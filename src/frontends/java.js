@@ -193,6 +193,50 @@ function isSupportedExpressionNode(node) {
 }
 
 /**
+ * Applies Java Unicode translation before token-level string escape decoding.
+ * @param {string} literal - Parser-confirmed Java string literal.
+ * @param {import("../semantic/types.js").SourceLocation} location - Literal source location.
+ * @returns {string} Unicode-translated literal.
+ */
+function translateUnicodeEscapes(literal, location) {
+  let translated = ""
+  let consecutiveBackslashes = 0
+  let previousWasUnicodeEscape = false
+
+  for (let index = 0; index < literal.length; index++) {
+    const character = literal[index]
+    const eligible = character == "\\" && (previousWasUnicodeEscape || consecutiveBackslashes % 2 == 0)
+
+    if (eligible && literal[index + 1] == "u") {
+      let digitsStart = index + 2
+
+      while (literal[digitsStart] == "u") digitsStart++
+
+      const hexadecimal = literal.slice(digitsStart, digitsStart + 4)
+      const isHexadecimal = hexadecimal.length == 4 && [...hexadecimal].every((digit) =>
+        (digit >= "0" && digit <= "9") || (digit >= "A" && digit <= "F") || (digit >= "a" && digit <= "f")
+      )
+
+      if (!isHexadecimal) return unsupportedSyntax("java", "unsupported string escape", location)
+
+      const translatedCharacter = String.fromCharCode(Number.parseInt(hexadecimal, 16))
+
+      translated += translatedCharacter
+      consecutiveBackslashes = translatedCharacter == "\\" ? consecutiveBackslashes + 1 : 0
+      previousWasUnicodeEscape = true
+      index = digitsStart + 3
+      continue
+    }
+
+    translated += character
+    consecutiveBackslashes = character == "\\" ? consecutiveBackslashes + 1 : 0
+    previousWasUnicodeEscape = false
+  }
+
+  return translated
+}
+
+/**
  * Decodes the accepted escapes from one parser-confirmed Java string literal.
  * @param {import("@lezer/common").SyntaxNode} node - Java StringLiteral node.
  * @param {string} filename - Source filename.
@@ -201,16 +245,22 @@ function isSupportedExpressionNode(node) {
  */
 function decodeStringLiteral(node, filename, source) {
   const location = nodeLocation(node, filename, source)
-  const literal = nodeText(node, source)
+  const literal = translateUnicodeEscapes(nodeText(node, source), location)
   let value = ""
 
   for (let index = 1; index < literal.length - 1; index++) {
     const character = literal[index]
 
+    if (character == "\"" || character == "\n" || character == "\r") {
+      return unsupportedSyntax("java", "invalid string literal", location)
+    }
+
     if (character != "\\") {
       value += character
       continue
     }
+
+    if (index + 1 >= literal.length - 1) return unsupportedSyntax("java", "invalid string literal", location)
 
     const escaped = literal[++index]
     const simple = simpleStringEscapes[escaped]

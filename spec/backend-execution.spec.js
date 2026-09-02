@@ -93,6 +93,32 @@ describe("source backends", () => {
     }
   })
 
+  it("decodes Java Unicode escapes through the real Java runtime", async () => {
+    const source = `public final class Main {
+  private static String label(boolean flag, String fallback) {
+    if (flag) {
+      return "\\u0061\\u005c\\u006e";
+    } else {
+      return fallback;
+    }
+  }
+
+  public static void main(String[] args) {
+    System.out.println(label(true, "no"));
+  }
+}
+`
+    const semanticModule = parse({filename: "Main.java", language: "java", source})
+    const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (semanticModule.functions[0].body[0])
+    const literal = /** @type {import("../src/semantic/types.js").StringLiteral} */ (branch.consequent[0].expression)
+
+    assert.equal(literal.value, "a\n")
+
+    const generated = generate({language: "java", module: semanticModule})
+
+    assert.equal(await executeGenerated("java", generated), "a\n\n")
+  })
+
   it("round-trips and executes boolean and string scalar programs in all five languages", async () => {
     const source = await readFile(new URL("fixtures/scalars/program.js", import.meta.url), "utf8")
     const semanticModule = parse({filename: "program.js", language: "javascript", source})

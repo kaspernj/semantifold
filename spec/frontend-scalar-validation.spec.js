@@ -27,6 +27,55 @@ function assertDiagnostic({code, detail, filename, language, line, source}) {
 }
 
 describe("scalar frontend validation", () => {
+  it("preserves PHP UTF-16 locations for non-ASCII strings", () => {
+    for (const [value, endColumn] of [["☃", 15], ["😀", 16]]) {
+      const source = `<?php
+declare(strict_types=1);
+function label(bool $flag, string $fallback): string {
+  if ($flag) {
+    return "${value}";
+  } else {
+    return $fallback;
+  }
+}
+echo label(true, 'no'), PHP_EOL;
+`
+      const module = parse({filename: "unicode.php", language: "php", source})
+      const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (module.functions[0].body[0])
+      const literal = branch.consequent[0].expression
+
+      assert.equal(literal.location.start.line, 5)
+      assert.equal(literal.location.start.column, 12)
+      assert.equal(literal.location.end.column, endColumn)
+    }
+  })
+
+  it("rejects Java Unicode translation that invalidates a string token", () => {
+    for (const escape of ["\\u000a", "\\u000d", "\\u0022"]) {
+      assertDiagnostic({
+        code: "UNSUPPORTED_SYNTAX",
+        detail: "invalid string literal",
+        filename: "invalid-unicode-escape.java",
+        language: "java",
+        line: 4,
+        source: `public final class Main {
+  private static String label(boolean flag, String fallback) {
+    if (flag) {
+      return "${escape}";
+    } else {
+      return fallback;
+    }
+  }
+
+  public static void main(String[] args) {
+    System.out.println(label(true, "no"));
+  }
+}
+`
+      })
+    }
+  })
+
   it("rejects boxed, inferred, literal-only, broad, and union annotations", () => {
     const types = ["Boolean", "String", "Flag", "any", "unknown", "true", "boolean | string"]
 
