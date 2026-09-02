@@ -172,6 +172,67 @@ console.log(select(true, "no"))
     })
   })
 
+  it("rejects callable names in parameter, local, and entry binding scopes", () => {
+    const helper = `function helper(flag: boolean, fallback: string): string {
+  if (flag) return fallback
+  else return fallback
+}
+`
+
+    assertSemanticDiagnostic({
+      code: "DUPLICATE_BINDING",
+      line: 5,
+      source: `${helper}function select(helper: boolean, fallback: string): string {
+  if (helper) return fallback
+  else return fallback
+}
+console.log(select(true, "no"))
+`
+    })
+    assertSemanticDiagnostic({
+      code: "DUPLICATE_BINDING",
+      line: 6,
+      source: `${helper}function select(flag: boolean, fallback: string): string {
+  let helper: string = fallback
+  if (flag) return helper(true, fallback)
+  else return fallback
+}
+console.log(select(true, "no"))
+`
+    })
+    assertSemanticDiagnostic({
+      code: "DUPLICATE_BINDING",
+      filename: "callable-entry.php",
+      language: "php",
+      line: 23,
+      source: `<?php
+declare(strict_types=1);
+
+function helper(bool $flag, string $fallback): string
+{
+    if ($flag) {
+        return $fallback;
+    } else {
+        return $fallback;
+    }
+}
+
+function select(bool $flag, string $fallback): string
+{
+    if ($flag) {
+        return $fallback;
+    } else {
+        return $fallback;
+    }
+}
+
+/** @var string $helper */
+$helper = "captured";
+echo select(true, $helper), PHP_EOL;
+`
+    })
+  })
+
   it("enforces immutable parameters and locals with exact type preservation", () => {
     assertSemanticDiagnostic({
       code: "IMMUTABLE_ASSIGNMENT",

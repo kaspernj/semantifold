@@ -15,6 +15,7 @@ export function validateBackendModule(module, language) {
   if (module.kind != "Module") unsupportedCapability(language, module.kind, module.location)
   if (module.functions.length == 0) unsupportedCapability(language, "module without functions", module.location)
   validateRestrictedSequence(module.entryPoint.body, "PrintStatement", language)
+  validateScaffoldingNames(module, language)
 
   for (const functionDeclaration of module.functions) {
     validateTargetIdentifier(language, functionDeclaration.name, "function", functionDeclaration.location)
@@ -41,6 +42,30 @@ export function validateBackendModule(module, language) {
 
   validateExpression(/** @type {import("../semantic/types.js").PrintStatement} */ (module.entryPoint.body.at(-1)).expression, language)
   validateBackendTypes(module, language)
+}
+
+/**
+ * Rejects semantic names that would capture syntax owned by one backend emitter.
+ * @param {import("../semantic/types.js").SemanticModule} module - Semantic module.
+ * @param {import("../semantic/types.js").SemanticLanguage} language - Backend language.
+ * @returns {void}
+ */
+function validateScaffoldingNames(module, language) {
+  const ownedEntryNames = language == "java" ? new Set(["args", "System"]) :
+    ["javascript", "typescript"].includes(language) ? new Set(["console"]) : new Set()
+  const ownedCallableNames = ["javascript", "typescript"].includes(language) ? new Set(["console"]) :
+    language == "ruby" ? new Set(["puts"]) : new Set()
+
+  for (const statement of module.entryPoint.body.slice(0, -1)) {
+    if (statement.kind == "LocalDeclaration" && ownedEntryNames.has(statement.name)) {
+      unsupportedCapability(language, `entry local '${statement.name}' captures backend scaffolding`, statement.location)
+    }
+  }
+  for (const declaration of module.functions) {
+    if (ownedCallableNames.has(declaration.name)) {
+      unsupportedCapability(language, `function '${declaration.name}' captures backend scaffolding`, declaration.location)
+    }
+  }
 }
 
 /**

@@ -108,7 +108,9 @@ function validateModuleTypes(module, fail) {
 
   for (const functionDeclaration of module.functions) validateFunction(functionDeclaration, functions, fail)
 
-  const entryScope = createScope(undefined, module.entryPoint.body)
+  const callableNames = new Set(functions.keys())
+
+  const entryScope = createScope(undefined, module.entryPoint.body, callableNames)
   const terminal = validateLocalPrefix(module.entryPoint.body, entryScope, functions, fail)
 
   if (terminal.kind != "PrintStatement") fail("UNSUPPORTED_STATEMENT", terminal.kind, terminal.location)
@@ -123,7 +125,7 @@ function validateModuleTypes(module, fail) {
  * @returns {void}
  */
 function validateFunction(declaration, functions, fail) {
-  const scope = createScope(undefined, declaration.body)
+  const scope = createScope(undefined, declaration.body, new Set(functions.keys()))
 
   for (const parameter of declaration.parameters) {
     const type = validateTypeReference(parameter.type, parameter.location, fail)
@@ -172,13 +174,14 @@ function validateReturnBranch(statements, parent, returnType, functions, fail) {
  * Creates a lexical scope with declarations marked pending until visited.
  * @param {Scope | undefined} parent - Enclosing scope.
  * @param {{kind: string, name?: string}[]} statements - Scope statements.
+ * @param {Set<string>} [reservedNames] - Names unavailable to root bindings.
  * @returns {Scope} Scope.
  */
-function createScope(parent, statements) {
+function createScope(parent, statements, reservedNames = new Set()) {
   const pending = new Set(statements.filter((statement) => statement.kind == "LocalDeclaration")
     .map((statement) => /** @type {{name: string}} */ (statement).name))
 
-  return {bindings: new Map(), parent, pending, usedNames: parent?.usedNames ?? new Set()}
+  return {bindings: new Map(), parent, pending, usedNames: parent?.usedNames ?? new Set(reservedNames)}
 }
 
 /**

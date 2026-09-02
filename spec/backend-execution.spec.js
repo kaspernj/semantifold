@@ -7,7 +7,7 @@ import os from "node:os"
 import path from "node:path"
 import {promisify} from "node:util"
 import {describe, it} from "@velocious/testing"
-import {generate, parse} from "../index.js"
+import {generate, parse, SemantifoldDiagnostic} from "../index.js"
 
 const execFileAsync = promisify(execFile)
 const targets = ["php", "ruby", "javascript", "typescript", "java"]
@@ -149,6 +149,57 @@ describe("source backends", () => {
 
       assert.deepEqual(withoutLocations(generatedModule), withoutLocations(semanticModule), `${language} modeled local round trip`)
       assert.equal(output, "yes\n", `${language} local output`)
+    }
+  })
+
+  it("rejects unsafe scaffolding captures while executing safe Ruby and PHP spellings", async () => {
+    const moduleWithEntryLocal = (name) => parse({
+      filename: `${name}.ts`,
+      language: "typescript",
+      source: `function select(flag: boolean, fallback: string): string {
+  if (flag) return fallback
+  else return fallback
+}
+let ${name}: string = "captured"
+console.log(select(true, "safe"))
+`
+    })
+
+    for (const [language, name] of [["javascript", "console"], ["typescript", "console"], ["java", "args"], ["java", "System"]]) {
+      assert.throws(
+        () => generate({language, module: moduleWithEntryLocal(name)}),
+        (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" && error.language == language
+      )
+    }
+
+    const moduleWithFunction = (name) => parse({
+      filename: `${name}-function.ts`,
+      language: "typescript",
+      source: `function ${name}(flag: boolean, fallback: string): string {
+  if (flag) return fallback
+  else return fallback
+}
+console.log(${name}(true, "safe"))
+`
+    })
+
+    for (const [language, name] of [["javascript", "console"], ["typescript", "console"], ["ruby", "puts"]]) {
+      assert.throws(
+        () => generate({language, module: moduleWithFunction(name)}),
+        (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" && error.language == language
+      )
+    }
+
+    const rubySource = generate({language: "ruby", module: moduleWithEntryLocal("puts")})
+    const phpSource = generate({language: "php", module: moduleWithEntryLocal("PHP_EOL")})
+
+    assert.equal(await executeGenerated("ruby", rubySource), "safe\n")
+    assert.equal(await executeGenerated("php", phpSource), "safe\n")
+
+    for (const [language, name] of [["javascript", "puts"], ["typescript", "puts"], ["ruby", "console"], ["php", "console"], ["java", "puts"]]) {
+      const source = generate({language, module: moduleWithFunction(name)})
+
+      assert.equal(await executeGenerated(language, source), "safe\n", `${language} safe callable spelling`)
     }
   })
 })

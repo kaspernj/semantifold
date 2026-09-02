@@ -66,4 +66,75 @@ console.log(select(true, "no"))
         error.language == "ruby" && error.location?.start.line == 3
     )
   })
+
+  it("rejects only entry locals that capture backend-owned scaffolding names", () => {
+    const moduleWithEntryLocal = (name) => parse({
+      filename: `${name}.ts`,
+      language: "typescript",
+      source: `function select(flag: boolean, fallback: string): string {
+  if (flag) return fallback
+  else return fallback
+}
+let ${name}: string = "captured"
+console.log(select(true, "no"))
+`
+    })
+    const consoleModule = moduleWithEntryLocal("console")
+    const argsModule = moduleWithEntryLocal("args")
+    const systemModule = moduleWithEntryLocal("System")
+
+    for (const language of ["javascript", "typescript"]) {
+      assert.throws(
+        () => generate({language, module: consoleModule}),
+        (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
+          error.language == language && error.location?.filename == "console.ts" && error.location.start.line == 5
+      )
+    }
+    for (const [name, module] of [["args", argsModule], ["System", systemModule]]) {
+      assert.throws(
+        () => generate({language: "java", module}),
+        (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
+          error.language == "java" && error.location?.filename == `${name}.ts` && error.location.start.line == 5
+      )
+    }
+
+    assert.doesNotThrow(() => generate({language: "ruby", module: consoleModule}))
+    assert.doesNotThrow(() => generate({language: "javascript", module: argsModule}))
+    assert.doesNotThrow(() => generate({language: "typescript", module: systemModule}))
+    assert.doesNotThrow(() => generate({language: "ruby", module: moduleWithEntryLocal("puts")}))
+    assert.doesNotThrow(() => generate({language: "php", module: moduleWithEntryLocal("PHP_EOL")}))
+  })
+
+  it("rejects only callable names that capture backend-owned print functions or receivers", () => {
+    const moduleWithFunction = (name) => parse({
+      filename: `${name}-function.ts`,
+      language: "typescript",
+      source: `function ${name}(flag: boolean, fallback: string): string {
+  if (flag) return fallback
+  else return fallback
+}
+console.log(${name}(true, "safe"))
+`
+    })
+    const consoleModule = moduleWithFunction("console")
+    const putsModule = moduleWithFunction("puts")
+
+    for (const language of ["javascript", "typescript"]) {
+      assert.throws(
+        () => generate({language, module: consoleModule}),
+        (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
+          error.language == language && error.location?.filename == "console-function.ts" && error.location.start.line == 1
+      )
+    }
+    assert.throws(
+      () => generate({language: "ruby", module: putsModule}),
+      (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
+        error.language == "ruby" && error.location?.filename == "puts-function.ts" && error.location.start.line == 1
+    )
+
+    assert.doesNotThrow(() => generate({language: "ruby", module: consoleModule}))
+    assert.doesNotThrow(() => generate({language: "php", module: consoleModule}))
+    assert.doesNotThrow(() => generate({language: "javascript", module: putsModule}))
+    assert.doesNotThrow(() => generate({language: "java", module: putsModule}))
+  })
 })
