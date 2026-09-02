@@ -6,7 +6,7 @@ import {mkdtemp, readFile, rm, writeFile} from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import {promisify} from "node:util"
-import {describe, it} from "node:test"
+import {describe, it} from "@velocious/testing"
 import {generate, parse} from "../index.js"
 
 const execFileAsync = promisify(execFile)

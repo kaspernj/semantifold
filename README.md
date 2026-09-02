@@ -30,7 +30,9 @@ Semantic integers must be JavaScript-safe integers. Java generation narrows them
 
 ## Development
 
-Use Node.js 24 and install with `npm ci`. The complete local gate is:
+Use Node.js 24 and install with `npm ci`. Specs use `@velocious/testing@0.0.0` and the standalone `velocious-test` runner. Run a focused spec with `npx velocious-test spec/repository-contract.spec.js`; run the framework-native `spec` directory discovery with `npm test`.
+
+The complete local gate is:
 
 ```sh
 npm test

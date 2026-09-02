@@ -1,14 +1,29 @@
 // @ts-check
 
 import assert from "node:assert/strict"
-import {access, readFile} from "node:fs/promises"
-import {describe, it} from "node:test"
+import {access, readFile, readdir} from "node:fs/promises"
+import {describe, expect, it} from "@velocious/testing"
 import DockerfileAst from "dockerfile-ast"
 import {parse as parseYaml} from "yaml"
 
 const {DockerfileParser} = DockerfileAst
 
 describe("repository delivery contracts", () => {
+  it("uses the released Velocious framework and standalone runner for every spec", async () => {
+    const packageJson = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"))
+    const specDirectory = new URL("./", import.meta.url)
+    const specFiles = (await readdir(specDirectory)).filter((filename) => filename.endsWith(".js"))
+
+    expect(packageJson.devDependencies["@velocious/testing"]).toEqual("0.0.0")
+    expect(packageJson.scripts.test).toEqual("velocious-test spec")
+    for (const filename of specFiles) {
+      const source = await readFile(new URL(filename, specDirectory), "utf8")
+
+      expect(filename).toMatch(/\.spec\.js$/u)
+      assert.doesNotMatch(source, /from ["']node:test["']/u, filename)
+    }
+  })
+
   it("pins the custom ESLint plugin to one immutable Git commit", async () => {
     const packageJson = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"))
     const packageLock = JSON.parse(await readFile(new URL("../package-lock.json", import.meta.url), "utf8"))
