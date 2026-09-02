@@ -147,6 +147,8 @@ describe("local declaration frontend validation", () => {
     const cases = [
       ["MISSING_TYPE", undefined, "value = fallback"],
       ["UNSUPPORTED_SYNTAX", "malformed local type metadata", "# @type [String]\n  # @semantifold-immutable true\n  value = fallback"],
+      ["UNSUPPORTED_SYNTAX", "malformed local type metadata", "# @typex [String]\n  value = fallback"],
+      ["UNSUPPORTED_SYNTAX", "malformed local type metadata", "# @type [String]\n  value = fallback\n  # @typex [String]\n  value = \"yes\""],
       ["UNSUPPORTED_SYNTAX", "MultiWriteNode", "# @type [String]\n  value, other = fallback, fallback"],
       ["UNSUPPORTED_SYNTAX", "LocalVariableOperatorWriteNode", "# @type [String]\n  value = fallback\n  value += fallback"],
       ["UNSUPPORTED_SYNTAX", "GlobalVariableWriteNode", "# @type [String]\n  $value = fallback"],

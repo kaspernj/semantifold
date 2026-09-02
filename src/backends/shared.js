@@ -35,12 +35,17 @@ export function validateBackendModule(module, language) {
     validateRestrictedSequence(branch.consequent, "ReturnStatement", language)
     validateRestrictedSequence(branch.alternate, "ReturnStatement", language)
 
-    validateExpression(branch.condition, language)
-    validateExpression(/** @type {import("../semantic/types.js").ReturnStatement} */ (branch.consequent.at(-1)).expression, language)
-    validateExpression(/** @type {import("../semantic/types.js").ReturnStatement} */ (branch.alternate.at(-1)).expression, language)
+    validateExpression(branch.condition, language, branch.location)
+    const consequentReturn = /** @type {import("../semantic/types.js").ReturnStatement} */ (branch.consequent.at(-1))
+    const alternateReturn = /** @type {import("../semantic/types.js").ReturnStatement} */ (branch.alternate.at(-1))
+
+    validateExpression(consequentReturn.expression, language, consequentReturn.location)
+    validateExpression(alternateReturn.expression, language, alternateReturn.location)
   }
 
-  validateExpression(/** @type {import("../semantic/types.js").PrintStatement} */ (module.entryPoint.body.at(-1)).expression, language)
+  const print = /** @type {import("../semantic/types.js").PrintStatement} */ (module.entryPoint.body.at(-1))
+
+  validateExpression(print.expression, language, print.location)
   validateBackendTypes(module, language)
 }
 
@@ -90,7 +95,7 @@ function validateRestrictedSequence(statements, terminalKind, language) {
         unsupportedCapability(language, "local declaration with invalid mutability", declaration.location)
       }
       validateTargetIdentifier(language, declaration.name, "local", declaration.location)
-      validateExpression(declaration.initializer, language)
+      validateExpression(declaration.initializer, language, declaration.location)
       continue
     }
     if (statement.kind == "AssignmentStatement") {
@@ -100,7 +105,7 @@ function validateRestrictedSequence(statements, terminalKind, language) {
         unsupportedCapability(language, `assignment target ${assignment.target.kind}`, assignment.target.location)
       }
       validateTargetIdentifier(language, assignment.target.name, "assignment target", assignment.target.location)
-      validateExpression(assignment.expression, language)
+      validateExpression(assignment.expression, language, assignment.location)
       continue
     }
 
@@ -110,45 +115,54 @@ function validateRestrictedSequence(statements, terminalKind, language) {
 
 /**
  * Checks expression backend capabilities recursively.
- * @param {import("../semantic/types.js").Expression} expression - Semantic expression.
+ * @param {unknown} expression - Candidate semantic expression.
  * @param {import("../semantic/types.js").SemanticLanguage} language - Backend language.
+ * @param {import("../semantic/types.js").SourceLocation | undefined} ownerLocation - Nearest owning node location.
  * @returns {void}
  */
-function validateExpression(expression, language) {
-  if (expression.kind == "IdentifierExpression") {
-    validateTargetIdentifier(language, expression.name, "reference", expression.location)
+function validateExpression(expression, language, ownerLocation) {
+  if (!expression || typeof expression != "object" || Array.isArray(expression)) {
+    return unsupportedCapability(language, "missing or invalid expression", ownerLocation)
+  }
+
+  const candidate = /** @type {import("../semantic/types.js").Expression} */ (expression)
+  const location = candidate.location ?? ownerLocation
+
+  if (typeof candidate.kind != "string") {
+    return unsupportedCapability(language, "missing or invalid expression", location)
+  }
+  if (candidate.kind == "IdentifierExpression") {
+    validateTargetIdentifier(language, candidate.name, "reference", location)
     return
   }
-  if (expression.kind == "IntegerLiteral") {
-    if (!Number.isSafeInteger(expression.value)) {
-      unsupportedCapability(language, "non-safe integer literal", expression.location)
+  if (candidate.kind == "IntegerLiteral") {
+    if (!Number.isSafeInteger(candidate.value)) {
+      unsupportedCapability(language, "non-safe integer literal", location)
     }
-    if (language == "java" && (expression.value < -2147483648 || expression.value > 2147483647)) {
-      unsupportedCapability(language, "integer literal outside signed 32-bit int range", expression.location)
+    if (language == "java" && (candidate.value < -2147483648 || candidate.value > 2147483647)) {
+      unsupportedCapability(language, "integer literal outside signed 32-bit int range", location)
     }
     return
   }
-  if (expression.kind == "BooleanLiteral" || expression.kind == "StringLiteral") return
-  if (expression.kind == "CallExpression") {
-    validateTargetIdentifier(language, expression.callee, "callee", expression.location)
-    if (expression.arguments.length != 2) {
-      unsupportedCapability(language, "call argument count other than two", expression.location)
+  if (candidate.kind == "BooleanLiteral" || candidate.kind == "StringLiteral") return
+  if (candidate.kind == "CallExpression") {
+    validateTargetIdentifier(language, candidate.callee, "callee", location)
+    if (candidate.arguments.length != 2) {
+      unsupportedCapability(language, "call argument count other than two", location)
     }
-    for (const argument of expression.arguments) validateExpression(argument, language)
+    for (const argument of candidate.arguments) validateExpression(argument, language, location)
     return
   }
-  if (expression.kind == "BinaryExpression") {
-    if (![">", "-", "+"].includes(expression.operator)) {
-      unsupportedCapability(language, `binary operator ${expression.operator}`, expression.location)
+  if (candidate.kind == "BinaryExpression") {
+    if (![">", "-", "+"].includes(candidate.operator)) {
+      unsupportedCapability(language, `binary operator ${candidate.operator}`, location)
     }
-    validateExpression(expression.left, language)
-    validateExpression(expression.right, language)
+    validateExpression(candidate.left, language, location)
+    validateExpression(candidate.right, language, location)
     return
   }
 
-  const unexpected = /** @type {{kind: string, location: import("../semantic/types.js").SourceLocation}} */ (expression)
-
-  unsupportedCapability(language, unexpected.kind, unexpected.location)
+  unsupportedCapability(language, String(Reflect.get(expression, "kind")), location)
 }
 
 /**

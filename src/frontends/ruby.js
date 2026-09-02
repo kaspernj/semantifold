@@ -214,21 +214,26 @@ function localMetadata(comments, node, filename, source) {
   const lines = associated.map((comment) => {
     return slicePrismSource(source, comment.location.startOffset, comment.location.startOffset + comment.location.length).slice(1).trim()
   })
-  const typeLines = lines.filter((line) => line.startsWith("@type"))
-  const immutableLines = lines.filter((line) => line.startsWith("@semantifold-immutable"))
+  const metadata = lines.map((line) => line.split(/\s+/u))
+  const typeMetadata = metadata.filter(([token]) => token == "@type")
+  const immutableMetadata = metadata.filter(([token]) => token == "@semantifold-immutable")
+  const profileMetadata = metadata.filter(([token]) => {
+    return token.startsWith("@type") || token.startsWith("@semantifold-immutable")
+  })
 
-  if (typeLines.length == 0 && immutableLines.length == 0) return undefined
+  if (profileMetadata.length == 0) return undefined
 
   const location = nodeLocation(node, filename, source)
 
-  if (typeLines.length != 1 || typeLines[0].split(/\s+/u).length != 2 ||
-    immutableLines.length > 1 || immutableLines.some((line) => line != "@semantifold-immutable")) {
+  if (typeMetadata.length != 1 || typeMetadata[0].length != 2 ||
+    immutableMetadata.length > 1 || immutableMetadata.some((tokens) => tokens.length != 1) ||
+    profileMetadata.length != typeMetadata.length + immutableMetadata.length) {
     return unsupportedSyntax("ruby", "malformed local type metadata", location)
   }
 
   return {
-    immutable: immutableLines.length == 1,
-    type: convertType(typeLines[0].split(/\s+/u)[1], `Local '${node.name}'`, location)
+    immutable: immutableMetadata.length == 1,
+    type: convertType(typeMetadata[0][1], `Local '${node.name}'`, location)
   }
 }
 

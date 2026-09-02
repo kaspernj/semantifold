@@ -168,4 +168,46 @@ describe("backend shape validation", () => {
       )
     }
   })
+
+  it("rejects missing and non-object local initializers before emitter dispatch", async () => {
+    for (const malformed of ["missing", "non-object"]) {
+      const module = await validLocalModule()
+      const declaration = /** @type {import("../src/semantic/types.js").LocalDeclaration} */ (module.functions[0].body[1])
+
+      if (malformed == "missing") Reflect.deleteProperty(declaration, "initializer")
+      else Reflect.set(declaration, "initializer", null)
+
+      assert.throws(
+        () => generate({language: "ruby", module}),
+        (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
+          error.language == "ruby" && error.location?.filename == "locals.ts" && error.location.start.line == 3 &&
+          error.message.includes("invalid expression"),
+        malformed
+      )
+    }
+  })
+
+  it("rejects missing task-002 expressions at their owning statement locations", async () => {
+    for (const malformed of ["assignment", "condition", "return", "print"]) {
+      const module = await validLocalModule()
+      const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (module.functions[0].body.at(-1))
+      const assignment = /** @type {import("../src/semantic/types.js").AssignmentStatement} */ (branch.consequent[0])
+      const returned = /** @type {import("../src/semantic/types.js").ReturnStatement} */ (branch.consequent.at(-1))
+      const print = /** @type {import("../src/semantic/types.js").PrintStatement} */ (module.entryPoint.body.at(-1))
+      const lines = {assignment: 5, condition: 4, print: 14, return: 6}
+
+      if (malformed == "assignment") Reflect.deleteProperty(assignment, "expression")
+      else if (malformed == "condition") Reflect.deleteProperty(branch, "condition")
+      else if (malformed == "return") Reflect.deleteProperty(returned, "expression")
+      else Reflect.deleteProperty(print, "expression")
+
+      assert.throws(
+        () => generate({language: "php", module}),
+        (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
+          error.language == "php" && error.location?.filename == "locals.ts" &&
+          error.location.start.line == Reflect.get(lines, malformed) && error.message.includes("invalid expression"),
+        malformed
+      )
+    }
+  })
 })
