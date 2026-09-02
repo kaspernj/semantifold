@@ -53,6 +53,20 @@ function prismLocation(location, filename, source) {
 }
 
 /**
+ * Slices JavaScript source using Prism's UTF-8 byte offsets.
+ * @param {string} source - Complete source.
+ * @param {number} startOffset - Inclusive Prism byte offset.
+ * @param {number} endOffset - Exclusive Prism byte offset.
+ * @returns {string} Source text in the byte range.
+ */
+function slicePrismSource(source, startOffset, endOffset) {
+  return source.slice(
+    utf8ByteOffsetToUtf16Offset(source, startOffset),
+    utf8ByteOffsetToUtf16Offset(source, endOffset)
+  )
+}
+
+/**
  * Converts a supported Prism expression.
  * @param {import("@ruby/prism").Node} node - Prism node.
  * @param {string} filename - Source filename.
@@ -150,7 +164,7 @@ function typeComments(comments, node, source) {
   let returnType
 
   for (const comment of preceding) {
-    const text = source.slice(comment.location.startOffset, comment.location.startOffset + comment.location.length)
+    const text = slicePrismSource(source, comment.location.startOffset, comment.location.startOffset + comment.location.length)
     const words = text.slice(1).trim().split(/\s+/u)
 
     if (words[0] == "@param" && words.length == 3) parameterTypes.set(words[1], words[2])
@@ -176,7 +190,7 @@ function associatedComments(comments, node, source) {
   for (let index = preceding.length - 1; index >= 0; index--) {
     const comment = preceding[index]
     const endOffset = comment.location.startOffset + comment.location.length
-    const gap = source.slice(endOffset, boundary)
+    const gap = slicePrismSource(source, endOffset, boundary)
 
     if (!isImmediateCommentGap(gap)) break
 
@@ -197,7 +211,9 @@ function associatedComments(comments, node, source) {
  */
 function localMetadata(comments, node, filename, source) {
   const associated = associatedComments(comments, node, source)
-  const lines = associated.map((comment) => source.slice(comment.location.startOffset, comment.location.startOffset + comment.location.length).slice(1).trim())
+  const lines = associated.map((comment) => {
+    return slicePrismSource(source, comment.location.startOffset, comment.location.startOffset + comment.location.length).slice(1).trim()
+  })
   const typeLines = lines.filter((line) => line.startsWith("@type"))
   const immutableLines = lines.filter((line) => line.startsWith("@semantifold-immutable"))
 

@@ -1,12 +1,11 @@
 // @ts-check
 
-import assert from "node:assert/strict"
 import {execFile} from "node:child_process"
 import {mkdtemp, readFile, rm, writeFile} from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import {promisify} from "node:util"
-import {describe, it} from "@velocious/testing"
+import {describe, expect, it} from "@velocious/testing"
 import {generate, parse, SemantifoldDiagnostic} from "../index.js"
 
 const execFileAsync = promisify(execFile)
@@ -78,6 +77,33 @@ async function executeGenerated(language, source) {
   }
 }
 
+/**
+ * Requires one backend capability diagnostic without losing its target context.
+ * @param {() => unknown} callback - Generation callback.
+ * @param {string} language - Expected backend language.
+ * @returns {void}
+ */
+function expectUnsupportedCapability(callback, language) {
+  /** @type {unknown} */
+  let error
+
+  try {
+    callback()
+  } catch (caught) {
+    error = caught
+  }
+
+  expect(error).toBeInstanceOf(SemantifoldDiagnostic)
+
+  const diagnostic = /** @type {SemantifoldDiagnostic} */ (error)
+
+  expect({code: diagnostic.code, expectedLanguage: language, language: diagnostic.language}).toEqual({
+    code: "UNSUPPORTED_CAPABILITY",
+    expectedLanguage: language,
+    language
+  })
+}
+
 describe("source backends", () => {
   it("generates independently executable exact-output programs for all five languages", async () => {
     const source = await readFile(new URL("fixtures/program.js", import.meta.url), "utf8")
@@ -88,8 +114,8 @@ describe("source backends", () => {
       const generatedModule = parse({filename: filenames.get(language), language, source: generated})
       const output = await executeGenerated(language, generated)
 
-      assert.deepEqual(withoutLocations(generatedModule), withoutLocations(semanticModule), `${language} modeled round trip`)
-      assert.equal(output, "5\n", `${language} output`)
+      expect({language, module: withoutLocations(generatedModule)}).toEqual({language, module: withoutLocations(semanticModule)})
+      expect({language, output}).toEqual({language, output: "5\n"})
     }
   })
 
@@ -112,11 +138,11 @@ describe("source backends", () => {
     const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (semanticModule.functions[0].body[0])
     const literal = /** @type {import("../src/semantic/types.js").StringLiteral} */ (branch.consequent[0].expression)
 
-    assert.equal(literal.value, "a\n")
+    expect(literal.value).toEqual("a\n")
 
     const generated = generate({language: "java", module: semanticModule})
 
-    assert.equal(await executeGenerated("java", generated), "a\n\n")
+    expect(await executeGenerated("java", generated)).toEqual("a\n\n")
   })
 
   it("round-trips and executes boolean and string scalar programs in all five languages", async () => {
@@ -133,8 +159,8 @@ describe("source backends", () => {
       const generatedModule = parse({filename: filenames.get(language), language, source: generated})
       const output = await executeGenerated(language, generated)
 
-      assert.deepEqual(withoutLocations(generatedModule), withoutLocations(semanticModule), `${language} modeled scalar round trip`)
-      assert.equal(output, `${expected}\n`, `${language} scalar output`)
+      expect({language, module: withoutLocations(generatedModule)}).toEqual({language, module: withoutLocations(semanticModule)})
+      expect({language, output}).toEqual({language, output: `${expected}\n`})
     }
   })
 
@@ -147,9 +173,23 @@ describe("source backends", () => {
       const generatedModule = parse({filename: filenames.get(language), language, source: generated})
       const output = await executeGenerated(language, generated)
 
-      assert.deepEqual(withoutLocations(generatedModule), withoutLocations(semanticModule), `${language} modeled local round trip`)
-      assert.equal(output, "yes\n", `${language} local output`)
+      expect({language, module: withoutLocations(generatedModule)}).toEqual({language, module: withoutLocations(semanticModule)})
+      expect({language, output}).toEqual({language, output: "yes\n"})
     }
+  })
+
+  it("reparses generated Ruby local metadata after a multibyte initializer", async () => {
+    const source = await readFile(new URL("fixtures/locals/program.js", import.meta.url), "utf8")
+    const semanticModule = parse({filename: "program.js", language: "javascript", source})
+    const preferred = /** @type {import("../src/semantic/types.js").LocalDeclaration} */ (semanticModule.functions[0].body[0])
+
+    Reflect.set(preferred.initializer, "value", "☃")
+
+    const generated = generate({language: "ruby", module: semanticModule})
+    const generatedModule = parse({filename: "program.rb", language: "ruby", source: generated})
+
+    expect(withoutLocations(generatedModule)).toEqual(withoutLocations(semanticModule))
+    expect(await executeGenerated("ruby", generated)).toEqual("☃\n")
   })
 
   it("rejects unsafe scaffolding captures while executing safe Ruby and PHP spellings", async () => {
@@ -166,10 +206,7 @@ console.log(select(true, "safe"))
     })
 
     for (const [language, name] of [["javascript", "console"], ["typescript", "console"], ["java", "args"], ["java", "System"]]) {
-      assert.throws(
-        () => generate({language, module: moduleWithEntryLocal(name)}),
-        (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" && error.language == language
-      )
+      expectUnsupportedCapability(() => generate({language, module: moduleWithEntryLocal(name)}), language)
     }
 
     const moduleWithFunction = (name) => parse({
@@ -184,22 +221,19 @@ console.log(${name}(true, "safe"))
     })
 
     for (const [language, name] of [["javascript", "console"], ["typescript", "console"], ["ruby", "puts"]]) {
-      assert.throws(
-        () => generate({language, module: moduleWithFunction(name)}),
-        (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" && error.language == language
-      )
+      expectUnsupportedCapability(() => generate({language, module: moduleWithFunction(name)}), language)
     }
 
     const rubySource = generate({language: "ruby", module: moduleWithEntryLocal("puts")})
     const phpSource = generate({language: "php", module: moduleWithEntryLocal("PHP_EOL")})
 
-    assert.equal(await executeGenerated("ruby", rubySource), "safe\n")
-    assert.equal(await executeGenerated("php", phpSource), "safe\n")
+    expect(await executeGenerated("ruby", rubySource)).toEqual("safe\n")
+    expect(await executeGenerated("php", phpSource)).toEqual("safe\n")
 
     for (const [language, name] of [["javascript", "puts"], ["typescript", "puts"], ["ruby", "console"], ["php", "console"], ["java", "puts"]]) {
       const source = generate({language, module: moduleWithFunction(name)})
 
-      assert.equal(await executeGenerated(language, source), "safe\n", `${language} safe callable spelling`)
+      expect({language, output: await executeGenerated(language, source)}).toEqual({language, output: "safe\n"})
     }
   })
 })
