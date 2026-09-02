@@ -77,6 +77,18 @@ describe("backend shape validation", () => {
     }
   })
 
+  it("rejects duplicate function names before selecting a signature", async () => {
+    const module = await validScalarModule()
+
+    module.functions.push(module.functions[0])
+
+    assert.throws(
+      () => generate({language: "javascript", module}),
+      (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
+        error.message.includes("duplicate function")
+    )
+  })
+
   it("rejects malformed scalar types and literal payloads before emission", async () => {
     for (const malformed of ["type", "boolean", "string"]) {
       const module = await validScalarModule()

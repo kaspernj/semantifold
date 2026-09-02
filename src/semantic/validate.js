@@ -52,7 +52,16 @@ export function validateBackendTypes(module, language) {
  * @returns {void}
  */
 function validateModuleTypes(module, fail) {
-  const functions = new Map(module.functions.map((functionDeclaration) => [functionDeclaration.name, functionDeclaration]))
+  /** @type {Map<string, import("./types.js").FunctionDeclaration>} */
+  const functions = new Map()
+
+  for (const functionDeclaration of module.functions) {
+    if (functions.has(functionDeclaration.name)) {
+      fail(`duplicate function '${functionDeclaration.name}'`, functionDeclaration.location)
+    }
+
+    functions.set(functionDeclaration.name, functionDeclaration)
+  }
 
   for (const functionDeclaration of module.functions) {
     /** @type {Map<string, import("./types.js").SemanticTypeName>} */

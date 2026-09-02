@@ -71,6 +71,9 @@ function convertExpression(node, filename, source) {
 
       return unsupportedSyntax("php", detail, location)
     }
+    if (typeof literal.raw == "string" && ["b\"", "B\"", "b'", "B'"].some((prefix) => literal.raw.startsWith(prefix))) {
+      return unsupportedSyntax("php", "binary string literal", location)
+    }
     if (typeof literal.value != "string" || !hasOnlyUnicodeScalars(literal.value)) {
       return unsupportedSyntax("php", "invalid Unicode string literal", location)
     }

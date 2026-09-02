@@ -232,6 +232,61 @@ echo label(true, 'no'), PHP_EOL;
     })
   })
 
+  it("rejects duplicate function names before collapsing signatures", () => {
+    assertDiagnostic({
+      code: "UNSUPPORTED_SYNTAX",
+      detail: "duplicate function",
+      filename: "Main.java",
+      language: "java",
+      line: 10,
+      source: `public final class Main {
+  private static String label(boolean flag, String fallback) {
+    if (flag) {
+      return "yes";
+    } else {
+      return fallback;
+    }
+  }
+
+  private static String label(String fallback, boolean flag) {
+    if (flag) {
+      return "yes";
+    } else {
+      return fallback;
+    }
+  }
+
+  public static void main(String[] args) {
+    System.out.println(label(true, "no"));
+  }
+}
+`
+    })
+  })
+
+  it("rejects PHP binary-prefixed strings", () => {
+    for (const literal of [`b"yes"`, `B'yes'`]) {
+      assertDiagnostic({
+        code: "UNSUPPORTED_SYNTAX",
+        detail: "binary string literal",
+        filename: "binary.php",
+        language: "php",
+        line: 5,
+        source: `<?php
+declare(strict_types=1);
+function label(bool $flag, string $fallback): string {
+  if ($flag) {
+    return ${literal};
+  } else {
+    return $fallback;
+  }
+}
+echo label(true, 'no'), PHP_EOL;
+`
+      })
+    }
+  })
+
   it("rejects excluded literals and invalid Unicode scalar data", () => {
     const javascriptLiterals = ["1.5", "1n", "/yes/u", "Symbol(\"yes\")"]
 
