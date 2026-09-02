@@ -429,10 +429,8 @@ export function parseJava({filename, source}) {
   if (functionMethods.length == 0) return unsupportedSyntax("java", "class without a semantic function", location)
   if (!mainMethod) return unsupportedSyntax("java", "class without main", location)
 
-  return {
-    entryPoint: convertEntryPoint(mainMethod, filename, source),
-    functions: functionMethods.map((method) => convertFunction(method, filename, source)),
-    kind: "Module",
-    location
-  }
+  const functions = functionMethods.map((method) => convertFunction(method, filename, source))
+  const entryPoint = convertEntryPoint(mainMethod, filename, source)
+
+  return {entryPoint, functions, kind: "Module", location}
 }

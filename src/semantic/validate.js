@@ -122,13 +122,17 @@ function inferExpressionType(expression, parameters, functions, fail) {
   }
 
   if (expression.kind == "BooleanLiteral") {
-    if (typeof expression.value != "boolean") fail("invalid boolean literal value", expression.location)
+    const value = Reflect.get(expression, "value")
+
+    if (typeof value != "boolean") fail("invalid boolean literal value", expression.location)
 
     return "boolean"
   }
 
   if (expression.kind == "StringLiteral") {
-    if (typeof expression.value != "string" || !hasOnlyUnicodeScalars(expression.value)) {
+    const value = Reflect.get(expression, "value")
+
+    if (typeof value != "string" || !hasOnlyUnicodeScalars(value)) {
       fail("invalid Unicode string literal", expression.location)
     }
 
