@@ -232,6 +232,23 @@ function decodeStringLiteral(node, filename, source) {
       continue
     }
 
+    if (escaped == "u") {
+      let digitsStart = index + 1
+
+      while (literal[digitsStart] == "u") digitsStart++
+
+      const hexadecimal = literal.slice(digitsStart, digitsStart + 4)
+      const isHexadecimal = hexadecimal.length == 4 && [...hexadecimal].every((digit) =>
+        (digit >= "0" && digit <= "9") || (digit >= "A" && digit <= "F") || (digit >= "a" && digit <= "f")
+      )
+
+      if (!isHexadecimal) return unsupportedSyntax("java", "unsupported string escape", location)
+
+      value += String.fromCharCode(Number.parseInt(hexadecimal, 16))
+      index = digitsStart + 3
+      continue
+    }
+
     return unsupportedSyntax("java", "unsupported string escape", location)
   }
 
