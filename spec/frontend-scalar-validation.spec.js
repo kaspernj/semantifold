@@ -316,7 +316,7 @@ echo label(true, 'no'), PHP_EOL;
 
   it("rejects duplicate function names before collapsing signatures", () => {
     assertDiagnostic({
-      code: "UNSUPPORTED_SYNTAX",
+      code: "DUPLICATE_BINDING",
       detail: "duplicate function",
       filename: "Main.java",
       language: "java",
@@ -370,7 +370,7 @@ echo label(true, 'no'), PHP_EOL;
   })
 
   it("rejects excluded literals and invalid Unicode scalar data", () => {
-    const javascriptLiterals = ["1.5", "1n", "/yes/u", "Symbol(\"yes\")"]
+    const javascriptLiterals = ["1.5", "1n", "/yes/u"]
 
     for (const literal of javascriptLiterals) {
       const source = `/**
@@ -388,6 +388,25 @@ console.log(label(true, "no"))
 
       assertDiagnostic({code: "UNSUPPORTED_SYNTAX", filename: "literal.js", language: "javascript", line: 8, source})
     }
+
+    assertDiagnostic({
+      code: "UNRESOLVED_BINDING",
+      filename: "symbol.js",
+      language: "javascript",
+      line: 8,
+      source: `/**
+ * Selects a string.
+ * @param {boolean} flag - Selection flag.
+ * @param {string} fallback - Fallback string.
+ * @returns {string} Selected string.
+ */
+function label(flag, fallback) {
+  if (flag) return Symbol("yes")
+  else return fallback
+}
+console.log(label(true, "no"))
+`
+    })
 
     assertDiagnostic({
       code: "UNSUPPORTED_SYNTAX",
@@ -540,11 +559,11 @@ ${branch}
 ${call}
 `
 
-      assertDiagnostic({code: "UNSUPPORTED_SYNTAX", filename, language: "typescript", line, source})
+      assertDiagnostic({code: "TYPE_MISMATCH", filename, language: "typescript", line, source})
     }
 
     assertDiagnostic({
-      code: "UNSUPPORTED_SYNTAX",
+      code: "UNRESOLVED_BINDING",
       filename: "identifier.ts",
       language: "typescript",
       line: 2,
@@ -557,7 +576,7 @@ console.log(label(true, "no"))
     })
 
     assertDiagnostic({
-      code: "UNSUPPORTED_SYNTAX",
+      code: "UNRESOLVED_BINDING",
       filename: "callee.ts",
       language: "typescript",
       line: 5,

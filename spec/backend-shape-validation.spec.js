@@ -25,6 +25,16 @@ async function validScalarModule() {
   return parse({filename: "scalar-program.js", language: "javascript", source})
 }
 
+/**
+ * Loads a fresh valid semantic module containing locals.
+ * @returns {Promise<import("../src/semantic/types.js").SemanticModule>} Semantic module.
+ */
+async function validLocalModule() {
+  const source = await readFile(new URL("fixtures/locals/program.ts", import.meta.url), "utf8")
+
+  return parse({filename: "locals.ts", language: "typescript", source})
+}
+
 describe("backend shape validation", () => {
   it("rejects Java integer literals outside the signed 32-bit range", async () => {
     for (const value of [2147483648, -2147483649]) {
@@ -103,6 +113,57 @@ describe("backend shape validation", () => {
         () => generate({language: "java", module}),
         (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
           error.language == "java" && error.location?.filename == "scalar-program.js",
+        malformed
+      )
+    }
+  })
+
+  it("rejects invalid local binding semantics before emission", async () => {
+    for (const invalid of ["immutable", "initializer type", "assignment type", "unresolved target"]) {
+      const module = await validLocalModule()
+      const declaration = /** @type {import("../src/semantic/types.js").LocalDeclaration} */ (module.functions[0].body[1])
+      const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (module.functions[0].body.at(-1))
+      const assignment = /** @type {import("../src/semantic/types.js").AssignmentStatement} */ (branch.consequent[0])
+
+      if (invalid == "immutable") declaration.mutable = false
+      else if (invalid == "initializer type") declaration.initializer = {kind: "BooleanLiteral", location: declaration.initializer.location, value: true}
+      else if (invalid == "assignment type") assignment.expression = {kind: "BooleanLiteral", location: assignment.expression.location, value: true}
+      else assignment.target.name = "missing"
+
+      assert.throws(
+        () => generate({language: "java", module}),
+        (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
+          error.language == "java" && error.location?.filename == "locals.ts",
+        invalid
+      )
+    }
+  })
+
+  it("rejects local statements after the restricted terminal shape", async () => {
+    const module = await validLocalModule()
+
+    module.functions[0].body.push(module.functions[0].body[0])
+
+    assert.throws(
+      () => generate({language: "php", module}),
+      (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" && error.language == "php"
+    )
+  })
+
+  it("rejects malformed local mutability and non-identifier assignment targets", async () => {
+    for (const malformed of ["mutability", "target"]) {
+      const module = await validLocalModule()
+      const declaration = /** @type {import("../src/semantic/types.js").LocalDeclaration} */ (module.functions[0].body[1])
+      const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (module.functions[0].body.at(-1))
+      const assignment = /** @type {import("../src/semantic/types.js").AssignmentStatement} */ (branch.consequent[0])
+
+      if (malformed == "mutability") Reflect.set(declaration, "mutable", "yes")
+      else Reflect.set(assignment.target, "kind", "CallExpression")
+
+      assert.throws(
+        () => generate({language: "typescript", module}),
+        (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
+          error.language == "typescript" && error.location?.filename == "locals.ts",
         malformed
       )
     }

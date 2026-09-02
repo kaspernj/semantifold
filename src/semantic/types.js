@@ -79,6 +79,24 @@
 /** @typedef {IdentifierExpression | IntegerLiteral | BooleanLiteral | StringLiteral | BinaryExpression | CallExpression} Expression */
 
 /**
+ * @typedef LocalDeclaration
+ * @property {"LocalDeclaration"} kind - Node discriminator.
+ * @property {string} name - Declared local name.
+ * @property {TypeReference} type - Explicit local type.
+ * @property {boolean} mutable - Whether later assignment is allowed.
+ * @property {Expression} initializer - Required initializer expression.
+ * @property {SourceLocation} location - Declaration source location.
+ */
+
+/**
+ * @typedef AssignmentStatement
+ * @property {"AssignmentStatement"} kind - Node discriminator.
+ * @property {IdentifierExpression} target - Simple local assignment target.
+ * @property {Expression} expression - Assigned expression.
+ * @property {SourceLocation} location - Assignment source location.
+ */
+
+/**
  * @typedef ReturnStatement
  * @property {"ReturnStatement"} kind - Node discriminator.
  * @property {Expression} expression - Returned expression.
@@ -89,12 +107,13 @@
  * @typedef IfStatement
  * @property {"IfStatement"} kind - Node discriminator.
  * @property {Expression} condition - Branch condition.
- * @property {ReturnStatement[]} consequent - True branch.
- * @property {ReturnStatement[]} alternate - False branch.
+ * @property {(LocalDeclaration | AssignmentStatement | ReturnStatement)[]} consequent - True branch.
+ * @property {(LocalDeclaration | AssignmentStatement | ReturnStatement)[]} alternate - False branch.
  * @property {SourceLocation} location - Source location.
  */
 
-/** @typedef {IfStatement | ReturnStatement} FunctionStatement */
+/** @typedef {LocalDeclaration | AssignmentStatement} LocalStatement */
+/** @typedef {LocalStatement | IfStatement | ReturnStatement} FunctionStatement */
 
 /**
  * @typedef FunctionDeclaration
@@ -116,7 +135,7 @@
 /**
  * @typedef EntryPoint
  * @property {"EntryPoint"} kind - Node discriminator.
- * @property {PrintStatement[]} body - Entry-point statements.
+ * @property {(LocalStatement | PrintStatement)[]} body - Entry-point statements.
  * @property {SourceLocation} location - Source location.
  */
 

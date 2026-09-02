@@ -137,4 +137,18 @@ describe("source backends", () => {
       assert.equal(output, `${expected}\n`, `${language} scalar output`)
     }
   })
+
+  it("round-trips typed locals and assignment through all five real toolchains", async () => {
+    const source = await readFile(new URL("fixtures/locals/program.js", import.meta.url), "utf8")
+    const semanticModule = parse({filename: "program.js", language: "javascript", source})
+
+    for (const language of targets) {
+      const generated = generate({language, module: semanticModule})
+      const generatedModule = parse({filename: filenames.get(language), language, source: generated})
+      const output = await executeGenerated(language, generated)
+
+      assert.deepEqual(withoutLocations(generatedModule), withoutLocations(semanticModule), `${language} modeled local round trip`)
+      assert.equal(output, "yes\n", `${language} local output`)
+    }
+  })
 })

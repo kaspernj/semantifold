@@ -36,4 +36,34 @@ console.log(difference(4, 9))
       (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" && error.language == "ruby" && error.location?.filename == "end.ts"
     )
   })
+
+  it("rejects target-reserved local declarations and assignment targets at their own locations", () => {
+    const source = `function select(flag: boolean, fallback: string): string {
+  let end: string = fallback
+  end = "yes"
+  if (flag) return end
+  else return fallback
+}
+console.log(select(true, "no"))
+`
+    const module = parse({filename: "reserved-local.ts", language: "typescript", source})
+
+    assert.throws(
+      () => generate({language: "ruby", module}),
+      (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
+        error.language == "ruby" && error.location?.filename == "reserved-local.ts" && error.location.start.line == 2
+    )
+
+    const declaration = /** @type {import("../src/semantic/types.js").LocalDeclaration} */ (module.functions[0].body[0])
+    const assignment = /** @type {import("../src/semantic/types.js").AssignmentStatement} */ (module.functions[0].body[1])
+
+    declaration.name = "value"
+    assignment.target.name = "end"
+
+    assert.throws(
+      () => generate({language: "ruby", module}),
+      (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
+        error.language == "ruby" && error.location?.start.line == 3
+    )
+  })
 })

@@ -14,12 +14,7 @@ import {emitStringLiteral} from "./scalars.js"
 export function validateBackendModule(module, language) {
   if (module.kind != "Module") unsupportedCapability(language, module.kind, module.location)
   if (module.functions.length == 0) unsupportedCapability(language, "module without functions", module.location)
-  if (module.entryPoint.body.length != 1) {
-    unsupportedCapability(language, "entry point without exactly one print", module.entryPoint.location)
-  }
-  if (module.entryPoint.body[0].kind != "PrintStatement") {
-    unsupportedCapability(language, "entry point statement other than print", module.entryPoint.body[0].location)
-  }
+  validateRestrictedSequence(module.entryPoint.body, "PrintStatement", language)
 
   for (const functionDeclaration of module.functions) {
     validateTargetIdentifier(language, functionDeclaration.name, "function", functionDeclaration.location)
@@ -27,29 +22,65 @@ export function validateBackendModule(module, language) {
     if (functionDeclaration.parameters.length != 2) {
       unsupportedCapability(language, "function parameter count other than two", functionDeclaration.location)
     }
-    if (functionDeclaration.body.length != 1 || functionDeclaration.body[0].kind != "IfStatement") {
-      unsupportedCapability(language, "function body other than one if/else", functionDeclaration.location)
-    }
+    validateRestrictedSequence(functionDeclaration.body, "IfStatement", language)
 
     for (const parameter of functionDeclaration.parameters) {
       validateTargetIdentifier(language, parameter.name, "parameter", parameter.location)
 
     }
 
-    const branch = /** @type {import("../semantic/types.js").IfStatement} */ (functionDeclaration.body[0])
+    const branch = /** @type {import("../semantic/types.js").IfStatement} */ (functionDeclaration.body.at(-1))
 
-    if (branch.consequent.length != 1 || branch.alternate.length != 1 ||
-      branch.consequent[0].kind != "ReturnStatement" || branch.alternate[0].kind != "ReturnStatement") {
-      unsupportedCapability(language, "if/else branch without exactly one return", branch.location)
-    }
+    validateRestrictedSequence(branch.consequent, "ReturnStatement", language)
+    validateRestrictedSequence(branch.alternate, "ReturnStatement", language)
 
     validateExpression(branch.condition, language)
-    validateExpression(branch.consequent[0].expression, language)
-    validateExpression(branch.alternate[0].expression, language)
+    validateExpression(/** @type {import("../semantic/types.js").ReturnStatement} */ (branch.consequent.at(-1)).expression, language)
+    validateExpression(/** @type {import("../semantic/types.js").ReturnStatement} */ (branch.alternate.at(-1)).expression, language)
   }
 
-  for (const statement of module.entryPoint.body) validateExpression(statement.expression, language)
+  validateExpression(/** @type {import("../semantic/types.js").PrintStatement} */ (module.entryPoint.body.at(-1)).expression, language)
   validateBackendTypes(module, language)
+}
+
+/**
+ * Validates a task-002 local prefix and exact terminal statement.
+ * @param {{kind: string, location: import("../semantic/types.js").SourceLocation}[]} statements - Statements.
+ * @param {"IfStatement" | "ReturnStatement" | "PrintStatement"} terminalKind - Required terminal kind.
+ * @param {import("../semantic/types.js").SemanticLanguage} language - Backend language.
+ * @returns {void}
+ */
+function validateRestrictedSequence(statements, terminalKind, language) {
+  const terminal = statements.at(-1)
+
+  if (!terminal || terminal.kind != terminalKind) {
+    unsupportedCapability(language, `statement sequence without terminal ${terminalKind}`, terminal?.location)
+  }
+
+  for (const statement of statements.slice(0, -1)) {
+    if (statement.kind == "LocalDeclaration") {
+      const declaration = /** @type {import("../semantic/types.js").LocalDeclaration} */ (statement)
+
+      if (typeof declaration.mutable != "boolean") {
+        unsupportedCapability(language, "local declaration with invalid mutability", declaration.location)
+      }
+      validateTargetIdentifier(language, declaration.name, "local", declaration.location)
+      validateExpression(declaration.initializer, language)
+      continue
+    }
+    if (statement.kind == "AssignmentStatement") {
+      const assignment = /** @type {import("../semantic/types.js").AssignmentStatement} */ (statement)
+
+      if (assignment.target.kind != "IdentifierExpression") {
+        unsupportedCapability(language, `assignment target ${assignment.target.kind}`, assignment.target.location)
+      }
+      validateTargetIdentifier(language, assignment.target.name, "assignment target", assignment.target.location)
+      validateExpression(assignment.expression, language)
+      continue
+    }
+
+    unsupportedCapability(language, `statement ${statement.kind}`, statement.location)
+  }
 }
 
 /**

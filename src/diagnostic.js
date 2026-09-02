@@ -72,6 +72,18 @@ export function missingType(language, subject, location) {
 }
 
 /**
+ * Throws a language-neutral semantic diagnostic discovered after adaptation.
+ * @param {import("./semantic/types.js").SemanticLanguage} language - Source language.
+ * @param {string} code - Stable semantic diagnostic code.
+ * @param {string} detail - Human-readable semantic failure.
+ * @param {import("./semantic/types.js").SourceLocation | undefined} location - Source location.
+ * @returns {never} Always throws.
+ */
+export function semanticFailure(language, code, detail, location) {
+  throw new SemantifoldDiagnostic({code, language, location, message: detail})
+}
+
+/**
  * Throws an unsupported backend-capability diagnostic.
  * @param {import("./semantic/types.js").SemanticLanguage} language - Backend language.
  * @param {string} capability - Unsupported semantic capability.
