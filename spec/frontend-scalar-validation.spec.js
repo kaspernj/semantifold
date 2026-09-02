@@ -21,7 +21,8 @@ function assertDiagnostic({code, detail, filename, language, line, source}) {
       if (detail) assert.ok(error.message.includes(detail))
 
       return true
-    }
+    },
+    filename
   )
 }
 

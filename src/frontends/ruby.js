@@ -19,7 +19,7 @@ import {
   loadPrism
 } from "@ruby/prism"
 import {SemantifoldDiagnostic, unsupportedSyntax} from "../diagnostic.js"
-import {locationFromOffsets, moduleLocation} from "../semantic/location.js"
+import {locationFromOffsets, moduleLocation, utf8ByteOffsetToUtf16Offset} from "../semantic/location.js"
 import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
 import {requireSourceScalarType} from "./scalars.js"
 const parsePrism = await loadPrism()
@@ -32,7 +32,12 @@ const parsePrism = await loadPrism()
  * @returns {import("../semantic/types.js").SourceLocation} Source location.
  */
 function nodeLocation(node, filename, source) {
-  return locationFromOffsets(filename, source, node.location.startOffset, node.location.startOffset + node.location.length)
+  return locationFromOffsets(
+    filename,
+    source,
+    utf8ByteOffsetToUtf16Offset(source, node.location.startOffset),
+    utf8ByteOffsetToUtf16Offset(source, node.location.startOffset + node.location.length)
+  )
 }
 
 /**

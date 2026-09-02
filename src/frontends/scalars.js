@@ -6,13 +6,13 @@ import {scalarType} from "../semantic/scalars.js"
 /**
  * Builds a source-spelling map with exact semantic scalar values.
  * @param {readonly (readonly [string, import("../semantic/types.js").SemanticTypeName])[]} entries - Source mappings.
- * @returns {ReadonlyMap<string, import("../semantic/types.js").SemanticTypeName>} Source type map.
+ * @returns {Map<string, import("../semantic/types.js").SemanticTypeName>} Source type map.
  */
 function sourceTypeMap(entries) {
   return new Map(entries)
 }
 
-/** @type {Readonly<Record<import("../semantic/types.js").SemanticLanguage, ReadonlyMap<string, import("../semantic/types.js").SemanticTypeName>>>} */
+/** @type {Readonly<Record<import("../semantic/types.js").SemanticLanguage, Map<string, import("../semantic/types.js").SemanticTypeName>>>} */
 const sourceScalarTypes = Object.freeze({
   java: sourceTypeMap([
     ["int", "integer"],

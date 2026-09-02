@@ -33,7 +33,7 @@ export function hasOnlyUnicodeScalars(value) {
     if (codeUnit >= 0xD800 && codeUnit <= 0xDBFF) {
       const trailing = value.charCodeAt(index + 1)
 
-      if (trailing < 0xDC00 || trailing > 0xDFFF) return false
+      if (!Number.isInteger(trailing) || trailing < 0xDC00 || trailing > 0xDFFF) return false
       index++
     } else if (codeUnit >= 0xDC00 && codeUnit <= 0xDFFF) {
       return false

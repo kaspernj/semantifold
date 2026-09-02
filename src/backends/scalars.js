@@ -62,7 +62,7 @@ function emitPhpString(value) {
     } else emitted += character
   }
 
-  return `${emitted}\"`
+  return `${emitted}"`
 }
 
 /**
@@ -90,7 +90,7 @@ function emitRubyString(value) {
     } else emitted += character
   }
 
-  return `${emitted}\"`
+  return `${emitted}"`
 }
 
 /**
@@ -116,5 +116,5 @@ function emitJavaString(value) {
     } else emitted += character
   }
 
-  return `${emitted}\"`
+  return `${emitted}"`
 }
