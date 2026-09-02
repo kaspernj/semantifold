@@ -8,7 +8,7 @@ Backend tests start from one parsed semantic module, generate every target, pars
 - `ruby program.rb`
 - `node program.js`
 - local lockfile-installed `tsc program.ts`, then `node program.js`
-- `javac Main.java`, then `java -Dstdout.encoding=UTF-8 -cp … Main`
+- `javac Main.java`, then `java -cp … Main`
 
 Cleanup runs in `finally`. A missing tool raises the process error and fails the spec; there are no skip branches or mocked compilers. Diagnostic specs cover unsupported syntax, missing JSDoc types, and backend capability rejection.
 

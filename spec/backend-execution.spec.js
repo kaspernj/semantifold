@@ -72,7 +72,7 @@ async function executeGenerated(language, source) {
     await writeFile(filename, source)
     await execFileAsync("javac", [filename], {cwd: directory})
 
-    return (await execFileAsync("java", ["-Dstdout.encoding=UTF-8", "-cp", directory, "Main"])).stdout
+    return (await execFileAsync("java", ["-cp", directory, "Main"])).stdout
   } finally {
     await rm(directory, {force: true, recursive: true})
   }
