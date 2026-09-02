@@ -1,7 +1,7 @@
 // @ts-check
 
 import assert from "node:assert/strict"
-import {describe, it} from "node:test"
+import {describe, it} from "@velocious/testing"
 import {parse, SemantifoldDiagnostic} from "../index.js"
 
 describe("PHP frontend validation", () => {

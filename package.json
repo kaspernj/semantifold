@@ -26,7 +26,7 @@
     "eslint": "eslint --max-warnings 0 .",
     "lint": "npm run eslint && npm run typecheck",
     "prepack": "npm run build",
-    "test": "node --test spec/*-spec.js",
+    "test": "velocious-test spec",
     "typecheck": "tsc --noEmit"
   },
   "engines": {
@@ -54,6 +54,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^24.3.0",
+    "@velocious/testing": "0.0.0",
     "dockerfile-ast": "^0.7.1",
     "eslint": "^10.0.1",
     "eslint-plugin-jsdoc": "^64.0.2",
