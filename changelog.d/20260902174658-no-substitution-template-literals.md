@@ -4,4 +4,5 @@
 
 # Fixes
 
+- Apply Java Unicode translation before ordinary string-escape decoding.
 - Preserve php-parser UTF-16 source locations for non-ASCII string literals.

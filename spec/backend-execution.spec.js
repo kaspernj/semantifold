@@ -72,7 +72,7 @@ async function executeGenerated(language, source) {
     await writeFile(filename, source)
     await execFileAsync("javac", [filename], {cwd: directory})
 
-    return (await execFileAsync("java", ["-cp", directory, "Main"])).stdout
+    return (await execFileAsync("java", ["-Dstdout.encoding=UTF-8", "-cp", directory, "Main"])).stdout
   } finally {
     await rm(directory, {force: true, recursive: true})
   }
@@ -97,7 +97,7 @@ describe("source backends", () => {
     const source = `public final class Main {
   private static String label(boolean flag, String fallback) {
     if (flag) {
-      return "\\u0061";
+      return "\\u0061\\u005cn";
     } else {
       return fallback;
     }
@@ -112,11 +112,11 @@ describe("source backends", () => {
     const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (semanticModule.functions[0].body[0])
     const literal = /** @type {import("../src/semantic/types.js").StringLiteral} */ (branch.consequent[0].expression)
 
-    assert.equal(literal.value, "a")
+    assert.equal(literal.value, "a\n")
 
     const generated = generate({language: "java", module: semanticModule})
 
-    assert.equal(await executeGenerated("java", generated), "a\n")
+    assert.equal(await executeGenerated("java", generated), "a\n\n")
   })
 
   it("round-trips and executes boolean and string scalar programs in all five languages", async () => {
