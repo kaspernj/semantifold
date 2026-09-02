@@ -1,0 +1,26 @@
+name: semantifold
+
+services:
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    init: true
+    user: "1000:1000"
+    working_dir: /home/dev/semantifold
+    environment:
+      GH_CONFIG_DIR: /home/dev/.config/gh
+      HOME: /home/dev
+      NODE_ENV: development
+    volumes:
+      - type: bind
+        source: ${DEV_HOME_PATH:-/home/dev}
+        target: /home/dev
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${GH_CONFIG_SOURCE_PATH:?Set GH_CONFIG_SOURCE_PATH in .env}
+        target: /home/dev/.config/gh
+        read_only: true
+        bind:
+          create_host_path: false

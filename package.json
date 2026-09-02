@@ -1,0 +1,66 @@
+{
+  "name": "semantifold",
+  "version": "0.1.0",
+  "description": "Language-neutral semantic code analysis, transformation, generation, and execution toolkit",
+  "type": "module",
+  "main": "build/index.js",
+  "types": "build/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./build/index.d.ts",
+      "import": "./build/index.js"
+    }
+  },
+  "files": [
+    "build/**",
+    "docs/**",
+    "index.js",
+    "LICENSE",
+    "README.md",
+    "src/**",
+    "tsconfig.json"
+  ],
+  "scripts": {
+    "all-checks": "npm run lint && npm test",
+    "build": "node scripts/clean-build.js && tsc",
+    "eslint": "eslint --max-warnings 0 .",
+    "lint": "npm run eslint && npm run typecheck",
+    "prepack": "npm run build",
+    "test": "node --test spec/*-spec.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kaspernj/semantifold.git"
+  },
+  "author": "kasper@diestoeckels.de",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/kaspernj/semantifold/issues"
+  },
+  "homepage": "https://github.com/kaspernj/semantifold#readme",
+  "dependencies": {
+    "@babel/parser": "^7.28.4",
+    "@babel/types": "^7.28.4",
+    "@lezer/common": "^1.2.3",
+    "@lezer/java": "^1.1.3",
+    "@ruby/prism": "^1.9.0",
+    "comment-parser": "^1.4.1",
+    "php-parser": "^3.7.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^24.3.0",
+    "dockerfile-ast": "^0.7.1",
+    "eslint": "^10.0.1",
+    "eslint-plugin-jsdoc": "^64.0.2",
+    "eslint-plugin-jsdoc-inline-type-casts": "https://github.com/kaspernj/eslint-plugin-jsdoc-inline-type-casts/archive/441b6c5ca335a115a75d9f050134357ddb0a61d1.tar.gz",
+    "eslint-plugin-jsdoc-tag-lines": "^1.0.1",
+    "globals": "^17.0.0",
+    "typescript": "^7.0.0",
+    "yaml": "^2.9.0"
+  }
+}
