@@ -53,6 +53,7 @@ The execution specs require PHP CLI, Ruby, TypeScript, and a Java JDK in additio
 - [Coding standards](docs/coding-standards.md)
 - [Language support](docs/language-support.md)
 - [Testing](docs/testing.md)
+- [Language feature roadmap](todo/README.md)
 - [Initial toolchain plan](docs/plans/2026-09-02-initial-toolchain.md)
 
 Semantifold is ISC licensed.
