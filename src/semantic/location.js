@@ -25,6 +25,34 @@ export function pointAt(source, offset) {
 }
 
 /**
+ * Converts a parser UTF-8 byte offset to Semantifold's UTF-16 source offset.
+ * @param {string} source - Complete source.
+ * @param {number} byteOffset - Zero-based UTF-8 byte offset.
+ * @returns {number} Zero-based UTF-16 offset.
+ */
+export function utf8ByteOffsetToUtf16Offset(source, byteOffset) {
+  if (!Number.isInteger(byteOffset) || byteOffset < 0) throw new RangeError(`Invalid UTF-8 source offset: ${byteOffset}`)
+
+  let bytes = 0
+
+  for (let index = 0; index < source.length;) {
+    if (bytes == byteOffset) return index
+
+    const codePoint = source.codePointAt(index)
+
+    if (codePoint === undefined) throw new RangeError(`Invalid UTF-8 source offset: ${byteOffset}`)
+
+    bytes += codePoint <= 0x7F ? 1 : codePoint <= 0x7FF ? 2 : codePoint <= 0xFFFF ? 3 : 4
+    if (bytes > byteOffset) throw new RangeError(`Invalid UTF-8 source offset: ${byteOffset}`)
+    index += codePoint > 0xFFFF ? 2 : 1
+  }
+
+  if (bytes == byteOffset) return source.length
+
+  throw new RangeError(`Invalid UTF-8 source offset: ${byteOffset}`)
+}
+
+/**
  * Builds a normalized source location from offsets.
  * @param {string} filename - Originating filename.
  * @param {string} source - Complete source.

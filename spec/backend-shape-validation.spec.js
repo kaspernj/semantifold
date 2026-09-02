@@ -15,6 +15,16 @@ async function validModule() {
   return parse({filename: "program.js", language: "javascript", source})
 }
 
+/**
+ * Loads a fresh valid boolean/string semantic module.
+ * @returns {Promise<import("../src/semantic/types.js").SemanticModule>} Semantic module.
+ */
+async function validScalarModule() {
+  const source = await readFile(new URL("fixtures/scalars/program.js", import.meta.url), "utf8")
+
+  return parse({filename: "scalar-program.js", language: "javascript", source})
+}
+
 describe("backend shape validation", () => {
   it("rejects Java integer literals outside the signed 32-bit range", async () => {
     for (const value of [2147483648, -2147483649]) {
@@ -44,6 +54,56 @@ describe("backend shape validation", () => {
         () => generate({language: "php", module}),
         (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" && error.language == "php",
         branchShape
+      )
+    }
+  })
+
+  it("rejects scalar condition, return, and call argument type mismatches", async () => {
+    for (const mismatch of ["condition", "return", "argument"]) {
+      const module = await validScalarModule()
+      const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (module.functions[0].body[0])
+      const call = /** @type {import("../src/semantic/types.js").CallExpression} */ (module.entryPoint.body[0].expression)
+
+      if (mismatch == "condition") branch.condition = branch.consequent[0].expression
+      else if (mismatch == "return") branch.consequent[0].expression = call.arguments[0]
+      else call.arguments[0] = call.arguments[1]
+
+      assert.throws(
+        () => generate({language: "typescript", module}),
+        (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
+          error.language == "typescript" && error.location?.filename == "scalar-program.js",
+        mismatch
+      )
+    }
+  })
+
+  it("rejects duplicate function names before selecting a signature", async () => {
+    const module = await validScalarModule()
+
+    module.functions.push(module.functions[0])
+
+    assert.throws(
+      () => generate({language: "javascript", module}),
+      (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
+        error.message.includes("duplicate function")
+    )
+  })
+
+  it("rejects malformed scalar types and literal payloads before emission", async () => {
+    for (const malformed of ["type", "boolean", "string"]) {
+      const module = await validScalarModule()
+      const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (module.functions[0].body[0])
+      const call = /** @type {import("../src/semantic/types.js").CallExpression} */ (module.entryPoint.body[0].expression)
+
+      if (malformed == "type") Reflect.set(module.functions[0].parameters[0].type, "name", "float")
+      else if (malformed == "boolean") Reflect.set(call.arguments[0], "value", "true")
+      else Reflect.set(branch.consequent[0].expression, "value", "\uD800")
+
+      assert.throws(
+        () => generate({language: "java", module}),
+        (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
+          error.language == "java" && error.location?.filename == "scalar-program.js",
+        malformed
       )
     }
   })

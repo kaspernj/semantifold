@@ -67,7 +67,7 @@ export function missingType(language, subject, location) {
     code: "MISSING_TYPE",
     language,
     location,
-    message: `${subject} requires an explicit supported integer type.`
+    message: `${subject} requires an explicit supported scalar type: integer, boolean, or string.`
   })
 }
 

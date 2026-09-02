@@ -1,7 +1,9 @@
 // @ts-check
 
 import {unsupportedCapability} from "../diagnostic.js"
+import {validateBackendTypes} from "../semantic/validate.js"
 import {validateTargetIdentifier} from "./identifiers.js"
+import {emitStringLiteral} from "./scalars.js"
 
 /**
  * Checks the intentionally narrow backend contract.
@@ -25,9 +27,6 @@ export function validateBackendModule(module, language) {
     if (functionDeclaration.parameters.length != 2) {
       unsupportedCapability(language, "function parameter count other than two", functionDeclaration.location)
     }
-    if (functionDeclaration.returnType.name != "integer") {
-      unsupportedCapability(language, `return type ${functionDeclaration.returnType.name}`, functionDeclaration.location)
-    }
     if (functionDeclaration.body.length != 1 || functionDeclaration.body[0].kind != "IfStatement") {
       unsupportedCapability(language, "function body other than one if/else", functionDeclaration.location)
     }
@@ -35,9 +34,6 @@ export function validateBackendModule(module, language) {
     for (const parameter of functionDeclaration.parameters) {
       validateTargetIdentifier(language, parameter.name, "parameter", parameter.location)
 
-      if (parameter.type.name != "integer") {
-        unsupportedCapability(language, `parameter type ${parameter.type.name}`, parameter.location)
-      }
     }
 
     const branch = /** @type {import("../semantic/types.js").IfStatement} */ (functionDeclaration.body[0])
@@ -53,6 +49,7 @@ export function validateBackendModule(module, language) {
   }
 
   for (const statement of module.entryPoint.body) validateExpression(statement.expression, language)
+  validateBackendTypes(module, language)
 }
 
 /**
@@ -75,6 +72,7 @@ function validateExpression(expression, language) {
     }
     return
   }
+  if (expression.kind == "BooleanLiteral" || expression.kind == "StringLiteral") return
   if (expression.kind == "CallExpression") {
     validateTargetIdentifier(language, expression.callee, "callee", expression.location)
     if (expression.arguments.length != 2) {
@@ -100,15 +98,18 @@ function validateExpression(expression, language) {
 /**
  * Emits a supported expression.
  * @param {import("../semantic/types.js").Expression} expression - Semantic expression.
+ * @param {import("../semantic/types.js").SemanticLanguage} language - Target language.
  * @param {(name: string) => string} emitIdentifier - Identifier formatter.
  * @returns {string} Source expression.
  */
-export function emitExpression(expression, emitIdentifier) {
+export function emitExpression(expression, language, emitIdentifier) {
   if (expression.kind == "IdentifierExpression") return emitIdentifier(expression.name)
   if (expression.kind == "IntegerLiteral") return String(expression.value)
+  if (expression.kind == "BooleanLiteral") return expression.value ? "true" : "false"
+  if (expression.kind == "StringLiteral") return emitStringLiteral(language, expression.value)
   if (expression.kind == "CallExpression") {
-    return `${expression.callee}(${expression.arguments.map((argument) => emitExpression(argument, emitIdentifier)).join(", ")})`
+    return `${expression.callee}(${expression.arguments.map((argument) => emitExpression(argument, language, emitIdentifier)).join(", ")})`
   }
 
-  return `(${emitExpression(expression.left, emitIdentifier)} ${expression.operator} ${emitExpression(expression.right, emitIdentifier)})`
+  return `(${emitExpression(expression.left, language, emitIdentifier)} ${expression.operator} ${emitExpression(expression.right, language, emitIdentifier)})`
 }

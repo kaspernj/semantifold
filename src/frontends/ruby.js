@@ -4,20 +4,24 @@ import {
   CallNode,
   DefNode,
   ElseNode,
+  FalseNode,
   IfNode,
   IntegerNode,
+  InterpolatedStringNode,
   LocalVariableReadNode,
   ParenthesesNode,
   ProgramNode,
   RequiredParameterNode,
   ReturnNode,
   StatementsNode,
+  StringNode,
+  TrueNode,
   loadPrism
 } from "@ruby/prism"
-import {SemantifoldDiagnostic, missingType, unsupportedSyntax} from "../diagnostic.js"
-import {locationFromOffsets, moduleLocation} from "../semantic/location.js"
-
-const integerType = /** @type {const} */ ({kind: "TypeReference", name: "integer"})
+import {SemantifoldDiagnostic, unsupportedSyntax} from "../diagnostic.js"
+import {locationFromOffsets, moduleLocation, utf8ByteOffsetToUtf16Offset} from "../semantic/location.js"
+import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
+import {requireSourceScalarType} from "./scalars.js"
 const parsePrism = await loadPrism()
 
 /**
@@ -28,7 +32,12 @@ const parsePrism = await loadPrism()
  * @returns {import("../semantic/types.js").SourceLocation} Source location.
  */
 function nodeLocation(node, filename, source) {
-  return locationFromOffsets(filename, source, node.location.startOffset, node.location.startOffset + node.location.length)
+  return locationFromOffsets(
+    filename,
+    source,
+    utf8ByteOffsetToUtf16Offset(source, node.location.startOffset),
+    utf8ByteOffsetToUtf16Offset(source, node.location.startOffset + node.location.length)
+  )
 }
 
 /**
@@ -54,6 +63,23 @@ function convertExpression(node, filename, source) {
 
     return {kind: "IntegerLiteral", location, value: node.value}
   }
+
+  if (node instanceof TrueNode || node instanceof FalseNode) {
+    return {kind: "BooleanLiteral", location, value: node instanceof TrueNode}
+  }
+
+  if (node instanceof StringNode) {
+    const decoded = node.unescaped
+
+    if (!decoded.validEncoding || decoded.encoding != "utf-8" || node.isForcedBinaryEncoding() ||
+      !hasOnlyUnicodeScalars(decoded.value)) {
+      return unsupportedSyntax("ruby", "invalid Unicode string literal", location)
+    }
+
+    return {kind: "StringLiteral", location, value: decoded.value}
+  }
+
+  if (node instanceof InterpolatedStringNode) return unsupportedSyntax("ruby", "interpolated string", location)
 
   if (node instanceof CallNode && node.receiver && [">", "-", "+"].includes(node.name) && node.arguments_?.arguments_.length == 1) {
     return {
@@ -171,16 +197,14 @@ function isImmediateCommentGap(gap) {
 }
 
 /**
- * Requires the supported Ruby Integer spelling.
+ * Requires an exact supported Ruby scalar spelling.
  * @param {string | undefined} sourceType - Ruby type comment value.
  * @param {string} subject - Typed subject.
  * @param {import("../semantic/types.js").SourceLocation} location - Source location.
  * @returns {import("../semantic/types.js").TypeReference} Semantic type.
  */
 function convertType(sourceType, subject, location) {
-  if (sourceType != "[Integer]") return missingType("ruby", subject, location)
-
-  return integerType
+  return requireSourceScalarType("ruby", sourceType, subject, location)
 }
 
 /**

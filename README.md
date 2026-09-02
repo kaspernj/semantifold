@@ -8,14 +8,14 @@ Semantifold is an early language-neutral semantic code toolkit. This first relea
 import {generate, parse} from "semantifold"
 
 const module = parse({
-  filename: "difference.ts",
+  filename: "label.ts",
   language: "typescript",
   source: `
-    function difference(left: number, right: number): number {
-      if (left > right) return left - right
-      else return right - left
+    function label(flag: boolean, fallback: string): string {
+      if (flag) return "yes"
+      else return fallback
     }
-    console.log(difference(4, 9))
+    console.log(label(true, "no"))
   `
 })
 
@@ -24,9 +24,9 @@ const javaSource = generate({language: "java", module})
 
 `parse` returns parser-independent discriminated semantic nodes with normalized types and source locations. `generate` accepts that shared module and returns an independently executable source program. `supportedLanguages` lists the five exact language identifiers, and `SemantifoldDiagnostic` exposes stable error codes for unsupported syntax, missing types, parse failures, and backend capabilities.
 
-This is not general-purpose support for any of the five languages. The implemented subset is a typed two-integer function, comparison, `if`/`else` returns, integer `+`/`-`, a function call, and entry-point printing. See [language support](docs/language-support.md) before using it on other code.
+This is not general-purpose support for any of the five languages. The implemented subset is a two-parameter function using explicit integer, boolean, or string types; a strictly boolean `if`/`else`; one return per branch; integer `+`, `-`, and `>`; a two-argument function call; and entry-point printing. See [language support](docs/language-support.md) before using it on other code.
 
-Semantic integers must be JavaScript-safe integers. Java generation narrows them further to signed 32-bit `int`. JavaScript and TypeScript functions must be synchronous and non-generator; Ruby annotations must be the immediately associated comment block; and PHP accepts only an optional exact `declare(strict_types=1)`. Frontends reject syntax instead of dropping receivers, arguments, parameters, declarations, or statements. Before emission, each backend validates exact one-return branch shape plus target lexical and reserved-word rules for every function, parameter, callee, and identifier reference.
+Semantic integers must be JavaScript-safe integers. Java generation narrows literals further to signed 32-bit `int`; arithmetic-result overflow remains outside the portable contract. Strings are parser-decoded Unicode scalar values and are re-escaped for each target without preserving source quotes or escapes. Interpolation, lone surrogates, nullability, floating point, wrapper types, inferred public types, and unions remain unsupported. JavaScript and TypeScript functions must be synchronous and non-generator; Ruby annotations must be the immediately associated comment block; and PHP accepts only an optional exact `declare(strict_types=1)`. Frontends reject syntax instead of dropping receivers, arguments, parameters, declarations, or statements. Before emission, each backend validates shape, scalar types, modeled bindings, target identifiers, and literal representability.
 
 ## Development
 

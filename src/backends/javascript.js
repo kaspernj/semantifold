@@ -1,6 +1,7 @@
 // @ts-check
 
 import {emitExpression} from "./shared.js"
+import {emitScalarType} from "./scalars.js"
 
 /**
  * Emits an independently executable JavaScript program with JSDoc types.
@@ -15,20 +16,22 @@ export function generateJavaScript(module) {
     return [
       "/**",
       " * Generated semantic function.",
-      ...functionDeclaration.parameters.map((parameter) => ` * @param {number} ${parameter.name} - Integer parameter.`),
-      " * @returns {number} Integer result.",
+      ...functionDeclaration.parameters.map((parameter) => {
+        return ` * @param {${emitScalarType("javascript", parameter.type)}} ${parameter.name} - Semantic parameter.`
+      }),
+      ` * @returns {${emitScalarType("javascript", functionDeclaration.returnType)}} Semantic result.`,
       " */",
       `function ${functionDeclaration.name}(${parameters}) {`,
-      `  if (${emitExpression(branch.condition, (name) => name)}) {`,
-      `    return ${emitExpression(branch.consequent[0].expression, (name) => name)}`,
+      `  if (${emitExpression(branch.condition, "javascript", (name) => name)}) {`,
+      `    return ${emitExpression(branch.consequent[0].expression, "javascript", (name) => name)}`,
       "  } else {",
-      `    return ${emitExpression(branch.alternate[0].expression, (name) => name)}`,
+      `    return ${emitExpression(branch.alternate[0].expression, "javascript", (name) => name)}`,
       "  }",
       "}"
     ].join("\n")
   }).join("\n\n")
   const prints = module.entryPoint.body.map((statement) => {
-    return `console.log(${emitExpression(statement.expression, (name) => name)})`
+    return `console.log(${emitExpression(statement.expression, "javascript", (name) => name)})`
   }).join("\n")
 
   return `${functions}\n\n${prints}\n`

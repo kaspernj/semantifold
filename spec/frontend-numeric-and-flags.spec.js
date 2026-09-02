@@ -48,6 +48,20 @@ def difference(left, right)
   end
 end
 puts difference(4, 9)
+`],
+  ["java", "Main.java", `
+public final class Main {
+  private static int difference(int left, int right) {
+    if (left > right) {
+      return 9007199254740993;
+    } else {
+      return right - left;
+    }
+  }
+  public static void main(String[] args) {
+    System.out.println(difference(4, 9));
+  }
+}
 `]
 ]
 

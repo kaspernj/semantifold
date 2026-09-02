@@ -3,8 +3,21 @@
 import {parser} from "@lezer/java"
 import {SemantifoldDiagnostic, missingType, unsupportedSyntax} from "../diagnostic.js"
 import {locationFromOffsets, moduleLocation} from "../semantic/location.js"
+import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
+import {sourceScalarType} from "./scalars.js"
 
-const integerType = /** @type {const} */ ({kind: "TypeReference", name: "integer"})
+/** @type {Readonly<Record<string, string>>} */
+const simpleStringEscapes = Object.freeze({
+  "\"": "\"",
+  "'": "'",
+  "\\": "\\",
+  b: "\b",
+  f: "\f",
+  n: "\n",
+  r: "\r",
+  s: " ",
+  t: "\t"
+})
 
 /**
  * Returns all direct child syntax nodes.
@@ -95,7 +108,7 @@ function convertExpression(node, filename, source) {
   if (node.name == "ParenthesizedExpression") {
     const children = structuralChildren(node)
 
-    if (children.length != 1 || !isSupportedExpressionNode(children[0])) {
+    if (children.length != 1) {
       return unsupportedSyntax("java", "unsupported parenthesized expression", location)
     }
 
@@ -112,6 +125,14 @@ function convertExpression(node, filename, source) {
     if (!Number.isSafeInteger(value)) return unsupportedSyntax("java", "non-safe integer literal", location)
 
     return {kind: "IntegerLiteral", location, value}
+  }
+
+  if (node.name == "BooleanLiteral") {
+    return {kind: "BooleanLiteral", location, value: nodeText(node, source) == "true"}
+  }
+
+  if (node.name == "StringLiteral") {
+    return {kind: "StringLiteral", location, value: decodeStringLiteral(node, filename, source)}
   }
 
   if (node.name == "BinaryExpression") {
@@ -160,7 +181,63 @@ function convertExpression(node, filename, source) {
  * @returns {boolean} Whether the node is supported.
  */
 function isSupportedExpressionNode(node) {
-  return ["Identifier", "IntegerLiteral", "BinaryExpression", "MethodInvocation", "ParenthesizedExpression"].includes(node.name)
+  return [
+    "Identifier",
+    "IntegerLiteral",
+    "BooleanLiteral",
+    "StringLiteral",
+    "BinaryExpression",
+    "MethodInvocation",
+    "ParenthesizedExpression"
+  ].includes(node.name)
+}
+
+/**
+ * Decodes the accepted escapes from one parser-confirmed Java string literal.
+ * @param {import("@lezer/common").SyntaxNode} node - Java StringLiteral node.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @returns {string} Decoded Unicode string.
+ */
+function decodeStringLiteral(node, filename, source) {
+  const location = nodeLocation(node, filename, source)
+  const literal = nodeText(node, source)
+  let value = ""
+
+  for (let index = 1; index < literal.length - 1; index++) {
+    const character = literal[index]
+
+    if (character != "\\") {
+      value += character
+      continue
+    }
+
+    const escaped = literal[++index]
+    const simple = simpleStringEscapes[escaped]
+
+    if (simple !== undefined) {
+      value += simple
+      continue
+    }
+
+    if (escaped >= "0" && escaped <= "7") {
+      let octal = escaped
+      const maximumLength = escaped <= "3" ? 3 : 2
+
+      while (octal.length < maximumLength && literal[index + 1] >= "0" && literal[index + 1] <= "7") {
+        octal += literal[++index]
+      }
+
+      value += String.fromCharCode(Number.parseInt(octal, 8))
+      continue
+    }
+
+    return unsupportedSyntax("java", "unsupported string escape", location)
+  }
+
+  if (!hasOnlyUnicodeScalars(value)) return unsupportedSyntax("java", "invalid Unicode string literal", location)
+
+  return value
 }
 
 /**
@@ -178,16 +255,25 @@ function convertReturnBlock(block, filename, source) {
 
     if (statement.name != "ReturnStatement") return unsupportedSyntax("java", statement.name, location)
 
-    const expression = directChildren(statement).find((child) => ["Identifier", "IntegerLiteral", "BinaryExpression", "MethodInvocation", "ParenthesizedExpression"].includes(child.name))
+    const expressionNodes = directChildren(statement).filter((child) => child.name != "return" && child.name != ";")
+    const expression = expressionNodes.length == 1 ? expressionNodes[0] : undefined
 
-    if (!expression) return unsupportedSyntax("java", "empty return", location)
+    if (!expression) {
+      const unsupported = expressionNodes[0]
+
+      return unsupportedSyntax(
+        "java",
+        unsupported?.name ?? "empty return",
+        unsupported ? nodeLocation(unsupported, filename, source) : location
+      )
+    }
 
     return {expression: convertExpression(expression, filename, source), kind: /** @type {const} */ ("ReturnStatement"), location}
   })
 }
 
 /**
- * Requires a Java `int` type node.
+ * Requires an exact Java scalar type node.
  * @param {import("@lezer/common").SyntaxNode | null} sourceType - Java type node.
  * @param {string} subject - Typed subject.
  * @param {import("../semantic/types.js").SourceLocation} location - Source location.
@@ -195,9 +281,25 @@ function convertReturnBlock(block, filename, source) {
  * @returns {import("../semantic/types.js").TypeReference} Semantic type.
  */
 function convertType(sourceType, subject, location, source) {
-  if (!sourceType || nodeText(sourceType, source) != "int") return missingType("java", subject, location)
+  if (!sourceType) return missingType("java", subject, location)
+  if (!["PrimitiveType", "TypeName", "ScopedTypeName"].includes(sourceType.name)) {
+    return unsupportedSyntax("java", "unsupported scalar type", location)
+  }
 
-  return integerType
+  const type = sourceScalarType("java", nodeText(sourceType, source))
+
+  if (!type) return unsupportedSyntax("java", "unsupported scalar type", nodeLocation(sourceType, location.filename, source))
+
+  return type
+}
+
+/**
+ * Returns the direct Java declaration type node supported by scalar conversion.
+ * @param {import("@lezer/common").SyntaxNode} node - Declaration node.
+ * @returns {import("@lezer/common").SyntaxNode | null} Type syntax node.
+ */
+function declarationType(node) {
+  return node.getChild("PrimitiveType") ?? node.getChild("TypeName") ?? node.getChild("ScopedTypeName")
 }
 
 /**
@@ -221,7 +323,7 @@ function convertFunction(node, filename, source) {
       kind: /** @type {const} */ ("Parameter"),
       location: parameterLocation,
       name: parameterName,
-      type: convertType(parameter.getChild("PrimitiveType"), `Parameter '${parameterName}'`, parameterLocation, source)
+      type: convertType(declarationType(parameter), `Parameter '${parameterName}'`, parameterLocation, source)
     }
   })
   const block = requiredChild(node, "Block", filename, source)
@@ -232,7 +334,8 @@ function convertFunction(node, filename, source) {
   const ifNode = bodyNodes[0]
   const ifLocation = nodeLocation(ifNode, filename, source)
   const conditionContainer = requiredChild(ifNode, "ParenthesizedExpression", filename, source)
-  const condition = descendants(conditionContainer, "BinaryExpression")[0]
+  const conditionNodes = structuralChildren(conditionContainer)
+  const condition = conditionNodes.length == 1 ? conditionNodes[0] : undefined
   const branches = ifNode.getChildren("Block")
 
   if (!condition || branches.length != 2) return unsupportedSyntax("java", "if without two block branches", ifLocation)
@@ -249,7 +352,7 @@ function convertFunction(node, filename, source) {
     location,
     name,
     parameters,
-    returnType: convertType(node.getChild("PrimitiveType"), `Function '${name}' return`, location, source)
+    returnType: convertType(declarationType(node), `Function '${name}' return`, location, source)
   }
 }
 
@@ -285,7 +388,7 @@ function convertEntryPoint(node, filename, source) {
   const argumentList = requiredChild(printInvocation, "ArgumentList", filename, source)
   const arguments_ = structuralChildren(argumentList)
 
-  if (arguments_.length != 1 || !isSupportedExpressionNode(arguments_[0])) {
+  if (arguments_.length != 1) {
     return unsupportedSyntax("java", "println without one supported argument", nodeLocation(argumentList, filename, source))
   }
 
@@ -326,10 +429,8 @@ export function parseJava({filename, source}) {
   if (functionMethods.length == 0) return unsupportedSyntax("java", "class without a semantic function", location)
   if (!mainMethod) return unsupportedSyntax("java", "class without main", location)
 
-  return {
-    entryPoint: convertEntryPoint(mainMethod, filename, source),
-    functions: functionMethods.map((method) => convertFunction(method, filename, source)),
-    kind: "Module",
-    location
-  }
+  const functions = functionMethods.map((method) => convertFunction(method, filename, source))
+  const entryPoint = convertEntryPoint(mainMethod, filename, source)
+
+  return {entryPoint, functions, kind: "Module", location}
 }

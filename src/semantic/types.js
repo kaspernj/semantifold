@@ -1,7 +1,7 @@
 // @ts-check
 
 /** @typedef {"php" | "ruby" | "javascript" | "typescript" | "java"} SemanticLanguage */
-/** @typedef {"integer"} SemanticTypeName */
+/** @typedef {"integer" | "boolean" | "string"} SemanticTypeName */
 
 /**
  * @typedef SourcePoint
@@ -46,6 +46,20 @@
  */
 
 /**
+ * @typedef BooleanLiteral
+ * @property {"BooleanLiteral"} kind - Node discriminator.
+ * @property {boolean} value - Boolean value.
+ * @property {SourceLocation} location - Source location.
+ */
+
+/**
+ * @typedef StringLiteral
+ * @property {"StringLiteral"} kind - Node discriminator.
+ * @property {string} value - Unicode string value.
+ * @property {SourceLocation} location - Source location.
+ */
+
+/**
  * @typedef BinaryExpression
  * @property {"BinaryExpression"} kind - Node discriminator.
  * @property {">" | "-" | "+"} operator - Supported binary operator.
@@ -62,7 +76,7 @@
  * @property {SourceLocation} location - Source location.
  */
 
-/** @typedef {IdentifierExpression | IntegerLiteral | BinaryExpression | CallExpression} Expression */
+/** @typedef {IdentifierExpression | IntegerLiteral | BooleanLiteral | StringLiteral | BinaryExpression | CallExpression} Expression */
 
 /**
  * @typedef ReturnStatement
