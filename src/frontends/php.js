@@ -2,7 +2,7 @@
 
 import PhpParser from "php-parser"
 import {parseFailure, unsupportedSyntax} from "../diagnostic.js"
-import {locationFromOffsets, moduleLocation, utf8ByteOffsetToUtf16Offset} from "../semantic/location.js"
+import {locationFromOffsets, moduleLocation} from "../semantic/location.js"
 import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
 import {requireSourceScalarType} from "./scalars.js"
 const parser = new PhpParser.Engine({
@@ -20,12 +20,7 @@ const parser = new PhpParser.Engine({
 function nodeLocation(node, filename, source) {
   if (!node.loc) throw new Error(`PHP parser omitted source location for ${node.kind}.`)
 
-  return locationFromOffsets(
-    filename,
-    source,
-    utf8ByteOffsetToUtf16Offset(source, node.loc.start.offset),
-    utf8ByteOffsetToUtf16Offset(source, node.loc.end.offset)
-  )
+  return locationFromOffsets(filename, source, node.loc.start.offset, node.loc.end.offset)
 }
 
 /**
