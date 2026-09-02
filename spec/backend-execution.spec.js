@@ -92,4 +92,18 @@ describe("source backends", () => {
       assert.equal(output, "5\n", `${language} output`)
     }
   })
+
+  it("round-trips and executes boolean and string scalar programs in all five languages", async () => {
+    const source = await readFile(new URL("fixtures/scalars/program.js", import.meta.url), "utf8")
+    const semanticModule = parse({filename: "program.js", language: "javascript", source})
+
+    for (const language of targets) {
+      const generated = generate({language, module: semanticModule})
+      const generatedModule = parse({filename: filenames.get(language), language, source: generated})
+      const output = await executeGenerated(language, generated)
+
+      assert.deepEqual(withoutLocations(generatedModule), withoutLocations(semanticModule), `${language} modeled scalar round trip`)
+      assert.equal(output, "yes\n", `${language} scalar output`)
+    }
+  })
 })
