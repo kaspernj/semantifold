@@ -35,6 +35,22 @@ async function validLocalModule() {
   return parse({filename: "locals.ts", language: "typescript", source})
 }
 
+const malformedStructures = ["missing", "null", "primitive", "array"]
+
+/**
+ * Replaces or removes one semantic field with a malformed external-IR value.
+ * @param {object} owner - Semantic object owning the field.
+ * @param {string} field - Field to corrupt.
+ * @param {string} malformed - Malformation representative.
+ * @returns {void}
+ */
+function corruptField(owner, field, malformed) {
+  if (malformed == "missing") Reflect.deleteProperty(owner, field)
+  else if (malformed == "null") Reflect.set(owner, field, null)
+  else if (malformed == "primitive") Reflect.set(owner, field, 7)
+  else Reflect.set(owner, field, [])
+}
+
 describe("backend shape validation", () => {
   it("rejects Java integer literals outside the signed 32-bit range", async () => {
     for (const value of [2147483648, -2147483649]) {
@@ -169,35 +185,53 @@ describe("backend shape validation", () => {
     }
   })
 
-  it("rejects missing and non-object local initializers before emitter dispatch", async () => {
-    for (const malformed of ["missing", "non-object"]) {
-      const module = await validLocalModule()
-      const declaration = /** @type {import("../src/semantic/types.js").LocalDeclaration} */ (module.functions[0].body[1])
+  for (const field of ["name", "mutable", "type", "initializer"]) {
+    it(`rejects malformed local declaration ${field} values before emitter dispatch`, async () => {
+      for (const malformed of malformedStructures) {
+        const module = await validLocalModule()
+        const declaration = /** @type {import("../src/semantic/types.js").LocalDeclaration} */ (module.functions[0].body[1])
 
-      if (malformed == "missing") Reflect.deleteProperty(declaration, "initializer")
-      else Reflect.set(declaration, "initializer", null)
+        corruptField(declaration, field, malformed)
 
-      assert.throws(
-        () => generate({language: "ruby", module}),
-        (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
-          error.language == "ruby" && error.location?.filename == "locals.ts" && error.location.start.line == 3 &&
-          error.message.includes("invalid expression"),
-        malformed
-      )
-    }
-  })
+        assert.throws(
+          () => generate({language: "php", module}),
+          (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
+            error.language == "php" && error.location?.filename == "locals.ts" && error.location.start.line == 3,
+          `${field} ${malformed}`
+        )
+      }
+    })
+  }
 
-  it("rejects missing task-002 expressions at their owning statement locations", async () => {
-    for (const malformed of ["assignment", "condition", "return", "print"]) {
+  for (const field of ["target", "target name", "expression"]) {
+    it(`rejects malformed assignment ${field} values before emitter dispatch`, async () => {
+      for (const malformed of malformedStructures) {
+        const module = await validLocalModule()
+        const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (module.functions[0].body.at(-1))
+        const assignment = /** @type {import("../src/semantic/types.js").AssignmentStatement} */ (branch.consequent[0])
+
+        if (field == "target name") corruptField(assignment.target, "name", malformed)
+        else corruptField(assignment, field, malformed)
+
+        assert.throws(
+          () => generate({language: "php", module}),
+          (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
+            error.language == "php" && error.location?.filename == "locals.ts" && error.location.start.line == 5,
+          `${field} ${malformed}`
+        )
+      }
+    })
+  }
+
+  it("rejects missing task-002 terminal expressions at their owning statement locations", async () => {
+    for (const malformed of ["condition", "return", "print"]) {
       const module = await validLocalModule()
       const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (module.functions[0].body.at(-1))
-      const assignment = /** @type {import("../src/semantic/types.js").AssignmentStatement} */ (branch.consequent[0])
       const returned = /** @type {import("../src/semantic/types.js").ReturnStatement} */ (branch.consequent.at(-1))
       const print = /** @type {import("../src/semantic/types.js").PrintStatement} */ (module.entryPoint.body.at(-1))
-      const lines = {assignment: 5, condition: 4, print: 14, return: 6}
+      const lines = {condition: 4, print: 14, return: 6}
 
-      if (malformed == "assignment") Reflect.deleteProperty(assignment, "expression")
-      else if (malformed == "condition") Reflect.deleteProperty(branch, "condition")
+      if (malformed == "condition") Reflect.deleteProperty(branch, "condition")
       else if (malformed == "return") Reflect.deleteProperty(returned, "expression")
       else Reflect.deleteProperty(print, "expression")
 

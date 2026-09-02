@@ -101,16 +101,35 @@ function validateRestrictedSequence(statements, terminalKind, language) {
     if (statement.kind == "AssignmentStatement") {
       const assignment = /** @type {import("../semantic/types.js").AssignmentStatement} */ (statement)
 
-      if (assignment.target.kind != "IdentifierExpression") {
-        unsupportedCapability(language, `assignment target ${assignment.target.kind}`, assignment.target.location)
-      }
-      validateTargetIdentifier(language, assignment.target.name, "assignment target", assignment.target.location)
+      validateAssignmentTarget(assignment.target, language, assignment.location)
       validateExpression(assignment.expression, language, assignment.location)
       continue
     }
 
     unsupportedCapability(language, `statement ${statement.kind}`, statement.location)
   }
+}
+
+/**
+ * Validates the simple identifier target introduced by task 002.
+ * @param {unknown} target - Candidate assignment target.
+ * @param {import("../semantic/types.js").SemanticLanguage} language - Backend language.
+ * @param {import("../semantic/types.js").SourceLocation | undefined} ownerLocation - Assignment location.
+ * @returns {void}
+ */
+function validateAssignmentTarget(target, language, ownerLocation) {
+  if (!target || typeof target != "object" || Array.isArray(target)) {
+    return unsupportedCapability(language, "missing or invalid assignment target", ownerLocation)
+  }
+
+  const candidate = /** @type {import("../semantic/types.js").IdentifierExpression} */ (target)
+  const location = candidate.location ?? ownerLocation
+
+  if (candidate.kind != "IdentifierExpression") {
+    return unsupportedCapability(language, `assignment target ${String(Reflect.get(target, "kind"))}`, location)
+  }
+
+  validateTargetIdentifier(language, candidate.name, "assignment target", location)
 }
 
 /**

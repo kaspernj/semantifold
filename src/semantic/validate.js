@@ -262,17 +262,23 @@ function resolveBinding(name, location, scope, fail) {
 
 /**
  * Validates one semantic type reference.
- * @param {import("./types.js").TypeReference} type - Semantic type reference.
+ * @param {unknown} type - Candidate semantic type reference.
  * @param {import("./types.js").SourceLocation} location - Owning source location.
  * @param {SemanticFail} fail - Diagnostic callback.
  * @returns {import("./types.js").SemanticTypeName} Validated scalar name.
  */
 function validateTypeReference(type, location, fail) {
-  if (type.kind != "TypeReference" || !isScalarTypeName(type.name)) {
+  if (!type || typeof type != "object" || Array.isArray(type)) {
+    return fail("TYPE_MISMATCH", "Unsupported scalar type.", location)
+  }
+
+  const candidate = /** @type {import("./types.js").TypeReference} */ (type)
+
+  if (candidate.kind != "TypeReference" || !isScalarTypeName(candidate.name)) {
     fail("TYPE_MISMATCH", "Unsupported scalar type.", location)
   }
 
-  return type.name
+  return candidate.name
 }
 
 /**

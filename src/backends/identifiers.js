@@ -58,12 +58,14 @@ const reservedWords = {
 /**
  * Validates an identifier against the target backend's deliberately narrow lexical contract.
  * @param {import("../semantic/types.js").SemanticLanguage} language - Target language.
- * @param {string} name - Semantic identifier.
+ * @param {unknown} name - Candidate semantic identifier.
  * @param {string} role - Identifier role for diagnostics.
- * @param {import("../semantic/types.js").SourceLocation} location - Originating location.
+ * @param {import("../semantic/types.js").SourceLocation | undefined} location - Originating location.
  * @returns {void}
  */
 export function validateTargetIdentifier(language, name, role, location) {
+  if (typeof name != "string") unsupportedCapability(language, `${role} identifier`, location)
+
   const reservedName = language == "php" ? name.toLowerCase() : name
 
   if (!identifierPatterns[language].test(name) || reservedWords[language].has(reservedName)) {
