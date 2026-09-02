@@ -57,8 +57,16 @@ function convertExpression(node, language, filename, source) {
     return {kind: "StringLiteral", location, value: node.value}
   }
 
-  if (node.type == "TemplateLiteral" && node.expressions.length > 0) {
-    return unsupportedSyntax(language, "interpolated string", location)
+  if (node.type == "TemplateLiteral") {
+    if (node.expressions.length > 0) return unsupportedSyntax(language, "interpolated string", location)
+
+    const quasi = node.quasis[0]
+
+    if (typeof quasi.value.cooked != "string" || !hasOnlyUnicodeScalars(quasi.value.cooked)) {
+      return unsupportedSyntax(language, "invalid Unicode string literal", location)
+    }
+
+    return {kind: "StringLiteral", location, value: quasi.value.cooked}
   }
 
   if (node.type == "BinaryExpression" && [">", "-", "+"].includes(node.operator)) {

@@ -144,6 +144,39 @@ echo label(true, 'no'), PHP_EOL;
     })
   })
 
+  it("accepts no-substitution template literals as semantic StringLiteral nodes", () => {
+    const cases = [
+      ["template.js", "javascript", `
+/**
+ * Selects a string.
+ * @param {boolean} flag - Selection flag.
+ * @param {string} fallback - Fallback string.
+ * @returns {string} Selected string.
+ */
+function label(flag, fallback) {
+  if (flag) return \`yes\\n\`
+  else return fallback
+}
+console.log(label(true, "no"))
+`],
+      ["template.ts", "typescript", `function label(flag: boolean, fallback: string): string {
+  if (flag) return \`yes\\n\`
+  else return fallback
+}
+console.log(label(true, "no"))
+`]
+    ]
+
+    for (const [filename, language, source] of cases) {
+      const module = parse({filename, language, source})
+      const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (module.functions[0].body[0])
+      const expression = branch.consequent[0].expression
+
+      assert.equal(expression.kind, "StringLiteral")
+      assert.equal(/** @type {import("../src/semantic/types.js").StringLiteral} */ (expression).value, "yes\n")
+    }
+  })
+
   it("rejects language-specific excluded scalar forms", () => {
     assertDiagnostic({
       code: "MISSING_TYPE",
