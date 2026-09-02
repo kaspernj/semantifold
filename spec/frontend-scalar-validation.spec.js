@@ -50,6 +50,32 @@ echo label(true, 'no'), PHP_EOL;
     }
   })
 
+  it("rejects Java Unicode translation that invalidates a string token", () => {
+    for (const escape of ["\\u000a", "\\u000d", "\\u0022"]) {
+      assertDiagnostic({
+        code: "UNSUPPORTED_SYNTAX",
+        detail: "invalid string literal",
+        filename: "invalid-unicode-escape.java",
+        language: "java",
+        line: 4,
+        source: `public final class Main {
+  private static String label(boolean flag, String fallback) {
+    if (flag) {
+      return "${escape}";
+    } else {
+      return fallback;
+    }
+  }
+
+  public static void main(String[] args) {
+    System.out.println(label(true, "no"));
+  }
+}
+`
+      })
+    }
+  })
+
   it("rejects boxed, inferred, literal-only, broad, and union annotations", () => {
     const types = ["Boolean", "String", "Flag", "any", "unknown", "true", "boolean | string"]
 

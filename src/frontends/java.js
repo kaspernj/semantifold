@@ -201,10 +201,11 @@ function isSupportedExpressionNode(node) {
 function translateUnicodeEscapes(literal, location) {
   let translated = ""
   let consecutiveBackslashes = 0
+  let previousWasUnicodeEscape = false
 
   for (let index = 0; index < literal.length; index++) {
     const character = literal[index]
-    const eligible = character == "\\" && consecutiveBackslashes % 2 == 0
+    const eligible = character == "\\" && (previousWasUnicodeEscape || consecutiveBackslashes % 2 == 0)
 
     if (eligible && literal[index + 1] == "u") {
       let digitsStart = index + 2
@@ -222,12 +223,14 @@ function translateUnicodeEscapes(literal, location) {
 
       translated += translatedCharacter
       consecutiveBackslashes = translatedCharacter == "\\" ? consecutiveBackslashes + 1 : 0
+      previousWasUnicodeEscape = true
       index = digitsStart + 3
       continue
     }
 
     translated += character
     consecutiveBackslashes = character == "\\" ? consecutiveBackslashes + 1 : 0
+    previousWasUnicodeEscape = false
   }
 
   return translated
@@ -248,10 +251,16 @@ function decodeStringLiteral(node, filename, source) {
   for (let index = 1; index < literal.length - 1; index++) {
     const character = literal[index]
 
+    if (character == "\"" || character == "\n" || character == "\r") {
+      return unsupportedSyntax("java", "invalid string literal", location)
+    }
+
     if (character != "\\") {
       value += character
       continue
     }
+
+    if (index + 1 >= literal.length - 1) return unsupportedSyntax("java", "invalid string literal", location)
 
     const escaped = literal[++index]
     const simple = simpleStringEscapes[escaped]

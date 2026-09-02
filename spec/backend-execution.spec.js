@@ -97,7 +97,7 @@ describe("source backends", () => {
     const source = `public final class Main {
   private static String label(boolean flag, String fallback) {
     if (flag) {
-      return "\\u0061\\u005cn";
+      return "\\u0061\\u005c\\u006e";
     } else {
       return fallback;
     }

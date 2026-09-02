@@ -4,5 +4,5 @@
 
 # Fixes
 
-- Apply Java Unicode translation before ordinary string-escape decoding.
+- Apply Java Unicode translation before ordinary string-escape decoding, preserving chained-escape eligibility and rejecting invalid translated string boundaries.
 - Preserve php-parser UTF-16 source locations for non-ASCII string literals.
