@@ -1,5 +1,5 @@
 public final class Main {
-  private static String label(boolean flag, String fallback) {
+  private static java.lang.String label(boolean flag, String fallback) {
     if (flag) {
       return "yes";
     } else {

@@ -1,10 +1,10 @@
 // @ts-check
 
 import PhpParser from "php-parser"
-import {missingType, parseFailure, unsupportedSyntax} from "../diagnostic.js"
+import {parseFailure, unsupportedSyntax} from "../diagnostic.js"
 import {locationFromOffsets, moduleLocation} from "../semantic/location.js"
-
-const integerType = /** @type {const} */ ({kind: "TypeReference", name: "integer"})
+import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
+import {requireSourceScalarType} from "./scalars.js"
 const parser = new PhpParser.Engine({
   ast: {withPositions: true},
   parser: {extractDoc: true, suppressErrors: false}
@@ -49,6 +49,33 @@ function convertExpression(node, filename, source) {
 
     return {kind: "IntegerLiteral", location, value}
   }
+
+  if (node.kind == "boolean") {
+    const literal = /** @type {import("php-parser").Boolean} */ (node)
+
+    if (typeof literal.value != "boolean") return unsupportedSyntax("php", "invalid boolean literal value", location)
+
+    return {kind: "BooleanLiteral", location, value: literal.value}
+  }
+
+  if (node.kind == "string") {
+    const literal = /** @type {import("php-parser").String} */ (node)
+
+    if (typeof literal.value != "string" || !hasOnlyUnicodeScalars(literal.value)) {
+      return unsupportedSyntax("php", "invalid Unicode string literal", location)
+    }
+
+    return {kind: "StringLiteral", location, value: literal.value}
+  }
+
+  if (node.kind == "encapsed") {
+    const literal = /** @type {import("php-parser").Encapsed} */ (node)
+    const detail = literal.type == literal.TYPE_STRING ? "interpolated string" : `${literal.type} string`
+
+    return unsupportedSyntax("php", detail, location)
+  }
+
+  if (node.kind == "nowdoc") return unsupportedSyntax("php", "nowdoc string", location)
 
   if (node.kind == "bin") {
     const binary = /** @type {import("php-parser").Bin} */ (node)
@@ -106,16 +133,23 @@ function convertReturnBlock(block, filename, source) {
 }
 
 /**
- * Requires the PHP `int` type.
- * @param {import("php-parser").Identifier | null} sourceType - PHP type node.
+ * Requires an exact PHP scalar declaration type.
+ * @param {import("php-parser").Node | null} sourceType - PHP type node.
  * @param {string} subject - Typed subject.
  * @param {import("../semantic/types.js").SourceLocation} location - Source location.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
  * @returns {import("../semantic/types.js").TypeReference} Semantic type.
  */
-function convertType(sourceType, subject, location) {
-  if (!sourceType || sourceType.name != "int") return missingType("php", subject, location)
+function convertType(sourceType, subject, location, filename, source) {
+  if (!sourceType) return requireSourceScalarType("php", undefined, subject, location)
+  if (sourceType.kind != "typereference" && sourceType.kind != "name" && sourceType.kind != "identifier") {
+    return unsupportedSyntax("php", "unsupported scalar type", nodeLocation(sourceType, filename, source))
+  }
 
-  return integerType
+  const typeName = /** @type {import("php-parser").TypeReference | import("php-parser").Name | import("php-parser").Identifier} */ (sourceType).name
+
+  return requireSourceScalarType("php", typeName, subject, location)
 }
 
 /**
@@ -137,16 +171,19 @@ function convertFunction(node, filename, source) {
     const parameterLocation = nodeLocation(parameter, filename, source)
     const parameterName = typeof parameter.name == "string" ? parameter.name : parameter.name.name
 
+    if (parameter.nullable) return unsupportedSyntax("php", "unsupported scalar type", parameterLocation)
+
     return {
       kind: /** @type {const} */ ("Parameter"),
       location: parameterLocation,
       name: parameterName,
-      type: convertType(parameter.type, `Parameter '${parameterName}'`, parameterLocation)
+      type: convertType(parameter.type, `Parameter '${parameterName}'`, parameterLocation, filename, source)
     }
   })
   const ifNode = /** @type {import("php-parser").If} */ (node.body.children[0])
   const ifLocation = nodeLocation(ifNode, filename, source)
 
+  if (node.nullable) return unsupportedSyntax("php", "unsupported scalar type", location)
   if (!ifNode.alternate || ifNode.alternate.kind != "block") {
     return unsupportedSyntax("php", "if without block else", ifLocation)
   }
@@ -163,7 +200,7 @@ function convertFunction(node, filename, source) {
     location,
     name,
     parameters,
-    returnType: convertType(node.type, `Function '${name}' return`, location)
+    returnType: convertType(node.type, `Function '${name}' return`, location, filename, source)
   }
 }
 

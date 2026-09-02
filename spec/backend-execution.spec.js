@@ -96,6 +96,11 @@ describe("source backends", () => {
   it("round-trips and executes boolean and string scalar programs in all five languages", async () => {
     const source = await readFile(new URL("fixtures/scalars/program.js", import.meta.url), "utf8")
     const semanticModule = parse({filename: "program.js", language: "javascript", source})
+    const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (semanticModule.functions[0].body[0])
+    const literal = /** @type {import("../src/semantic/types.js").StringLiteral} */ (branch.consequent[0].expression)
+    const expected = "quote \" slash \\ line\n tab\t dollar $ hash #{ snowman ☃ emoji 😀 nul \0"
+
+    literal.value = expected
 
     for (const language of targets) {
       const generated = generate({language, module: semanticModule})
@@ -103,7 +108,7 @@ describe("source backends", () => {
       const output = await executeGenerated(language, generated)
 
       assert.deepEqual(withoutLocations(generatedModule), withoutLocations(semanticModule), `${language} modeled scalar round trip`)
-      assert.equal(output, "yes\n", `${language} scalar output`)
+      assert.equal(output, `${expected}\n`, `${language} scalar output`)
     }
   })
 })

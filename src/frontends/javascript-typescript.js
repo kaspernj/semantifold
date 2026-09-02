@@ -4,8 +4,8 @@ import {parse as parseBabel} from "@babel/parser"
 import {parse as parseComment} from "comment-parser"
 import {missingType, parseFailure, unsupportedSyntax} from "../diagnostic.js"
 import {locationFromOffsets, moduleLocation} from "../semantic/location.js"
-
-const integerType = /** @type {const} */ ({kind: "TypeReference", name: "integer"})
+import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
+import {requireSourceScalarType} from "./scalars.js"
 
 /**
  * Returns a source location for a Babel node.
@@ -41,6 +41,24 @@ function convertExpression(node, language, filename, source) {
     if (!Number.isSafeInteger(node.value)) return unsupportedSyntax(language, "non-safe integer literal", location)
 
     return {kind: "IntegerLiteral", location, value: node.value}
+  }
+
+  if (node.type == "BooleanLiteral") {
+    if (typeof node.value != "boolean") return unsupportedSyntax(language, "invalid boolean literal value", location)
+
+    return {kind: "BooleanLiteral", location, value: node.value}
+  }
+
+  if (node.type == "StringLiteral") {
+    if (typeof node.value != "string" || !hasOnlyUnicodeScalars(node.value)) {
+      return unsupportedSyntax(language, "invalid Unicode string literal", location)
+    }
+
+    return {kind: "StringLiteral", location, value: node.value}
+  }
+
+  if (node.type == "TemplateLiteral" && node.expressions.length > 0) {
+    return unsupportedSyntax(language, "interpolated string", location)
   }
 
   if (node.type == "BinaryExpression" && [">", "-", "+"].includes(node.operator)) {
@@ -122,7 +140,7 @@ function jsdocTypes(node, filename, source) {
 }
 
 /**
- * Requires a supported integer type spelling.
+ * Requires a supported JavaScript JSDoc scalar type spelling.
  * @param {string | undefined} sourceType - Source-language type.
  * @param {"javascript" | "typescript"} language - Frontend language.
  * @param {string} subject - Typed subject.
@@ -130,9 +148,36 @@ function jsdocTypes(node, filename, source) {
  * @returns {import("../semantic/types.js").TypeReference} Semantic type.
  */
 function convertType(sourceType, language, subject, location) {
-  if (sourceType != "number") return missingType(language, subject, location)
+  return requireSourceScalarType(language, sourceType, subject, location)
+}
 
-  return integerType
+/**
+ * Converts one exact TypeScript scalar keyword annotation.
+ * @param {import("@babel/types").TypeAnnotation | import("@babel/types").TSTypeAnnotation | import("@babel/types").Noop | null | undefined} annotation - Type annotation.
+ * @param {string} subject - Typed subject.
+ * @param {import("../semantic/types.js").SourceLocation} ownerLocation - Owning declaration location.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @returns {import("../semantic/types.js").TypeReference} Semantic scalar type.
+ */
+function convertTypeScriptType(annotation, subject, ownerLocation, filename, source) {
+  if (!annotation) return missingType("typescript", subject, ownerLocation)
+  if (annotation.type != "TSTypeAnnotation") {
+    return unsupportedSyntax("typescript", "unsupported scalar type", nodeLocation(annotation, filename, source))
+  }
+
+  const typeNode = annotation.typeAnnotation
+  const sourceType = typeNode.type == "TSNumberKeyword"
+    ? "number"
+    : typeNode.type == "TSBooleanKeyword"
+      ? "boolean"
+      : typeNode.type == "TSStringKeyword" ? "string" : undefined
+
+  if (!sourceType) {
+    return unsupportedSyntax("typescript", "unsupported scalar type", nodeLocation(typeNode, filename, source))
+  }
+
+  return requireSourceScalarType("typescript", sourceType, subject, ownerLocation)
 }
 
 /**
@@ -159,22 +204,21 @@ function convertFunction(node, language, filename, source) {
 
     if (parameter.type != "Identifier") return unsupportedSyntax(language, parameter.type, parameterLocation)
 
-    const annotation = parameter.typeAnnotation
-    const sourceType = language == "javascript"
-      ? documentedTypes?.parameters.get(parameter.name)
-      : annotation?.type == "TSTypeAnnotation" && annotation.typeAnnotation.type == "TSNumberKeyword" ? "number" : undefined
+    const type = language == "javascript"
+      ? convertType(documentedTypes?.parameters.get(parameter.name), language, `Parameter '${parameter.name}'`, parameterLocation)
+      : convertTypeScriptType(parameter.typeAnnotation, `Parameter '${parameter.name}'`, parameterLocation, filename, source)
 
     return {
       kind: /** @type {const} */ ("Parameter"),
       location: parameterLocation,
       name: parameter.name,
-      type: convertType(sourceType, language, `Parameter '${parameter.name}'`, parameterLocation)
+      type
     }
   })
   const returnAnnotation = node.returnType
-  const returnSourceType = language == "javascript"
-    ? documentedTypes?.returnType
-    : returnAnnotation?.type == "TSTypeAnnotation" && returnAnnotation.typeAnnotation.type == "TSNumberKeyword" ? "number" : undefined
+  const returnType = language == "javascript"
+    ? convertType(documentedTypes?.returnType, language, `Function '${node.id.name}' return`, location)
+    : convertTypeScriptType(returnAnnotation, `Function '${node.id.name}' return`, location, filename, source)
   const ifNode = node.body.body[0]
   const ifLocation = nodeLocation(ifNode, filename, source)
 
@@ -192,7 +236,7 @@ function convertFunction(node, language, filename, source) {
     location,
     name: node.id.name,
     parameters,
-    returnType: convertType(returnSourceType, language, `Function '${node.id.name}' return`, location)
+    returnType
   }
 }
 
