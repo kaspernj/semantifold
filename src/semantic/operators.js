@@ -1,6 +1,6 @@
 // @ts-check
 
-/** @typedef {"Add" | "Subtract" | "Multiply" | "Negate" | "Not" | "And" | "Or" | "Equal" | "NotEqual" | "JavaEqual" | "JavaNotEqual" | "StringEqual" | "StringNotEqual" | "StringConcat" | "LessThan" | "LessThanOrEqual" | "GreaterThan" | "GreaterThanOrEqual"} AdaptedOperation */
+/** @typedef {"Add" | "PhpAdd" | "Subtract" | "Multiply" | "Negate" | "Not" | "And" | "Or" | "Equal" | "NotEqual" | "JavaEqual" | "JavaNotEqual" | "StringEqual" | "StringNotEqual" | "StringConcat" | "LessThan" | "LessThanOrEqual" | "GreaterThan" | "GreaterThanOrEqual"} AdaptedOperation */
 
 /** @type {WeakMap<object, AdaptedOperation>} */
 const adaptedOperations = new WeakMap()

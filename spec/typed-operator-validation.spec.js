@@ -9,14 +9,15 @@ const targets = ["php", "ruby", "javascript", "typescript", "java"]
 
 /**
  * Asserts one stable located frontend diagnostic.
- * @param {{code: string, detail?: string, filename: string, language: import("../src/semantic/types.js").SemanticLanguage, line: number, source: string}} input - Expected diagnostic.
+ * @param {{code: string, column?: number, detail?: string, filename: string, language: import("../src/semantic/types.js").SemanticLanguage, line: number, source: string}} input - Expected diagnostic.
  * @returns {void}
  */
-function assertDiagnostic({code, detail, filename, language, line, source}) {
+function assertDiagnostic({code, column, detail, filename, language, line, source}) {
   assert.throws(
     () => parse({filename, language, source}),
     (error) => error instanceof SemantifoldDiagnostic && error.code == code && error.language == language &&
-      error.location?.filename == filename && error.location.start.line == line && (!detail || error.message.includes(detail)),
+      error.location?.filename == filename && error.location.start.line == line &&
+      (column === undefined || error.location.start.column == column) && (!detail || error.message.includes(detail)),
     filename
   )
 }
@@ -58,6 +59,26 @@ function invalid(int $left, int $right): bool {
   }
 }
 echo invalid(1, 2), PHP_EOL;
+`
+}
+
+/**
+ * @param {string} expression - Returned string expression.
+ * @param {string} left - Left call argument.
+ * @param {string} right - Right call argument.
+ * @returns {string} PHP program.
+ */
+function phpStringExpression(expression, left, right) {
+  return `<?php
+declare(strict_types=1);
+function combine(string $left, string $right): string {
+  if (true) {
+    return ${expression};
+  } else {
+    return $right;
+  }
+}
+echo combine(${left}, ${right}), PHP_EOL;
 `
 }
 
@@ -172,6 +193,33 @@ describe("typed operator validation", () => {
       .replace("invalid(1, 2)", "invalid(1, \"2\")")
 
     assertDiagnostic({code: "INVALID_OPERAND_TYPE", filename: "numeric-string.php", language: "php", line: 5, source: numericString})
+  })
+
+  it("reserves PHP string concatenation for dot instead of arithmetic plus", () => {
+    for (const [filename, left, right] of [
+      ["numeric-strings.php", '"1"', '"2"'],
+      ["ordinary-strings.php", '"left"', '"right"']
+    ]) {
+      assertDiagnostic({
+        code: "UNSUPPORTED_SYNTAX",
+        column: 12,
+        detail: "binary +",
+        filename,
+        language: "php",
+        line: 5,
+        source: phpStringExpression("$left + $right", left, right)
+      })
+    }
+
+    const module = parse({
+      filename: "concat.php",
+      language: "php",
+      source: phpStringExpression("$left . $right", '"left"', '"right"')
+    })
+    const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (module.functions[0].body[0])
+    const expression = /** @type {import("../src/semantic/types.js").BinaryExpression} */ (branch.consequent[0].expression)
+
+    expect({operation: expression.operation, type: expression.type}).toEqual({operation: "StringConcat", type: "string"})
   })
 
   it("rejects Java reference equality and malformed parser-native equals calls", () => {

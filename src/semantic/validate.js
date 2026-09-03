@@ -441,6 +441,14 @@ function normalizeUnaryOperation(sourceOperation, operandType, location, fail) {
  * @returns {import("./types.js").SemanticBinaryOperation} Semantic operation.
  */
 function normalizeBinaryOperation(sourceOperation, leftType, rightType, leftLocation, rightLocation, expressionLocation, fail) {
+  if (sourceOperation == "PhpAdd") {
+    if (leftType == "string" && rightType == "string") {
+      return fail("UNSUPPORTED_SYNTAX", "PHP binary + does not concatenate strings; use . instead.", expressionLocation)
+    }
+
+    sourceOperation = "Add"
+  }
+
   if (sourceOperation == "StringConcat") {
     if (leftType != "string") fail("INVALID_OPERAND_TYPE", `String concatenation requires string; received ${leftType}.`, leftLocation)
     if (rightType != "string") fail("INVALID_OPERAND_TYPE", `String concatenation requires string; received ${rightType}.`, rightLocation)

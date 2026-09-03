@@ -17,7 +17,7 @@ let cachedTokenSource
 /** @type {{end: number, start: number, text: string}[]} */
 let cachedTokenRanges = []
 const phpBinaryOperations = new Map([
-  ["+", "Add"],
+  ["+", "PhpAdd"],
   ["-", "Subtract"],
   ["*", "Multiply"],
   ["&&", "And"],
