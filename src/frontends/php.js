@@ -1,7 +1,8 @@
 // @ts-check
 
 import PhpParser from "php-parser"
-import {parseFailure, unsupportedSyntax} from "../diagnostic.js"
+import {parse as parseComment} from "comment-parser"
+import {missingType, parseFailure, unsupportedSyntax} from "../diagnostic.js"
 import {locationFromOffsets, moduleLocation} from "../semantic/location.js"
 import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
 import {requireSourceScalarType} from "./scalars.js"
@@ -120,24 +121,137 @@ function convertExpression(node, filename, source) {
 }
 
 /**
- * Converts a PHP block containing supported returns.
- * @param {import("php-parser").Block} block - PHP block.
+ * Converts one explicit PHP return.
+ * @param {import("php-parser").Node} node - PHP node.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
- * @returns {import("../semantic/types.js").ReturnStatement[]} Semantic returns.
+ * @returns {import("../semantic/types.js").ReturnStatement} Semantic return.
  */
-function convertReturnBlock(block, filename, source) {
-  return block.children.map((child) => {
-    const location = nodeLocation(child, filename, source)
+function convertReturn(node, filename, source) {
+  const location = nodeLocation(node, filename, source)
 
-    if (child.kind != "return") return unsupportedSyntax("php", child.kind, location)
+  if (node.kind != "return") return unsupportedSyntax("php", node.kind, location)
 
-    const returnNode = /** @type {import("php-parser").Return} */ (child)
+  const returnNode = /** @type {import("php-parser").Return} */ (node)
 
-    if (!returnNode.expr) return unsupportedSyntax("php", "empty return", location)
+  if (!returnNode.expr) return unsupportedSyntax("php", "empty return", location)
 
-    return {expression: convertExpression(returnNode.expr, filename, source), kind: /** @type {const} */ ("ReturnStatement"), location}
-  })
+  return {expression: convertExpression(returnNode.expr, filename, source), kind: "ReturnStatement", location}
+}
+
+/**
+ * Reads one exact PHP local `@var` carrier and immutability marker.
+ * @param {import("php-parser").Node} node - Assignment-owning statement.
+ * @param {string} name - Local name.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @returns {{immutable: boolean, type: import("../semantic/types.js").TypeReference} | undefined} Metadata when present.
+ */
+function localMetadata(node, name, filename, source) {
+  const comments = node.leadingComments ?? []
+  const comment = comments.at(-1)
+
+  if (!comment || comment.kind != "commentblock" || !comment.loc || !node.loc) return undefined
+
+  const gap = source.slice(comment.loc.end.offset, node.loc.start.offset)
+
+  if (!/^\s*$/u.test(gap) || (gap.match(/\n/gu)?.length ?? 0) > 1) return undefined
+
+  const block = parseComment(comment.value)[0]
+  const tags = block?.tags ?? []
+  const variables = tags.filter((tag) => tag.tag == "var")
+  const immutable = tags.filter((tag) => tag.tag == "semantifold-immutable")
+  const location = nodeLocation(node, filename, source)
+
+  if (variables.length == 0 && immutable.length == 0) return undefined
+
+  const exactVariable = variables.length == 1 && variables[0].type == "" && variables[0].description == `$${name}`
+  const exactImmutable = immutable.length <= 1 && immutable.every((tag) => tag.name == "" && tag.type == "" && tag.description == "")
+  const knownTags = tags.every((tag) => tag.tag == "var" || tag.tag == "semantifold-immutable")
+
+  if (!exactVariable || !exactImmutable || !knownTags) {
+    return unsupportedSyntax("php", "malformed local type metadata", location)
+  }
+
+  return {
+    immutable: immutable.length == 1,
+    type: requireSourceScalarType("php", variables[0].name, `Local '${name}'`, location)
+  }
+}
+
+/**
+ * Converts one PHP local declaration or assignment.
+ * @param {import("php-parser").Node} node - PHP statement.
+ * @param {Set<string>} visible - Names visible during adaptation.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @returns {import("../semantic/types.js").LocalStatement} Semantic local statement.
+ */
+function convertLocalStatement(node, visible, filename, source) {
+  const location = nodeLocation(node, filename, source)
+
+  if (node.kind != "expressionstatement") return unsupportedSyntax("php", node.kind, location)
+
+  const expression = /** @type {import("php-parser").ExpressionStatement} */ (node).expression
+
+  if (expression.kind != "assign") return unsupportedSyntax("php", expression.kind, nodeLocation(expression, filename, source))
+
+  const assignment = /** @type {import("php-parser").Assign} */ (expression)
+
+  if (assignment.operator != "=") return unsupportedSyntax("php", `assignment ${assignment.operator}`, location)
+  if (assignment.left.kind != "variable") return unsupportedSyntax("php", assignment.left.kind, nodeLocation(assignment.left, filename, source))
+
+  const variable = /** @type {import("php-parser").Variable} */ (assignment.left)
+  const targetLocation = nodeLocation(variable, filename, source)
+
+  if (typeof variable.name != "string" || variable.curly) return unsupportedSyntax("php", "dynamic variable", targetLocation)
+
+  const metadata = localMetadata(node, variable.name, filename, source)
+
+  if (metadata) {
+    visible.add(variable.name)
+    return {
+      initializer: convertExpression(assignment.right, filename, source),
+      kind: "LocalDeclaration",
+      location,
+      mutable: !metadata.immutable,
+      name: variable.name,
+      type: metadata.type
+    }
+  }
+
+  if (!visible.has(variable.name)) return missingType("php", `Local '${variable.name}'`, location)
+
+  return {
+    expression: convertExpression(assignment.right, filename, source),
+    kind: "AssignmentStatement",
+    location,
+    target: {kind: "IdentifierExpression", location: targetLocation, name: variable.name}
+  }
+}
+
+/**
+ * Converts a declaration/assignment prefix followed by one exact PHP terminal.
+ * @template {import("../semantic/types.js").IfStatement | import("../semantic/types.js").ReturnStatement | import("../semantic/types.js").PrintStatement} Terminal
+ * @param {import("php-parser").Node[]} statements - PHP statements.
+ * @param {string} terminalKind - Required parser kind.
+ * @param {(node: import("php-parser").Node) => Terminal} convertTerminal - Terminal converter.
+ * @param {Set<string>} visible - Visible names.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @returns {(import("../semantic/types.js").LocalStatement | Terminal)[]} Semantic statements.
+ */
+function convertRestrictedSequence(statements, terminalKind, convertTerminal, visible, filename, source) {
+  const terminal = statements.at(-1)
+
+  if (!terminal || terminal.kind != terminalKind) {
+    return unsupportedSyntax("php", `statement sequence without ${terminalKind}`, terminal ? nodeLocation(terminal, filename, source) : moduleLocation(filename, source))
+  }
+
+  return [
+    ...statements.slice(0, -1).map((statement) => convertLocalStatement(statement, visible, filename, source)),
+    convertTerminal(terminal)
+  ]
 }
 
 /**
@@ -171,7 +285,7 @@ function convertFunction(node, filename, source) {
   const location = nodeLocation(node, filename, source)
   const name = typeof node.name == "string" ? node.name : node.name.name
 
-  if (!node.body || node.body.children.length != 1 || node.body.children[0].kind != "if") {
+  if (!node.body) {
     return unsupportedSyntax("php", "function body", location)
   }
 
@@ -188,27 +302,56 @@ function convertFunction(node, filename, source) {
       type: convertType(parameter.type, `Parameter '${parameterName}'`, parameterLocation, filename, source)
     }
   })
-  const ifNode = /** @type {import("php-parser").If} */ (node.body.children[0])
-  const ifLocation = nodeLocation(ifNode, filename, source)
-
   if (node.nullable) return unsupportedSyntax("php", "unsupported scalar type", location)
-  if (!ifNode.alternate || ifNode.alternate.kind != "block") {
-    return unsupportedSyntax("php", "if without block else", ifLocation)
-  }
+  const visible = new Set(parameters.map((parameter) => parameter.name))
+  const body = convertRestrictedSequence(
+    node.body.children,
+    "if",
+    (statement) => convertIf(/** @type {import("php-parser").If} */ (statement), visible, filename, source),
+    visible,
+    filename,
+    source
+  )
 
   return {
-    body: [{
-      alternate: convertReturnBlock(/** @type {import("php-parser").Block} */ (ifNode.alternate), filename, source),
-      condition: convertExpression(ifNode.test, filename, source),
-      consequent: convertReturnBlock(ifNode.body, filename, source),
-      kind: "IfStatement",
-      location: ifLocation
-    }],
+    body: /** @type {import("../semantic/types.js").FunctionStatement[]} */ (body),
     kind: "FunctionDeclaration",
     location,
     name,
     parameters,
     returnType: convertType(node.type, `Function '${name}' return`, location, filename, source)
+  }
+}
+
+/**
+ * Converts the existing PHP if/else terminal with restricted branch prefixes.
+ * @param {import("php-parser").If} node - PHP if node.
+ * @param {Set<string>} visible - Enclosing visible names.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @returns {import("../semantic/types.js").IfStatement} Semantic branch.
+ */
+function convertIf(node, visible, filename, source) {
+  const location = nodeLocation(node, filename, source)
+
+  if (!node.alternate || node.alternate.kind != "block") {
+    return unsupportedSyntax("php", "if without block else", location)
+  }
+
+  const consequentVisible = new Set(visible)
+  const alternateVisible = new Set(visible)
+  const alternate = /** @type {import("php-parser").Block} */ (node.alternate)
+
+  return {
+    alternate: /** @type {(import("../semantic/types.js").LocalStatement | import("../semantic/types.js").ReturnStatement)[]} */ (
+      convertRestrictedSequence(alternate.children, "return", (statement) => convertReturn(statement, filename, source), alternateVisible, filename, source)
+    ),
+    condition: convertExpression(node.test, filename, source),
+    consequent: /** @type {(import("../semantic/types.js").LocalStatement | import("../semantic/types.js").ReturnStatement)[]} */ (
+      convertRestrictedSequence(node.body.children, "return", (statement) => convertReturn(statement, filename, source), consequentVisible, filename, source)
+    ),
+    kind: "IfStatement",
+    location
   }
 }
 
@@ -243,18 +386,26 @@ export function parsePhp({filename, source}) {
   const functions = program.children.filter((node) => node.kind == "function")
     .map((node) => convertFunction(/** @type {import("php-parser").Function} */ (node), filename, source))
   const executableNodes = program.children.filter((node) => node.kind != "function" && node.kind != "declare" && node.kind != "noop")
-  const entryStatements = executableNodes.map((node) => {
-    if (node.kind != "echo") return unsupportedSyntax("php", node.kind, nodeLocation(node, filename, source))
-
-    return convertPrint(/** @type {import("php-parser").Echo} */ (node), filename, source)
-  })
   const location = moduleLocation(filename, source)
 
   if (functions.length == 0) return unsupportedSyntax("php", "module without a function", location)
-  if (entryStatements.length == 0) return unsupportedSyntax("php", "module without an entry point", location)
+  if (executableNodes.length == 0) return unsupportedSyntax("php", "module without an entry point", location)
+
+  const entryStatements = convertRestrictedSequence(
+    executableNodes,
+    "echo",
+    (node) => convertPrint(/** @type {import("php-parser").Echo} */ (node), filename, source),
+    new Set(),
+    filename,
+    source
+  )
 
   return {
-    entryPoint: {body: entryStatements, kind: "EntryPoint", location: entryStatements[0].location},
+    entryPoint: {
+      body: /** @type {(import("../semantic/types.js").LocalStatement | import("../semantic/types.js").PrintStatement)[]} */ (entryStatements),
+      kind: "EntryPoint",
+      location: entryStatements[0].location
+    },
     functions,
     kind: "Module",
     location

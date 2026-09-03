@@ -291,35 +291,126 @@ function decodeStringLiteral(node, filename, source) {
 }
 
 /**
- * Converts a Java block containing supported returns.
- * @param {import("@lezer/common").SyntaxNode} block - Java block.
+ * Converts one explicit Java return statement.
+ * @param {import("@lezer/common").SyntaxNode} statement - Java statement.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
- * @returns {import("../semantic/types.js").ReturnStatement[]} Semantic returns.
+ * @returns {import("../semantic/types.js").ReturnStatement} Semantic return.
  */
-function convertReturnBlock(block, filename, source) {
-  const statements = directChildren(block).filter((child) => child.name != "{" && child.name != "}")
+function convertReturn(statement, filename, source) {
+  const location = nodeLocation(statement, filename, source)
 
-  return statements.map((statement) => {
-    const location = nodeLocation(statement, filename, source)
+  if (statement.name != "ReturnStatement") return unsupportedSyntax("java", statement.name, location)
 
-    if (statement.name != "ReturnStatement") return unsupportedSyntax("java", statement.name, location)
+  const expressionNodes = directChildren(statement).filter((child) => child.name != "return" && child.name != ";")
+  const expression = expressionNodes.length == 1 ? expressionNodes[0] : undefined
 
-    const expressionNodes = directChildren(statement).filter((child) => child.name != "return" && child.name != ";")
-    const expression = expressionNodes.length == 1 ? expressionNodes[0] : undefined
+  if (!expression) {
+    const unsupported = expressionNodes[0]
 
-    if (!expression) {
-      const unsupported = expressionNodes[0]
+    return unsupportedSyntax(
+      "java",
+      unsupported?.name ?? "empty return",
+      unsupported ? nodeLocation(unsupported, filename, source) : location
+    )
+  }
 
-      return unsupportedSyntax(
-        "java",
-        unsupported?.name ?? "empty return",
-        unsupported ? nodeLocation(unsupported, filename, source) : location
-      )
+  return {expression: convertExpression(expression, filename, source), kind: "ReturnStatement", location}
+}
+
+/**
+ * Converts one Java local declaration or assignment.
+ * @param {import("@lezer/common").SyntaxNode} statement - Java statement.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @returns {import("../semantic/types.js").LocalStatement} Semantic local statement.
+ */
+function convertLocalStatement(statement, filename, source) {
+  const location = nodeLocation(statement, filename, source)
+
+  if (statement.name == "LocalVariableDeclaration") {
+    const declarators = statement.getChildren("VariableDeclarator")
+    const typeNode = declarationType(statement)
+    const varNode = statement.getChild("var")
+    const modifiers = statement.getChild("Modifiers")
+    const modifierChildren = modifiers ? structuralChildren(modifiers) : []
+
+    if (varNode) return unsupportedSyntax("java", "var local declaration", nodeLocation(varNode, filename, source))
+    if (declarators.length != 1) return unsupportedSyntax("java", "multiple local declarators", location)
+    if (!typeNode || typeNode.name == "ArrayType") return unsupportedSyntax("java", "unsupported local type", location)
+    if (modifierChildren.some((child) => child.name != "final") || modifierChildren.length > 1) {
+      return unsupportedSyntax("java", "unsupported local modifiers", modifiers ? nodeLocation(modifiers, filename, source) : location)
     }
 
-    return {expression: convertExpression(expression, filename, source), kind: /** @type {const} */ ("ReturnStatement"), location}
-  })
+    const declarator = declarators[0]
+    const definition = requiredChild(declarator, "Definition", filename, source)
+    const assignment = declarator.getChild("AssignOp")
+    const dimensions = declarator.getChildren("Dimension")
+    const initializerNodes = directChildren(declarator).filter((child) => child.name != "Definition" && child.name != "AssignOp")
+
+    if (dimensions.length > 0) return unsupportedSyntax("java", "array local declaration", nodeLocation(declarator, filename, source))
+    if (!assignment || nodeText(assignment, source) != "=" || initializerNodes.length != 1) {
+      return unsupportedSyntax("java", "uninitialized local declaration", nodeLocation(declarator, filename, source))
+    }
+
+    const name = nodeText(definition, source)
+
+    return {
+      initializer: convertExpression(initializerNodes[0], filename, source),
+      kind: "LocalDeclaration",
+      location,
+      mutable: modifierChildren.length == 0,
+      name,
+      type: convertType(typeNode, `Local '${name}'`, location, source)
+    }
+  }
+
+  if (statement.name == "ExpressionStatement") {
+    const assignment = statement.getChild("AssignmentExpression")
+
+    if (!assignment) return unsupportedSyntax("java", statement.name, location)
+
+    const children = structuralChildren(assignment)
+    const operator = assignment.getChild("AssignOp")
+    const target = children[0]
+    const expression = children.at(-1)
+
+    if (!operator || nodeText(operator, source) != "=") return unsupportedSyntax("java", "compound assignment", nodeLocation(assignment, filename, source))
+    if (!target || target.name != "Identifier") return unsupportedSyntax("java", target?.name ?? "assignment target", target ? nodeLocation(target, filename, source) : location)
+    if (!expression || expression == target || expression == operator) return unsupportedSyntax("java", "assignment expression", nodeLocation(assignment, filename, source))
+
+    return {
+      expression: convertExpression(expression, filename, source),
+      kind: "AssignmentStatement",
+      location,
+      target: {kind: "IdentifierExpression", location: nodeLocation(target, filename, source), name: nodeText(target, source)}
+    }
+  }
+
+  return unsupportedSyntax("java", statement.name, location)
+}
+
+/**
+ * Converts a declaration/assignment prefix followed by one exact Java terminal.
+ * @template {import("../semantic/types.js").IfStatement | import("../semantic/types.js").ReturnStatement | import("../semantic/types.js").PrintStatement} Terminal
+ * @param {import("@lezer/common").SyntaxNode[]} statements - Java statements.
+ * @param {string} terminalName - Required terminal node name.
+ * @param {(node: import("@lezer/common").SyntaxNode) => Terminal} convertTerminal - Terminal converter.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @returns {(import("../semantic/types.js").LocalStatement | Terminal)[]} Semantic statements.
+ */
+function convertRestrictedSequence(statements, terminalName, convertTerminal, filename, source) {
+  const terminal = statements.at(-1)
+
+  if (!terminal || terminal.name != terminalName) {
+    return unsupportedSyntax("java", `statement sequence without ${terminalName}`, terminal ? nodeLocation(terminal, filename, source) : moduleLocation(filename, source))
+  }
+
+  return [
+    ...statements.slice(0, -1).map((statement) => convertLocalStatement(statement, filename, source)),
+    convertTerminal(terminal)
+  ]
 }
 
 /**
@@ -379,30 +470,53 @@ function convertFunction(node, filename, source) {
   const block = requiredChild(node, "Block", filename, source)
   const bodyNodes = directChildren(block).filter((child) => child.name != "{" && child.name != "}")
 
-  if (bodyNodes.length != 1 || bodyNodes[0].name != "IfStatement") return unsupportedSyntax("java", "function body", location)
-
-  const ifNode = bodyNodes[0]
-  const ifLocation = nodeLocation(ifNode, filename, source)
-  const conditionContainer = requiredChild(ifNode, "ParenthesizedExpression", filename, source)
-  const conditionNodes = structuralChildren(conditionContainer)
-  const condition = conditionNodes.length == 1 ? conditionNodes[0] : undefined
-  const branches = ifNode.getChildren("Block")
-
-  if (!condition || branches.length != 2) return unsupportedSyntax("java", "if without two block branches", ifLocation)
+  const body = convertRestrictedSequence(
+    bodyNodes,
+    "IfStatement",
+    (statement) => convertIf(statement, filename, source),
+    filename,
+    source
+  )
 
   return {
-    body: [{
-      alternate: convertReturnBlock(branches[1], filename, source),
-      condition: convertExpression(condition, filename, source),
-      consequent: convertReturnBlock(branches[0], filename, source),
-      kind: "IfStatement",
-      location: ifLocation
-    }],
+    body: /** @type {import("../semantic/types.js").FunctionStatement[]} */ (body),
     kind: "FunctionDeclaration",
     location,
     name,
     parameters,
     returnType: convertType(declarationType(node), `Function '${name}' return`, location, source)
+  }
+}
+
+/**
+ * Converts the existing exact Java if/else terminal with restricted branch prefixes.
+ * @param {import("@lezer/common").SyntaxNode} node - Java if statement.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @returns {import("../semantic/types.js").IfStatement} Semantic branch.
+ */
+function convertIf(node, filename, source) {
+  const location = nodeLocation(node, filename, source)
+  const conditionContainer = requiredChild(node, "ParenthesizedExpression", filename, source)
+  const conditionNodes = structuralChildren(conditionContainer)
+  const condition = conditionNodes.length == 1 ? conditionNodes[0] : undefined
+  const branches = node.getChildren("Block")
+
+  if (!condition || branches.length != 2) return unsupportedSyntax("java", "if without two block branches", location)
+
+  const consequentStatements = directChildren(branches[0]).filter((child) => child.name != "{" && child.name != "}")
+  const alternateStatements = directChildren(branches[1]).filter((child) => child.name != "{" && child.name != "}")
+
+  return {
+    alternate: /** @type {(import("../semantic/types.js").LocalStatement | import("../semantic/types.js").ReturnStatement)[]} */ (
+      convertRestrictedSequence(alternateStatements, "ReturnStatement", (statement) => convertReturn(statement, filename, source), filename, source)
+    ),
+    condition: convertExpression(condition, filename, source),
+    consequent: /** @type {(import("../semantic/types.js").LocalStatement | import("../semantic/types.js").ReturnStatement)[]} */ (
+      convertRestrictedSequence(consequentStatements, "ReturnStatement", (statement) => convertReturn(statement, filename, source), filename, source)
+    ),
+    kind: "IfStatement",
+    location
   }
 }
 
@@ -418,13 +532,22 @@ function convertEntryPoint(node, filename, source) {
   const block = requiredChild(node, "Block", filename, source)
   const statements = structuralChildren(block)
 
-  if (statements.length != 1 || statements[0].name != "ExpressionStatement") {
-    const unsupported = statements.length == 1 ? statements[0] : block
+  const body = convertRestrictedSequence(statements, "ExpressionStatement", (statement) => convertPrint(statement, filename, source), filename, source)
 
-    return unsupportedSyntax("java", "main body other than one print statement", nodeLocation(unsupported, filename, source))
-  }
+  return {body: /** @type {(import("../semantic/types.js").LocalStatement | import("../semantic/types.js").PrintStatement)[]} */ (body), kind: "EntryPoint", location}
+}
 
-  const printInvocation = statements[0].getChild("MethodInvocation")
+/**
+ * Converts Java's one supported print statement.
+ * @param {import("@lezer/common").SyntaxNode} statement - Expression statement.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @returns {import("../semantic/types.js").PrintStatement} Semantic print.
+ */
+function convertPrint(statement, filename, source) {
+  const location = nodeLocation(statement, filename, source)
+
+  const printInvocation = statement.getChild("MethodInvocation")
 
   if (!printInvocation) return unsupportedSyntax("java", "main without System.out.println", location)
 
@@ -444,11 +567,7 @@ function convertEntryPoint(node, filename, source) {
 
   const printLocation = nodeLocation(printInvocation, filename, source)
 
-  return {
-    body: [{expression: convertExpression(arguments_[0], filename, source), kind: "PrintStatement", location: printLocation}],
-    kind: "EntryPoint",
-    location
-  }
+  return {expression: convertExpression(arguments_[0], filename, source), kind: "PrintStatement", location: printLocation}
 }
 
 /**

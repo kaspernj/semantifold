@@ -55,18 +55,47 @@ const reservedWords = {
   ])
 }
 
+const phpInvalidParameterBindings = new Set([
+  "GLOBALS", "_COOKIE", "_ENV", "_FILES", "_GET", "_POST", "_REQUEST", "_SERVER", "_SESSION", "this"
+])
+const phpInvalidAssignedBindings = new Set(["GLOBALS", "this"])
+
 /**
  * Validates an identifier against the target backend's deliberately narrow lexical contract.
  * @param {import("../semantic/types.js").SemanticLanguage} language - Target language.
- * @param {string} name - Semantic identifier.
+ * @param {unknown} name - Candidate semantic identifier.
  * @param {string} role - Identifier role for diagnostics.
- * @param {import("../semantic/types.js").SourceLocation} location - Originating location.
+ * @param {import("../semantic/types.js").SourceLocation | undefined} location - Originating location.
  * @returns {void}
  */
 export function validateTargetIdentifier(language, name, role, location) {
+  if (typeof name != "string") unsupportedCapability(language, `${role} identifier`, location)
+
   const reservedName = language == "php" ? name.toLowerCase() : name
 
   if (!identifierPatterns[language].test(name) || reservedWords[language].has(reservedName)) {
+    unsupportedCapability(language, `${role} identifier '${name}'`, location)
+  }
+}
+
+/**
+ * Validates a binding identifier against target restrictions beyond general identifier syntax.
+ * @param {import("../semantic/types.js").SemanticLanguage} language - Target language.
+ * @param {unknown} name - Candidate semantic identifier.
+ * @param {string} role - Binding role for diagnostics.
+ * @param {import("../semantic/types.js").SourceLocation | undefined} location - Originating location.
+ * @returns {void}
+ */
+export function validateTargetBindingIdentifier(language, name, role, location) {
+  validateTargetIdentifier(language, name, role, location)
+
+  const invalidTypeScriptBinding = language == "typescript" && (name == "arguments" || name == "eval")
+  const invalidPhpVariable = language == "php" && typeof name == "string" &&
+    ((role == "parameter" && phpInvalidParameterBindings.has(name)) ||
+      ((role == "local" || role == "assignment target") && phpInvalidAssignedBindings.has(name)))
+  const invalidRubyBinding = language == "ruby" && typeof name == "string" && /^_[1-9]$/u.test(name)
+
+  if (invalidTypeScriptBinding || invalidPhpVariable || invalidRubyBinding) {
     unsupportedCapability(language, `${role} identifier '${name}'`, location)
   }
 }

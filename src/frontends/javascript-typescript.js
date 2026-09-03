@@ -113,19 +113,125 @@ function convertReturn(node, language, filename, source) {
 }
 
 /**
+ * Converts one supported local declaration or assignment.
+ * @param {import("@babel/types").Statement} node - Babel statement.
+ * @param {"javascript" | "typescript"} language - Frontend language.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @returns {import("../semantic/types.js").LocalStatement} Semantic local statement.
+ */
+function convertLocalStatement(node, language, filename, source) {
+  const location = nodeLocation(node, filename, source)
+
+  if (node.type == "VariableDeclaration") {
+    if (!["let", "const"].includes(node.kind) || node.declarations.length != 1) {
+      return unsupportedSyntax(language, `${node.kind} declaration`, location)
+    }
+
+    const declarator = node.declarations[0]
+    const declaratorLocation = nodeLocation(declarator, filename, source)
+
+    if (declarator.id.type != "Identifier") return unsupportedSyntax(language, declarator.id.type, declaratorLocation)
+    if (!declarator.init) return unsupportedSyntax(language, "uninitialized declaration", declaratorLocation)
+
+    const type = language == "typescript"
+      ? convertTypeScriptType(declarator.id.typeAnnotation, `Local '${declarator.id.name}'`, declaratorLocation, filename, source)
+      : localJavaScriptType(node, declarator.id.name, filename, source)
+
+    return {
+      initializer: convertExpression(declarator.init, language, filename, source),
+      kind: "LocalDeclaration",
+      location,
+      mutable: node.kind == "let",
+      name: declarator.id.name,
+      type
+    }
+  }
+
+  if (node.type == "ExpressionStatement" && node.expression.type == "AssignmentExpression") {
+    const assignment = node.expression
+    const targetLocation = nodeLocation(assignment.left, filename, source)
+
+    if (assignment.operator != "=") return unsupportedSyntax(language, `assignment ${assignment.operator}`, location)
+    if (assignment.left.type != "Identifier") return unsupportedSyntax(language, assignment.left.type, targetLocation)
+
+    return {
+      expression: convertExpression(assignment.right, language, filename, source),
+      kind: "AssignmentStatement",
+      location,
+      target: {kind: "IdentifierExpression", location: targetLocation, name: assignment.left.name}
+    }
+  }
+
+  return unsupportedSyntax(language, node.type, location)
+}
+
+/**
+ * Reads an immediately associated JavaScript local `@type` tag.
+ * @param {import("@babel/types").VariableDeclaration} node - Local declaration.
+ * @param {string} name - Local name.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @returns {import("../semantic/types.js").TypeReference} Semantic type.
+ */
+function localJavaScriptType(node, name, filename, source) {
+  const comment = node.leadingComments?.at(-1)
+  const location = nodeLocation(node, filename, source)
+
+  if (!comment || comment.type != "CommentBlock" || !comment.value.startsWith("*")) {
+    return missingType("javascript", `Local '${name}'`, location)
+  }
+
+  const gap = source.slice(comment.end ?? 0, node.start ?? 0)
+
+  if (!/^\s*$/u.test(gap) || (gap.match(/\n/gu)?.length ?? 0) > 1) {
+    return missingType("javascript", `Local '${name}'`, location)
+  }
+
+  const block = parseComment(`/*${comment.value}*/`)[0]
+  const tags = block?.tags.filter((tag) => tag.tag == "type") ?? []
+
+  return convertType(tags.length == 1 ? tags[0].type : undefined, "javascript", `Local '${name}'`, location)
+}
+
+/**
+ * Converts a restricted declaration/assignment prefix and one terminal statement.
+ * @template {import("@babel/types").Statement} Node
+ * @template {import("../semantic/types.js").FunctionStatement | import("../semantic/types.js").PrintStatement} Terminal
+ * @param {Node[]} statements - Source statements.
+ * @param {"IfStatement" | "ReturnStatement" | "ExpressionStatement"} terminalKind - Terminal kind.
+ * @param {(node: Node) => Terminal} convertTerminal - Terminal converter.
+ * @param {"javascript" | "typescript"} language - Frontend language.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @returns {(import("../semantic/types.js").LocalStatement | Terminal)[]} Semantic statements.
+ */
+function convertRestrictedSequence(statements, terminalKind, convertTerminal, language, filename, source) {
+  const terminal = statements.at(-1)
+
+  if (!terminal || terminal.type != terminalKind) {
+    const location = terminal ? nodeLocation(terminal, filename, source) : moduleLocation(filename, source)
+
+    return unsupportedSyntax(language, `statement sequence without terminal ${terminalKind}`, location)
+  }
+
+  return [...statements.slice(0, -1).map((statement) => convertLocalStatement(statement, language, filename, source)), convertTerminal(terminal)]
+}
+
+/**
  * Converts a block containing only supported return statements.
  * @param {import("@babel/types").Statement} node - Babel statement or block.
  * @param {"javascript" | "typescript"} language - Frontend language.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
- * @returns {import("../semantic/types.js").ReturnStatement[]} Semantic returns.
+ * @returns {(import("../semantic/types.js").LocalStatement | import("../semantic/types.js").ReturnStatement)[]} Semantic branch statements.
  */
 function convertReturnBlock(node, language, filename, source) {
-  if (node.type != "BlockStatement") {
-    return [convertReturn(node, language, filename, source)]
-  }
+  const statements = node.type == "BlockStatement" ? node.body : [node]
 
-  return node.body.map((statement) => convertReturn(statement, language, filename, source))
+  return /** @type {(import("../semantic/types.js").LocalStatement | import("../semantic/types.js").ReturnStatement)[]} */ (
+    convertRestrictedSequence(statements, "ReturnStatement", (statement) => convertReturn(statement, language, filename, source), language, filename, source)
+  )
 }
 
 /**
@@ -202,9 +308,6 @@ function convertFunction(node, language, filename, source) {
   if (!node.id) return unsupportedSyntax(language, "anonymous function", location)
   if (node.async) return unsupportedSyntax(language, "async function", location)
   if (node.generator) return unsupportedSyntax(language, "generator function", location)
-  if (node.body.body.length != 1 || node.body.body[0].type != "IfStatement") {
-    return unsupportedSyntax(language, "function body", location)
-  }
 
   const documentedTypes = language == "javascript" ? jsdocTypes(node, filename, source) : undefined
   const parameters = node.params.map((parameter) => {
@@ -227,24 +330,44 @@ function convertFunction(node, language, filename, source) {
   const returnType = language == "javascript"
     ? convertType(documentedTypes?.returnType, language, `Function '${node.id.name}' return`, location)
     : convertTypeScriptType(returnAnnotation, `Function '${node.id.name}' return`, location, filename, source)
-  const ifNode = node.body.body[0]
-  const ifLocation = nodeLocation(ifNode, filename, source)
-
-  if (!ifNode.alternate) return unsupportedSyntax(language, "if without else", ifLocation)
+  const body = convertRestrictedSequence(
+    node.body.body,
+    "IfStatement",
+    (statement) => convertIf(/** @type {import("@babel/types").IfStatement} */ (statement), language, filename, source),
+    language,
+    filename,
+    source
+  )
 
   return {
-    body: [{
-      alternate: convertReturnBlock(ifNode.alternate, language, filename, source),
-      condition: convertExpression(ifNode.test, language, filename, source),
-      consequent: convertReturnBlock(ifNode.consequent, language, filename, source),
-      kind: "IfStatement",
-      location: ifLocation
-    }],
+    body: /** @type {import("../semantic/types.js").FunctionStatement[]} */ (body),
     kind: "FunctionDeclaration",
     location,
     name: node.id.name,
     parameters,
     returnType
+  }
+}
+
+/**
+ * Converts the existing exact if/else terminal shape.
+ * @param {import("@babel/types").IfStatement} node - Babel if statement.
+ * @param {"javascript" | "typescript"} language - Frontend language.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @returns {import("../semantic/types.js").IfStatement} Semantic branch.
+ */
+function convertIf(node, language, filename, source) {
+  const location = nodeLocation(node, filename, source)
+
+  if (!node.alternate) return unsupportedSyntax(language, "if without else", location)
+
+  return {
+    alternate: convertReturnBlock(node.alternate, language, filename, source),
+    condition: convertExpression(node.test, language, filename, source),
+    consequent: convertReturnBlock(node.consequent, language, filename, source),
+    kind: "IfStatement",
+    location
   }
 }
 
@@ -293,15 +416,27 @@ export function parseJavaScriptTypeScript({filename, language, source}) {
   const file = parseBabelSource({filename, language, source})
   const functions = file.program.body.filter((node) => node.type == "FunctionDeclaration")
     .map((node) => convertFunction(node, language, filename, source))
-  const entryStatements = file.program.body.filter((node) => node.type != "FunctionDeclaration")
-    .map((node) => convertPrint(node, language, filename, source))
+  const entryNodes = file.program.body.filter((node) => node.type != "FunctionDeclaration")
   const location = moduleLocation(filename, source)
 
   if (functions.length == 0) return unsupportedSyntax(language, "module without a function", location)
-  if (entryStatements.length == 0) return unsupportedSyntax(language, "module without an entry point", location)
+  if (entryNodes.length == 0) return unsupportedSyntax(language, "module without an entry point", location)
+
+  const entryStatements = convertRestrictedSequence(
+    entryNodes,
+    "ExpressionStatement",
+    (statement) => convertPrint(statement, language, filename, source),
+    language,
+    filename,
+    source
+  )
 
   return {
-    entryPoint: {body: entryStatements, kind: "EntryPoint", location: entryStatements[0].location},
+    entryPoint: {
+      body: /** @type {(import("../semantic/types.js").LocalStatement | import("../semantic/types.js").PrintStatement)[]} */ (entryStatements),
+      kind: "EntryPoint",
+      location: entryStatements[0].location
+    },
     functions,
     kind: "Module",
     location

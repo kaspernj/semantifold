@@ -5,14 +5,15 @@ import {describe, it} from "@velocious/testing"
 import {parse, SemantifoldDiagnostic} from "../index.js"
 
 /**
- * Asserts a Java unsupported-syntax diagnostic.
+ * Asserts a Java diagnostic.
  * @param {string} source - Java source.
+ * @param {string} [code] - Expected diagnostic code.
  * @returns {void}
  */
-function assertUnsupported(source) {
+function assertUnsupported(source, code = "UNSUPPORTED_SYNTAX") {
   assert.throws(
     () => parse({filename: "Main.java", language: "java", source}),
-    (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_SYNTAX" && error.language == "java" && error.location?.filename == "Main.java"
+    (error) => error instanceof SemantifoldDiagnostic && error.code == code && error.language == "java" && error.location?.filename == "Main.java"
   )
 }
 
@@ -48,7 +49,7 @@ public final class Main {
     System.out.println(difference("4", 9));
   }
 }
-`)
+`, "TYPE_MISMATCH")
   })
 
   it("rejects extra entry-point statements instead of ignoring them", () => {
@@ -62,7 +63,7 @@ public final class Main {
     }
   }
   public static void main(String[] args) {
-    int ignored = 1;
+    int first = 1, second = 2;
     System.out.println(difference(4, 9));
   }
 }
