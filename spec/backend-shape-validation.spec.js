@@ -48,7 +48,8 @@ function corruptField(owner, field, malformed) {
   if (malformed == "missing") Reflect.deleteProperty(owner, field)
   else if (malformed == "null") Reflect.set(owner, field, null)
   else if (malformed == "primitive") Reflect.set(owner, field, 7)
-  else Reflect.set(owner, field, [])
+  else if (malformed == "array") Reflect.set(owner, field, [])
+  else Reflect.set(owner, field, {length: 2})
 }
 
 describe("backend shape validation", () => {
@@ -222,6 +223,70 @@ describe("backend shape validation", () => {
       }
     })
   }
+
+  it("rejects malformed call fields in local initializers and assignment expressions", async () => {
+    for (const placement of ["initializer", "assignment"]) {
+      for (const field of ["callee", "arguments"]) {
+        for (const malformed of [...malformedStructures, "object"]) {
+          const module = await validLocalModule()
+          const declaration = /** @type {import("../src/semantic/types.js").LocalDeclaration} */ (module.functions[0].body[1])
+          const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (module.functions[0].body.at(-1))
+          const assignment = /** @type {import("../src/semantic/types.js").AssignmentStatement} */ (branch.consequent[0])
+          const owner = placement == "initializer" ? declaration : assignment
+          const ownerField = placement == "initializer" ? "initializer" : "expression"
+          const line = placement == "initializer" ? 3 : 5
+          const call = {
+            arguments: [{kind: "IdentifierExpression", name: "flag"}, {kind: "IdentifierExpression", name: "fallback"}],
+            callee: "select",
+            kind: "CallExpression"
+          }
+
+          corruptField(call, field, malformed)
+          Reflect.set(owner, ownerField, call)
+
+          assert.throws(
+            () => generate({language: "ruby", module}),
+            (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
+              error.language == "ruby" && error.location?.filename == "locals.ts" && error.location.start.line == line,
+            `${placement} ${field} ${malformed}`
+          )
+        }
+      }
+    }
+  })
+
+  it("rejects malformed and recursively malformed call argument members at the nearest owner", async () => {
+    for (const placement of ["initializer", "assignment"]) {
+      for (const malformed of [...malformedStructures, "object", "nested call"]) {
+        const module = await validLocalModule()
+        const declaration = /** @type {import("../src/semantic/types.js").LocalDeclaration} */ (module.functions[0].body[1])
+        const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (module.functions[0].body.at(-1))
+        const assignment = /** @type {import("../src/semantic/types.js").AssignmentStatement} */ (branch.consequent[0])
+        const owner = placement == "initializer" ? declaration : assignment
+        const ownerField = placement == "initializer" ? "initializer" : "expression"
+        const line = placement == "initializer" ? 3 : 5
+        const call = {
+          arguments: [{kind: "IdentifierExpression", name: "flag"}, {kind: "IdentifierExpression", name: "fallback"}],
+          callee: "select",
+          kind: "CallExpression"
+        }
+
+        if (malformed == "nested call") {
+          call.arguments[0] = /** @type {never} */ ({callee: "select", kind: "CallExpression"})
+        } else {
+          corruptField(call.arguments, "0", malformed)
+        }
+        Reflect.set(owner, ownerField, call)
+
+        assert.throws(
+          () => generate({language: "ruby", module}),
+          (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
+            error.language == "ruby" && error.location?.filename == "locals.ts" && error.location.start.line == line,
+          `${placement} argument ${malformed}`
+        )
+      }
+    }
+  })
 
   it("rejects missing task-002 terminal expressions at their owning statement locations", async () => {
     for (const malformed of ["condition", "return", "print"]) {

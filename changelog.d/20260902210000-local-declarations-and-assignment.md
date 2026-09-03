@@ -7,3 +7,4 @@
 - Reject misspelled Ruby local profile tags and malformed external task-002 expressions with stable located diagnostics.
 - Validate every external local-declaration and assignment field structurally before target-specific checks or emission.
 - Reject TypeScript strict-mode `arguments` and `eval` binding names before emission without changing other targets' identifier policies.
+- Reject malformed call fields nested in caller-supplied local initializers and assignment expressions with located backend diagnostics.

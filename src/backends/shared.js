@@ -166,6 +166,9 @@ function validateExpression(expression, language, ownerLocation) {
   if (candidate.kind == "BooleanLiteral" || candidate.kind == "StringLiteral") return
   if (candidate.kind == "CallExpression") {
     validateTargetIdentifier(language, candidate.callee, "callee", location)
+    if (!Array.isArray(candidate.arguments)) {
+      unsupportedCapability(language, "missing or invalid call arguments", location)
+    }
     if (candidate.arguments.length != 2) {
       unsupportedCapability(language, "call argument count other than two", location)
     }
