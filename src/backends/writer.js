@@ -81,15 +81,16 @@ export class SourceWriter {
    * @param {string} text - Generated text.
    * @param {string} reason - Stable reason.
    * @param {import("../semantic/types.js").SemanticNode[]} [relatedNodes] - Related nodes.
+   * @param {(string | undefined)[]} [relatedPaths] - Occurrence paths for shared related nodes.
    * @returns {void}
    */
-  synthetic(text, reason, relatedNodes = []) {
+  synthetic(text, reason, relatedNodes = [], relatedPaths = []) {
     if (text.length == 0) return
 
     /** @type {Set<string>} */
     const seen = new Set()
-    const relatedOrigins = relatedNodes.flatMap((node) => {
-      const record = this.index.recordFor(node)
+    const relatedOrigins = relatedNodes.flatMap((node, index) => {
+      const record = this.index.recordFor(node, relatedPaths[index])
 
       return relatedOriginsFor(record.origin).flatMap((related) => {
         const contextual = {

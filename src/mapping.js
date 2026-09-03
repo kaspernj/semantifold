@@ -544,19 +544,17 @@ export function mappingFromSourceMap(sourceMap, {content, filename, language, so
     const source = sourcesByMapName.get(mapping.source)
 
     if (!source) throw new RangeError(`Source Map references unregistered source '${mapping.source}'.`)
+    if (source.content == null) {
+      throw new RangeError(`Source content is required to import mapped positions for '${source.filename}'.`)
+    }
 
-    const originalOffset = source.content == null
-      ? 0
-      : indexedOffsetAt(/** @type {ReturnType<typeof createCoordinateIndex>} */ (sourceCoordinates.get(source.id)),
-          mapping.originalLine, mapping.originalColumn + 1)
-    const originalEnd = source.content == null ? originalOffset : Math.min(source.content.length, originalOffset + 1)
-    const originalLocation = source.content == null
-      ? {
-          end: {column: mapping.originalColumn + 1, line: mapping.originalLine, offset: originalOffset},
-          filename: source.filename,
-          start: {column: mapping.originalColumn + 1, line: mapping.originalLine, offset: originalOffset}
-        }
-      : locationFromOffsets(source.filename, source.content, originalOffset, originalEnd)
+    const originalOffset = indexedOffsetAt(
+      /** @type {ReturnType<typeof createCoordinateIndex>} */ (sourceCoordinates.get(source.id)),
+      mapping.originalLine,
+      mapping.originalColumn + 1
+    )
+    const originalEnd = Math.min(source.content.length, originalOffset + 1)
+    const originalLocation = locationFromOffsets(source.filename, source.content, originalOffset, originalEnd)
 
     mappedSpans.push(definedProperties({
       generated: locationFromOffsets(filename, content, generatedOffset, end),

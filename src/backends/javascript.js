@@ -48,21 +48,23 @@ export function generateJavaScript(module, writer) {
     writer.synthetic("\n", "line break", [declaration])
 
     const branch = /** @type {import("../semantic/types.js").IfStatement} */ (declaration.body.at(-1))
+    const branchPath = `/functions/${functionIndex}/body/${declaration.body.length - 1}`
 
-    for (const statement of /** @type {import("../semantic/types.js").LocalStatement[]} */ (declaration.body.slice(0, -1))) {
-      emitLocal(writer, statement, "  ")
+    for (const [statementIndex, statement] of /** @type {import("../semantic/types.js").LocalStatement[]} */ (
+      declaration.body.slice(0, -1)).entries()) {
+      emitLocal(writer, statement, "  ", `/functions/${functionIndex}/body/${statementIndex}`)
     }
 
     writer.synthetic("  ", "indentation", [branch])
     writer.mapped("if", {mappingKind: "anchor", node: branch})
     writer.synthetic(" ", "conditional spacing", [branch])
     writer.mapped("(", {mappingKind: "anchor", node: branch})
-    emitExpression(writer, branch.condition, "javascript", identity)
+    emitExpression(writer, branch.condition, `${branchPath}/condition`, "javascript", identity)
     writer.mapped(")", {mappingKind: "anchor", node: branch})
     writer.synthetic(" ", "conditional spacing", [branch])
     writer.mapped("{", {mappingKind: "anchor", node: branch})
     writer.synthetic("\n", "line break", [branch])
-    emitBranch(writer, branch.consequent, branch, "    ")
+    emitBranch(writer, branch.consequent, branch, "    ", `${branchPath}/consequent`)
     writer.synthetic("  ", "indentation", [branch])
     writer.mapped("}", {mappingKind: "anchor", node: branch})
     writer.synthetic(" ", "conditional spacing", [branch])
@@ -70,7 +72,7 @@ export function generateJavaScript(module, writer) {
     writer.synthetic(" ", "conditional spacing", [branch])
     writer.mapped("{", {mappingKind: "anchor", node: branch})
     writer.synthetic("\n", "line break", [branch])
-    emitBranch(writer, branch.alternate, branch, "    ")
+    emitBranch(writer, branch.alternate, branch, "    ", `${branchPath}/alternate`)
     writer.synthetic("  ", "indentation", [branch])
     writer.mapped("}", {mappingKind: "anchor", node: branch})
     writer.synthetic("\n", "line break", [branch])
@@ -80,13 +82,14 @@ export function generateJavaScript(module, writer) {
   writer.synthetic("\n\n", "entry-point separator", [module.entryPoint])
   const statements = module.entryPoint.body
 
-  for (const statement of /** @type {import("../semantic/types.js").LocalStatement[]} */ (statements.slice(0, -1))) emitLocal(writer, statement, "")
+  for (const [statementIndex, statement] of /** @type {import("../semantic/types.js").LocalStatement[]} */ (
+    statements.slice(0, -1)).entries()) emitLocal(writer, statement, "", `/entryPoint/body/${statementIndex}`)
 
   const print = /** @type {import("../semantic/types.js").PrintStatement} */ (statements.at(-1))
 
   writer.mapped("console.log", {mappingKind: "anchor", node: print})
   writer.mapped("(", {mappingKind: "anchor", node: print})
-  emitExpression(writer, print.expression, "javascript", identity)
+  emitExpression(writer, print.expression, `/entryPoint/body/${statements.length - 1}/expression`, "javascript", identity)
   writer.mapped(")", {mappingKind: "anchor", node: print})
   writer.synthetic("\n", "final line break", [module.entryPoint])
 }
@@ -97,17 +100,19 @@ export function generateJavaScript(module, writer) {
  * @param {(import("../semantic/types.js").LocalStatement | import("../semantic/types.js").ReturnStatement)[]} statements - Branch statements.
  * @param {import("../semantic/types.js").IfStatement} branch - Owning branch.
  * @param {string} indent - Indentation.
+ * @param {string} statementsPath - JSON Pointer for the branch statement sequence.
  * @returns {void}
  */
-function emitBranch(writer, statements, branch, indent) {
-  for (const statement of /** @type {import("../semantic/types.js").LocalStatement[]} */ (statements.slice(0, -1))) emitLocal(writer, statement, indent)
+function emitBranch(writer, statements, branch, indent, statementsPath) {
+  for (const [statementIndex, statement] of /** @type {import("../semantic/types.js").LocalStatement[]} */ (
+    statements.slice(0, -1)).entries()) emitLocal(writer, statement, indent, `${statementsPath}/${statementIndex}`)
 
   const returned = /** @type {import("../semantic/types.js").ReturnStatement} */ (statements.at(-1))
 
   writer.synthetic(indent, "indentation", [branch])
   writer.mapped("return", {mappingKind: "anchor", node: returned})
   writer.synthetic(" ", "return spacing", [returned])
-  emitExpression(writer, returned.expression, "javascript", identity)
+  emitExpression(writer, returned.expression, `${statementsPath}/${statements.length - 1}/expression`, "javascript", identity)
   writer.synthetic("\n", "line break", [returned])
 }
 
@@ -116,9 +121,10 @@ function emitBranch(writer, statements, branch, indent) {
  * @param {import("./writer.js").SourceWriter} writer - Source-aware writer.
  * @param {import("../semantic/types.js").LocalStatement} statement - Local statement.
  * @param {string} indent - Leading indentation.
+ * @param {string} statementPath - Exact JSON Pointer for this statement occurrence.
  * @returns {void}
  */
-function emitLocal(writer, statement, indent) {
+function emitLocal(writer, statement, indent, statementPath) {
   writer.synthetic(indent, "indentation", [statement])
 
   if (statement.kind == "AssignmentStatement") {
@@ -126,7 +132,7 @@ function emitLocal(writer, statement, indent) {
     writer.synthetic(" ", "assignment spacing", [statement])
     writer.mapped("=", {mappingKind: "exact", node: statement, role: "operator"})
     writer.synthetic(" ", "assignment spacing", [statement])
-    emitExpression(writer, statement.expression, "javascript", identity)
+    emitExpression(writer, statement.expression, `${statementPath}/expression`, "javascript", identity)
     writer.synthetic("\n", "line break", [statement])
     return
   }
@@ -135,7 +141,7 @@ function emitLocal(writer, statement, indent) {
   writer.mapped(emitScalarType("javascript", statement.type), {
     mappingKind: "exact",
     node: statement.type,
-    path: `${writer.occurrencePath(statement)}/type`,
+    path: `${statementPath}/type`,
     role: "type"
   })
   writer.synthetic("} */\n", "JavaScript local type scaffolding", [statement])
@@ -146,7 +152,7 @@ function emitLocal(writer, statement, indent) {
   writer.synthetic(" ", "assignment spacing", [statement])
   writer.mapped("=", {mappingKind: "exact", node: statement, role: "operator"})
   writer.synthetic(" ", "assignment spacing", [statement])
-  emitExpression(writer, statement.initializer, "javascript", identity)
+  emitExpression(writer, statement.initializer, `${statementPath}/initializer`, "javascript", identity)
   writer.synthetic("\n", "line break", [statement])
 }
 

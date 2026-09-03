@@ -1,6 +1,6 @@
 // @ts-check
 
-import {SemantifoldDiagnostic} from "../diagnostic.js"
+import {SemantifoldDiagnostic, unsupportedCapability} from "../diagnostic.js"
 import {generateJava} from "./java.js"
 import {generateJavaScript} from "./javascript.js"
 import {generatePhp} from "./php.js"
@@ -52,7 +52,7 @@ export function generateArtifactSource({language, filename = defaultFilenames[la
     throw new TypeError("Source map filename must be a non-empty single-line string.")
   }
   if (language == "java" && filename.split(/[\\/]/u).at(-1) != "Main.java") {
-    throw new TypeError("Java artifact filename must have the basename Main.java.")
+    unsupportedCapability(language, "artifact filename basename other than Main.java", module.location)
   }
   if (!["none", "external", "inline"].includes(mapDirective)) throw new TypeError(`Unsupported map directive: ${mapDirective}`)
   if (mapDirective != "none" && language != "javascript" && language != "typescript") {

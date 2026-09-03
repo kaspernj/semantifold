@@ -221,43 +221,44 @@ function validateExpression(expression, language, ownerLocation) {
  * Emits a supported expression.
  * @param {import("./writer.js").SourceWriter} writer - Source-aware writer.
  * @param {import("../semantic/types.js").Expression} expression - Semantic expression.
+ * @param {string} path - Exact JSON Pointer for this expression occurrence.
  * @param {import("../semantic/types.js").SemanticLanguage} language - Target language.
  * @param {(name: string) => string} emitIdentifier - Identifier formatter.
  * @returns {void}
  */
-export function emitExpression(writer, expression, language, emitIdentifier) {
+export function emitExpression(writer, expression, path, language, emitIdentifier) {
   if (expression.kind == "IdentifierExpression") {
-    writer.mapped(emitIdentifier(expression.name), {mappingKind: "exact", node: expression, role: "name"})
+    writer.mapped(emitIdentifier(expression.name), {mappingKind: "exact", node: expression, path, role: "name"})
     return
   }
   if (expression.kind == "IntegerLiteral") {
-    writer.mapped(String(expression.value), {mappingKind: "exact", node: expression, role: "literal"})
+    writer.mapped(String(expression.value), {mappingKind: "exact", node: expression, path, role: "literal"})
     return
   }
   if (expression.kind == "BooleanLiteral") {
-    writer.mapped(expression.value ? "true" : "false", {mappingKind: "exact", node: expression, role: "literal"})
+    writer.mapped(expression.value ? "true" : "false", {mappingKind: "exact", node: expression, path, role: "literal"})
     return
   }
   if (expression.kind == "StringLiteral") {
-    writer.mapped(emitStringLiteral(language, expression.value), {mappingKind: "exact", node: expression, role: "literal"})
+    writer.mapped(emitStringLiteral(language, expression.value), {mappingKind: "exact", node: expression, path, role: "literal"})
     return
   }
   if (expression.kind == "CallExpression") {
-    writer.mapped(expression.callee, {mappingKind: "exact", node: expression, role: "callee"})
-    writer.mapped("(", {mappingKind: "anchor", node: expression})
+    writer.mapped(expression.callee, {mappingKind: "exact", node: expression, path, role: "callee"})
+    writer.mapped("(", {mappingKind: "anchor", node: expression, path})
     expression.arguments.forEach((argument, index) => {
-      if (index > 0) writer.synthetic(", ", "argument separator", [expression])
-      emitExpression(writer, argument, language, emitIdentifier)
+      if (index > 0) writer.synthetic(", ", "argument separator", [expression], [path])
+      emitExpression(writer, argument, `${path}/arguments/${index}`, language, emitIdentifier)
     })
-    writer.mapped(")", {mappingKind: "anchor", node: expression})
+    writer.mapped(")", {mappingKind: "anchor", node: expression, path})
     return
   }
 
-  writer.mapped("(", {mappingKind: "anchor", node: expression})
-  emitExpression(writer, expression.left, language, emitIdentifier)
-  writer.synthetic(" ", "operator spacing", [expression])
-  writer.mapped(expression.operator, {mappingKind: "exact", node: expression, role: "operator"})
-  writer.synthetic(" ", "operator spacing", [expression])
-  emitExpression(writer, expression.right, language, emitIdentifier)
-  writer.mapped(")", {mappingKind: "anchor", node: expression})
+  writer.mapped("(", {mappingKind: "anchor", node: expression, path})
+  emitExpression(writer, expression.left, `${path}/left`, language, emitIdentifier)
+  writer.synthetic(" ", "operator spacing", [expression], [path])
+  writer.mapped(expression.operator, {mappingKind: "exact", node: expression, path, role: "operator"})
+  writer.synthetic(" ", "operator spacing", [expression], [path])
+  emitExpression(writer, expression.right, `${path}/right`, language, emitIdentifier)
+  writer.mapped(")", {mappingKind: "anchor", node: expression, path})
 }
