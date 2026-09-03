@@ -42,8 +42,10 @@ export function withParserRanges(node, ranges) {
 export function annotateParsedModule(module, {filename, language, source}) {
   const sources = [{content: source, filename, id: "source:0", language}]
   const entries = semanticEntries(module)
-  /** @type {Map<object, import("./types.js").SemanticNodeProvenance>} */
-  const records = new Map()
+  /** @type {Map<string, import("./types.js").SemanticNodeProvenance>} */
+  const recordsByPath = new Map()
+  /** @type {import("./types.js").SemanticNodeProvenance[]} */
+  const records = []
 
   for (const [index, entry] of entries.entries()) {
     const ranges = parserRanges.get(entry.node) ?? {}
@@ -62,15 +64,16 @@ export function annotateParsedModule(module, {filename, language, source}) {
       ranges: sourceProvenance.ranges
     }
 
-    records.set(entry.node, record)
+    records.push(record)
+    recordsByPath.set(entry.path, record)
     entry.node.sourceProvenance = sourceProvenance
   }
 
-  const symbols = resolveSymbols(module, records)
+  const symbols = resolveSymbols(module, recordsByPath)
 
   module.provenance = {
     coordinateSystem: "utf16",
-    nodes: [...records.values()],
+    nodes: records,
     schema: "SemantifoldProvenance",
     sources,
     symbols,
@@ -84,7 +87,7 @@ export function annotateParsedModule(module, {filename, language, source}) {
  * Rebuilds canonical generation metadata without trusting caller-provided identities.
  * @param {import("./types.js").SemanticModule} module - Semantic module.
  * @param {{filename: string, content: string, language?: import("./types.js").SemanticLanguage}[]} [providedSources] - Additional source content.
- * @returns {{provenance: import("./types.js").SemanticProvenance, recordFor: (node: import("./types.js").SemanticNode) => import("./types.js").SemanticNodeProvenance}} Canonical index.
+ * @returns {{provenance: import("./types.js").SemanticProvenance, recordFor: (node: import("./types.js").SemanticNode, path?: string) => import("./types.js").SemanticNodeProvenance}} Canonical index.
  */
 export function createGenerationIndex(module, providedSources = []) {
   const entries = semanticEntries(module)
@@ -108,8 +111,12 @@ export function createGenerationIndex(module, providedSources = []) {
     if (!sources.some((source) => source.filename == location.filename)) addSource(location.filename, null, null)
   }
 
-  /** @type {Map<object, import("./types.js").SemanticNodeProvenance>} */
-  const records = new Map()
+  /** @type {Map<object, import("./types.js").SemanticNodeProvenance[]>} */
+  const recordsByNode = new Map()
+  /** @type {Map<string, import("./types.js").SemanticNodeProvenance>} */
+  const recordsByPath = new Map()
+  /** @type {import("./types.js").SemanticNodeProvenance[]} */
+  const records = []
 
   for (const [index, entry] of entries.entries()) {
     const located = "location" in entry.node ? entry.node.location : entry.ownerLocation
@@ -121,19 +128,26 @@ export function createGenerationIndex(module, providedSources = []) {
       ? normalizeOrigin(associated.origin, priorSourcesById, sources) ?? sourceOrigin(fallbackSource, fallbackLocation)
       : sourceOrigin(fallbackSource, fallbackLocation)
 
-    records.set(entry.node, {
+    const record = {
       id: `node:${index}`,
       kind: entry.node.kind,
       origin,
       path: entry.path,
       ranges
-    })
+    }
+
+    records.push(record)
+    recordsByPath.set(entry.path, record)
+    const occurrences = recordsByNode.get(entry.node) ?? []
+
+    occurrences.push(record)
+    recordsByNode.set(entry.node, occurrences)
   }
 
-  const symbols = resolveSymbols(module, records)
+  const symbols = resolveSymbols(module, recordsByPath)
   const provenance = /** @type {import("./types.js").SemanticProvenance} */ ({
     coordinateSystem: "utf16",
-    nodes: [...records.values()],
+    nodes: records,
     schema: "SemantifoldProvenance",
     sources,
     symbols,
@@ -142,12 +156,22 @@ export function createGenerationIndex(module, providedSources = []) {
 
   return {
     provenance,
-    recordFor(node) {
-      const record = records.get(node)
+    recordFor(node, path) {
+      const occurrences = recordsByNode.get(node)
 
-      if (!record) throw new RangeError("Semantic node is not part of this module.")
+      if (!occurrences) throw new RangeError("Semantic node is not part of this module.")
+      if (path !== undefined) {
+        const record = occurrences.find((candidate) => candidate.path == path)
 
-      return record
+        if (!record) throw new RangeError(`Semantic node does not occur at '${path}'.`)
+
+        return record
+      }
+      if (occurrences.length != 1) {
+        throw new RangeError("Shared semantic node requires an occurrence path.")
+      }
+
+      return occurrences[0]
     }
   }
 
@@ -477,7 +501,7 @@ export function semanticEntries(module) {
 /**
  * Resolves declarations and references after semantic validation.
  * @param {import("./types.js").SemanticModule} module - Validated module.
- * @param {Map<object, import("./types.js").SemanticNodeProvenance>} records - Node records.
+ * @param {Map<string, import("./types.js").SemanticNodeProvenance>} records - Node records by occurrence path.
  * @returns {import("./types.js").SemanticSymbolProvenance[]} Symbols.
  */
 function resolveSymbols(module, records) {
@@ -486,18 +510,21 @@ function resolveSymbols(module, records) {
   /** @type {Map<string, string>} */
   const functions = new Map()
 
-  for (const declaration of module.functions) {
-    functions.set(declaration.name, declare(declaration, declaration.name, "function"))
+  for (const [index, declaration] of module.functions.entries()) {
+    functions.set(declaration.name, declare(declaration, declaration.name, "function", `/functions/${index}`))
   }
 
-  for (const declaration of module.functions) {
+  for (const [index, declaration] of module.functions.entries()) {
+    const declarationPath = `/functions/${index}`
     const scope = new Map()
 
-    for (const parameter of declaration.parameters) scope.set(parameter.name, declare(parameter, parameter.name, "parameter"))
-    visitStatements(declaration.body, scope)
+    for (const [parameterIndex, parameter] of declaration.parameters.entries()) {
+      scope.set(parameter.name, declare(parameter, parameter.name, "parameter", `${declarationPath}/parameters/${parameterIndex}`))
+    }
+    visitStatements(declaration.body, scope, `${declarationPath}/body`)
   }
 
-  visitStatements(module.entryPoint.body, new Map())
+  visitStatements(module.entryPoint.body, new Map(), "/entryPoint/body")
 
   return symbols
 
@@ -506,10 +533,11 @@ function resolveSymbols(module, records) {
    * @param {import("./types.js").FunctionDeclaration | import("./types.js").Parameter | import("./types.js").LocalDeclaration} node - Declaration.
    * @param {string} name - Symbol name.
    * @param {import("./types.js").SemanticSymbolKind} kind - Symbol kind.
+   * @param {string} path - Declaration occurrence path.
    * @returns {string} Symbol identity.
    */
-  function declare(node, name, kind) {
-    const record = records.get(node)
+  function declare(node, name, kind, path) {
+    const record = records.get(path)
 
     if (!record) throw new Error(`Missing provenance for ${node.kind}.`)
 
@@ -526,24 +554,27 @@ function resolveSymbols(module, records) {
    * Resolves references in one statement sequence.
    * @param {(import("./types.js").FunctionStatement | import("./types.js").PrintStatement)[]} statements - Statements.
    * @param {Map<string, string>} parent - Visible bindings.
+   * @param {string} path - Statement sequence path.
    * @returns {void}
    */
-  function visitStatements(statements, parent) {
+  function visitStatements(statements, parent, path) {
     const scope = new Map(parent)
 
-    for (const statement of statements) {
+    for (const [index, statement] of statements.entries()) {
+      const statementPath = `${path}/${index}`
+
       if (statement.kind == "LocalDeclaration") {
-        visitExpression(statement.initializer, scope)
-        scope.set(statement.name, declare(statement, statement.name, "local"))
+        visitExpression(statement.initializer, scope, `${statementPath}/initializer`)
+        scope.set(statement.name, declare(statement, statement.name, "local", statementPath))
       } else if (statement.kind == "AssignmentStatement") {
-        reference(statement.target, scope.get(statement.target.name), "write")
-        visitExpression(statement.expression, scope)
+        reference(statement.target, scope.get(statement.target.name), "write", `${statementPath}/target`)
+        visitExpression(statement.expression, scope, `${statementPath}/expression`)
       } else if (statement.kind == "ReturnStatement" || statement.kind == "PrintStatement") {
-        visitExpression(statement.expression, scope)
+        visitExpression(statement.expression, scope, `${statementPath}/expression`)
       } else if (statement.kind == "IfStatement") {
-        visitExpression(statement.condition, scope)
-        visitStatements(statement.consequent, scope)
-        visitStatements(statement.alternate, scope)
+        visitExpression(statement.condition, scope, `${statementPath}/condition`)
+        visitStatements(statement.consequent, scope, `${statementPath}/consequent`)
+        visitStatements(statement.alternate, scope, `${statementPath}/alternate`)
       }
     }
   }
@@ -552,16 +583,17 @@ function resolveSymbols(module, records) {
    * Resolves references in one expression.
    * @param {import("./types.js").Expression} expression - Expression.
    * @param {Map<string, string>} scope - Visible bindings.
+   * @param {string} path - Expression occurrence path.
    * @returns {void}
    */
-  function visitExpression(expression, scope) {
-    if (expression.kind == "IdentifierExpression") reference(expression, scope.get(expression.name), "read")
+  function visitExpression(expression, scope, path) {
+    if (expression.kind == "IdentifierExpression") reference(expression, scope.get(expression.name), "read", path)
     else if (expression.kind == "CallExpression") {
-      reference(expression, functions.get(expression.callee), "call")
-      for (const argument of expression.arguments) visitExpression(argument, scope)
+      reference(expression, functions.get(expression.callee), "call", path)
+      for (const [index, argument] of expression.arguments.entries()) visitExpression(argument, scope, `${path}/arguments/${index}`)
     } else if (expression.kind == "BinaryExpression") {
-      visitExpression(expression.left, scope)
-      visitExpression(expression.right, scope)
+      visitExpression(expression.left, scope, `${path}/left`)
+      visitExpression(expression.right, scope, `${path}/right`)
     }
   }
 
@@ -570,12 +602,13 @@ function resolveSymbols(module, records) {
    * @param {import("./types.js").IdentifierExpression | import("./types.js").CallExpression} node - Reference node.
    * @param {string | undefined} symbolId - Resolved symbol.
    * @param {"read" | "write" | "call"} role - Reference role.
+   * @param {string} path - Reference occurrence path.
    * @returns {void}
    */
-  function reference(node, symbolId, role) {
+  function reference(node, symbolId, role, path) {
     if (!symbolId) return
 
-    const record = records.get(node)
+    const record = records.get(path)
     const symbol = symbols.find((candidate) => candidate.id == symbolId)
 
     if (!record || !symbol) throw new Error(`Missing provenance while resolving ${node.kind}.`)

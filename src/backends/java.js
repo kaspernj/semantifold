@@ -18,13 +18,23 @@ export function generateJava(module, writer) {
     writer.synthetic("  ", "indentation", [declaration])
     writer.mapped("private static", {mappingKind: "anchor", node: declaration})
     writer.synthetic(" ", "method spacing", [declaration])
-    writer.mapped(emitScalarType("java", declaration.returnType), {mappingKind: "exact", node: declaration.returnType, role: "type"})
+    writer.mapped(emitScalarType("java", declaration.returnType), {
+      mappingKind: "exact",
+      node: declaration.returnType,
+      path: `/functions/${functionIndex}/returnType`,
+      role: "type"
+    })
     writer.synthetic(" ", "method spacing", [declaration])
     writer.mapped(declaration.name, {mappingKind: "exact", node: declaration, role: "name"})
     writer.mapped("(", {mappingKind: "anchor", node: declaration})
     declaration.parameters.forEach((parameter, index) => {
       if (index > 0) writer.synthetic(", ", "parameter separator", [declaration])
-      writer.mapped(emitScalarType("java", parameter.type), {mappingKind: "exact", node: parameter.type, role: "type"})
+      writer.mapped(emitScalarType("java", parameter.type), {
+        mappingKind: "exact",
+        node: parameter.type,
+        path: `/functions/${functionIndex}/parameters/${index}/type`,
+        role: "type"
+      })
       writer.synthetic(" ", "parameter spacing", [parameter])
       writer.mapped(parameter.name, {mappingKind: "exact", node: parameter, role: "name"})
     })

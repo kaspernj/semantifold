@@ -18,6 +18,7 @@ import {
   originalPositionFor,
   parse
 } from "../index.js"
+import {SourceWriter} from "../src/backends/writer.js"
 
 const execFileAsync = promisify(execFile)
 const baseSource = `function difference(left: number, right: number): number {
@@ -136,6 +137,107 @@ describe("reviewed source-map corrections", () => {
     assert.equal(originalPositionFor(importedPrefix, {offset: 0}).location, undefined)
     assert.equal(traceOriginalPositionFor(prefixTrace, {column: 1, line: 1}).source, "in.js")
     assert.equal(originalPositionFor(importedPrefix, {offset: 1}).location.filename, "in.js")
+  })
+
+  it("prefers an exact source-content override over suffix candidates", () => {
+    const mapping = importedSourceMap(["foo.js", "nested/foo.js"], [
+      {content: "exact override", filename: "foo.js", language: "javascript"}
+    ])
+
+    expect(mapping.sources.map(({content, filename}) => ({content, filename}))).toEqual([
+      {content: "exact override", filename: "foo.js"},
+      {content: "map content 1", filename: "nested/foo.js"}
+    ])
+  })
+
+  it("applies a uniquely identifying suffix source-content override", () => {
+    const mapping = importedSourceMap(["nested/foo.js", "other.js"], [
+      {content: "suffix override", filename: "foo.js", language: "javascript"}
+    ])
+
+    expect(mapping.sources.map(({content, filename}) => ({content, filename}))).toEqual([
+      {content: "suffix override", filename: "foo.js"},
+      {content: "map content 1", filename: "other.js"}
+    ])
+  })
+
+  it("rejects an ambiguous suffix source-content override", () => {
+    assert.throws(() => importedSourceMap(["a/foo.js", "b/foo.js"], [
+      {content: "ambiguous override", filename: "foo.js", language: "javascript"}
+    ]), /ambiguous.*foo\.js/iu)
+  })
+
+  it("maps aliased semantic nodes by occurrence path deterministically", () => {
+    const module = parse({filename: "program.ts", language: "typescript", source: baseSource})
+    const declaration = module.functions[0]
+    const sharedType = /** @type {import("../src/semantic/types.js").TypeReference} */ ({
+      kind: "TypeReference",
+      name: "integer"
+    })
+
+    declaration.parameters[0].type = sharedType
+    declaration.parameters[1].type = sharedType
+    declaration.returnType = sharedType
+    const first = generateArtifact({language: "typescript", module})
+    const second = generateArtifact({language: "typescript", module})
+    const records = first.mapping.nodes.filter((record) => record.kind == "TypeReference")
+    const expected = [
+      ["/functions/0/parameters/0/type", declaration.parameters[0].location.start.offset],
+      ["/functions/0/parameters/1/type", declaration.parameters[1].location.start.offset],
+      ["/functions/0/returnType", declaration.location.start.offset]
+    ]
+
+    expect(records.map((record) => [record.path, primaryOffset(record.origin)])).toEqual(expected)
+    const recordPaths = new Map(records.map((record) => [record.id, record.path]))
+    const typeSpans = first.mapping.spans.filter((span) => span.role == "type" && recordPaths.has(span.nodeId))
+
+    expect(typeSpans.map((span) => [recordPaths.get(span.nodeId), primaryOffset(span.origin)])).toEqual(expected)
+    expect(JSON.stringify(first.mapping)).toEqual(JSON.stringify(second.mapping))
+  })
+
+  it("retains and deduplicates every transformed origin in synthetic context", () => {
+    const module = parse({filename: "program.ts", language: "typescript", source: baseSource})
+    const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (module.functions[0].body.at(-1))
+    const provenance = branch.sourceProvenance
+
+    assert.ok(provenance)
+    provenance.origin = {
+      kind: "derived",
+      origins: [
+        {location: branch.condition.location, role: "condition", sourceId: "source:0"},
+        {location: branch.location, role: "branch", sourceId: "source:0"}
+      ]
+    }
+    const writer = new SourceWriter({filename: "generated.js", language: "javascript", module})
+
+    writer.synthetic("  ", "transformed indentation", [branch, branch])
+    const mapping = writer.finish()
+    const origin = mapping.spans[0].origin
+
+    assert.equal(origin.kind, "synthetic")
+    expect(origin.relatedOrigins.map(({location, role, sourceId}) => ({
+      end: location.end.offset,
+      role,
+      sourceId,
+      start: location.start.offset
+    }))).toEqual([
+      {
+        end: branch.condition.location.end.offset,
+        role: "condition",
+        sourceId: "source:0",
+        start: branch.condition.location.start.offset
+      },
+      {
+        end: branch.location.end.offset,
+        role: "branch",
+        sourceId: "source:0",
+        start: branch.location.start.offset
+      }
+    ])
+    expect(generatedPositionFor(mapping, {
+      offset: branch.location.end.offset - 1,
+      sourceId: "source:0"
+    }).length).toEqual(1)
   })
 
   it("uses canonical CRLF positions in rich forward and reverse lookups", () => {
@@ -545,4 +647,33 @@ function mixedCompositionFixture() {
       sourceId: "source:unrelated"
     }
   }
+}
+
+/**
+ * Imports a minimal V3 map with caller source-content overrides.
+ * @param {string[]} sources - V3 source names.
+ * @param {{filename: string, content: string, language?: import("../src/semantic/types.js").SemanticLanguage}[]} overrides - Overrides.
+ * @returns {import("../src/semantic/types.js").SemantifoldMapping} Imported rich mapping.
+ */
+function importedSourceMap(sources, overrides) {
+  return mappingFromSourceMap({
+    file: "generated.js",
+    mappings: "AAAA",
+    names: [],
+    sources,
+    sourcesContent: sources.map((_, index) => `map content ${index}`),
+    version: 3
+  }, {content: "x", filename: "generated.js", language: "javascript", sources: overrides})
+}
+
+/**
+ * Returns the first closed origin offset.
+ * @param {import("../src/semantic/types.js").SemanticOrigin} origin - Closed provenance.
+ * @returns {number} Primary offset.
+ */
+function primaryOffset(origin) {
+  if (origin.kind == "source") return origin.location.start.offset
+  if (origin.kind == "derived") return origin.origins[0].location.start.offset
+
+  return origin.relatedOrigins[0].location.start.offset
 }

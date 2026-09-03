@@ -21,13 +21,19 @@ export function generateTypeScript(module, writer) {
       if (index > 0) writer.synthetic(", ", "parameter separator", [declaration])
       writer.mapped(parameter.name, {mappingKind: "exact", node: parameter, role: "name"})
       writer.synthetic(": ", "type separator", [parameter])
-      writer.mapped(emitScalarType("typescript", parameter.type), {mappingKind: "exact", node: parameter.type, role: "type"})
+      writer.mapped(emitScalarType("typescript", parameter.type), {
+        mappingKind: "exact",
+        node: parameter.type,
+        path: `/functions/${functionIndex}/parameters/${index}/type`,
+        role: "type"
+      })
     })
     writer.mapped(")", {mappingKind: "anchor", node: declaration})
     writer.synthetic(": ", "return type separator", [declaration])
     writer.mapped(emitScalarType("typescript", declaration.returnType), {
       mappingKind: "exact",
       node: declaration.returnType,
+      path: `/functions/${functionIndex}/returnType`,
       role: "type"
     })
     writer.synthetic(" ", "function spacing", [declaration])

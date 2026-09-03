@@ -1,6 +1,6 @@
 // @ts-check
 
-import {createGenerationIndex, primaryLocation} from "../semantic/provenance.js"
+import {createGenerationIndex} from "../semantic/provenance.js"
 
 /** Source-aware deterministic generated-output builder. */
 export class SourceWriter {
@@ -43,12 +43,13 @@ export class SourceWriter {
    * @param {"exact" | "anchor"} annotation.mappingKind - Mapping precision.
    * @param {string} [annotation.role] - Semantic token role.
    * @param {string} [annotation.name] - Source Map name.
+   * @param {string} [annotation.path] - JSON Pointer for a shared node occurrence.
    * @returns {void}
    */
-  mapped(text, {mappingKind, name, node, role}) {
+  mapped(text, {mappingKind, name, node, path, role}) {
     if (text.length == 0) return
 
-    const record = this.index.recordFor(node)
+    const record = this.index.recordFor(node, path)
     const roleLocation = role ? record.ranges[role] : undefined
     const origin = roleLocation ? this.#sourceOrigin(roleLocation, record.origin) : record.origin
     const precision = mappingKind == "exact" && role && !roleLocation ? "anchor" : mappingKind
@@ -76,17 +77,24 @@ export class SourceWriter {
   synthetic(text, reason, relatedNodes = []) {
     if (text.length == 0) return
 
+    /** @type {Set<string>} */
+    const seen = new Set()
     const relatedOrigins = relatedNodes.flatMap((node) => {
       const record = this.index.recordFor(node)
-      const location = primaryLocation(record.origin)
 
-      if (!location) return []
+      return relatedOriginsFor(record.origin).flatMap((related) => {
+        const contextual = {
+          ...related,
+          nodeId: related.nodeId ?? record.id,
+          role: related.role ?? "context"
+        }
+        const key = relatedOriginKey(contextual)
 
-      const sourceId = record.origin.kind == "source" ? record.origin.sourceId : record.origin.kind == "derived"
-        ? record.origin.origins[0]?.sourceId
-        : record.origin.relatedOrigins[0]?.sourceId
+        if (seen.has(key)) return []
+        seen.add(key)
 
-      return sourceId ? [{location, nodeId: record.id, role: "context", sourceId}] : []
+        return [contextual]
+      })
     })
 
     this.#append(text, {mappingKind: "synthetic", origin: {kind: "synthetic", reason, relatedOrigins}})
@@ -163,4 +171,33 @@ export class SourceWriter {
 
     return source ? {kind: "source", location, sourceId: source.id} : fallback
   }
+}
+
+/**
+ * Expands every closed provenance range in semantic order.
+ * @param {import("../semantic/types.js").SemanticOrigin} origin - Closed provenance.
+ * @returns {import("../semantic/types.js").RelatedOrigin[]} Related ranges.
+ */
+function relatedOriginsFor(origin) {
+  if (origin.kind == "source") return [{location: origin.location, sourceId: origin.sourceId}]
+  if (origin.kind == "derived") return origin.origins
+
+  return origin.relatedOrigins
+}
+
+/**
+ * Builds a deterministic identity for one contextual related origin.
+ * @param {import("../semantic/types.js").RelatedOrigin} origin - Related origin.
+ * @returns {string} Stable identity.
+ */
+function relatedOriginKey(origin) {
+  return JSON.stringify([
+    origin.sourceId,
+    origin.location.filename,
+    origin.location.start.offset,
+    origin.location.end.offset,
+    origin.nodeId ?? null,
+    origin.symbolId ?? null,
+    origin.role ?? null
+  ])
 }

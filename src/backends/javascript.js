@@ -14,9 +14,14 @@ export function generateJavaScript(module, writer) {
     if (functionIndex > 0) writer.synthetic("\n\n", "declaration separator", [declaration])
 
     writer.synthetic("/**\n * Generated semantic function.\n", "JavaScript type scaffolding", [declaration])
-    for (const parameter of declaration.parameters) {
+    for (const [parameterIndex, parameter] of declaration.parameters.entries()) {
       writer.synthetic(" * @param {", "JavaScript type scaffolding", [parameter])
-      writer.mapped(emitScalarType("javascript", parameter.type), {mappingKind: "exact", node: parameter.type, role: "type"})
+      writer.mapped(emitScalarType("javascript", parameter.type), {
+        mappingKind: "exact",
+        node: parameter.type,
+        path: `/functions/${functionIndex}/parameters/${parameterIndex}/type`,
+        role: "type"
+      })
       writer.synthetic("} ", "JavaScript type scaffolding", [parameter])
       writer.mapped(parameter.name, {mappingKind: "exact", node: parameter, role: "name"})
       writer.synthetic(" - Semantic parameter.\n", "JavaScript type scaffolding", [parameter])
@@ -25,6 +30,7 @@ export function generateJavaScript(module, writer) {
     writer.mapped(emitScalarType("javascript", declaration.returnType), {
       mappingKind: "exact",
       node: declaration.returnType,
+      path: `/functions/${functionIndex}/returnType`,
       role: "type"
     })
     writer.synthetic("} Semantic result.\n */\n", "JavaScript type scaffolding", [declaration])

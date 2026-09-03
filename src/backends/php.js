@@ -21,13 +21,23 @@ export function generatePhp(module, writer) {
     writer.mapped("(", {mappingKind: "anchor", node: declaration})
     declaration.parameters.forEach((parameter, index) => {
       if (index > 0) writer.synthetic(", ", "parameter separator", [declaration])
-      writer.mapped(emitScalarType("php", parameter.type), {mappingKind: "exact", node: parameter.type, role: "type"})
+      writer.mapped(emitScalarType("php", parameter.type), {
+        mappingKind: "exact",
+        node: parameter.type,
+        path: `/functions/${functionIndex}/parameters/${index}/type`,
+        role: "type"
+      })
       writer.synthetic(" ", "parameter spacing", [parameter])
       writer.mapped(`$${parameter.name}`, {mappingKind: "exact", node: parameter, role: "name"})
     })
     writer.mapped(")", {mappingKind: "anchor", node: declaration})
     writer.synthetic(": ", "return type separator", [declaration])
-    writer.mapped(emitScalarType("php", declaration.returnType), {mappingKind: "exact", node: declaration.returnType, role: "type"})
+    writer.mapped(emitScalarType("php", declaration.returnType), {
+      mappingKind: "exact",
+      node: declaration.returnType,
+      path: `/functions/${functionIndex}/returnType`,
+      role: "type"
+    })
     writer.synthetic("\n", "line break", [declaration])
     writer.mapped("{", {mappingKind: "anchor", node: declaration})
     writer.synthetic("\n", "line break", [declaration])

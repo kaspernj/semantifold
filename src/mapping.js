@@ -458,17 +458,39 @@ export function mappingFromSourceMap(sourceMap, {content, filename, language, so
   const generatedCoordinates = createCoordinateIndex(content)
   /** @type {import("./semantic/types.js").RegisteredSource[]} */
   const sources = []
+  /** @type {Map<number, {filename: string, content: string, language?: import("./semantic/types.js").SemanticLanguage}>} */
+  const overridesBySourceIndex = new Map()
+
+  for (const override of provided) {
+    const exact = trace.sources.flatMap((source, index) => source == override.filename ? [index] : [])
+
+    if (exact.length > 0) {
+      for (const index of exact) overridesBySourceIndex.set(index, override)
+      continue
+    }
+    const suffix = trace.sources.flatMap((source, index) => source?.endsWith(`/${override.filename}`) ? [index] : [])
+
+    if (suffix.length > 1) {
+      throw new RangeError(`Ambiguous Source Map source content override '${override.filename}' matches multiple sources.`)
+    }
+    if (suffix.length == 1 && !overridesBySourceIndex.has(suffix[0])) overridesBySourceIndex.set(suffix[0], override)
+  }
+  /** @type {Map<string, import("./semantic/types.js").RegisteredSource>} */
+  const sourcesByMapName = new Map()
 
   trace.sources.forEach((source, index) => {
     if (source == null) return
 
-    const providedSource = provided.find((candidate) => candidate.filename == source || source.endsWith(`/${candidate.filename}`))
-    sources.push({
+    const providedSource = overridesBySourceIndex.get(index)
+    const registered = {
       content: providedSource?.content ?? trace.sourcesContent?.[index] ?? null,
       filename: providedSource?.filename ?? source,
       id: `source:${sources.length}`,
       language: providedSource?.language ?? null
-    })
+    }
+
+    sources.push(registered)
+    if (!sourcesByMapName.has(source)) sourcesByMapName.set(source, registered)
   })
   const sourceCoordinates = new Map(sources.filter((source) => source.content != null)
     .map((source) => [source.id, createCoordinateIndex(/** @type {string} */ (source.content))]))
@@ -500,7 +522,7 @@ export function mappingFromSourceMap(sourceMap, {content, filename, language, so
       return
     }
 
-    const source = sources.find((candidate) => candidate.filename == mapping.source || mapping.source?.endsWith(`/${candidate.filename}`))
+    const source = sourcesByMapName.get(mapping.source)
 
     if (!source) throw new RangeError(`Source Map references unregistered source '${mapping.source}'.`)
 
