@@ -2,7 +2,7 @@
 
 import {unsupportedCapability} from "../diagnostic.js"
 import {validateBackendTypes} from "../semantic/validate.js"
-import {validateTargetIdentifier} from "./identifiers.js"
+import {validateTargetBindingIdentifier, validateTargetIdentifier} from "./identifiers.js"
 import {emitStringLiteral} from "./scalars.js"
 
 /**
@@ -26,7 +26,7 @@ export function validateBackendModule(module, language) {
     validateRestrictedSequence(functionDeclaration.body, "IfStatement", language)
 
     for (const parameter of functionDeclaration.parameters) {
-      validateTargetIdentifier(language, parameter.name, "parameter", parameter.location)
+      validateTargetBindingIdentifier(language, parameter.name, "parameter", parameter.location)
 
     }
 
@@ -94,7 +94,7 @@ function validateRestrictedSequence(statements, terminalKind, language) {
       if (typeof declaration.mutable != "boolean") {
         unsupportedCapability(language, "local declaration with invalid mutability", declaration.location)
       }
-      validateTargetIdentifier(language, declaration.name, "local", declaration.location)
+      validateTargetBindingIdentifier(language, declaration.name, "local", declaration.location)
       validateExpression(declaration.initializer, language, declaration.location)
       continue
     }
@@ -129,7 +129,7 @@ function validateAssignmentTarget(target, language, ownerLocation) {
     return unsupportedCapability(language, `assignment target ${String(Reflect.get(target, "kind"))}`, location)
   }
 
-  validateTargetIdentifier(language, candidate.name, "assignment target", location)
+  validateTargetBindingIdentifier(language, candidate.name, "assignment target", location)
 }
 
 /**

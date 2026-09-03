@@ -72,3 +72,19 @@ export function validateTargetIdentifier(language, name, role, location) {
     unsupportedCapability(language, `${role} identifier '${name}'`, location)
   }
 }
+
+/**
+ * Validates a binding identifier against target restrictions beyond general identifier syntax.
+ * @param {import("../semantic/types.js").SemanticLanguage} language - Target language.
+ * @param {unknown} name - Candidate semantic identifier.
+ * @param {string} role - Binding role for diagnostics.
+ * @param {import("../semantic/types.js").SourceLocation | undefined} location - Originating location.
+ * @returns {void}
+ */
+export function validateTargetBindingIdentifier(language, name, role, location) {
+  validateTargetIdentifier(language, name, role, location)
+
+  if (language == "typescript" && (name == "arguments" || name == "eval")) {
+    unsupportedCapability(language, `${role} identifier '${name}'`, location)
+  }
+}

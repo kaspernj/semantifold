@@ -1,5 +1,6 @@
 // @ts-check
 
+import assert from "node:assert/strict"
 import {execFile} from "node:child_process"
 import {mkdtemp, readFile, rm, writeFile} from "node:fs/promises"
 import os from "node:os"
@@ -175,6 +176,53 @@ describe("source backends", () => {
 
       expect({language, module: withoutLocations(generatedModule)}).toEqual({language, module: withoutLocations(semanticModule)})
       expect({language, output}).toEqual({language, output: "yes\n"})
+    }
+  })
+
+  it("rejects TypeScript strict-mode local bindings before the real compiler while JavaScript remains legal", async () => {
+    const moduleWithLocal = (name) => parse({
+      filename: `${name}.js`,
+      language: "javascript",
+      source: `/**
+ * @param {boolean} flag - Selection flag.
+ * @param {string} fallback - Fallback value.
+ * @returns {string} Selected value.
+ */
+function select(flag, fallback) {
+  /** @type {string} */
+  let ${name} = fallback
+  ${name} = "yes"
+  if (flag) return ${name}
+  else return fallback
+}
+console.log(select(true, "no"))
+`
+    })
+
+    for (const name of ["arguments", "eval"]) {
+      const module = moduleWithLocal(name)
+      const javascript = generate({language: "javascript", module})
+
+      expect(await executeGenerated("javascript", javascript)).toEqual("yes\n")
+      await assert.rejects(
+        () => executeGenerated("typescript", javascript),
+        (error) => error instanceof Error &&
+          (("stdout" in error && typeof error.stdout == "string" && error.stdout.includes("TS1215")) ||
+            ("stderr" in error && typeof error.stderr == "string" && error.stderr.includes("TS1215"))),
+        name
+      )
+      assert.throws(
+        () => generate({language: "typescript", module}),
+        (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
+          error.language == "typescript" && error.location?.filename == `${name}.js` && error.location.start.line == 8,
+        name
+      )
+    }
+
+    for (const name of ["argument", "evaluate"]) {
+      const generated = generate({language: "typescript", module: moduleWithLocal(name)})
+
+      expect({name, output: await executeGenerated("typescript", generated)}).toEqual({name, output: "yes\n"})
     }
   })
 

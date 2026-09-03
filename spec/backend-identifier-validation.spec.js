@@ -67,6 +67,48 @@ console.log(select(true, "no"))
     )
   })
 
+  it("rejects TypeScript strict-mode parameter and assignment binding names at their own locations", () => {
+    const parameterSource = `function select(flag: boolean, fallback: string): string {
+  if (flag) return fallback
+  else return fallback
+}
+console.log(select(true, "no"))
+`
+    const parameterModule = parse({filename: "strict-parameter.ts", language: "typescript", source: parameterSource})
+    const parameterBranch = /** @type {import("../src/semantic/types.js").IfStatement} */ (parameterModule.functions[0].body[0])
+    const parameterReference = /** @type {import("../src/semantic/types.js").IdentifierExpression} */ (parameterBranch.condition)
+
+    parameterModule.functions[0].parameters[0].name = "arguments"
+    parameterReference.name = "arguments"
+
+    assert.throws(
+      () => generate({language: "typescript", module: parameterModule}),
+      (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
+        error.language == "typescript" && error.location?.filename == "strict-parameter.ts" && error.location.start.line == 1
+    )
+
+    const assignmentSource = `function select(flag: boolean, fallback: string): string {
+  let result: string = fallback
+  result = "yes"
+  if (flag) return result
+  else return fallback
+}
+console.log(select(true, "no"))
+`
+    const assignmentModule = parse({filename: "strict-assignment.ts", language: "typescript", source: assignmentSource})
+    const assignment = /** @type {import("../src/semantic/types.js").AssignmentStatement} */ (assignmentModule.functions[0].body[1])
+
+    assignment.target.name = "eval"
+
+    assert.throws(
+      () => generate({language: "typescript", module: assignmentModule}),
+      (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
+        error.language == "typescript" && error.location?.filename == "strict-assignment.ts" && error.location.start.line == 3
+    )
+
+    assert.doesNotThrow(() => generate({language: "javascript", module: parameterModule}))
+  })
+
   it("rejects only entry locals that capture backend-owned scaffolding names", () => {
     const moduleWithEntryLocal = (name) => parse({
       filename: `${name}.ts`,
