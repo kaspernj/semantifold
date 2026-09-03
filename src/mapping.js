@@ -184,15 +184,7 @@ export function composeMappings(outer, inner) {
 
   for (const source of outer.sources) {
     if (sourceRepresentsGenerated(source, inner.generated)) continue
-    let composedSource = sources.find((candidate) => sameRegisteredSource(candidate, source))
-
-    if (!composedSource) {
-      while (sourceIds.has(`source:${nextSourceIndex}`)) nextSourceIndex++
-      composedSource = {...source, id: `source:${nextSourceIndex}`}
-      sourceIds.add(composedSource.id)
-      sources.push(composedSource)
-    }
-    outerSourceIds.set(source.id, composedSource.id)
+    retainOuterSource(source.id)
   }
 
   const spans = outer.spans.flatMap((span) => {
@@ -208,6 +200,11 @@ export function composeMappings(outer, inner) {
     const traced = trace?.traced
 
     if (!traced) {
+      for (const related of relatedOriginsForOrigin(span.origin)) {
+        const relatedTrace = traceRelatedOrigin(related)
+
+        if (relatedTrace && isGeneratedEofPoint(related)) retainOuterSource(related.sourceId)
+      }
       const unidentified = {...span}
 
       delete unidentified.nodeId
@@ -351,7 +348,12 @@ export function composeMappings(outer, inner) {
           ? trace.overlapping
           : trace?.traced ? [trace.traced] : []
 
-      if (tracedSpans.length == 0) throw new RangeError(`Unable to trace intermediate origin '${related.location.filename}'.`)
+      if (tracedSpans.length == 0) {
+        if (!isGeneratedEofPoint(related)) throw new RangeError(`Unable to trace intermediate origin '${related.location.filename}'.`)
+        retainOuterSource(related.sourceId)
+
+        return [remapRelatedOriginSourceId(related, outerSourceIds)]
+      }
 
       return tracedSpans.flatMap((tracedSpan) => relatedOriginsForSpan(tracedSpan).map((tracedRelated) => definedProperties({
           ...tracedRelated,
@@ -360,6 +362,37 @@ export function composeMappings(outer, inner) {
           symbolId: tracedRelated.symbolId ?? tracedSpan.symbolId
         })))
     })
+  }
+
+  /**
+   * Retains one outer source that survives composition and assigns its composed identity.
+   * @param {string} sourceId - Outer source registry identity.
+   * @returns {void}
+   */
+  function retainOuterSource(sourceId) {
+    if (outerSourceIds.has(sourceId)) return
+    const source = outerIndex.sourcesById.get(sourceId)
+
+    if (!source) throw new RangeError(`Unknown outer mapping source '${sourceId}'.`)
+    let composedSource = sources.find((candidate) => sameRegisteredSource(candidate, source))
+
+    if (!composedSource) {
+      while (sourceIds.has(`source:${nextSourceIndex}`)) nextSourceIndex++
+      composedSource = {...source, id: `source:${nextSourceIndex}`}
+      sourceIds.add(composedSource.id)
+      sources.push(composedSource)
+    }
+    outerSourceIds.set(source.id, composedSource.id)
+  }
+
+  /**
+   * Tests whether one intermediate origin is the exact point after all generated code units.
+   * @param {import("./semantic/types.js").RelatedOrigin} related - Candidate intermediate origin.
+   * @returns {boolean} Whether this is an EOF point rather than a generated half-open range.
+   */
+  function isGeneratedEofPoint(related) {
+    return related.location.start.offset == inner.generated.content.length &&
+      related.location.end.offset == inner.generated.content.length
   }
 }
 

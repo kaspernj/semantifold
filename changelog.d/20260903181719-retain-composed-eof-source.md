@@ -1,0 +1,1 @@
+- Retain intermediate source provenance when rich-map composition encounters an untraced zero-length point at generated EOF.
