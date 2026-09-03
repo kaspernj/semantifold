@@ -267,6 +267,34 @@ console.log(ch\\u006fose(true, "no"))
     expect(originalPositionFor(composed, {offset: 0}).location.filename).toEqual("original.ts")
   })
 
+  it("preserves synthetic scaffolding while composing its related provenance", () => {
+    const module = parse({filename: "original.ts", language: "typescript", source: baseSource})
+    const intermediate = generateArtifact({filename: "intermediate.ts", language: "typescript", module})
+    const reparsed = parse({filename: "intermediate.ts", language: "typescript", source: intermediate.code})
+    const outer = generateArtifact({filename: "final.js", language: "javascript", module: reparsed})
+    const outerSpan = outer.mapping.spans.find((span) => span.mappingKind == "synthetic" &&
+      span.origin.kind == "synthetic" && span.origin.reason == "indentation" && span.origin.relatedOrigins.length > 0)
+
+    assert.ok(outerSpan)
+    assert.equal(outerSpan.origin.kind, "synthetic")
+    expect(outerSpan.origin.relatedOrigins[0].location.filename).toEqual("intermediate.ts")
+    const composed = composeMappings(outer.mapping, intermediate.mapping)
+    const composedSpan = composed.spans.find((span) => span.generated.start.offset == outerSpan.generated.start.offset &&
+      span.generated.end.offset == outerSpan.generated.end.offset)
+
+    assert.ok(composedSpan)
+    assert.equal(composedSpan.origin.kind, "synthetic")
+    expect({mappingKind: composedSpan.mappingKind, reason: composedSpan.origin.reason}).toEqual({
+      mappingKind: "synthetic",
+      reason: "indentation"
+    })
+    const related = composedSpan.origin.relatedOrigins[0]
+
+    expect({filename: related.location.filename, role: related.role}).toEqual({filename: "original.ts", role: "context"})
+    assert.ok(related.nodeId)
+    expect(composed.nodes.some((node) => node.id == related.nodeId)).toEqual(true)
+  })
+
   it("does not trace an unrelated suffix-matched V3 source", () => {
     const composed = composeSourceMaps({
       file: "final.js",

@@ -257,6 +257,27 @@ export function composeMappings(outer, inner) {
    * @returns {import("./semantic/types.js").SemantifoldMappingSpan} Composed span.
    */
   function composedSpan(outerSpan, innerSpan, generated, preservesWholeOrigin) {
+    if (outerSpan.mappingKind == "synthetic" && outerSpan.origin.kind == "synthetic") {
+      const relationship = outerSpan.origin.relatedOrigins[0]
+
+      return definedProperties({
+        generated,
+        mappingKind: /** @type {const} */ ("synthetic"),
+        name: outerSpan.name,
+        origin: {
+          kind: /** @type {const} */ ("synthetic"),
+          reason: outerSpan.origin.reason,
+          relatedOrigins: relatedOriginsForSpan(innerSpan).map((related) => definedProperties({
+            ...related,
+            nodeId: related.nodeId ?? innerSpan.nodeId,
+            role: relationship?.role ?? related.role,
+            symbolId: related.symbolId ?? innerSpan.symbolId
+          }))
+        },
+        role: outerSpan.role
+      })
+    }
+
     return definedProperties({
       ...outerSpan,
       generated,
@@ -271,6 +292,20 @@ export function composeMappings(outer, inner) {
       symbolId: innerSpan.symbolId
     })
   }
+}
+
+/**
+ * Converts one mapped span's closed origin into related provenance.
+ * @param {import("./semantic/types.js").SemantifoldMappingSpan} span - Traced inner span.
+ * @returns {import("./semantic/types.js").RelatedOrigin[]} Related original ranges.
+ */
+function relatedOriginsForSpan(span) {
+  if (span.origin.kind == "source") {
+    return [{location: span.origin.location, sourceId: span.origin.sourceId}]
+  }
+  if (span.origin.kind == "derived") return span.origin.origins
+
+  return span.origin.relatedOrigins
 }
 
 /**
