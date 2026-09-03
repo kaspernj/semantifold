@@ -193,7 +193,7 @@ export function composeMappings(outer, inner) {
 
     for (const related of relatedOriginsForOrigin(span.origin)) {
       trace = traceRelatedOrigin(related)
-      if (trace) break
+      if (trace?.traced) break
     }
     const location = trace?.related.location
     const overlapping = trace?.overlapping ?? []
@@ -863,10 +863,12 @@ function buildMappingIndex(mapping) {
   const originalPointsBySource = new Map(mapping.sources.map((source) => [source.id, new Map()]))
 
   for (const span of mapping.spans) {
-    if (span.nodeId) nodeSpans.get(span.nodeId)?.push(span)
-    if (span.symbolId) symbolSpans.get(span.symbolId)?.push(span)
+    const spanNodeIds = new Set(span.nodeId ? [span.nodeId] : [])
+    const spanSymbolIds = new Set(span.symbolId ? [span.symbolId] : [])
 
     for (const related of relatedOriginsForOrigin(span.origin)) {
+      if (related.nodeId) spanNodeIds.add(related.nodeId)
+      if (related.symbolId) spanSymbolIds.add(related.symbolId)
       if (related.location.end.offset == related.location.start.offset) {
         const points = originalPointsBySource.get(related.sourceId)
         const pointSpans = points?.get(related.location.start.offset) ?? []
@@ -882,6 +884,8 @@ function buildMappingIndex(mapping) {
         start: related.location.start.offset
       })
     }
+    for (const nodeId of spanNodeIds) nodeSpans.get(nodeId)?.push(span)
+    for (const symbolId of spanSymbolIds) symbolSpans.get(symbolId)?.push(span)
   }
 
   for (const entries of originalBySource.values()) {

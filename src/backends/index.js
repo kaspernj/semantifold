@@ -19,6 +19,7 @@ const defaultFilenames = Object.freeze({
   typescript: "program.ts"
 })
 const lineTerminatorPattern = /[\n\r\u2028\u2029]/u
+const syntheticArtifactBase = Object.freeze(["__semantifold_artifacts__"])
 
 /**
  * Generates target source from a semantic module.
@@ -106,8 +107,8 @@ export function generateArtifactSource({language, filename = defaultFilenames[la
  * @returns {string} Portable forward-slash relative path.
  */
 function relativeArtifactPath(generatedFilename, relatedFilename) {
-  const generatedDirectory = normalizedPathParts(generatedFilename)
-  const related = normalizedPathParts(relatedFilename)
+  const generatedDirectory = resolvedArtifactPathParts(generatedFilename)
+  const related = resolvedArtifactPathParts(relatedFilename)
 
   generatedDirectory.pop()
   let common = 0
@@ -118,17 +119,18 @@ function relativeArtifactPath(generatedFilename, relatedFilename) {
 }
 
 /**
- * Normalizes separators and dot segments in one logical artifact filename.
+ * Resolves separators and dot segments against the shared synthetic artifact base.
  * @param {string} filename - Logical artifact filename.
- * @returns {string[]} Normalized path parts.
+ * @returns {string[]} Resolved path parts.
  */
-function normalizedPathParts(filename) {
-  const parts = []
+function resolvedArtifactPathParts(filename) {
+  const parts = [...syntheticArtifactBase]
 
   for (const part of filename.replaceAll("\\", "/").split("/")) {
     if (part == "" || part == ".") continue
-    if (part == ".." && parts.length > 0 && parts.at(-1) != "..") parts.pop()
-    else parts.push(part)
+    if (part == "..") {
+      if (parts.length > syntheticArtifactBase.length) parts.pop()
+    } else parts.push(part)
   }
 
   return parts
