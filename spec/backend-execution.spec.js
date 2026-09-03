@@ -279,7 +279,9 @@ console.log(${name}(true, "safe"))
     }
   })
 
-  it("rejects exact PHP GLOBALS variable bindings while preserving callable and near-collision names", async () => {
+  it("enforces exact PHP predefined variable binding roles before the real runtime", async () => {
+    const invalidParameterNames = ["GLOBALS", "_SERVER", "_GET", "_POST", "_FILES", "_COOKIE", "_SESSION", "_REQUEST", "_ENV", "this"]
+    const invalidAssignedNames = ["GLOBALS", "this"]
     const moduleWithLocal = (keyword, name) => parse({
       filename: `${name}-local.ts`,
       language: "typescript",
@@ -288,56 +290,103 @@ console.log(${name}(true, "safe"))
   else return fallback
 }
 ${keyword} ${name}: string = "safe"
-console.log(select(true, ${name}))
+console.log(select(true, "safe"))
 `
     })
     const moduleWithParameter = (name) => parse({
       filename: `${name}-parameter.ts`,
       language: "typescript",
       source: `function select(flag: boolean, ${name}: string): string {
-  if (flag) return ${name}
-  else return ${name}
+  if (flag) return "safe"
+  else return "safe"
 }
 console.log(select(true, "safe"))
 `
     })
-    const moduleWithFunction = (name) => parse({
-      filename: `${name}-function.ts`,
-      language: "typescript",
-      source: `function ${name}(flag: boolean, fallback: string): string {
+    const moduleWithFunction = (name) => {
+      const sourceName = name == "this" ? "thisFunction" : name
+      const module = parse({
+        filename: `${name}-function.ts`,
+        language: "typescript",
+        source: `function ${sourceName}(flag: boolean, fallback: string): string {
   if (flag) return fallback
   else return fallback
 }
-console.log(${name}(true, "safe"))
+console.log(${sourceName}(true, "safe"))
+`
+      })
+
+      if (name == "this") {
+        module.functions[0].name = name
+        const print = /** @type {import("../src/semantic/types.js").PrintStatement} */ (module.entryPoint.body[0])
+        const call = /** @type {import("../src/semantic/types.js").CallExpression} */ (print.expression)
+
+        call.callee = name
+      }
+
+      return module
+    }
+    const moduleWithAssignment = (name) => parse({
+      filename: `${name}-assignment.ts`,
+      language: "typescript",
+      source: `function select(flag: boolean, fallback: string): string {
+  if (flag) return fallback
+  else return fallback
+}
+let ${name}: string = "before"
+${name} = "safe"
+console.log(select(true, ${name}))
 `
     })
 
-    for (const source of [
-      "<?php\n$GLOBALS = \"safe\";\n",
-      "<?php\nfunction select($GLOBALS, $fallback) { return $fallback; }\n"
-    ]) {
+    for (const name of invalidParameterNames) {
       await assert.rejects(
-        () => executeGenerated("php", source),
-        (error) => processFailureIncludes(error, "GLOBALS")
+        () => executeGenerated("php", `<?php\nfunction select($${name}, $fallback) { return $fallback; }\n`),
+        (error) => processFailureIncludes(error, name)
+      )
+    }
+    for (const name of invalidAssignedNames) {
+      await assert.rejects(
+        () => executeGenerated("php", `<?php\n$${name} = "safe";\n`),
+        (error) => processFailureIncludes(error, name)
       )
     }
 
-    for (const keyword of ["let", "const"]) {
+    for (const name of invalidAssignedNames) {
+      for (const keyword of ["let", "const"]) {
+        assert.throws(
+          () => generate({language: "php", module: moduleWithLocal(keyword, name)}),
+          (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
+            error.language == "php" && error.location?.filename == `${name}-local.ts` && error.location.start.line == 5,
+          `${keyword} ${name}`
+        )
+      }
+    }
+    for (const name of invalidParameterNames) {
       assert.throws(
-        () => generate({language: "php", module: moduleWithLocal(keyword, "GLOBALS")}),
+        () => generate({language: "php", module: moduleWithParameter(name)}),
         (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
-          error.language == "php" && error.location?.filename == "GLOBALS-local.ts" && error.location.start.line == 5,
-        keyword
+          error.language == "php" && error.location?.filename == `${name}-parameter.ts` && error.location.start.line == 1,
+        name
       )
     }
-    assert.throws(
-      () => generate({language: "php", module: moduleWithParameter("GLOBALS")}),
-      (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
-        error.language == "php" && error.location?.filename == "GLOBALS-parameter.ts" && error.location.start.line == 1
-    )
 
-    expect(await executeGenerated("php", generate({language: "php", module: moduleWithLocal("let", "globals")}))).toEqual("safe\n")
-    expect(await executeGenerated("php", generate({language: "php", module: moduleWithFunction("GLOBALS")}))).toEqual("safe\n")
+    for (const name of ["globals", "This", "_get", "thisValue"]) {
+      expect({name, output: await executeGenerated("php", generate({language: "php", module: moduleWithAssignment(name)}))})
+        .toEqual({name, output: "safe\n"})
+    }
+    for (const name of ["_SERVER", "_GET", "_POST", "_FILES", "_COOKIE", "_SESSION", "_REQUEST", "_ENV"]) {
+      expect({name, output: await executeGenerated("php", generate({language: "php", module: moduleWithAssignment(name)}))})
+        .toEqual({name, output: "safe\n"})
+    }
+    for (const name of ["php_errormsg", "http_response_header", "argc", "argv"]) {
+      expect({name, output: await executeGenerated("php", generate({language: "php", module: moduleWithParameter(name)}))})
+        .toEqual({name, output: "safe\n"})
+    }
+    for (const name of invalidParameterNames) {
+      expect({name, output: await executeGenerated("php", generate({language: "php", module: moduleWithFunction(name)}))})
+        .toEqual({name, output: "safe\n"})
+    }
   })
 
   it("rejects Ruby numbered binding names while preserving _10", async () => {

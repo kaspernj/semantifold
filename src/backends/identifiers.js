@@ -55,6 +55,11 @@ const reservedWords = {
   ])
 }
 
+const phpInvalidParameterBindings = new Set([
+  "GLOBALS", "_COOKIE", "_ENV", "_FILES", "_GET", "_POST", "_REQUEST", "_SERVER", "_SESSION", "this"
+])
+const phpInvalidAssignedBindings = new Set(["GLOBALS", "this"])
+
 /**
  * Validates an identifier against the target backend's deliberately narrow lexical contract.
  * @param {import("../semantic/types.js").SemanticLanguage} language - Target language.
@@ -85,8 +90,9 @@ export function validateTargetBindingIdentifier(language, name, role, location) 
   validateTargetIdentifier(language, name, role, location)
 
   const invalidTypeScriptBinding = language == "typescript" && (name == "arguments" || name == "eval")
-  const invalidPhpVariable = language == "php" && name == "GLOBALS" &&
-    (role == "parameter" || role == "local" || role == "assignment target")
+  const invalidPhpVariable = language == "php" && typeof name == "string" &&
+    ((role == "parameter" && phpInvalidParameterBindings.has(name)) ||
+      ((role == "local" || role == "assignment target") && phpInvalidAssignedBindings.has(name)))
   const invalidRubyBinding = language == "ruby" && typeof name == "string" && /^_[1-9]$/u.test(name)
 
   if (invalidTypeScriptBinding || invalidPhpVariable || invalidRubyBinding) {

@@ -119,7 +119,7 @@ console.log(select(true, "no"))
 console.log(select(true, "no"))
 `
 
-    for (const [language, name] of [["php", "GLOBALS"], ["ruby", "_1"]]) {
+    for (const [language, name] of [["php", "GLOBALS"], ["php", "this"], ["ruby", "_1"]]) {
       const module = parse({filename: `${name}-assignment.ts`, language: "typescript", source})
       const assignment = /** @type {import("../src/semantic/types.js").AssignmentStatement} */ (module.functions[0].body[1])
 
@@ -131,6 +131,26 @@ console.log(select(true, "no"))
           error.language == language && error.location?.filename == `${name}-assignment.ts` &&
           error.location.start.line == 3 && error.message.includes("assignment target identifier"),
         `${language} ${name}`
+      )
+    }
+  })
+
+  it("rejects exact PHP auto-global parameter bindings at their declaration", () => {
+    for (const name of ["_SERVER", "_GET", "_POST", "_FILES", "_COOKIE", "_SESSION", "_REQUEST", "_ENV"]) {
+      const source = `function select(flag: boolean, ${name}: string): string {
+  if (flag) return ${name}
+  else return ${name}
+}
+console.log(select(true, "safe"))
+`
+      const module = parse({filename: `${name}-parameter.ts`, language: "typescript", source})
+
+      assert.throws(
+        () => generate({language: "php", module}),
+        (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
+          error.language == "php" && error.location?.filename == `${name}-parameter.ts` &&
+          error.location.start.line == 1 && error.message.includes("parameter identifier"),
+        name
       )
     }
   })

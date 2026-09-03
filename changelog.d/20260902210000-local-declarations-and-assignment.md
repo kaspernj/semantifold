@@ -9,3 +9,4 @@
 - Reject TypeScript strict-mode `arguments` and `eval` binding names before emission without changing other targets' identifier policies.
 - Reject malformed call fields nested in caller-supplied local initializers and assignment expressions with located backend diagnostics.
 - Enforce proven TypeScript, PHP, and Ruby runtime identifier restrictions only for the binding roles each target rejects.
+- Reject PHP's exact automatic-global parameter bindings and its narrower `GLOBALS`/`this` local-declaration and assignment-target bindings.
