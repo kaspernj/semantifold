@@ -4,59 +4,129 @@ import {emitExpression} from "./shared.js"
 import {emitScalarType} from "./scalars.js"
 
 /**
- * Emits an independently executable Ruby program.
+ * Emits an independently executable Ruby program through the source-aware writer.
  * @param {import("../semantic/types.js").SemanticModule} module - Semantic module.
- * @returns {string} Ruby source.
+ * @param {import("./writer.js").SourceWriter} writer - Source-aware writer.
+ * @returns {void}
  */
-export function generateRuby(module) {
-  const functions = module.functions.map((functionDeclaration) => {
-    const parameters = functionDeclaration.parameters.map((parameter) => parameter.name).join(", ")
-    const typeComments = [
-      ...functionDeclaration.parameters.map((parameter) => `# @param ${parameter.name} [${emitScalarType("ruby", parameter.type)}]`),
-      `# @return [${emitScalarType("ruby", functionDeclaration.returnType)}]`
-    ]
-    const branch = /** @type {import("../semantic/types.js").IfStatement} */ (functionDeclaration.body.at(-1))
-    const prefix = /** @type {import("../semantic/types.js").LocalStatement[]} */ (functionDeclaration.body.slice(0, -1)).flatMap((statement) => emitLocal(statement, "  "))
-    const consequent = /** @type {import("../semantic/types.js").LocalStatement[]} */ (branch.consequent.slice(0, -1)).flatMap((statement) => emitLocal(statement, "    "))
-    const alternate = /** @type {import("../semantic/types.js").LocalStatement[]} */ (branch.alternate.slice(0, -1)).flatMap((statement) => emitLocal(statement, "    "))
-    const consequentReturn = /** @type {import("../semantic/types.js").ReturnStatement} */ (branch.consequent.at(-1))
-    const alternateReturn = /** @type {import("../semantic/types.js").ReturnStatement} */ (branch.alternate.at(-1))
+export function generateRuby(module, writer) {
+  module.functions.forEach((declaration, functionIndex) => {
+    if (functionIndex > 0) writer.synthetic("\n\n", "declaration separator", [declaration])
 
-    return [
-      ...typeComments,
-      `def ${functionDeclaration.name}(${parameters})`,
-      ...prefix,
-      `  if ${emitExpression(branch.condition, "ruby", (name) => name)}`,
-      ...consequent,
-      `    return ${emitExpression(consequentReturn.expression, "ruby", (name) => name)}`,
-      "  else",
-      ...alternate,
-      `    return ${emitExpression(alternateReturn.expression, "ruby", (name) => name)}`,
-      "  end",
-      "end"
-    ].join("\n")
-  }).join("\n\n")
-  const entryPrefix = /** @type {import("../semantic/types.js").LocalStatement[]} */ (module.entryPoint.body.slice(0, -1)).flatMap((statement) => emitLocal(statement, ""))
-  const print = /** @type {import("../semantic/types.js").PrintStatement} */ (module.entryPoint.body.at(-1))
-  const prints = [...entryPrefix, `puts ${emitExpression(print.expression, "ruby", (name) => name)}`].join("\n")
+    for (const parameter of declaration.parameters) {
+      writer.synthetic("# @param ", "Ruby type scaffolding", [parameter])
+      writer.mapped(parameter.name, {mappingKind: "exact", node: parameter, role: "name"})
+      writer.synthetic(" [", "Ruby type scaffolding", [parameter])
+      writer.mapped(emitScalarType("ruby", parameter.type), {mappingKind: "exact", node: parameter.type, role: "type"})
+      writer.synthetic("]\n", "Ruby type scaffolding", [parameter])
+    }
+    writer.synthetic("# @return [", "Ruby type scaffolding", [declaration])
+    writer.mapped(emitScalarType("ruby", declaration.returnType), {mappingKind: "exact", node: declaration.returnType, role: "type"})
+    writer.synthetic("]\n", "Ruby type scaffolding", [declaration])
+    writer.mapped("def", {mappingKind: "anchor", node: declaration})
+    writer.synthetic(" ", "function spacing", [declaration])
+    writer.mapped(declaration.name, {mappingKind: "exact", node: declaration, role: "name"})
+    writer.mapped("(", {mappingKind: "anchor", node: declaration})
+    declaration.parameters.forEach((parameter, index) => {
+      if (index > 0) writer.synthetic(", ", "parameter separator", [declaration])
+      writer.mapped(parameter.name, {mappingKind: "exact", node: parameter, role: "name"})
+    })
+    writer.mapped(")", {mappingKind: "anchor", node: declaration})
+    writer.synthetic("\n", "line break", [declaration])
 
-  return `${functions}\n\n${prints}\n`
+    const branch = /** @type {import("../semantic/types.js").IfStatement} */ (declaration.body.at(-1))
+
+    for (const statement of /** @type {import("../semantic/types.js").LocalStatement[]} */ (declaration.body.slice(0, -1))) emitLocal(writer, statement, "  ")
+
+    writer.synthetic("  ", "indentation", [branch])
+    writer.mapped("if", {mappingKind: "anchor", node: branch})
+    writer.synthetic(" ", "conditional spacing", [branch])
+    emitExpression(writer, branch.condition, "ruby", identity)
+    writer.synthetic("\n", "line break", [branch])
+    emitBranch(writer, branch.consequent, branch, "    ")
+    writer.synthetic("  ", "indentation", [branch])
+    writer.mapped("else", {mappingKind: "anchor", node: branch})
+    writer.synthetic("\n", "line break", [branch])
+    emitBranch(writer, branch.alternate, branch, "    ")
+    writer.synthetic("  ", "indentation", [branch])
+    writer.mapped("end", {mappingKind: "anchor", node: branch})
+    writer.synthetic("\n", "line break", [branch])
+    writer.mapped("end", {mappingKind: "anchor", node: declaration})
+  })
+
+  writer.synthetic("\n\n", "entry-point separator", [module.entryPoint])
+  const statements = module.entryPoint.body
+
+  for (const statement of /** @type {import("../semantic/types.js").LocalStatement[]} */ (statements.slice(0, -1))) emitLocal(writer, statement, "")
+
+  const print = /** @type {import("../semantic/types.js").PrintStatement} */ (statements.at(-1))
+
+  writer.mapped("puts", {mappingKind: "anchor", node: print})
+  writer.synthetic(" ", "print spacing", [print])
+  emitExpression(writer, print.expression, "ruby", identity)
+  writer.synthetic("\n", "final line break", [module.entryPoint])
 }
 
 /**
- * Emits one Ruby local statement with its exact Semantifold profile metadata.
+ * Emits one Ruby return branch.
+ * @param {import("./writer.js").SourceWriter} writer - Source-aware writer.
+ * @param {(import("../semantic/types.js").LocalStatement | import("../semantic/types.js").ReturnStatement)[]} statements - Branch statements.
+ * @param {import("../semantic/types.js").IfStatement} branch - Owning branch.
+ * @param {string} indent - Indentation.
+ * @returns {void}
+ */
+function emitBranch(writer, statements, branch, indent) {
+  for (const statement of /** @type {import("../semantic/types.js").LocalStatement[]} */ (statements.slice(0, -1))) emitLocal(writer, statement, indent)
+
+  const returned = /** @type {import("../semantic/types.js").ReturnStatement} */ (statements.at(-1))
+
+  writer.synthetic(indent, "indentation", [branch])
+  writer.mapped("return", {mappingKind: "anchor", node: returned})
+  writer.synthetic(" ", "return spacing", [returned])
+  emitExpression(writer, returned.expression, "ruby", identity)
+  writer.synthetic("\n", "line break", [returned])
+}
+
+/**
+ * Emits one Ruby local statement with exact Semantifold profile metadata.
+ * @param {import("./writer.js").SourceWriter} writer - Source-aware writer.
  * @param {import("../semantic/types.js").LocalStatement} statement - Local statement.
  * @param {string} indent - Leading indentation.
- * @returns {string[]} Source lines.
+ * @returns {void}
  */
-function emitLocal(statement, indent) {
+function emitLocal(writer, statement, indent) {
+  writer.synthetic(indent, "indentation", [statement])
+
   if (statement.kind == "AssignmentStatement") {
-    return [`${indent}${statement.target.name} = ${emitExpression(statement.expression, "ruby", (name) => name)}`]
+    writer.mapped(statement.target.name, {mappingKind: "exact", node: statement.target, role: "name"})
+    writer.synthetic(" ", "assignment spacing", [statement])
+    writer.mapped("=", {mappingKind: "exact", node: statement, role: "operator"})
+    writer.synthetic(" ", "assignment spacing", [statement])
+    emitExpression(writer, statement.expression, "ruby", identity)
+    writer.synthetic("\n", "line break", [statement])
+    return
   }
 
-  return [
-    `${indent}# @type [${emitScalarType("ruby", statement.type)}]`,
-    ...statement.mutable ? [] : [`${indent}# @semantifold-immutable`],
-    `${indent}${statement.name} = ${emitExpression(statement.initializer, "ruby", (name) => name)}`
-  ]
+  writer.synthetic("# @type [", "Ruby local type scaffolding", [statement])
+  writer.mapped(emitScalarType("ruby", statement.type), {mappingKind: "exact", node: statement.type, role: "type"})
+  writer.synthetic("]\n", "Ruby local type scaffolding", [statement])
+  if (!statement.mutable) {
+    writer.synthetic(`${indent}# @semantifold-immutable\n`, "Ruby immutability scaffolding", [statement])
+  }
+  writer.synthetic(indent, "indentation", [statement])
+  writer.mapped(statement.name, {mappingKind: "exact", node: statement, role: "name"})
+  writer.synthetic(" ", "assignment spacing", [statement])
+  writer.mapped("=", {mappingKind: "exact", node: statement, role: "operator"})
+  writer.synthetic(" ", "assignment spacing", [statement])
+  emitExpression(writer, statement.initializer, "ruby", identity)
+  writer.synthetic("\n", "line break", [statement])
+}
+
+/**
+ * Returns an unchanged Ruby identifier.
+ * @param {string} name - Identifier.
+ * @returns {string} Identifier.
+ */
+function identity(name) {
+  return name
 }

@@ -10,7 +10,7 @@ Introduce a multi-file semantic program with explicit module identities, exports
 
 ## Current evidence and gap
 
-The public `parse` API accepts one filename/source and returns one `SemanticModule`; `generate` returns one source string. Java always emits `Main.java`, Babel parses with `sourceType: "script"`, and frontends reject imports/packages/namespaces. [`../docs/goals.md`](../docs/goals.md) lists multi-file modules as a candidate, while architecture currently promises only a single executable program. File layout and resolution cannot be hidden in a target emitter string.
+The public `parse` API accepts one filename/source and returns one `SemanticModule`; `generate` returns one compatibility source string and `generateArtifact` returns one named artifact with rich/v3 mappings. Provenance already supports a versioned multi-source registry and generation accepts caller-assembled multi-source IR, but there is no semantic program graph or multi-artifact layout. Java defaults to `Main.java`, Babel parses with `sourceType: "script"`, and frontends reject imports/packages/namespaces. [`../docs/goals.md`](../docs/goals.md) lists multi-file modules as a candidate. File layout and resolution cannot be hidden in one target artifact.
 
 ## Language matrix
 
@@ -27,7 +27,7 @@ The public `parse` API accepts one filename/source and returns one `SemanticModu
 - Add `SemanticProgram {modules, entryModule, location?}` and enrich `SemanticModule` with stable logical identity, source filename, declarations, imports, exports, and optional entry point.
 - Add explicit symbol namespaces/kinds for functions, records/types, and later errors. Imports bind a remote exported declaration to a local name; references resolve to declaration identity, not concatenated strings.
 - Validate unique module identities, exports, local bindings, import targets/kinds, visibility, entry-module uniqueness, dependency cycles, and deterministic initialization order. Initially reject all cycles.
-- Define a public multi-source parse request and generation result such as ordered `{filename, source}` artifacts. Preserve backwards-compatible single-module behavior only if it stays unambiguous; document any API versioning decision.
+- Define a public multi-source parse request and an ordered artifact-set result whose elements extend the existing `{filename, language, code, mapping, sourceMap, sourceMapFilename}` contract. Preserve `generate` and single `generateArtifact` behavior.
 - Paths/specifiers are logical metadata. Do not read transitive source files implicitly or invoke a package manager.
 
 ## Frontend work
@@ -42,7 +42,7 @@ The public `parse` API accepts one filename/source and returns one `SemanticModu
 
 - Change generation to plan all target artifacts before emitting any, including deterministic filenames, directories, module/package declarations, imports/requires, and one executable entry artifact.
 - Validate target-qualified identifiers, case/collision rules, reserved names, path traversal, filename/public-class contracts, import cycles, and unavailable target representation before writing/returning artifacts.
-- Return artifacts to the caller; do not write files as a hidden side effect. Tests may materialize them in isolated temporary directories.
+- Return an ordered set of existing artifact envelopes to the caller; do not write files as a hidden side effect. Tests may materialize them in isolated temporary directories.
 - No backend may flatten modules into one global file if that changes visibility or name resolution.
 
 ## Diagnostics and source locations
@@ -64,7 +64,7 @@ Document the multi-source/public artifact API, logical resolution, canonical lay
 
 ## Non-goals
 
-Package-manager/network resolution, dependency installation, implicit filesystem discovery, Ruby gems/load paths, npm/CommonJS/bundlers/path aliases, Composer/autoload, Java classpath/module-path discovery or JPMS, cyclic initialization, re-exports/star/default/dynamic imports, resource files, and source maps back to original artifacts.
+Package-manager/network resolution, dependency installation, implicit filesystem discovery, Ruby gems/load paths, npm/CommonJS/bundlers/path aliases, Composer/autoload, Java classpath/module-path discovery or JPMS, cyclic initialization, re-exports/star/default/dynamic imports, and resource files. Existing provenance/mapping must be preserved per artifact, but task 010 does not add debugger protocols or runtime-specific mapping formats.
 
 ## Completion criteria
 

@@ -4,12 +4,17 @@ import PhpParser from "php-parser"
 import {parse as parseComment} from "comment-parser"
 import {missingType, parseFailure, unsupportedSyntax} from "../diagnostic.js"
 import {locationFromOffsets, moduleLocation} from "../semantic/location.js"
+import {withParserRanges} from "../semantic/provenance.js"
 import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
 import {requireSourceScalarType} from "./scalars.js"
 const parser = new PhpParser.Engine({
   ast: {withPositions: true},
   parser: {extractDoc: true, suppressErrors: false}
 })
+/** @type {string | undefined} */
+let cachedTokenSource
+/** @type {{end: number, start: number, text: string}[]} */
+let cachedTokenRanges = []
 
 /**
  * Returns a normalized PHP node location.
@@ -22,6 +27,69 @@ function nodeLocation(node, filename, source) {
   if (!node.loc) throw new Error(`PHP parser omitted source location for ${node.kind}.`)
 
   return locationFromOffsets(filename, source, node.loc.start.offset, node.loc.end.offset)
+}
+
+/**
+ * Locates a comment-parser token inside a PHP parser-owned doc comment.
+ * @param {import("php-parser").CommentBlock} comment - PHP doc comment.
+ * @param {import("comment-parser").Spec} tag - Parsed doc tag.
+ * @param {"name" | "type"} field - Token field.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @returns {import("../semantic/types.js").SourceLocation} Exact token location.
+ */
+function commentTagLocation(comment, tag, field, filename, source) {
+  const line = tag.source[0]
+
+  if (!comment.loc || !line) throw new Error(`Comment parser omitted the @${tag.tag} source token.`)
+
+  let lineStart = comment.loc.start.offset
+
+  for (let lineNumber = 0; lineNumber < line.number; lineNumber++) {
+    while (lineStart < source.length && source[lineStart] != "\r" && source[lineStart] != "\n") lineStart++
+    if (source[lineStart] == "\r" && source[lineStart + 1] == "\n") lineStart += 2
+    else lineStart++
+  }
+
+  const orderedFields = ["start", "delimiter", "postDelimiter", "tag", "postTag", "name", "postName", "type"]
+  const fieldIndex = orderedFields.indexOf(field)
+  const start = lineStart + orderedFields.slice(0, fieldIndex).reduce((length, key) =>
+    length + line.tokens[/** @type {keyof typeof line.tokens} */ (key)].length, 0)
+  const value = line.tokens[field]
+
+  return locationFromOffsets(filename, source, start, start + value.length)
+}
+
+/**
+ * Finds one parser token between parser-owned node boundaries.
+ * @param {string} tokenText - Exact token text.
+ * @param {number} startOffset - Inclusive search boundary.
+ * @param {number} endOffset - Exclusive search boundary.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @returns {import("../semantic/types.js").SourceLocation} Token location.
+ */
+function tokenLocation(tokenText, startOffset, endOffset, filename, source) {
+  if (cachedTokenSource != source) {
+    let offset = 0
+
+    cachedTokenRanges = parser.tokenGetAll(source).map((token) => {
+      const text = typeof token == "string" ? token : token[1]
+      const range = {end: offset + text.length, start: offset, text}
+
+      offset = range.end
+
+      return range
+    })
+    cachedTokenSource = source
+  }
+
+  const token = cachedTokenRanges.find((candidate) => candidate.text == tokenText && candidate.start >= startOffset &&
+    candidate.end <= endOffset)
+
+  if (token) return locationFromOffsets(filename, source, token.start, token.end)
+
+  throw new Error(`PHP parser omitted token '${tokenText}' between ${startOffset} and ${endOffset}.`)
 }
 
 /**
@@ -39,7 +107,7 @@ function convertExpression(node, filename, source) {
 
     if (typeof variable.name != "string") return unsupportedSyntax("php", "dynamic variable", location)
 
-    return {kind: "IdentifierExpression", location, name: variable.name}
+    return withParserRanges({kind: /** @type {const} */ ("IdentifierExpression"), location, name: variable.name}, {name: location})
   }
 
   if (node.kind == "number") {
@@ -48,7 +116,7 @@ function convertExpression(node, filename, source) {
 
     if (!Number.isSafeInteger(value)) return unsupportedSyntax("php", "non-safe integer literal", location)
 
-    return {kind: "IntegerLiteral", location, value}
+    return withParserRanges({kind: /** @type {const} */ ("IntegerLiteral"), location, value}, {literal: location})
   }
 
   if (node.kind == "boolean") {
@@ -56,7 +124,7 @@ function convertExpression(node, filename, source) {
 
     if (typeof literal.value != "boolean") return unsupportedSyntax("php", "invalid boolean literal value", location)
 
-    return {kind: "BooleanLiteral", location, value: literal.value}
+    return withParserRanges({kind: /** @type {const} */ ("BooleanLiteral"), location, value: literal.value}, {literal: location})
   }
 
   if (node.kind == "string") {
@@ -74,7 +142,7 @@ function convertExpression(node, filename, source) {
       return unsupportedSyntax("php", "invalid Unicode string literal", location)
     }
 
-    return {kind: "StringLiteral", location, value: literal.value}
+    return withParserRanges({kind: /** @type {const} */ ("StringLiteral"), location, value: literal.value}, {literal: location})
   }
 
   if (node.kind == "encapsed") {
@@ -91,13 +159,17 @@ function convertExpression(node, filename, source) {
 
     if (![">", "-", "+"].includes(binary.type)) return unsupportedSyntax("php", `binary ${binary.type}`, location)
 
-    return {
-      kind: "BinaryExpression",
+    const semantic = {
+      kind: /** @type {const} */ ("BinaryExpression"),
       left: convertExpression(binary.left, filename, source),
       location,
       operator: /** @type {">" | "-" | "+"} */ (binary.type),
       right: convertExpression(binary.right, filename, source)
     }
+
+    return withParserRanges(semantic, {
+      operator: tokenLocation(binary.type, binary.left.loc?.end.offset ?? 0, binary.right.loc?.start.offset ?? source.length, filename, source)
+    })
   }
 
   if (node.kind == "call") {
@@ -109,12 +181,12 @@ function convertExpression(node, filename, source) {
 
     const callee = /** @type {import("php-parser").Name | import("php-parser").Identifier} */ (call.what).name
 
-    return {
+    return withParserRanges({
       arguments: call.arguments.map((argument) => convertExpression(argument, filename, source)),
       callee,
       kind: "CallExpression",
       location
-    }
+    }, {callee: nodeLocation(call.what, filename, source)})
   }
 
   return unsupportedSyntax("php", node.kind, location)
@@ -175,7 +247,13 @@ function localMetadata(node, name, filename, source) {
 
   return {
     immutable: immutable.length == 1,
-    type: requireSourceScalarType("php", variables[0].name, `Local '${name}'`, location)
+    type: requireSourceScalarType(
+      "php",
+      variables[0].name,
+      `Local '${name}'`,
+      location,
+      commentTagLocation(comment, variables[0], "name", filename, source)
+    )
   }
 }
 
@@ -210,24 +288,33 @@ function convertLocalStatement(node, visible, filename, source) {
 
   if (metadata) {
     visible.add(variable.name)
-    return {
+    return withParserRanges({
       initializer: convertExpression(assignment.right, filename, source),
       kind: "LocalDeclaration",
       location,
       mutable: !metadata.immutable,
       name: variable.name,
       type: metadata.type
-    }
+    }, {
+      name: targetLocation,
+      operator: tokenLocation("=", assignment.left.loc?.end.offset ?? 0, assignment.right.loc?.start.offset ?? source.length, filename, source)
+    })
   }
 
   if (!visible.has(variable.name)) return missingType("php", `Local '${variable.name}'`, location)
 
-  return {
+  const target = withParserRanges({kind: /** @type {const} */ ("IdentifierExpression"), location: targetLocation, name: variable.name}, {
+    name: targetLocation
+  })
+
+  return withParserRanges({
     expression: convertExpression(assignment.right, filename, source),
     kind: "AssignmentStatement",
     location,
-    target: {kind: "IdentifierExpression", location: targetLocation, name: variable.name}
-  }
+    target
+  }, {
+    operator: tokenLocation("=", assignment.left.loc?.end.offset ?? 0, assignment.right.loc?.start.offset ?? source.length, filename, source)
+  })
 }
 
 /**
@@ -271,7 +358,7 @@ function convertType(sourceType, subject, location, filename, source) {
 
   const typeName = /** @type {import("php-parser").TypeReference | import("php-parser").Name | import("php-parser").Identifier} */ (sourceType).name
 
-  return requireSourceScalarType("php", typeName, subject, location)
+  return requireSourceScalarType("php", typeName, subject, location, nodeLocation(sourceType, filename, source))
 }
 
 /**
@@ -295,12 +382,15 @@ function convertFunction(node, filename, source) {
 
     if (parameter.nullable) return unsupportedSyntax("php", "unsupported scalar type", parameterLocation)
 
-    return {
+    const parameterNode = typeof parameter.name == "string" ? parameter : parameter.name
+    const semanticParameter = {
       kind: /** @type {const} */ ("Parameter"),
       location: parameterLocation,
       name: parameterName,
       type: convertType(parameter.type, `Parameter '${parameterName}'`, parameterLocation, filename, source)
     }
+
+    return withParserRanges(semanticParameter, {name: nodeLocation(parameterNode, filename, source)})
   })
   if (node.nullable) return unsupportedSyntax("php", "unsupported scalar type", location)
   const visible = new Set(parameters.map((parameter) => parameter.name))
@@ -313,14 +403,16 @@ function convertFunction(node, filename, source) {
     source
   )
 
-  return {
+  const nameNode = typeof node.name == "string" ? node : node.name
+
+  return withParserRanges({
     body: /** @type {import("../semantic/types.js").FunctionStatement[]} */ (body),
     kind: "FunctionDeclaration",
     location,
     name,
     parameters,
     returnType: convertType(node.type, `Function '${name}' return`, location, filename, source)
-  }
+  }, {name: nodeLocation(nameNode, filename, source)})
 }
 
 /**

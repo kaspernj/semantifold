@@ -26,7 +26,7 @@ function withoutLocations(value) {
 
   if (value && typeof value == "object") {
     const entries = Object.entries(value)
-      .filter(([key]) => key != "location")
+      .filter(([key]) => key != "location" && key != "provenance")
       .map(([key, item]) => [key, withoutLocations(item)])
 
     return /** @type {Value} */ (Object.fromEntries(entries))

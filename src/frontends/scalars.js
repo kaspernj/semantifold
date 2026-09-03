@@ -1,6 +1,7 @@
 // @ts-check
 
 import {missingType} from "../diagnostic.js"
+import {setParserRanges} from "../semantic/provenance.js"
 import {scalarType} from "../semantic/scalars.js"
 
 /**
@@ -46,12 +47,16 @@ const sourceScalarTypes = Object.freeze({
  * Looks up an exact source scalar spelling without inspecting parser nodes.
  * @param {import("../semantic/types.js").SemanticLanguage} language - Source language.
  * @param {string} sourceType - Exact source type spelling.
+ * @param {import("../semantic/types.js").SourceLocation} [location] - Exact parser-owned type spelling.
  * @returns {import("../semantic/types.js").TypeReference | undefined} Semantic type when supported.
  */
-export function sourceScalarType(language, sourceType) {
+export function sourceScalarType(language, sourceType, location) {
   const name = sourceScalarTypes[language].get(sourceType)
+  const type = name ? scalarType(name) : undefined
 
-  return name ? scalarType(name) : undefined
+  if (type && location) setParserRanges(type, {type: location})
+
+  return type
 }
 
 /**
@@ -60,10 +65,11 @@ export function sourceScalarType(language, sourceType) {
  * @param {string | undefined} sourceType - Exact source type spelling.
  * @param {string} subject - Typed source subject.
  * @param {import("../semantic/types.js").SourceLocation} location - Owning source location.
+ * @param {import("../semantic/types.js").SourceLocation} [typeLocation] - Exact parser-owned type spelling.
  * @returns {import("../semantic/types.js").TypeReference} Semantic scalar type.
  */
-export function requireSourceScalarType(language, sourceType, subject, location) {
-  const type = sourceType ? sourceScalarType(language, sourceType) : undefined
+export function requireSourceScalarType(language, sourceType, subject, location, typeLocation = location) {
+  const type = sourceType ? sourceScalarType(language, sourceType, typeLocation) : undefined
 
   if (!type) return missingType(language, subject, location)
 

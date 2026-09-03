@@ -4,68 +4,150 @@ import {emitExpression} from "./shared.js"
 import {emitScalarType} from "./scalars.js"
 
 /**
- * Emits an independently executable PHP program.
+ * Emits an independently executable PHP program through the source-aware writer.
  * @param {import("../semantic/types.js").SemanticModule} module - Semantic module.
- * @returns {string} PHP source.
+ * @param {import("./writer.js").SourceWriter} writer - Source-aware writer.
+ * @returns {void}
  */
-export function generatePhp(module) {
-  const functions = module.functions.map((functionDeclaration) => {
-    const parameters = functionDeclaration.parameters.map((parameter) => {
-      return `${emitScalarType("php", parameter.type)} $${parameter.name}`
-    }).join(", ")
-    const branch = /** @type {import("../semantic/types.js").IfStatement} */ (functionDeclaration.body.at(-1))
-    const prefix = /** @type {import("../semantic/types.js").LocalStatement[]} */ (functionDeclaration.body.slice(0, -1)).flatMap((statement) => emitLocal(statement, "    "))
-    const consequentPrefix = /** @type {import("../semantic/types.js").LocalStatement[]} */ (branch.consequent.slice(0, -1)).flatMap((statement) => emitLocal(statement, "        "))
-    const alternatePrefix = /** @type {import("../semantic/types.js").LocalStatement[]} */ (branch.alternate.slice(0, -1)).flatMap((statement) => emitLocal(statement, "        "))
-    const consequentReturn = /** @type {import("../semantic/types.js").ReturnStatement} */ (branch.consequent.at(-1))
-    const alternateReturn = /** @type {import("../semantic/types.js").ReturnStatement} */ (branch.alternate.at(-1))
-    const consequent = emitExpression(consequentReturn.expression, "php", (name) => `$${name}`)
-    const alternate = emitExpression(alternateReturn.expression, "php", (name) => `$${name}`)
+export function generatePhp(module, writer) {
+  writer.synthetic("<?php\ndeclare(strict_types=1);\n\n", "PHP program scaffolding", [module])
 
-    return [
-      `function ${functionDeclaration.name}(${parameters}): ${emitScalarType("php", functionDeclaration.returnType)}`,
-      "{",
-      ...prefix,
-      `    if (${emitExpression(branch.condition, "php", (name) => `$${name}`)}) {`,
-      ...consequentPrefix,
-      `        return ${consequent};`,
-      "    } else {",
-      ...alternatePrefix,
-      `        return ${alternate};`,
-      "    }",
-      "}"
-    ].join("\n")
-  }).join("\n\n")
-  const entryPrefix = /** @type {import("../semantic/types.js").LocalStatement[]} */ (module.entryPoint.body.slice(0, -1)).flatMap((statement) => emitLocal(statement, ""))
-  const print = /** @type {import("../semantic/types.js").PrintStatement} */ (module.entryPoint.body.at(-1))
-  const prints = [...entryPrefix, `echo ${emitExpression(print.expression, "php", (name) => `$${name}`)}, PHP_EOL;`].join("\n")
+  module.functions.forEach((declaration, functionIndex) => {
+    if (functionIndex > 0) writer.synthetic("\n\n", "declaration separator", [declaration])
 
-  return `<?php\ndeclare(strict_types=1);\n\n${functions}\n\n${prints}\n`
+    writer.mapped("function", {mappingKind: "anchor", node: declaration})
+    writer.synthetic(" ", "function spacing", [declaration])
+    writer.mapped(declaration.name, {mappingKind: "exact", node: declaration, role: "name"})
+    writer.mapped("(", {mappingKind: "anchor", node: declaration})
+    declaration.parameters.forEach((parameter, index) => {
+      if (index > 0) writer.synthetic(", ", "parameter separator", [declaration])
+      writer.mapped(emitScalarType("php", parameter.type), {mappingKind: "exact", node: parameter.type, role: "type"})
+      writer.synthetic(" ", "parameter spacing", [parameter])
+      writer.mapped(`$${parameter.name}`, {mappingKind: "exact", node: parameter, role: "name"})
+    })
+    writer.mapped(")", {mappingKind: "anchor", node: declaration})
+    writer.synthetic(": ", "return type separator", [declaration])
+    writer.mapped(emitScalarType("php", declaration.returnType), {mappingKind: "exact", node: declaration.returnType, role: "type"})
+    writer.synthetic("\n", "line break", [declaration])
+    writer.mapped("{", {mappingKind: "anchor", node: declaration})
+    writer.synthetic("\n", "line break", [declaration])
+
+    const branch = /** @type {import("../semantic/types.js").IfStatement} */ (declaration.body.at(-1))
+
+    for (const statement of /** @type {import("../semantic/types.js").LocalStatement[]} */ (declaration.body.slice(0, -1))) emitLocal(writer, statement, "    ")
+
+    writer.synthetic("    ", "indentation", [branch])
+    writer.mapped("if", {mappingKind: "anchor", node: branch})
+    writer.synthetic(" ", "conditional spacing", [branch])
+    writer.mapped("(", {mappingKind: "anchor", node: branch})
+    emitExpression(writer, branch.condition, "php", phpIdentifier)
+    writer.mapped(")", {mappingKind: "anchor", node: branch})
+    writer.synthetic(" ", "conditional spacing", [branch])
+    writer.mapped("{", {mappingKind: "anchor", node: branch})
+    writer.synthetic("\n", "line break", [branch])
+    emitBranch(writer, branch.consequent, branch, "        ")
+    writer.synthetic("    ", "indentation", [branch])
+    writer.mapped("}", {mappingKind: "anchor", node: branch})
+    writer.synthetic(" ", "conditional spacing", [branch])
+    writer.mapped("else", {mappingKind: "anchor", node: branch})
+    writer.synthetic(" ", "conditional spacing", [branch])
+    writer.mapped("{", {mappingKind: "anchor", node: branch})
+    writer.synthetic("\n", "line break", [branch])
+    emitBranch(writer, branch.alternate, branch, "        ")
+    writer.synthetic("    ", "indentation", [branch])
+    writer.mapped("}", {mappingKind: "anchor", node: branch})
+    writer.synthetic("\n", "line break", [branch])
+    writer.mapped("}", {mappingKind: "anchor", node: declaration})
+  })
+
+  writer.synthetic("\n\n", "entry-point separator", [module.entryPoint])
+  const statements = module.entryPoint.body
+
+  for (const statement of /** @type {import("../semantic/types.js").LocalStatement[]} */ (statements.slice(0, -1))) emitLocal(writer, statement, "")
+
+  const print = /** @type {import("../semantic/types.js").PrintStatement} */ (statements.at(-1))
+
+  writer.mapped("echo", {mappingKind: "anchor", node: print})
+  writer.synthetic(" ", "print spacing", [print])
+  emitExpression(writer, print.expression, "php", phpIdentifier)
+  writer.synthetic(", ", "PHP print separator", [print])
+  writer.mapped("PHP_EOL", {mappingKind: "anchor", node: print})
+  writer.mapped(";", {mappingKind: "anchor", node: print})
+  writer.synthetic("\n", "final line break", [module.entryPoint])
+}
+
+/**
+ * Emits one PHP return branch.
+ * @param {import("./writer.js").SourceWriter} writer - Source-aware writer.
+ * @param {(import("../semantic/types.js").LocalStatement | import("../semantic/types.js").ReturnStatement)[]} statements - Branch statements.
+ * @param {import("../semantic/types.js").IfStatement} branch - Owning branch.
+ * @param {string} indent - Indentation.
+ * @returns {void}
+ */
+function emitBranch(writer, statements, branch, indent) {
+  for (const statement of /** @type {import("../semantic/types.js").LocalStatement[]} */ (statements.slice(0, -1))) emitLocal(writer, statement, indent)
+
+  const returned = /** @type {import("../semantic/types.js").ReturnStatement} */ (statements.at(-1))
+
+  writer.synthetic(indent, "indentation", [branch])
+  writer.mapped("return", {mappingKind: "anchor", node: returned})
+  writer.synthetic(" ", "return spacing", [returned])
+  emitExpression(writer, returned.expression, "php", phpIdentifier)
+  writer.mapped(";", {mappingKind: "anchor", node: returned})
+  writer.synthetic("\n", "line break", [returned])
 }
 
 /**
  * Emits one PHP local statement with its exact Semantifold profile metadata.
+ * @param {import("./writer.js").SourceWriter} writer - Source-aware writer.
  * @param {import("../semantic/types.js").LocalStatement} statement - Local statement.
  * @param {string} indent - Leading indentation.
- * @returns {string[]} Source lines.
+ * @returns {void}
  */
-function emitLocal(statement, indent) {
+function emitLocal(writer, statement, indent) {
+  writer.synthetic(indent, "indentation", [statement])
+
   if (statement.kind == "AssignmentStatement") {
-    return [`${indent}$${statement.target.name} = ${emitExpression(statement.expression, "php", (name) => `$${name}`)};`]
+    writer.mapped(`$${statement.target.name}`, {mappingKind: "exact", node: statement.target, role: "name"})
+    writer.synthetic(" ", "assignment spacing", [statement])
+    writer.mapped("=", {mappingKind: "exact", node: statement, role: "operator"})
+    writer.synthetic(" ", "assignment spacing", [statement])
+    emitExpression(writer, statement.expression, "php", phpIdentifier)
+    writer.mapped(";", {mappingKind: "anchor", node: statement})
+    writer.synthetic("\n", "line break", [statement])
+    return
   }
 
   if (statement.mutable) {
-    return [
-      `${indent}/** @var ${emitScalarType("php", statement.type)} $${statement.name} */`,
-      `${indent}$${statement.name} = ${emitExpression(statement.initializer, "php", (name) => `$${name}`)};`
-    ]
+    writer.synthetic("/** @var ", "PHP local type scaffolding", [statement])
+    writer.mapped(emitScalarType("php", statement.type), {mappingKind: "exact", node: statement.type, role: "type"})
+    writer.synthetic(" ", "PHP local type scaffolding", [statement])
+    writer.mapped(`$${statement.name}`, {mappingKind: "exact", node: statement, role: "name"})
+    writer.synthetic(" */\n", "PHP local type scaffolding", [statement])
+  } else {
+    writer.synthetic("/**\n", "PHP local type scaffolding", [statement])
+    writer.synthetic(`${indent} * @var `, "PHP local type scaffolding", [statement])
+    writer.mapped(emitScalarType("php", statement.type), {mappingKind: "exact", node: statement.type, role: "type"})
+    writer.synthetic(" ", "PHP local type scaffolding", [statement])
+    writer.mapped(`$${statement.name}`, {mappingKind: "exact", node: statement, role: "name"})
+    writer.synthetic(`\n${indent} * @semantifold-immutable\n${indent} */\n`, "PHP local type scaffolding", [statement])
   }
 
-  return [
-    `${indent}/**`,
-    `${indent} * @var ${emitScalarType("php", statement.type)} $${statement.name}`,
-    `${indent} * @semantifold-immutable`,
-    `${indent} */`,
-    `${indent}$${statement.name} = ${emitExpression(statement.initializer, "php", (name) => `$${name}`)};`
-  ]
+  writer.synthetic(indent, "indentation", [statement])
+  writer.mapped(`$${statement.name}`, {mappingKind: "exact", node: statement, role: "name"})
+  writer.synthetic(" ", "assignment spacing", [statement])
+  writer.mapped("=", {mappingKind: "exact", node: statement, role: "operator"})
+  writer.synthetic(" ", "assignment spacing", [statement])
+  emitExpression(writer, statement.initializer, "php", phpIdentifier)
+  writer.mapped(";", {mappingKind: "anchor", node: statement})
+  writer.synthetic("\n", "line break", [statement])
+}
+
+/**
+ * Formats one PHP variable identifier.
+ * @param {string} name - Semantic identifier.
+ * @returns {string} PHP identifier.
+ */
+function phpIdentifier(name) {
+  return `$${name}`
 }

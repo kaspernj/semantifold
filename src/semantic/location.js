@@ -15,7 +15,11 @@ export function pointAt(source, offset) {
   let lineStart = 0
 
   for (let index = 0; index < offset; index++) {
-    if (source[index] == "\n") {
+    if (source[index] == "\r") {
+      line++
+      if (source[index + 1] == "\n" && index + 1 < offset) index++
+      lineStart = index + 1
+    } else if (source[index] == "\n") {
       line++
       lineStart = index + 1
     }
