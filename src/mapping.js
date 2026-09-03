@@ -277,6 +277,19 @@ export function composeMappings(outer, inner) {
       })
     }
 
+    const composedDerivedOrigins = outerSpan.origin.kind == "derived"
+      ? composeRelatedOrigins(outerSpan.origin.origins, selectedRelated, innerSpan, restrictSelectedTrace)
+      : undefined
+    const origin = outerSpan.origin.kind == "source" ? innerSpan.origin : outerSpan.origin.kind == "derived"
+      ? composedDerivedOrigins?.length == 0 && innerSpan.origin.kind == "synthetic"
+        ? innerSpan.origin
+        : {kind: /** @type {const} */ ("derived"), origins: /** @type {import("./semantic/types.js").RelatedOrigin[]} */ (composedDerivedOrigins)}
+      : {
+          kind: /** @type {const} */ ("synthetic"),
+          reason: outerSpan.origin.reason,
+          relatedOrigins: composeRelatedOrigins(outerSpan.origin.relatedOrigins, selectedRelated, innerSpan, restrictSelectedTrace)
+        }
+
     return definedProperties({
       ...outerSpan,
       generated,
@@ -286,16 +299,7 @@ export function composeMappings(outer, inner) {
           : /** @type {const} */ ("anchor"),
       name: outerSpan.name ?? innerSpan.name,
       nodeId: innerSpan.nodeId,
-      origin: outerSpan.origin.kind == "source" ? innerSpan.origin : outerSpan.origin.kind == "derived"
-        ? {
-            kind: /** @type {const} */ ("derived"),
-            origins: composeRelatedOrigins(outerSpan.origin.origins, selectedRelated, innerSpan, restrictSelectedTrace)
-          }
-        : {
-            kind: /** @type {const} */ ("synthetic"),
-            reason: outerSpan.origin.reason,
-            relatedOrigins: composeRelatedOrigins(outerSpan.origin.relatedOrigins, selectedRelated, innerSpan, restrictSelectedTrace)
-          },
+      origin,
       role: innerSpan.role ?? outerSpan.role,
       symbolId: innerSpan.symbolId
     })

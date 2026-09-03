@@ -239,6 +239,7 @@ function usableSourceProvenance(provenance) {
 
   for (const source of provenance.sources) {
     if (!source || typeof source.id != "string" || sourceIds.has(source.id) || typeof source.filename != "string" ||
+      source.filename.length == 0 ||
       source.content !== null && typeof source.content != "string" || source.language !== null &&
       !["php", "ruby", "javascript", "typescript", "java"].includes(source.language)) return undefined
     sourceIds.add(source.id)

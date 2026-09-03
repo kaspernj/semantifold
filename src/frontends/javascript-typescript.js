@@ -8,7 +8,10 @@ import {withParserRanges} from "../semantic/provenance.js"
 import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
 import {requireSourceScalarType} from "./scalars.js"
 
-/** @type {WeakMap<object, import("@babel/parser").ParseResult<import("@babel/types").File>["tokens"]>} */
+/** @typedef {NonNullable<import("@babel/parser").ParseResult<import("@babel/types").File>["tokens"]>[number]} BabelToken */
+/** @typedef {{byStart: Map<number, BabelToken>, tokens: BabelToken[]}} BabelTokenIndex */
+
+/** @type {WeakMap<object, BabelTokenIndex>} */
 const nodeTokens = new WeakMap()
 
 /**
@@ -35,9 +38,9 @@ function nodeLocation(node, filename, source) {
  */
 function identifierLocation(node, filename, source) {
   if (typeof node.start != "number") throw new Error("Babel omitted an identifier start offset.")
-  const token = nodeTokens.get(node)?.find((candidate) => candidate.start == node.start && candidate.type.label == "name")
+  const token = nodeTokens.get(node)?.byStart.get(node.start)
 
-  if (!token) throw new Error(`Babel omitted the identifier token for '${node.name}'.`)
+  if (!token || token.type.label != "name") throw new Error(`Babel omitted the identifier token for '${node.name}'.`)
 
   return locationFromOffsets(filename, source, token.start, token.end)
 }
@@ -53,9 +56,26 @@ function identifierLocation(node, filename, source) {
  * @returns {import("../semantic/types.js").SourceLocation} Exact token location.
  */
 function tokenLocation(owner, value, startOffset, endOffset, filename, source) {
-  const tokens = nodeTokens.get(owner)
-  const token = tokens?.find((candidate) => candidate.start >= startOffset && candidate.end <= endOffset &&
-    (candidate.value == value || candidate.type.label == value))
+  const tokens = nodeTokens.get(owner)?.tokens ?? []
+  let low = 0
+  let high = tokens.length
+
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2)
+
+    if (tokens[middle].start < startOffset) low = middle + 1
+    else high = middle
+  }
+  let token
+
+  for (let index = low; index < tokens.length && tokens[index].start < endOffset; index++) {
+    const candidate = tokens[index]
+
+    if (candidate.end <= endOffset && (candidate.value == value || candidate.type.label == value)) {
+      token = candidate
+      break
+    }
+  }
 
   if (!token) throw new Error(`Babel omitted token '${value}' between ${startOffset} and ${endOffset}.`)
 
@@ -520,7 +540,10 @@ function convertPrint(node, language, filename, source) {
  */
 export function parseJavaScriptTypeScript({filename, language, source}) {
   const file = parseBabelSource({filename, language, source})
-  rememberTokens(file, file.tokens)
+  const tokens = file.tokens ?? []
+  const tokenIndex = {byStart: new Map(tokens.map((token) => [token.start, token])), tokens}
+
+  rememberTokens(file, tokenIndex)
   const functions = file.program.body.filter((node) => node.type == "FunctionDeclaration")
     .map((node) => convertFunction(node, language, filename, source))
   const entryNodes = file.program.body.filter((node) => node.type != "FunctionDeclaration")
@@ -574,7 +597,7 @@ function parseBabelSource({filename, language, source}) {
 /**
  * Associates Babel nodes with their parser token stream without leaking it into semantic values.
  * @param {object} value - Current parser value.
- * @param {import("@babel/parser").ParseResult<import("@babel/types").File>["tokens"]} tokens - Parser tokens.
+ * @param {BabelTokenIndex} tokens - Indexed parser tokens.
  * @param {WeakSet<object>} [visited] - Cycle protection.
  * @returns {void}
  */
