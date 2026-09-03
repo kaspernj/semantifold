@@ -167,6 +167,63 @@ describe("backend shape validation", () => {
     )
   })
 
+  it("rejects malformed function and branch prefix elements at their nearest owners", async () => {
+    const malformedPrefixes = [
+      ["null", null],
+      ["primitive", 7],
+      ["array", []],
+      ["missing kind", {}],
+      ["unsupported kind", {kind: "WhileStatement"}]
+    ]
+
+    for (const scope of ["function", "consequent", "alternate"]) {
+      for (const [malformed, value] of [...malformedPrefixes, ["sparse", undefined]]) {
+        const module = await validLocalModule()
+        const declaration = module.functions[0]
+        const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (declaration.body.at(-1))
+        const owner = scope == "function" ? declaration : branch
+        const field = scope == "function" ? "body" : scope
+        const statements = /** @type {{kind: string}[]} */ (Reflect.get(owner, field))
+        const terminal = statements.at(-1)
+        const prefix = malformed == "sparse" ? new Array(1) : [value]
+
+        prefix.push(terminal)
+        Reflect.set(owner, field, prefix)
+
+        assert.throws(
+          () => generate({language: "php", module}),
+          (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
+            error.language == "php" && error.location?.filename == "locals.ts" &&
+            error.location.start.line == owner.location.start.line &&
+            error.message.includes(malformed == "unsupported kind" ? "WhileStatement" : "invalid statement"),
+          `${scope} ${malformed}`
+        )
+      }
+    }
+  })
+
+  it("rejects malformed function and branch statement-list members at their nearest owners", async () => {
+    for (const scope of ["function", "consequent", "alternate"]) {
+      for (const malformed of ["missing", "null", "primitive", "object"]) {
+        const module = await validLocalModule()
+        const declaration = module.functions[0]
+        const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (declaration.body.at(-1))
+        const owner = scope == "function" ? declaration : branch
+        const field = scope == "function" ? "body" : scope
+
+        corruptField(owner, field, malformed)
+
+        assert.throws(
+          () => generate({language: "ruby", module}),
+          (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
+            error.language == "ruby" && error.location?.filename == "locals.ts" &&
+            error.location.start.line == owner.location.start.line && error.message.includes("statement sequence"),
+          `${scope} ${malformed}`
+        )
+      }
+    }
+  })
+
   it("rejects malformed local mutability and non-identifier assignment targets", async () => {
     for (const malformed of ["mutability", "target"]) {
       const module = await validLocalModule()
