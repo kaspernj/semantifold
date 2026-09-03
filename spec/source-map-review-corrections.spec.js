@@ -185,6 +185,82 @@ console.log(ch\\u006fose(true, "no"))
     }
   })
 
+  it("does not trace an unrelated same-named source through an intermediate mapping", () => {
+    const inner = mappingFromSourceMap({
+      file: "middle.js",
+      mappings: "AAAA",
+      names: [],
+      sources: ["original.js"],
+      sourcesContent: ["xy"],
+      version: 3
+    }, {content: "ab", filename: "middle.js", language: "javascript"})
+    const outer = structuredClone(mappingFromSourceMap({
+      file: "final.js",
+      mappings: "AAAA",
+      names: [],
+      sources: ["middle.js"],
+      sourcesContent: ["ab"],
+      version: 3
+    }, {content: "Z", filename: "final.js", language: "javascript"}))
+    const outerOrigin = outer.spans[0].origin
+
+    outer.sources.push({content: "zz", filename: "middle.js", id: "source:1", language: "javascript"})
+    assert.equal(outerOrigin.kind, "source")
+    outerOrigin.sourceId = "source:1"
+    const composed = composeMappings(outer, inner)
+    const composedOrigin = composed.spans[0].origin
+
+    assert.equal(composedOrigin.kind, "source")
+    expect(composedOrigin.sourceId).toEqual("source:1")
+    expect(composed.sources.find((source) => source.id == composedOrigin.sourceId)?.content).toEqual("zz")
+    expect(originalPositionFor(composed, {offset: 0}).location.filename).toEqual("middle.js")
+  })
+
+  it("anchors an exact outer subrange that cannot adopt a whole exact inner origin", () => {
+    const inner = structuredClone(mappingFromSourceMap({
+      file: "middle.js",
+      mappings: "AAAA",
+      names: [],
+      sources: ["original.js"],
+      sourcesContent: ["xy"],
+      version: 3
+    }, {content: "ab", filename: "middle.js", language: "javascript"}))
+    const outer = structuredClone(mappingFromSourceMap({
+      file: "final.js",
+      mappings: "AAAA",
+      names: [],
+      sources: ["middle.js"],
+      sourcesContent: ["ab"],
+      version: 3
+    }, {content: "Z", filename: "final.js", language: "javascript"}))
+    const innerOrigin = inner.spans[0].origin
+    const outerOrigin = outer.spans[0].origin
+
+    assert.equal(innerOrigin.kind, "source")
+    assert.equal(outerOrigin.kind, "source")
+    inner.spans[0].mappingKind = "exact"
+    innerOrigin.location.end = {column: 3, line: 1, offset: 2}
+    const wholeOuter = structuredClone(outer)
+    const wholeOrigin = wholeOuter.spans[0].origin
+
+    assert.equal(wholeOrigin.kind, "source")
+    wholeOuter.spans[0].mappingKind = "exact"
+    wholeOrigin.location.end = {column: 3, line: 1, offset: 2}
+    expect(originalPositionFor(composeMappings(wholeOuter, inner), {offset: 0}).mappingKind).toEqual("exact")
+
+    outer.spans[0].mappingKind = "exact"
+    outerOrigin.location = {
+      end: {column: 3, line: 1, offset: 2},
+      filename: "middle.js",
+      start: {column: 2, line: 1, offset: 1}
+    }
+    const composed = composeMappings(outer, inner)
+    const result = originalPositionFor(composed, {offset: 0})
+
+    expect({end: result.location.end.offset, mappingKind: result.mappingKind, start: result.location.start.offset})
+      .toEqual({end: 2, mappingKind: "anchor", start: 0})
+  })
+
   it("splits exact outer ranges across every overlapping inner mapping", () => {
     const inner = mappingFromSourceMap({
       file: "middle.js",

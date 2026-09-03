@@ -168,14 +168,15 @@ export function parseMapping(serialized) {
  * @returns {import("./semantic/types.js").SemantifoldMapping} Composed rich map.
  */
 export function composeMappings(outer, inner) {
-  mappingIndex(outer)
+  const outerIndex = mappingIndex(outer)
+
   mappingIndex(inner)
 
   /** @type {import("./semantic/types.js").RegisteredSource[]} */
   const sources = inner.sources.map((source, index) => ({...source, id: `source:${index}`}))
 
   for (const source of outer.sources) {
-    if (source.filename == inner.generated.filename) continue
+    if (sourceRepresentsGenerated(source, inner.generated)) continue
     if (!sources.some((candidate) => candidate.filename == source.filename && candidate.content == source.content)) {
       sources.push({...source, id: `source:${sources.length}`})
     }
@@ -183,10 +184,13 @@ export function composeMappings(outer, inner) {
 
   const spans = outer.spans.flatMap((span) => {
     const location = primaryLocation(span.origin)
-    const overlapping = location?.filename == inner.generated.filename
+    const sourceId = sourceIdForOrigin(span.origin)
+    const source = sourceId ? outerIndex.sourcesById.get(sourceId) : undefined
+    const tracesIntermediate = source ? sourceRepresentsGenerated(source, inner.generated) : false
+    const overlapping = tracesIntermediate && location
       ? spansOverlappingGenerated(inner.spans, location.start.offset, location.end.offset)
       : []
-    const traced = overlapping[0] ?? (location?.filename == inner.generated.filename
+    const traced = overlapping[0] ?? (tracesIntermediate && location
       ? spanForGenerated(inner.spans, location.start.offset)
       : undefined)
 
@@ -206,17 +210,21 @@ export function composeMappings(outer, inner) {
         const overlapEnd = Math.min(location.end.offset, candidate.generated.end.offset)
         const generatedStart = span.generated.start.offset + overlapStart - location.start.offset
         const generatedEnd = span.generated.start.offset + overlapEnd - location.start.offset
+        const preservesWholeOrigin = overlapStart == candidate.generated.start.offset && overlapEnd == candidate.generated.end.offset
 
         return composedSpan(span, candidate, locationFromOffsets(
           outer.generated.filename,
           outer.generated.content,
           generatedStart,
           generatedEnd
-        ))
+        ), preservesWholeOrigin)
       })
     }
 
-    return [composedSpan(span, traced, span.generated)]
+    const preservesWholeOrigin = Boolean(location && location.start.offset == traced.generated.start.offset &&
+      location.end.offset == traced.generated.end.offset)
+
+    return [composedSpan(span, traced, span.generated, preservesWholeOrigin)]
   })
 
   return finalizeMapping({
@@ -235,14 +243,15 @@ export function composeMappings(outer, inner) {
    * @param {import("./semantic/types.js").SemantifoldMappingSpan} outerSpan - Outer span.
    * @param {import("./semantic/types.js").SemantifoldMappingSpan} innerSpan - Inner span.
    * @param {import("./semantic/types.js").SourceLocation} generated - Final generated subrange.
+   * @param {boolean} preservesWholeOrigin - Whether adopting the inner origin retains its complete range.
    * @returns {import("./semantic/types.js").SemantifoldMappingSpan} Composed span.
    */
-  function composedSpan(outerSpan, innerSpan, generated) {
+  function composedSpan(outerSpan, innerSpan, generated, preservesWholeOrigin) {
     return definedProperties({
       ...outerSpan,
       generated,
       mappingKind: innerSpan.mappingKind == "synthetic" ? /** @type {const} */ ("synthetic") :
-        outerSpan.mappingKind == "exact" && innerSpan.mappingKind == "exact"
+        outerSpan.mappingKind == "exact" && innerSpan.mappingKind == "exact" && preservesWholeOrigin
           ? /** @type {const} */ ("exact")
           : /** @type {const} */ ("anchor"),
       name: outerSpan.name ?? innerSpan.name,
@@ -252,6 +261,17 @@ export function composeMappings(outer, inner) {
       symbolId: innerSpan.symbolId
     })
   }
+}
+
+/**
+ * Determines whether a registered source is the generated artifact consumed by an inner map.
+ * @param {import("./semantic/types.js").RegisteredSource} source - Outer source registry entry.
+ * @param {import("./semantic/types.js").GeneratedSource} generated - Inner generated artifact.
+ * @returns {boolean} Whether identity-selected provenance may be traced through the inner map.
+ */
+function sourceRepresentsGenerated(source, generated) {
+  return source.filename == generated.filename && source.content == generated.content &&
+    (source.language == null || source.language == generated.language)
 }
 
 /**

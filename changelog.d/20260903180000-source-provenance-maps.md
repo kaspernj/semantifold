@@ -5,4 +5,4 @@
 - Add forward/reverse/node/symbol lookup, deterministic parse/stringify, rich and v3 composition, Source Map import, and diagnostic/location remapping.
 - Use `@jridgewell/gen-mapping` and `@jridgewell/trace-mapping` for maintained v3 encoding and tracing.
 - Recommend a future pre-1.0 minor release (`0.2.0`); this change does not publish a package.
-- Keep provenance attached to semantic nodes across transformations, detach immutable artifact metadata from mutable semantic locations, canonicalize CRLF positions, bound mapping validation/lookups near linearly, and correct escaped identifiers, unmapped V3 lines, Java filenames, external directive paths and terminators, source ownership, and multi-span composition.
+- Keep provenance attached to semantic nodes across transformations, detach immutable artifact metadata from mutable semantic locations, canonicalize CRLF positions, bound mapping validation/lookups near linearly, and correct escaped identifiers, unmapped V3 lines, Java filenames, external directive paths and terminators, source ownership, registry-identified intermediates, exact-subrange anchoring, and multi-span composition.
