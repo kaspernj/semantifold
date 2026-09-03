@@ -78,7 +78,7 @@ export function generateArtifactSource({language, filename = defaultFilenames[la
   const sourceMap = toSourceMapV3(writer.finish())
 
   if (mapDirective == "external") {
-    const sourceMapUrl = relativeArtifactPath(filename, sourceMapFilename)
+    const sourceMapUrl = encodeArtifactPath(relativeArtifactPath(filename, sourceMapFilename))
 
     writer.synthetic(`//# sourceMappingURL=${sourceMapUrl}\n`, "external source map directive", [module])
   } else if (mapDirective == "inline") {
@@ -132,6 +132,15 @@ function normalizedPathParts(filename) {
   }
 
   return parts
+}
+
+/**
+ * Encodes literal filesystem path segments without encoding structural slashes.
+ * @param {string} path - Relative artifact path.
+ * @returns {string} URL-safe relative artifact path.
+ */
+function encodeArtifactPath(path) {
+  return path.split("/").map((part) => encodeURIComponent(part)).join("/")
 }
 
 /**

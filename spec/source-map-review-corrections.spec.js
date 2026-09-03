@@ -10,6 +10,7 @@ import {describe, expect, it} from "@velocious/testing"
 import {originalPositionFor as traceOriginalPositionFor, TraceMap} from "@jridgewell/trace-mapping"
 import {
   composeMappings,
+  composeSourceMaps,
   generateArtifact,
   generatedPositionFor,
   getNodeProvenance,
@@ -59,6 +60,29 @@ describe("reviewed source-map corrections", () => {
     assert.ok(directive)
     expect(directive[1]).toEqual("program.js.map")
     expect(new URL(directive[1], "https://example.invalid/dist/program.js").pathname).toEqual("/dist/program.js.map")
+  })
+
+  it("URL-encodes significant characters in nested external map filenames", () => {
+    const module = parse({filename: "program.ts", language: "typescript", source: baseSource})
+    const artifact = generateArtifact({
+      filename: "dist/program.js",
+      language: "javascript",
+      mapDirective: "external",
+      module,
+      sourceMapFilename: "dist/maps/program.js.map#v1?copy"
+    })
+    const directive = artifact.code.match(/\/\/# sourceMappingURL=(.+)\n$/u)
+
+    expect(artifact.sourceMapFilename).toEqual("dist/maps/program.js.map#v1?copy")
+    assert.ok(directive)
+    expect(directive[1]).toEqual("maps/program.js.map%23v1%3Fcopy")
+    const resolved = new URL(directive[1], "https://example.invalid/dist/program.js")
+
+    expect({hash: resolved.hash, pathname: resolved.pathname, search: resolved.search}).toEqual({
+      hash: "",
+      pathname: "/dist/maps/program.js.map%23v1%3Fcopy",
+      search: ""
+    })
   })
 
   it("rejects every ECMAScript line terminator in external map names and executes normal directives", async () => {
@@ -216,6 +240,58 @@ console.log(ch\\u006fose(true, "no"))
     expect(originalPositionFor(composed, {offset: 0}).location.filename).toEqual("middle.js")
   })
 
+  it("preserves custom inner source IDs used by retained node origins", () => {
+    const module = parse({filename: "original.ts", language: "typescript", source: baseSource})
+    const artifact = generateArtifact({filename: "intermediate.ts", language: "typescript", module})
+    const inner = structuredClone(artifact.mapping)
+    const priorSourceId = inner.sources[0].id
+    const customSourceId = "input:typescript"
+
+    inner.sources[0].id = customSourceId
+    inner.nodes.forEach((node) => renameOriginSourceId(node.origin, priorSourceId, customSourceId))
+    inner.spans.forEach((span) => renameOriginSourceId(span.origin, priorSourceId, customSourceId))
+    const outer = mappingFromSourceMap({
+      file: "final.js",
+      mappings: "AAAA",
+      names: [],
+      sources: ["intermediate.ts"],
+      sourcesContent: [artifact.code],
+      version: 3
+    }, {content: "Z", filename: "final.js", language: "javascript"})
+    const composed = composeMappings(outer, inner)
+    const retained = composed.nodes.find((node) => node.path == "/functions/0")
+
+    assert.equal(retained.origin.kind, "source")
+    expect(composed.sources[0].id).toEqual(customSourceId)
+    expect(retained.origin.sourceId).toEqual(customSourceId)
+    expect(originalPositionFor(composed, {offset: 0}).location.filename).toEqual("original.ts")
+  })
+
+  it("does not trace an unrelated suffix-matched V3 source", () => {
+    const composed = composeSourceMaps({
+      file: "final.js",
+      mappings: "AAAA",
+      names: [],
+      sources: ["vendor/intermediate.ts"],
+      sourcesContent: ["unrelated"],
+      version: 3
+    }, {
+      file: "intermediate.ts",
+      mappings: "AAAA",
+      names: [],
+      sources: ["original.ts"],
+      sourcesContent: ["original"],
+      version: 3
+    })
+    const traced = traceOriginalPositionFor(new TraceMap(composed), {column: 0, line: 1})
+    const tracedSourceIndex = composed.sources.indexOf(traced.source)
+
+    expect({source: traced.source, sourceContent: composed.sourcesContent?.[tracedSourceIndex]}).toEqual({
+      source: "vendor/intermediate.ts",
+      sourceContent: "unrelated"
+    })
+  })
+
   it("anchors an exact outer subrange that cannot adopt a whole exact inner origin", () => {
     const inner = structuredClone(mappingFromSourceMap({
       file: "middle.js",
@@ -298,4 +374,24 @@ console.log(ch\\u006fose(true, "no"))
  */
 function slice(source, location) {
   return source.slice(location.start.offset, location.end.offset)
+}
+
+/**
+ * Rewrites one source registry identity in a mutable closed origin.
+ * @param {import("../src/semantic/types.js").SemanticOrigin} origin - Origin to update.
+ * @param {string} priorSourceId - Existing source identity.
+ * @param {string} sourceId - Replacement source identity.
+ * @returns {void}
+ */
+function renameOriginSourceId(origin, priorSourceId, sourceId) {
+  if (origin.kind == "source") {
+    if (origin.sourceId == priorSourceId) origin.sourceId = sourceId
+    return
+  }
+
+  const relatedOrigins = origin.kind == "derived" ? origin.origins : origin.relatedOrigins
+
+  for (const related of relatedOrigins) {
+    if (related.sourceId == priorSourceId) related.sourceId = sourceId
+  }
 }

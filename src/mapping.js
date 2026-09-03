@@ -173,13 +173,23 @@ export function composeMappings(outer, inner) {
   mappingIndex(inner)
 
   /** @type {import("./semantic/types.js").RegisteredSource[]} */
-  const sources = inner.sources.map((source, index) => ({...source, id: `source:${index}`}))
+  const sources = inner.sources.map((source) => ({...source}))
+  const sourceIds = new Set(sources.map((source) => source.id))
+  /** @type {Map<string, string>} */
+  const outerSourceIds = new Map()
+  let nextSourceIndex = 0
 
   for (const source of outer.sources) {
     if (sourceRepresentsGenerated(source, inner.generated)) continue
-    if (!sources.some((candidate) => candidate.filename == source.filename && candidate.content == source.content)) {
-      sources.push({...source, id: `source:${sources.length}`})
+    let composedSource = sources.find((candidate) => sameRegisteredSource(candidate, source))
+
+    if (!composedSource) {
+      while (sourceIds.has(`source:${nextSourceIndex}`)) nextSourceIndex++
+      composedSource = {...source, id: `source:${nextSourceIndex}`}
+      sourceIds.add(composedSource.id)
+      sources.push(composedSource)
     }
+    outerSourceIds.set(source.id, composedSource.id)
   }
 
   const spans = outer.spans.flatMap((span) => {
@@ -200,7 +210,7 @@ export function composeMappings(outer, inner) {
       delete unidentified.nodeId
       delete unidentified.symbolId
 
-      return [{...unidentified, origin: remapOriginSources(span.origin, outer.sources, sources, false)}]
+      return [{...unidentified, origin: remapOriginSourceIds(span.origin, outerSourceIds)}]
     }
 
     if (location && overlapping.length > 1 && span.mappingKind == "exact" &&
@@ -256,7 +266,7 @@ export function composeMappings(outer, inner) {
           : /** @type {const} */ ("anchor"),
       name: outerSpan.name ?? innerSpan.name,
       nodeId: innerSpan.nodeId,
-      origin: remapOriginSources(innerSpan.origin, inner.sources, sources, true),
+      origin: innerSpan.origin,
       role: innerSpan.role ?? outerSpan.role,
       symbolId: innerSpan.symbolId
     })
@@ -275,6 +285,16 @@ function sourceRepresentsGenerated(source, generated) {
 }
 
 /**
+ * Compares complete registered-source identity fields other than registry-local ID.
+ * @param {import("./semantic/types.js").RegisteredSource} left - First registered source.
+ * @param {import("./semantic/types.js").RegisteredSource} right - Second registered source.
+ * @returns {boolean} Whether both entries represent the same source artifact.
+ */
+function sameRegisteredSource(left, right) {
+  return left.filename == right.filename && left.content == right.content && left.language == right.language
+}
+
+/**
  * Composes Source Map v3 maps with maintained tracing machinery.
  * @param {import("@jridgewell/trace-mapping").SourceMapInput} outer - Final output to intermediate map.
  * @param {import("@jridgewell/trace-mapping").SourceMapInput} inner - Intermediate to original map.
@@ -284,15 +304,20 @@ export function composeSourceMaps(outer, inner) {
   const outerMap = new TraceMap(outer)
   const innerMap = new TraceMap(inner)
   const composed = new GenMapping({file: outerMap.file})
+  const intermediateIndexes = typeof innerMap.file == "string"
+    ? outerMap.resolvedSources.flatMap((source, index) => source == innerMap.file ? [index] : [])
+    : []
+  const intermediateIndex = intermediateIndexes.length == 1 ? intermediateIndexes[0] : undefined
+  const intermediateSource = intermediateIndex === undefined ? undefined : outerMap.resolvedSources[intermediateIndex]
 
   for (const source of innerMap.sources) {
     if (source != null) setSourceContent(composed, source, sourceContentFor(innerMap, source))
   }
-  for (const source of outerMap.sources) {
-    if (source != null && source != innerMap.file && !source.endsWith(`/${innerMap.file}`)) {
+  outerMap.sources.forEach((source, index) => {
+    if (source != null && index != intermediateIndex) {
       setSourceContent(composed, source, sourceContentFor(outerMap, source))
     }
-  }
+  })
 
   eachMapping(outerMap, (mapping) => {
     if (mapping.source == null || mapping.originalLine == null || mapping.originalColumn == null) {
@@ -300,7 +325,7 @@ export function composeSourceMaps(outer, inner) {
       return
     }
 
-    const isIntermediate = mapping.source == innerMap.file || mapping.source.endsWith(`/${innerMap.file}`)
+    const isIntermediate = intermediateSource !== undefined && mapping.source == intermediateSource
     const traced = isIntermediate
       ? traceOriginalPositionFor(innerMap, {column: mapping.originalColumn, line: mapping.originalLine})
       : {column: mapping.originalColumn, line: mapping.originalLine, name: mapping.name, source: mapping.source}
@@ -969,52 +994,34 @@ function sourceIdForOrigin(origin) {
 /**
  * Rewrites closed-origin source identities against a composed registry.
  * @param {import("./semantic/types.js").SemanticOrigin} origin - Origin.
- * @param {import("./semantic/types.js").RegisteredSource[]} originalSources - Registry owning the origin.
- * @param {import("./semantic/types.js").RegisteredSource[]} composedSources - Composed sources.
- * @param {boolean} preserveIdentities - Whether related node/symbol identities belong to the composed node index.
+ * @param {Map<string, string>} sourceIds - Original-to-composed source identities.
  * @returns {import("./semantic/types.js").SemanticOrigin} Rewritten origin.
  */
-function remapOriginSources(origin, originalSources, composedSources, preserveIdentities) {
+function remapOriginSourceIds(origin, sourceIds) {
   if (origin.kind == "source") {
-    const source = remappedSource(origin.sourceId, origin.location.filename)
+    const sourceId = sourceIds.get(origin.sourceId)
 
-    if (!source) throw new RangeError(`Composed mapping omitted source '${origin.location.filename}'.`)
+    if (!sourceId) throw new RangeError(`Composed mapping omitted source '${origin.location.filename}'.`)
 
-    return {kind: "source", location: origin.location, sourceId: source.id}
+    return {kind: "source", location: origin.location, sourceId}
   }
 
   const remapRelated = (/** @type {import("./semantic/types.js").RelatedOrigin} */ related) => {
-    const source = remappedSource(related.sourceId, related.location.filename)
+    const sourceId = sourceIds.get(related.sourceId)
 
-    if (!source) throw new RangeError(`Composed mapping omitted source '${related.location.filename}'.`)
-
-    if (preserveIdentities) return {...related, sourceId: source.id}
+    if (!sourceId) throw new RangeError(`Composed mapping omitted source '${related.location.filename}'.`)
 
     const unidentified = {...related}
 
     delete unidentified.nodeId
     delete unidentified.symbolId
 
-    return {...unidentified, sourceId: source.id}
+    return {...unidentified, sourceId}
   }
 
   if (origin.kind == "derived") return {kind: "derived", origins: origin.origins.map(remapRelated)}
 
   return {kind: "synthetic", reason: origin.reason, relatedOrigins: origin.relatedOrigins.map(remapRelated)}
-
-  /**
-   * Resolves one old registry identity into the deterministic composed registry.
-   * @param {string} sourceId - Old source identity.
-   * @param {string} filename - Location filename.
-   * @returns {import("./semantic/types.js").RegisteredSource | undefined} Composed source.
-   */
-  function remappedSource(sourceId, filename) {
-    const original = originalSources.find((source) => source.id == sourceId)
-
-    return original
-      ? composedSources.find((source) => source.filename == original.filename && source.content == original.content)
-      : composedSources.find((source) => source.filename == filename)
-  }
 }
 
 /**
