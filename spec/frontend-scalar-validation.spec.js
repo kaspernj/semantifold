@@ -544,13 +544,13 @@ echo label(true, 'no'), PHP_EOL;
 
   it("enforces strict semantic condition, return, and call argument types", () => {
     const cases = [
-      ["condition.ts", "  if (fallback) return \"yes\"", 2],
-      ["return.ts", "  if (flag) return true", 2],
-      ["argument.ts", "  if (flag) return \"yes\"", 5],
-      ["operator.ts", "  if (flag) return \"yes\" + fallback", 2]
+      ["condition.ts", "  if (fallback) return \"yes\"", 2, "NON_BOOLEAN_CONDITION"],
+      ["return.ts", "  if (flag) return true", 2, "TYPE_MISMATCH"],
+      ["argument.ts", "  if (flag) return \"yes\"", 5, "TYPE_MISMATCH"],
+      ["operator.ts", "  if (flag) return \"yes\" + flag", 2, "INVALID_OPERAND_TYPE"]
     ]
 
-    for (const [filename, branch, line] of cases) {
+    for (const [filename, branch, line, code] of cases) {
       const call = filename == "argument.ts" ? "console.log(label(\"true\", \"no\"))" : "console.log(label(true, \"no\"))"
       const source = `function label(flag: boolean, fallback: string): string {
 ${branch}
@@ -559,7 +559,7 @@ ${branch}
 ${call}
 `
 
-      assertDiagnostic({code: "TYPE_MISMATCH", filename, language: "typescript", line, source})
+      assertDiagnostic({code, filename, language: "typescript", line, source})
     }
 
     assertDiagnostic({

@@ -4,6 +4,7 @@ import {parse as parseBabel} from "@babel/parser"
 import {parse as parseComment} from "comment-parser"
 import {missingType, parseFailure, unsupportedSyntax} from "../diagnostic.js"
 import {locationFromOffsets, moduleLocation} from "../semantic/location.js"
+import {withAdaptedOperation} from "../semantic/operators.js"
 import {withParserRanges} from "../semantic/provenance.js"
 import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
 import {requireSourceScalarType} from "./scalars.js"
@@ -13,6 +14,17 @@ import {requireSourceScalarType} from "./scalars.js"
 
 /** @type {WeakMap<object, BabelTokenIndex>} */
 const nodeTokens = new WeakMap()
+const babelBinaryOperations = new Map([
+  ["+", "Add"],
+  ["-", "Subtract"],
+  ["*", "Multiply"],
+  ["===", "Equal"],
+  ["!==", "NotEqual"],
+  ["<", "LessThan"],
+  ["<=", "LessThanOrEqual"],
+  [">", "GreaterThan"],
+  [">=", "GreaterThanOrEqual"]
+])
 
 /**
  * Returns a source location for a Babel node.
@@ -162,21 +174,52 @@ function convertExpression(node, language, filename, source) {
     return withParserRanges({kind: /** @type {const} */ ("StringLiteral"), location, value: quasi.value.cooked}, {literal: location})
   }
 
-  if (node.type == "BinaryExpression" && [">", "-", "+"].includes(node.operator)) {
+  if (node.type == "UnaryExpression" && ["!", "-"].includes(node.operator)) {
+    const operand = convertExpression(node.argument, language, filename, source)
+    const semantic = withAdaptedOperation(withParserRanges({
+      kind: "UnaryExpression",
+      location,
+      operand
+    }, {
+      operator: tokenLocation(node, node.operator, node.start ?? 0, node.argument.start ?? node.end ?? source.length, filename, source)
+    }), node.operator == "!" ? "Not" : "Negate")
+
+    return /** @type {import("../semantic/types.js").Expression} */ (/** @type {unknown} */ (semantic))
+  }
+
+  if (node.type == "LogicalExpression" && ["&&", "||"].includes(node.operator)) {
+    const semantic = withAdaptedOperation(withParserRanges({
+      kind: "BinaryExpression",
+      left: convertExpression(node.left, language, filename, source),
+      location,
+      right: convertExpression(node.right, language, filename, source)
+    }, {
+      operator: tokenLocation(node, node.operator, node.left.end ?? node.start ?? 0, node.right.start ?? node.end ?? source.length, filename, source)
+    }), node.operator == "&&" ? "And" : "Or")
+
+    return /** @type {import("../semantic/types.js").Expression} */ (/** @type {unknown} */ (semantic))
+  }
+
+  if (node.type == "BinaryExpression" && babelBinaryOperations.has(node.operator)) {
     if (node.left.type == "PrivateName") unsupportedSyntax(language, node.left.type, location)
 
     const left = convertExpression(node.left, language, filename, source)
     const right = convertExpression(node.right, language, filename, source)
 
-    return withParserRanges({
+    const semantic = withAdaptedOperation(withParserRanges({
       kind: "BinaryExpression",
       left,
       location,
-      operator: /** @type {">" | "-" | "+"} */ (node.operator),
       right
     }, {
       operator: tokenLocation(node, node.operator, node.left.end ?? node.start ?? 0, node.right.start ?? node.end ?? source.length, filename, source)
-    })
+    }), /** @type {import("../semantic/operators.js").AdaptedOperation} */ (babelBinaryOperations.get(node.operator)))
+
+    return /** @type {import("../semantic/types.js").Expression} */ (/** @type {unknown} */ (semantic))
+  }
+
+  if (node.type == "BinaryExpression" && ["==", "!="].includes(node.operator)) {
+    return unsupportedSyntax(language, `coercive equality ${node.operator}`, location)
   }
 
   if (node.type == "CallExpression" && node.callee.type == "Identifier") {

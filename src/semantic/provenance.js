@@ -491,6 +491,8 @@ export function semanticEntries(module) {
       node.alternate.forEach((child, index) => visit(child, `${path}/alternate/${index}`, location))
     } else if (node.kind == "EntryPoint") {
       node.body.forEach((child, index) => visit(child, `${path}/body/${index}`, location))
+    } else if (node.kind == "UnaryExpression") {
+      visit(node.operand, `${path}/operand`, location)
     } else if (node.kind == "BinaryExpression") {
       visit(node.left, `${path}/left`, location)
       visit(node.right, `${path}/right`, location)
@@ -593,6 +595,8 @@ function resolveSymbols(module, records) {
     else if (expression.kind == "CallExpression") {
       reference(expression, functions.get(expression.callee), "call", path)
       for (const [index, argument] of expression.arguments.entries()) visitExpression(argument, scope, `${path}/arguments/${index}`)
+    } else if (expression.kind == "UnaryExpression") {
+      visitExpression(expression.operand, scope, `${path}/operand`)
     } else if (expression.kind == "BinaryExpression") {
       visitExpression(expression.left, scope, `${path}/left`)
       visitExpression(expression.right, scope, `${path}/right`)

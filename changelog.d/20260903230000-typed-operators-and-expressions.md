@@ -1,0 +1,1 @@
+Added closed, explicitly typed scalar operation expressions across all five frontends and backends, including portable arithmetic, comparison, short-circuit Boolean logic, strict scalar equality, target-specific string concatenation/equality, precedence-safe generation, and precise rejection of coercive or unsupported forms.
