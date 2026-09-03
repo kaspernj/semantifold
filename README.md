@@ -22,7 +22,18 @@ const module = parse({
 const javaSource = generate({language: "java", module})
 ```
 
-`parse` returns parser-independent discriminated semantic nodes with normalized types and source locations. `generate` accepts that shared module and returns an independently executable source program. `supportedLanguages` lists the five exact language identifiers, and `SemantifoldDiagnostic` exposes stable error codes for unsupported syntax, missing types, parse failures, binding/type failures, and backend capabilities.
+`parse` returns parser-independent discriminated semantic nodes with normalized types, source locations, a versioned source registry, and deterministic node/symbol provenance. `generate` accepts that shared module and returns an independently executable source program with its historical bytes unchanged. `generateArtifact` adds an output filename, an authoritative range-based `SemantifoldMapping` v1, and a Source Map v3 sidecar for every target:
+
+```js
+import {generateArtifact, originalPositionFor} from "semantifold"
+
+const artifact = generateArtifact({language: "java", module})
+const original = originalPositionFor(artifact.mapping, {offset: artifact.code.indexOf("label")})
+```
+
+Generated output always uses LF. Exact original content, including LF, CRLF, lone CR, and astral UTF-16 coordinates, remains in the source registry and `sourcesContent`. Optional inline/external `sourceMappingURL` directives apply only to JavaScript and TypeScript; PHP, Ruby, and Java use the same rich/v3 sidecars without foreign comments. See [source provenance and mappings](docs/source-maps.md) for schemas, lookups, composition, diagnostics, directives, and compatibility.
+
+`supportedLanguages` lists the five exact language identifiers, and `SemantifoldDiagnostic` exposes stable error codes for unsupported syntax, missing types, parse failures, binding/type failures, and backend capabilities.
 
 This is not general-purpose support for any of the five languages. The implemented subset is a two-parameter function using explicit integer, boolean, or string types; explicitly typed, initialized scalar locals; plain assignment to mutable locals; a strictly boolean `if`/`else`; one return per branch; integer `+`, `-`, and `>`; a two-argument function call; and entry-point printing. Declarations and assignments may form a restricted prefix before the existing terminal function `if`, branch return, or entry print. See [language support](docs/language-support.md) before using it on other code.
 
@@ -53,6 +64,7 @@ The execution specs require PHP CLI, Ruby, TypeScript, and a Java JDK in additio
 - [Coding standards](docs/coding-standards.md)
 - [Language support](docs/language-support.md)
 - [Testing](docs/testing.md)
+- [Source provenance and mappings](docs/source-maps.md)
 - [Language feature roadmap](https://github.com/kaspernj/semantifold/blob/master/todo/README.md)
 - [Initial toolchain plan](docs/plans/2026-09-02-initial-toolchain.md)
 

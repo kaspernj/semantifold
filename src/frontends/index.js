@@ -1,6 +1,7 @@
 // @ts-check
 
 import {SemantifoldDiagnostic} from "../diagnostic.js"
+import {annotateParsedModule} from "../semantic/provenance.js"
 import {validateParsedModule} from "../semantic/validate.js"
 import {parseJava} from "./java.js"
 import {parseJavaScriptTypeScript} from "./javascript-typescript.js"
@@ -16,12 +17,16 @@ import {parseRuby} from "./ruby.js"
  * @returns {import("../semantic/types.js").SemanticModule} Semantic module.
  */
 export function parseSource({filename, language, source}) {
-  if (language == "php") return validateParsedModule(parsePhp({filename, source}), language)
-  if (language == "ruby") return validateParsedModule(parseRuby({filename, source}), language)
+  let module
+
+  if (language == "php") module = validateParsedModule(parsePhp({filename, source}), language)
+  else if (language == "ruby") module = validateParsedModule(parseRuby({filename, source}), language)
   if (language == "javascript" || language == "typescript") {
-    return validateParsedModule(parseJavaScriptTypeScript({filename, language, source}), language)
+    module = validateParsedModule(parseJavaScriptTypeScript({filename, language, source}), language)
   }
-  if (language == "java") return validateParsedModule(parseJava({filename, source}), language)
+  else if (language == "java") module = validateParsedModule(parseJava({filename, source}), language)
+
+  if (module) return annotateParsedModule(module, {filename, language, source})
 
   throw new SemantifoldDiagnostic({
     code: "UNSUPPORTED_LANGUAGE",

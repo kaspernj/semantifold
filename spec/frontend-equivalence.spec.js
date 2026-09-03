@@ -19,7 +19,8 @@ const fixtures = [
  * @returns {import("../src/semantic/types.js").SemanticNodeWithoutLocations} Location-free semantic value.
  */
 function withoutLocations(node) {
-  return JSON.parse(JSON.stringify(node, (key, value) => key == "location" ? undefined : value))
+  return JSON.parse(JSON.stringify(node, (key, value) =>
+    key == "location" || key == "provenance" || key == "sourceProvenance" ? undefined : value))
 }
 
 describe("language frontends", () => {

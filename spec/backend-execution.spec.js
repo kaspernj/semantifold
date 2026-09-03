@@ -25,7 +25,8 @@ const filenames = new Map([
  * @returns {import("../src/semantic/types.js").SemanticNodeWithoutLocations} Location-free semantic value.
  */
 function withoutLocations(module) {
-  return JSON.parse(JSON.stringify(module, (key, value) => key == "location" ? undefined : value))
+  return JSON.parse(JSON.stringify(module, (key, value) =>
+    key == "location" || key == "provenance" || key == "sourceProvenance" ? undefined : value))
 }
 
 /**

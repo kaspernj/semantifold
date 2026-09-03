@@ -9,14 +9,17 @@ export class SemantifoldDiagnostic extends Error {
    * @param {string} options.message - Human-readable message.
    * @param {import("./semantic/types.js").SemanticLanguage} options.language - Related language.
    * @param {import("./semantic/types.js").SourceLocation | undefined} [options.location] - Related location.
+   * @param {import("./semantic/types.js").SourceLocation | undefined} [options.generatedLocation] - Pre-remapping generated location.
    * @param {Error | undefined} [options.cause] - Preserved parser error.
    */
-  constructor({cause, code, language, location, message}) {
+  constructor({cause, code, generatedLocation, language, location, message}) {
     const locationText = location ? ` at ${location.filename}:${location.start.line}:${location.start.column}` : ""
 
     super(`[${code}] ${language}${locationText}: ${message}`, cause ? {cause} : undefined)
     this.name = "SemantifoldDiagnostic"
     this.code = code
+    this.detail = message
+    this.generatedLocation = generatedLocation
     this.language = language
     this.location = location
   }

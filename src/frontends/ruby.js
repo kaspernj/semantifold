@@ -21,6 +21,7 @@ import {
 } from "@ruby/prism"
 import {missingType, SemantifoldDiagnostic, unsupportedSyntax} from "../diagnostic.js"
 import {locationFromOffsets, moduleLocation, utf8ByteOffsetToUtf16Offset} from "../semantic/location.js"
+import {withParserRanges} from "../semantic/provenance.js"
 import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
 import {requireSourceScalarType} from "./scalars.js"
 const parsePrism = await loadPrism()
@@ -81,17 +82,17 @@ function convertExpression(node, filename, source) {
   }
 
   if (node instanceof LocalVariableReadNode) {
-    return {kind: "IdentifierExpression", location, name: node.name}
+    return withParserRanges({kind: /** @type {const} */ ("IdentifierExpression"), location, name: node.name}, {name: location})
   }
 
   if (node instanceof IntegerNode) {
     if (!Number.isSafeInteger(node.value)) return unsupportedSyntax("ruby", "non-safe integer literal", location)
 
-    return {kind: "IntegerLiteral", location, value: node.value}
+    return withParserRanges({kind: /** @type {const} */ ("IntegerLiteral"), location, value: node.value}, {literal: location})
   }
 
   if (node instanceof TrueNode || node instanceof FalseNode) {
-    return {kind: "BooleanLiteral", location, value: node instanceof TrueNode}
+    return withParserRanges({kind: /** @type {const} */ ("BooleanLiteral"), location, value: node instanceof TrueNode}, {literal: location})
   }
 
   if (node instanceof StringNode) {
@@ -102,28 +103,28 @@ function convertExpression(node, filename, source) {
       return unsupportedSyntax("ruby", "invalid Unicode string literal", location)
     }
 
-    return {kind: "StringLiteral", location, value: decoded.value}
+    return withParserRanges({kind: /** @type {const} */ ("StringLiteral"), location, value: decoded.value}, {literal: location})
   }
 
   if (node instanceof InterpolatedStringNode) return unsupportedSyntax("ruby", "interpolated string", location)
 
   if (node instanceof CallNode && node.receiver && [">", "-", "+"].includes(node.name) && node.arguments_?.arguments_.length == 1) {
-    return {
+    return withParserRanges({
       kind: "BinaryExpression",
       left: convertExpression(node.receiver, filename, source),
       location,
       operator: /** @type {">" | "-" | "+"} */ (node.name),
       right: convertExpression(node.arguments_.arguments_[0], filename, source)
-    }
+    }, {operator: prismLocation(node.messageLoc ?? node.location, filename, source)})
   }
 
   if (node instanceof CallNode && !node.receiver) {
-    return {
+    return withParserRanges({
       arguments: (node.arguments_?.arguments_ ?? []).map((argument) => convertExpression(argument, filename, source)),
       callee: node.name,
       kind: "CallExpression",
       location
-    }
+    }, {callee: prismLocation(node.messageLoc ?? node.location, filename, source)})
   }
 
   return unsupportedSyntax("ruby", node.constructor.name, location)
@@ -154,24 +155,63 @@ function convertReturn(node, filename, source) {
  * Reads Prism-owned RBS-style type comments directly preceding a definition.
  * @param {import("@ruby/prism/src/deserialize.js").Comment[]} comments - Prism comments.
  * @param {{location: import("@ruby/prism").Location}} node - Comment owner.
+ * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
- * @returns {{parameters: Map<string, string>, returnType: string | undefined}} Declared types.
+ * @returns {{parameters: Map<string, {location: import("../semantic/types.js").SourceLocation, sourceType: string}>, returnType: {location: import("../semantic/types.js").SourceLocation, sourceType: string} | undefined}} Declared types.
  */
-function typeComments(comments, node, source) {
+function typeComments(comments, node, filename, source) {
   const preceding = associatedComments(comments, node, source)
   const parameterTypes = new Map()
-  /** @type {string | undefined} */
+  /** @type {{location: import("../semantic/types.js").SourceLocation, sourceType: string} | undefined} */
   let returnType
 
   for (const comment of preceding) {
-    const text = slicePrismSource(source, comment.location.startOffset, comment.location.startOffset + comment.location.length)
-    const words = text.slice(1).trim().split(/\s+/u)
+    const words = commentTokens(comment, filename, source)
 
-    if (words[0] == "@param" && words.length == 3) parameterTypes.set(words[1], words[2])
-    if (words[0] == "@return" && words.length == 2) returnType = words[1]
+    if (words[0]?.text == "@param" && words.length == 3) {
+      parameterTypes.set(words[1].text, {location: words[2].location, sourceType: words[2].text})
+    }
+    if (words[0]?.text == "@return" && words.length == 2) {
+      returnType = {location: words[1].location, sourceType: words[1].text}
+    }
   }
 
   return {parameters: parameterTypes, returnType}
+}
+
+/**
+ * Lexes whitespace-separated metadata tokens inside a Prism-owned Ruby comment.
+ * @param {import("@ruby/prism/src/deserialize.js").Comment} comment - Prism comment token.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @returns {{location: import("../semantic/types.js").SourceLocation, text: string}[]} Metadata tokens.
+ */
+function commentTokens(comment, filename, source) {
+  const start = utf8ByteOffsetToUtf16Offset(source, comment.location.startOffset)
+  const end = utf8ByteOffsetToUtf16Offset(source, comment.location.startOffset + comment.location.length)
+  const tokens = []
+  let offset = start + 1
+
+  while (offset < end) {
+    while (offset < end && isRubyMetadataWhitespace(source[offset])) offset++
+    const tokenStart = offset
+
+    while (offset < end && !isRubyMetadataWhitespace(source[offset])) offset++
+    if (tokenStart < offset) {
+      tokens.push({location: locationFromOffsets(filename, source, tokenStart, offset), text: source.slice(tokenStart, offset)})
+    }
+  }
+
+  return tokens
+}
+
+/**
+ * Checks one Ruby metadata separator.
+ * @param {string} character - Source character.
+ * @returns {boolean} Whether it separates metadata tokens.
+ */
+function isRubyMetadataWhitespace(character) {
+  return character == " " || character == "\t" || character == "\r" || character == "\n"
 }
 
 /**
@@ -211,14 +251,11 @@ function associatedComments(comments, node, source) {
  */
 function localMetadata(comments, node, filename, source) {
   const associated = associatedComments(comments, node, source)
-  const lines = associated.map((comment) => {
-    return slicePrismSource(source, comment.location.startOffset, comment.location.startOffset + comment.location.length).slice(1).trim()
-  })
-  const metadata = lines.map((line) => line.split(/\s+/u))
-  const typeMetadata = metadata.filter(([token]) => token == "@type")
-  const immutableMetadata = metadata.filter(([token]) => token == "@semantifold-immutable")
+  const metadata = associated.map((comment) => commentTokens(comment, filename, source))
+  const typeMetadata = metadata.filter(([token]) => token?.text == "@type")
+  const immutableMetadata = metadata.filter(([token]) => token?.text == "@semantifold-immutable")
   const profileMetadata = metadata.filter(([token]) => {
-    return token.startsWith("@type") || token.startsWith("@semantifold-immutable")
+    return token?.text.startsWith("@type") || token?.text.startsWith("@semantifold-immutable")
   })
 
   if (profileMetadata.length == 0) return undefined
@@ -233,7 +270,7 @@ function localMetadata(comments, node, filename, source) {
 
   return {
     immutable: immutableMetadata.length == 1,
-    type: convertType(typeMetadata[0][1], `Local '${node.name}'`, location)
+    type: convertType(typeMetadata[0][1].text, `Local '${node.name}'`, location, typeMetadata[0][1].location)
   }
 }
 
@@ -255,24 +292,29 @@ function convertLocalStatement(node, comments, visible, filename, source) {
 
   if (metadata) {
     visible.add(node.name)
-    return {
+    return withParserRanges({
       initializer: convertExpression(node.value, filename, source),
       kind: "LocalDeclaration",
       location,
       mutable: !metadata.immutable,
       name: node.name,
       type: metadata.type
-    }
+    }, {name: prismLocation(node.nameLoc, filename, source), operator: prismLocation(node.operatorLoc, filename, source)})
   }
 
   if (!visible.has(node.name)) return missingType("ruby", `Local '${node.name}'`, location)
 
-  return {
+  const targetLocation = prismLocation(node.nameLoc, filename, source)
+  const target = withParserRanges({kind: /** @type {const} */ ("IdentifierExpression"), location: targetLocation, name: node.name}, {
+    name: targetLocation
+  })
+
+  return withParserRanges({
     expression: convertExpression(node.value, filename, source),
     kind: "AssignmentStatement",
     location,
-    target: {kind: "IdentifierExpression", location: prismLocation(node.nameLoc, filename, source), name: node.name}
-  }
+    target
+  }, {operator: prismLocation(node.operatorLoc, filename, source)})
 }
 
 /**
@@ -324,10 +366,11 @@ function isImmediateCommentGap(gap) {
  * @param {string | undefined} sourceType - Ruby type comment value.
  * @param {string} subject - Typed subject.
  * @param {import("../semantic/types.js").SourceLocation} location - Source location.
+ * @param {import("../semantic/types.js").SourceLocation} [typeLocation] - Exact type comment token location.
  * @returns {import("../semantic/types.js").TypeReference} Semantic type.
  */
-function convertType(sourceType, subject, location) {
-  return requireSourceScalarType("ruby", sourceType, subject, location)
+function convertType(sourceType, subject, location, typeLocation = location) {
+  return requireSourceScalarType("ruby", sourceType, subject, location, typeLocation)
 }
 
 /**
@@ -351,18 +394,20 @@ function convertFunction(node, comments, filename, source) {
     return unsupportedSyntax("ruby", "parameters", location)
   }
 
-  const declaredTypes = typeComments(comments, node, source)
+  const declaredTypes = typeComments(comments, node, filename, source)
   const parameters = node.parameters.requireds.map((parameter) => {
     if (!(parameter instanceof RequiredParameterNode)) return unsupportedSyntax("ruby", parameter.constructor.name, location)
 
     const parameterLocation = nodeLocation(parameter, filename, source)
 
-    return {
+    const declaredType = declaredTypes.parameters.get(parameter.name)
+
+    return withParserRanges({
       kind: /** @type {const} */ ("Parameter"),
       location: parameterLocation,
       name: parameter.name,
-      type: convertType(declaredTypes.parameters.get(parameter.name), `Parameter '${parameter.name}'`, parameterLocation)
-    }
+      type: convertType(declaredType?.sourceType, `Parameter '${parameter.name}'`, parameterLocation, declaredType?.location)
+    }, {name: parameterLocation})
   })
   const visible = new Set(parameters.map((parameter) => parameter.name))
   const body = convertRestrictedSequence(
@@ -375,14 +420,14 @@ function convertFunction(node, comments, filename, source) {
     source
   )
 
-  return {
+  return withParserRanges({
     body: /** @type {import("../semantic/types.js").FunctionStatement[]} */ (body),
     kind: "FunctionDeclaration",
     location,
     name: node.name,
     parameters,
-    returnType: convertType(declaredTypes.returnType, `Function '${node.name}' return`, location)
-  }
+    returnType: convertType(declaredTypes.returnType?.sourceType, `Function '${node.name}' return`, location, declaredTypes.returnType?.location)
+  }, {name: prismLocation(node.nameLoc, filename, source)})
 }
 
 /**

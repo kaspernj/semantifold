@@ -1,0 +1,3 @@
+- Continue rich-map trace selection past untraced EOF points while preserving those point origins and their sources.
+- Include direct and contextual related node and symbol identities in deterministic deduplicated span queries.
+- Resolve mixed-depth logical artifact paths against one synthetic base before emitting external source-map URLs.

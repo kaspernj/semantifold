@@ -4,8 +4,15 @@ import {parse as parseBabel} from "@babel/parser"
 import {parse as parseComment} from "comment-parser"
 import {missingType, parseFailure, unsupportedSyntax} from "../diagnostic.js"
 import {locationFromOffsets, moduleLocation} from "../semantic/location.js"
+import {withParserRanges} from "../semantic/provenance.js"
 import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
 import {requireSourceScalarType} from "./scalars.js"
+
+/** @typedef {NonNullable<import("@babel/parser").ParseResult<import("@babel/types").File>["tokens"]>[number]} BabelToken */
+/** @typedef {{byStart: Map<number, BabelToken>, tokens: BabelToken[]}} BabelTokenIndex */
+
+/** @type {WeakMap<object, BabelTokenIndex>} */
+const nodeTokens = new WeakMap()
 
 /**
  * Returns a source location for a Babel node.
@@ -23,6 +30,90 @@ function nodeLocation(node, filename, source) {
 }
 
 /**
+ * Returns the identifier spelling rather than a trailing TypeScript annotation.
+ * @param {import("@babel/types").Identifier} node - Parser identifier.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @returns {import("../semantic/types.js").SourceLocation} Identifier location.
+ */
+function identifierLocation(node, filename, source) {
+  if (typeof node.start != "number") throw new Error("Babel omitted an identifier start offset.")
+  const token = nodeTokens.get(node)?.byStart.get(node.start)
+
+  if (!token || token.type.label != "name") throw new Error(`Babel omitted the identifier token for '${node.name}'.`)
+
+  return locationFromOffsets(filename, source, token.start, token.end)
+}
+
+/**
+ * Locates one Babel token within parser-node boundaries.
+ * @param {import("@babel/types").Node} owner - Token-owning parser node.
+ * @param {string} value - Exact token spelling.
+ * @param {number} startOffset - Inclusive boundary.
+ * @param {number} endOffset - Exclusive boundary.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @returns {import("../semantic/types.js").SourceLocation} Exact token location.
+ */
+function tokenLocation(owner, value, startOffset, endOffset, filename, source) {
+  const tokens = nodeTokens.get(owner)?.tokens ?? []
+  let low = 0
+  let high = tokens.length
+
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2)
+
+    if (tokens[middle].start < startOffset) low = middle + 1
+    else high = middle
+  }
+  let token
+
+  for (let index = low; index < tokens.length && tokens[index].start < endOffset; index++) {
+    const candidate = tokens[index]
+
+    if (candidate.end <= endOffset && (candidate.value == value || candidate.type.label == value)) {
+      token = candidate
+      break
+    }
+  }
+
+  if (!token) throw new Error(`Babel omitted token '${value}' between ${startOffset} and ${endOffset}.`)
+
+  return locationFromOffsets(filename, source, token.start, token.end)
+}
+
+/**
+ * Locates a comment-parser token inside a Babel-owned doc comment.
+ * @param {import("@babel/types").CommentBlock} comment - Babel doc comment.
+ * @param {import("comment-parser").Spec} tag - Parsed doc tag.
+ * @param {"name" | "type"} field - Token field.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @returns {import("../semantic/types.js").SourceLocation} Exact token location.
+ */
+function commentTagLocation(comment, tag, field, filename, source) {
+  const line = tag.source[0]
+
+  if (typeof comment.start != "number" || !line) throw new Error(`Comment parser omitted the @${tag.tag} source token.`)
+
+  let lineStart = comment.start
+
+  for (let lineNumber = 0; lineNumber < line.number; lineNumber++) {
+    while (lineStart < source.length && source[lineStart] != "\r" && source[lineStart] != "\n") lineStart++
+    if (source[lineStart] == "\r" && source[lineStart + 1] == "\n") lineStart += 2
+    else lineStart++
+  }
+
+  const orderedFields = ["start", "delimiter", "postDelimiter", "tag", "postTag", "type", "postType", "name"]
+  const fieldIndex = orderedFields.indexOf(field)
+  const start = lineStart + orderedFields.slice(0, fieldIndex).reduce((length, key) =>
+    length + line.tokens[/** @type {keyof typeof line.tokens} */ (key)].length, 0)
+  const token = line.tokens[field]
+
+  return locationFromOffsets(filename, source, start, start + token.length)
+}
+
+/**
  * Converts a supported Babel expression.
  * @param {import("@babel/types").Expression} node - Babel expression.
  * @param {"javascript" | "typescript"} language - Frontend language.
@@ -34,19 +125,21 @@ function convertExpression(node, language, filename, source) {
   const location = nodeLocation(node, filename, source)
 
   if (node.type == "Identifier") {
-    return {kind: "IdentifierExpression", location, name: node.name}
+    return withParserRanges({kind: /** @type {const} */ ("IdentifierExpression"), location, name: node.name}, {
+      name: identifierLocation(node, filename, source)
+    })
   }
 
   if (node.type == "NumericLiteral") {
     if (!Number.isSafeInteger(node.value)) return unsupportedSyntax(language, "non-safe integer literal", location)
 
-    return {kind: "IntegerLiteral", location, value: node.value}
+    return withParserRanges({kind: /** @type {const} */ ("IntegerLiteral"), location, value: node.value}, {literal: location})
   }
 
   if (node.type == "BooleanLiteral") {
     if (typeof node.value != "boolean") return unsupportedSyntax(language, "invalid boolean literal value", location)
 
-    return {kind: "BooleanLiteral", location, value: node.value}
+    return withParserRanges({kind: /** @type {const} */ ("BooleanLiteral"), location, value: node.value}, {literal: location})
   }
 
   if (node.type == "StringLiteral") {
@@ -54,7 +147,7 @@ function convertExpression(node, language, filename, source) {
       return unsupportedSyntax(language, "invalid Unicode string literal", location)
     }
 
-    return {kind: "StringLiteral", location, value: node.value}
+    return withParserRanges({kind: /** @type {const} */ ("StringLiteral"), location, value: node.value}, {literal: location})
   }
 
   if (node.type == "TemplateLiteral") {
@@ -66,19 +159,24 @@ function convertExpression(node, language, filename, source) {
       return unsupportedSyntax(language, "invalid Unicode string literal", location)
     }
 
-    return {kind: "StringLiteral", location, value: quasi.value.cooked}
+    return withParserRanges({kind: /** @type {const} */ ("StringLiteral"), location, value: quasi.value.cooked}, {literal: location})
   }
 
   if (node.type == "BinaryExpression" && [">", "-", "+"].includes(node.operator)) {
     if (node.left.type == "PrivateName") unsupportedSyntax(language, node.left.type, location)
 
-    return {
+    const left = convertExpression(node.left, language, filename, source)
+    const right = convertExpression(node.right, language, filename, source)
+
+    return withParserRanges({
       kind: "BinaryExpression",
-      left: convertExpression(node.left, language, filename, source),
+      left,
       location,
       operator: /** @type {">" | "-" | "+"} */ (node.operator),
-      right: convertExpression(node.right, language, filename, source)
-    }
+      right
+    }, {
+      operator: tokenLocation(node, node.operator, node.left.end ?? node.start ?? 0, node.right.start ?? node.end ?? source.length, filename, source)
+    })
   }
 
   if (node.type == "CallExpression" && node.callee.type == "Identifier") {
@@ -90,7 +188,9 @@ function convertExpression(node, language, filename, source) {
       return convertExpression(argument, language, filename, source)
     })
 
-    return {arguments: arguments_, callee: node.callee.name, kind: "CallExpression", location}
+    return withParserRanges({arguments: arguments_, callee: node.callee.name, kind: /** @type {const} */ ("CallExpression"), location}, {
+      callee: identifierLocation(node.callee, filename, source)
+    })
   }
 
   return unsupportedSyntax(language, node.type, location)
@@ -138,14 +238,17 @@ function convertLocalStatement(node, language, filename, source) {
       ? convertTypeScriptType(declarator.id.typeAnnotation, `Local '${declarator.id.name}'`, declaratorLocation, filename, source)
       : localJavaScriptType(node, declarator.id.name, filename, source)
 
-    return {
+    return withParserRanges({
       initializer: convertExpression(declarator.init, language, filename, source),
       kind: "LocalDeclaration",
       location,
       mutable: node.kind == "let",
       name: declarator.id.name,
       type
-    }
+    }, {
+      name: identifierLocation(declarator.id, filename, source),
+      operator: tokenLocation(declarator, "=", declarator.id.end ?? declarator.start ?? 0, declarator.init.start ?? declarator.end ?? source.length, filename, source)
+    })
   }
 
   if (node.type == "ExpressionStatement" && node.expression.type == "AssignmentExpression") {
@@ -155,12 +258,18 @@ function convertLocalStatement(node, language, filename, source) {
     if (assignment.operator != "=") return unsupportedSyntax(language, `assignment ${assignment.operator}`, location)
     if (assignment.left.type != "Identifier") return unsupportedSyntax(language, assignment.left.type, targetLocation)
 
-    return {
+    const target = withParserRanges({kind: /** @type {const} */ ("IdentifierExpression"), location: targetLocation, name: assignment.left.name}, {
+      name: identifierLocation(assignment.left, filename, source)
+    })
+
+    return withParserRanges({
       expression: convertExpression(assignment.right, language, filename, source),
       kind: "AssignmentStatement",
       location,
-      target: {kind: "IdentifierExpression", location: targetLocation, name: assignment.left.name}
-    }
+      target
+    }, {
+      operator: tokenLocation(assignment, "=", assignment.left.end ?? assignment.start ?? 0, assignment.right.start ?? assignment.end ?? source.length, filename, source)
+    })
   }
 
   return unsupportedSyntax(language, node.type, location)
@@ -191,7 +300,15 @@ function localJavaScriptType(node, name, filename, source) {
   const block = parseComment(`/*${comment.value}*/`)[0]
   const tags = block?.tags.filter((tag) => tag.tag == "type") ?? []
 
-  return convertType(tags.length == 1 ? tags[0].type : undefined, "javascript", `Local '${name}'`, location)
+  const tag = tags.length == 1 ? tags[0] : undefined
+
+  return convertType(
+    tag?.type,
+    "javascript",
+    `Local '${name}'`,
+    location,
+    tag ? commentTagLocation(comment, tag, "type", filename, source) : location
+  )
 }
 
 /**
@@ -239,18 +356,25 @@ function convertReturnBlock(node, language, filename, source) {
  * @param {import("@babel/types").FunctionDeclaration} node - Babel function node.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
- * @returns {{parameters: Map<string, string>, returnType: string | undefined}} Parsed types.
+ * @returns {{parameters: Map<string, {location: import("../semantic/types.js").SourceLocation, sourceType: string}>, returnType: {location: import("../semantic/types.js").SourceLocation, sourceType: string} | undefined}} Parsed types.
  */
 function jsdocTypes(node, filename, source) {
   const comment = node.leadingComments?.find((candidate) => candidate.type == "CommentBlock" && candidate.value.startsWith("*"))
 
   if (!comment) missingType("javascript", `Function '${node.id?.name ?? "anonymous"}'`, nodeLocation(node, filename, source))
 
-  const block = parseComment(`/*${comment.value}*/`)[0]
-  const parameters = new Map(block.tags.filter((tag) => tag.tag == "param").map((tag) => [tag.name, tag.type]))
+  const commentBlock = /** @type {import("@babel/types").CommentBlock} */ (comment)
+  const block = parseComment(`/*${commentBlock.value}*/`)[0]
+  const parameters = new Map(block.tags.filter((tag) => tag.tag == "param").map((tag) => [tag.name, {
+    location: commentTagLocation(commentBlock, tag, "type", filename, source),
+    sourceType: tag.type
+  }]))
   const returnTag = block.tags.find((tag) => tag.tag == "returns" || tag.tag == "return")
 
-  return {parameters, returnType: returnTag?.type}
+  return {
+    parameters,
+    returnType: returnTag ? {location: commentTagLocation(commentBlock, returnTag, "type", filename, source), sourceType: returnTag.type} : undefined
+  }
 }
 
 /**
@@ -259,10 +383,11 @@ function jsdocTypes(node, filename, source) {
  * @param {"javascript" | "typescript"} language - Frontend language.
  * @param {string} subject - Typed subject.
  * @param {import("../semantic/types.js").SourceLocation} location - Source location.
+ * @param {import("../semantic/types.js").SourceLocation} [typeLocation] - Exact type token location.
  * @returns {import("../semantic/types.js").TypeReference} Semantic type.
  */
-function convertType(sourceType, language, subject, location) {
-  return requireSourceScalarType(language, sourceType, subject, location)
+function convertType(sourceType, language, subject, location, typeLocation = location) {
+  return requireSourceScalarType(language, sourceType, subject, location, typeLocation)
 }
 
 /**
@@ -291,7 +416,7 @@ function convertTypeScriptType(annotation, subject, ownerLocation, filename, sou
     return unsupportedSyntax("typescript", "unsupported scalar type", nodeLocation(typeNode, filename, source))
   }
 
-  return requireSourceScalarType("typescript", sourceType, subject, ownerLocation)
+  return requireSourceScalarType("typescript", sourceType, subject, ownerLocation, nodeLocation(typeNode, filename, source))
 }
 
 /**
@@ -315,20 +440,21 @@ function convertFunction(node, language, filename, source) {
 
     if (parameter.type != "Identifier") return unsupportedSyntax(language, parameter.type, parameterLocation)
 
+    const documentedType = documentedTypes?.parameters.get(parameter.name)
     const type = language == "javascript"
-      ? convertType(documentedTypes?.parameters.get(parameter.name), language, `Parameter '${parameter.name}'`, parameterLocation)
+      ? convertType(documentedType?.sourceType, language, `Parameter '${parameter.name}'`, parameterLocation, documentedType?.location)
       : convertTypeScriptType(parameter.typeAnnotation, `Parameter '${parameter.name}'`, parameterLocation, filename, source)
 
-    return {
+    return withParserRanges({
       kind: /** @type {const} */ ("Parameter"),
       location: parameterLocation,
       name: parameter.name,
       type
-    }
+    }, {name: identifierLocation(parameter, filename, source)})
   })
   const returnAnnotation = node.returnType
   const returnType = language == "javascript"
-    ? convertType(documentedTypes?.returnType, language, `Function '${node.id.name}' return`, location)
+    ? convertType(documentedTypes?.returnType?.sourceType, language, `Function '${node.id.name}' return`, location, documentedTypes?.returnType?.location)
     : convertTypeScriptType(returnAnnotation, `Function '${node.id.name}' return`, location, filename, source)
   const body = convertRestrictedSequence(
     node.body.body,
@@ -339,14 +465,14 @@ function convertFunction(node, language, filename, source) {
     source
   )
 
-  return {
+  return withParserRanges({
     body: /** @type {import("../semantic/types.js").FunctionStatement[]} */ (body),
     kind: "FunctionDeclaration",
     location,
     name: node.id.name,
     parameters,
     returnType
-  }
+  }, {name: identifierLocation(node.id, filename, source)})
 }
 
 /**
@@ -414,6 +540,10 @@ function convertPrint(node, language, filename, source) {
  */
 export function parseJavaScriptTypeScript({filename, language, source}) {
   const file = parseBabelSource({filename, language, source})
+  const tokens = file.tokens ?? []
+  const tokenIndex = {byStart: new Map(tokens.map((token) => [token.start, token])), tokens}
+
+  rememberTokens(file, tokenIndex)
   const functions = file.program.body.filter((node) => node.type == "FunctionDeclaration")
     .map((node) => convertFunction(node, language, filename, source))
   const entryNodes = file.program.body.filter((node) => node.type != "FunctionDeclaration")
@@ -456,9 +586,30 @@ function parseBabelSource({filename, language, source}) {
     return parseBabel(source, {
       plugins: language == "typescript" ? ["typescript"] : [],
       sourceFilename: filename,
-      sourceType: "script"
+      sourceType: "script",
+      tokens: true
     })
   } catch (error) {
     return parseFailure(language, error)
+  }
+}
+
+/**
+ * Associates Babel nodes with their parser token stream without leaking it into semantic values.
+ * @param {object} value - Current parser value.
+ * @param {BabelTokenIndex} tokens - Indexed parser tokens.
+ * @param {WeakSet<object>} [visited] - Cycle protection.
+ * @returns {void}
+ */
+function rememberTokens(value, tokens, visited = new WeakSet()) {
+  if (visited.has(value)) return
+
+  visited.add(value)
+  nodeTokens.set(value, tokens)
+
+  for (const child of Object.values(value)) {
+    if (Array.isArray(child)) {
+      for (const item of child) if (item && typeof item == "object") rememberTokens(item, tokens, visited)
+    } else if (child && typeof child == "object") rememberTokens(child, tokens, visited)
   }
 }
