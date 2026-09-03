@@ -18,13 +18,15 @@ export function generateTypeScript(module, writer) {
     writer.mapped(declaration.name, {mappingKind: "exact", node: declaration, role: "name"})
     writer.mapped("(", {mappingKind: "anchor", node: declaration})
     declaration.parameters.forEach((parameter, index) => {
+      const parameterPath = `/functions/${functionIndex}/parameters/${index}`
+
       if (index > 0) writer.synthetic(", ", "parameter separator", [declaration])
-      writer.mapped(parameter.name, {mappingKind: "exact", node: parameter, role: "name"})
-      writer.synthetic(": ", "type separator", [parameter])
+      writer.mapped(parameter.name, {mappingKind: "exact", node: parameter, path: parameterPath, role: "name"})
+      writer.synthetic(": ", "type separator", [parameter], [parameterPath])
       writer.mapped(emitScalarType("typescript", parameter.type), {
         mappingKind: "exact",
         node: parameter.type,
-        path: `/functions/${functionIndex}/parameters/${index}/type`,
+        path: `${parameterPath}/type`,
         role: "type"
       })
     })

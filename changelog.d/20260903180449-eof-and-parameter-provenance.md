@@ -1,0 +1,2 @@
+- Preserve content-backed Source Map v3 EOF anchors as exact point origins in reverse provenance lookup, including empty sources.
+- Disambiguate shared semantic parameter occurrences across PHP, Ruby, JavaScript, TypeScript, and Java generation.

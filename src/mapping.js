@@ -107,6 +107,8 @@ export function generatedPositionFor(mapping, position) {
   /** @type {Set<import("./semantic/types.js").SemantifoldMappingSpan>} */
   const matches = new Set()
 
+  for (const span of index.originalPointsBySource.get(source.id)?.get(offset) ?? []) matches.add(span)
+
   for (let candidate = low - 1; candidate >= 0 && entries[candidate].prefixEnd > offset; candidate--) {
     if (entries[candidate].end > offset) matches.add(entries[candidate].span)
   }
@@ -813,7 +815,7 @@ function mappingIndex(mapping) {
 /**
  * Builds generated, original, node, and symbol indexes in one pass.
  * @param {import("./semantic/types.js").SemantifoldMapping} mapping - Validated mapping.
- * @returns {{generatedCoordinates: ReturnType<typeof createCoordinateIndex>, nodeSpans: Map<string, import("./semantic/types.js").SemantifoldMappingSpan[]>, originalBySource: Map<string, {end: number, prefixEnd: number, span: import("./semantic/types.js").SemantifoldMappingSpan, start: number}[]>, sourceCoordinates: Map<string, ReturnType<typeof createCoordinateIndex>>, sourcesById: Map<string, import("./semantic/types.js").RegisteredSource>, symbolSpans: Map<string, import("./semantic/types.js").SemantifoldMappingSpan[]>}} Mapping index.
+ * @returns {{generatedCoordinates: ReturnType<typeof createCoordinateIndex>, nodeSpans: Map<string, import("./semantic/types.js").SemantifoldMappingSpan[]>, originalBySource: Map<string, {end: number, prefixEnd: number, span: import("./semantic/types.js").SemantifoldMappingSpan, start: number}[]>, originalPointsBySource: Map<string, Map<number, import("./semantic/types.js").SemantifoldMappingSpan[]>>, sourceCoordinates: Map<string, ReturnType<typeof createCoordinateIndex>>, sourcesById: Map<string, import("./semantic/types.js").RegisteredSource>, symbolSpans: Map<string, import("./semantic/types.js").SemantifoldMappingSpan[]>}} Mapping index.
  */
 function buildMappingIndex(mapping) {
   const generatedCoordinates = createCoordinateIndex(mapping.generated.content)
@@ -824,13 +826,22 @@ function buildMappingIndex(mapping) {
   const symbolSpans = new Map(mapping.symbols.map((symbol) => [symbol.id, /** @type {import("./semantic/types.js").SemantifoldMappingSpan[]} */ ([])]))
   /** @type {Map<string, {end: number, prefixEnd: number, span: import("./semantic/types.js").SemantifoldMappingSpan, start: number}[]>} */
   const originalBySource = new Map(mapping.sources.map((source) => [source.id, []]))
+  /** @type {Map<string, Map<number, import("./semantic/types.js").SemantifoldMappingSpan[]>>} */
+  const originalPointsBySource = new Map(mapping.sources.map((source) => [source.id, new Map()]))
 
   for (const span of mapping.spans) {
     if (span.nodeId) nodeSpans.get(span.nodeId)?.push(span)
     if (span.symbolId) symbolSpans.get(span.symbolId)?.push(span)
 
     for (const related of relatedOriginsForOrigin(span.origin)) {
-      if (related.location.end.offset <= related.location.start.offset) continue
+      if (related.location.end.offset == related.location.start.offset) {
+        const points = originalPointsBySource.get(related.sourceId)
+        const pointSpans = points?.get(related.location.start.offset) ?? []
+
+        pointSpans.push(span)
+        points?.set(related.location.start.offset, pointSpans)
+        continue
+      }
       originalBySource.get(related.sourceId)?.push({
         end: related.location.end.offset,
         prefixEnd: related.location.end.offset,
@@ -850,7 +861,7 @@ function buildMappingIndex(mapping) {
     }
   }
 
-  return {generatedCoordinates, nodeSpans, originalBySource, sourceCoordinates, sourcesById, symbolSpans}
+  return {generatedCoordinates, nodeSpans, originalBySource, originalPointsBySource, sourceCoordinates, sourcesById, symbolSpans}
 }
 
 /**

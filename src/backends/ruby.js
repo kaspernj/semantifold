@@ -14,16 +14,18 @@ export function generateRuby(module, writer) {
     if (functionIndex > 0) writer.synthetic("\n\n", "declaration separator", [declaration])
 
     for (const [parameterIndex, parameter] of declaration.parameters.entries()) {
-      writer.synthetic("# @param ", "Ruby type scaffolding", [parameter])
-      writer.mapped(parameter.name, {mappingKind: "exact", node: parameter, role: "name"})
-      writer.synthetic(" [", "Ruby type scaffolding", [parameter])
+      const parameterPath = `/functions/${functionIndex}/parameters/${parameterIndex}`
+
+      writer.synthetic("# @param ", "Ruby type scaffolding", [parameter], [parameterPath])
+      writer.mapped(parameter.name, {mappingKind: "exact", node: parameter, path: parameterPath, role: "name"})
+      writer.synthetic(" [", "Ruby type scaffolding", [parameter], [parameterPath])
       writer.mapped(emitScalarType("ruby", parameter.type), {
         mappingKind: "exact",
         node: parameter.type,
-        path: `/functions/${functionIndex}/parameters/${parameterIndex}/type`,
+        path: `${parameterPath}/type`,
         role: "type"
       })
-      writer.synthetic("]\n", "Ruby type scaffolding", [parameter])
+      writer.synthetic("]\n", "Ruby type scaffolding", [parameter], [parameterPath])
     }
     writer.synthetic("# @return [", "Ruby type scaffolding", [declaration])
     writer.mapped(emitScalarType("ruby", declaration.returnType), {
@@ -39,7 +41,12 @@ export function generateRuby(module, writer) {
     writer.mapped("(", {mappingKind: "anchor", node: declaration})
     declaration.parameters.forEach((parameter, index) => {
       if (index > 0) writer.synthetic(", ", "parameter separator", [declaration])
-      writer.mapped(parameter.name, {mappingKind: "exact", node: parameter, role: "name"})
+      writer.mapped(parameter.name, {
+        mappingKind: "exact",
+        node: parameter,
+        path: `/functions/${functionIndex}/parameters/${index}`,
+        role: "name"
+      })
     })
     writer.mapped(")", {mappingKind: "anchor", node: declaration})
     writer.synthetic("\n", "line break", [declaration])

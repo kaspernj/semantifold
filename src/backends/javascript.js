@@ -15,16 +15,18 @@ export function generateJavaScript(module, writer) {
 
     writer.synthetic("/**\n * Generated semantic function.\n", "JavaScript type scaffolding", [declaration])
     for (const [parameterIndex, parameter] of declaration.parameters.entries()) {
-      writer.synthetic(" * @param {", "JavaScript type scaffolding", [parameter])
+      const parameterPath = `/functions/${functionIndex}/parameters/${parameterIndex}`
+
+      writer.synthetic(" * @param {", "JavaScript type scaffolding", [parameter], [parameterPath])
       writer.mapped(emitScalarType("javascript", parameter.type), {
         mappingKind: "exact",
         node: parameter.type,
-        path: `/functions/${functionIndex}/parameters/${parameterIndex}/type`,
+        path: `${parameterPath}/type`,
         role: "type"
       })
-      writer.synthetic("} ", "JavaScript type scaffolding", [parameter])
-      writer.mapped(parameter.name, {mappingKind: "exact", node: parameter, role: "name"})
-      writer.synthetic(" - Semantic parameter.\n", "JavaScript type scaffolding", [parameter])
+      writer.synthetic("} ", "JavaScript type scaffolding", [parameter], [parameterPath])
+      writer.mapped(parameter.name, {mappingKind: "exact", node: parameter, path: parameterPath, role: "name"})
+      writer.synthetic(" - Semantic parameter.\n", "JavaScript type scaffolding", [parameter], [parameterPath])
     }
     writer.synthetic(" * @returns {", "JavaScript type scaffolding", [declaration])
     writer.mapped(emitScalarType("javascript", declaration.returnType), {
@@ -40,7 +42,12 @@ export function generateJavaScript(module, writer) {
     writer.mapped("(", {mappingKind: "anchor", node: declaration})
     declaration.parameters.forEach((parameter, index) => {
       if (index > 0) writer.synthetic(", ", "parameter separator", [declaration])
-      writer.mapped(parameter.name, {mappingKind: "exact", node: parameter, role: "name"})
+      writer.mapped(parameter.name, {
+        mappingKind: "exact",
+        node: parameter,
+        path: `/functions/${functionIndex}/parameters/${index}`,
+        role: "name"
+      })
     })
     writer.mapped(")", {mappingKind: "anchor", node: declaration})
     writer.synthetic(" ", "function spacing", [declaration])
