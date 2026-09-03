@@ -35,8 +35,11 @@ function nodeLocation(node, filename, source) {
  */
 function identifierLocation(node, filename, source) {
   if (typeof node.start != "number") throw new Error("Babel omitted an identifier start offset.")
+  const token = nodeTokens.get(node)?.find((candidate) => candidate.start == node.start && candidate.type.label == "name")
 
-  return locationFromOffsets(filename, source, node.start, node.start + node.name.length)
+  if (!token) throw new Error(`Babel omitted the identifier token for '${node.name}'.`)
+
+  return locationFromOffsets(filename, source, token.start, token.end)
 }
 
 /**

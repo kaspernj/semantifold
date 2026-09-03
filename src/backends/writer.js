@@ -100,11 +100,11 @@ export class SourceWriter {
     return {
       coordinateSystem: "utf16",
       generated: {content: this.code, filename: this.filename, language: this.language},
-      nodes: this.index.provenance.nodes,
+      nodes: [...this.index.provenance.nodes],
       schema: "SemantifoldMapping",
-      sources: this.index.provenance.sources,
-      spans: this.spans,
-      symbols: this.index.provenance.symbols,
+      sources: [...this.index.provenance.sources],
+      spans: [...this.spans],
+      symbols: [...this.index.provenance.symbols],
       version: 1
     }
   }

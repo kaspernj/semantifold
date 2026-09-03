@@ -8,8 +8,12 @@ import {
   TraceMap
 } from "@jridgewell/trace-mapping"
 import {SemantifoldDiagnostic} from "./diagnostic.js"
-import {locationFromOffsets, pointAt} from "./semantic/location.js"
+import {createCoordinateIndex, indexedOffsetAt, indexedPointAt, locationFromOffsets} from "./semantic/location.js"
 import {primaryLocation} from "./semantic/provenance.js"
+
+/** @typedef {ReturnType<typeof buildMappingIndex>} MappingIndex */
+/** @type {WeakMap<import("./semantic/types.js").SemantifoldMapping, MappingIndex>} */
+const mappingIndexes = new WeakMap()
 
 /**
  * Projects an authoritative Semantifold mapping to Source Map v3.
@@ -17,7 +21,7 @@ import {primaryLocation} from "./semantic/provenance.js"
  * @returns {import("@jridgewell/gen-mapping").EncodedSourceMap} Source Map v3.
  */
 export function toSourceMapV3(mapping) {
-  validateMapping(mapping)
+  const index = mappingIndex(mapping)
 
   const generated = new GenMapping({file: mapping.generated.filename})
 
@@ -33,7 +37,7 @@ export function toSourceMapV3(mapping) {
       continue
     }
 
-    const registered = sourceForOrigin(mapping, span.origin, location)
+    const registered = sourceForOrigin(mapping, span.origin, location, index.sourcesById)
 
     if (span.name) {
       addSegment(generated, line, column, registered.filename, location.start.line - 1, location.start.column - 1, span.name, registered.content)
@@ -52,9 +56,9 @@ export function toSourceMapV3(mapping) {
  * @returns {{generatedLocation: import("./semantic/types.js").SourceLocation, location: import("./semantic/types.js").SourceLocation | undefined, mappingKind: import("./semantic/types.js").MappingKind, name: string | undefined, nodeId: string | undefined, role: string | undefined, symbolId: string | undefined}} Lookup result.
  */
 export function originalPositionFor(mapping, position) {
-  validateMapping(mapping)
-  const offset = positionOffset(mapping.generated.content, position)
-  const span = mapping.spans.find((candidate) => offset >= candidate.generated.start.offset && offset < candidate.generated.end.offset)
+  const index = mappingIndex(mapping)
+  const offset = positionOffset(index.generatedCoordinates, position)
+  const span = spanForGenerated(mapping.spans, offset)
 
   if (!span) throw new RangeError(`No generated mapping at offset ${offset}.`)
 
@@ -68,9 +72,9 @@ export function originalPositionFor(mapping, position) {
  * @returns {{generatedLocation: import("./semantic/types.js").SourceLocation, location: import("./semantic/types.js").SourceLocation | undefined, mappingKind: import("./semantic/types.js").MappingKind, name: string | undefined, nodeId: string | undefined, role: string | undefined, symbolId: string | undefined}[]} Generated results.
  */
 export function generatedPositionFor(mapping, position) {
-  validateMapping(mapping)
+  const index = mappingIndex(mapping)
   const source = "sourceId" in position
-    ? mapping.sources.find((candidate) => candidate.id == position.sourceId)
+    ? index.sourcesById.get(position.sourceId)
     : mapping.sources.find((candidate) => candidate.filename == position.filename)
 
   if (!source) return []
@@ -78,14 +82,35 @@ export function generatedPositionFor(mapping, position) {
     throw new TypeError(`Source content is required for line/column lookup of ${source.filename}.`)
   }
 
-  const offset = "offset" in position ? position.offset : offsetAt(source.content ?? "", position.line, position.column)
+  let offset
 
-  return mapping.spans.filter((span) => {
-    const location = primaryLocation(span.origin)
+  if ("offset" in position) {
+    if (source.content == null) {
+      if (!Number.isInteger(position.offset) || position.offset < 0) throw new RangeError(`Invalid source offset: ${position.offset}`)
+    } else indexedPointAt(/** @type {ReturnType<typeof createCoordinateIndex>} */ (index.sourceCoordinates.get(source.id)), position.offset)
+    offset = position.offset
+  } else {
+    offset = indexedOffsetAt(/** @type {ReturnType<typeof createCoordinateIndex>} */ (index.sourceCoordinates.get(source.id)),
+      position.line, position.column)
+  }
+  const entries = index.originalBySource.get(source.id) ?? []
+  let low = 0
+  let high = entries.length
 
-    return location?.filename == source.filename && sourceIdForOrigin(span.origin) == source.id &&
-      offset >= location.start.offset && offset < location.end.offset
-  }).map(mappingResult)
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2)
+
+    if (entries[middle].start <= offset) low = middle + 1
+    else high = middle
+  }
+
+  const matches = []
+
+  for (let candidate = low - 1; candidate >= 0 && entries[candidate].prefixEnd > offset; candidate--) {
+    if (entries[candidate].end > offset) matches.push(entries[candidate].span)
+  }
+
+  return matches.sort((left, right) => left.generated.start.offset - right.generated.start.offset).map(mappingResult)
 }
 
 /**
@@ -95,10 +120,10 @@ export function generatedPositionFor(mapping, position) {
  * @returns {import("./semantic/types.js").SemantifoldMappingSpan[]} Matching spans.
  */
 export function spansForNode(mapping, nodeId) {
-  validateMapping(mapping)
-  if (!mapping.nodes.some((node) => node.id == nodeId)) throw new RangeError(`Unknown semantic node: ${nodeId}`)
+  const index = mappingIndex(mapping)
+  if (!index.nodeSpans.has(nodeId)) throw new RangeError(`Unknown semantic node: ${nodeId}`)
 
-  return mapping.spans.filter((span) => span.nodeId == nodeId)
+  return [...(index.nodeSpans.get(nodeId) ?? [])]
 }
 
 /**
@@ -108,10 +133,10 @@ export function spansForNode(mapping, nodeId) {
  * @returns {import("./semantic/types.js").SemantifoldMappingSpan[]} Matching spans.
  */
 export function spansForSymbol(mapping, symbolId) {
-  validateMapping(mapping)
-  if (!mapping.symbols.some((symbol) => symbol.id == symbolId)) throw new RangeError(`Unknown semantic symbol: ${symbolId}`)
+  const index = mappingIndex(mapping)
+  if (!index.symbolSpans.has(symbolId)) throw new RangeError(`Unknown semantic symbol: ${symbolId}`)
 
-  return mapping.spans.filter((span) => span.symbolId == symbolId)
+  return [...(index.symbolSpans.get(symbolId) ?? [])]
 }
 
 /**
@@ -120,7 +145,7 @@ export function spansForSymbol(mapping, symbolId) {
  * @returns {string} Canonical pretty JSON with one trailing LF.
  */
 export function stringifyMapping(mapping) {
-  validateMapping(mapping)
+  mappingIndex(mapping)
 
   return `${JSON.stringify(sortJson(mapping), null, 2)}\n`
 }
@@ -133,9 +158,7 @@ export function stringifyMapping(mapping) {
 export function parseMapping(serialized) {
   const mapping = /** @type {unknown} */ (JSON.parse(serialized))
 
-  validateMapping(mapping)
-
-  return mapping
+  return finalizeMapping(mapping)
 }
 
 /**
@@ -145,8 +168,8 @@ export function parseMapping(serialized) {
  * @returns {import("./semantic/types.js").SemantifoldMapping} Composed rich map.
  */
 export function composeMappings(outer, inner) {
-  validateMapping(outer)
-  validateMapping(inner)
+  mappingIndex(outer)
+  mappingIndex(inner)
 
   /** @type {import("./semantic/types.js").RegisteredSource[]} */
   const sources = inner.sources.map((source, index) => ({...source, id: `source:${index}`}))
@@ -158,12 +181,14 @@ export function composeMappings(outer, inner) {
     }
   }
 
-  const spans = outer.spans.map((span) => {
+  const spans = outer.spans.flatMap((span) => {
     const location = primaryLocation(span.origin)
-    const traced = location?.filename == inner.generated.filename
-      ? inner.spans.find((candidate) => location.start.offset >= candidate.generated.start.offset &&
-        location.start.offset < candidate.generated.end.offset)
-      : undefined
+    const overlapping = location?.filename == inner.generated.filename
+      ? spansOverlappingGenerated(inner.spans, location.start.offset, location.end.offset)
+      : []
+    const traced = overlapping[0] ?? (location?.filename == inner.generated.filename
+      ? spanForGenerated(inner.spans, location.start.offset)
+      : undefined)
 
     if (!traced) {
       const unidentified = {...span}
@@ -171,22 +196,30 @@ export function composeMappings(outer, inner) {
       delete unidentified.nodeId
       delete unidentified.symbolId
 
-      return {...unidentified, origin: remapOriginSources(span.origin, outer.sources, sources, false)}
+      return [{...unidentified, origin: remapOriginSources(span.origin, outer.sources, sources, false)}]
     }
 
-    return definedProperties({
-      ...span,
-      mappingKind: traced.mappingKind == "synthetic" ? /** @type {const} */ ("synthetic") :
-        span.mappingKind == "exact" && traced.mappingKind == "exact" ? /** @type {const} */ ("exact") : /** @type {const} */ ("anchor"),
-      name: span.name ?? traced.name,
-      nodeId: traced.nodeId,
-      origin: remapOriginSources(traced.origin, inner.sources, sources, true),
-      role: traced.role ?? span.role,
-      symbolId: traced.symbolId
-    })
+    if (location && overlapping.length > 1 && span.mappingKind == "exact" &&
+      span.generated.end.offset - span.generated.start.offset == location.end.offset - location.start.offset) {
+      return overlapping.map((candidate) => {
+        const overlapStart = Math.max(location.start.offset, candidate.generated.start.offset)
+        const overlapEnd = Math.min(location.end.offset, candidate.generated.end.offset)
+        const generatedStart = span.generated.start.offset + overlapStart - location.start.offset
+        const generatedEnd = span.generated.start.offset + overlapEnd - location.start.offset
+
+        return composedSpan(span, candidate, locationFromOffsets(
+          outer.generated.filename,
+          outer.generated.content,
+          generatedStart,
+          generatedEnd
+        ))
+      })
+    }
+
+    return [composedSpan(span, traced, span.generated)]
   })
 
-  return {
+  return finalizeMapping({
     coordinateSystem: "utf16",
     generated: outer.generated,
     nodes: inner.nodes,
@@ -195,6 +228,29 @@ export function composeMappings(outer, inner) {
     spans,
     symbols: inner.symbols,
     version: 1
+  })
+
+  /**
+   * Composes one outer generated range with an inner range.
+   * @param {import("./semantic/types.js").SemantifoldMappingSpan} outerSpan - Outer span.
+   * @param {import("./semantic/types.js").SemantifoldMappingSpan} innerSpan - Inner span.
+   * @param {import("./semantic/types.js").SourceLocation} generated - Final generated subrange.
+   * @returns {import("./semantic/types.js").SemantifoldMappingSpan} Composed span.
+   */
+  function composedSpan(outerSpan, innerSpan, generated) {
+    return definedProperties({
+      ...outerSpan,
+      generated,
+      mappingKind: innerSpan.mappingKind == "synthetic" ? /** @type {const} */ ("synthetic") :
+        outerSpan.mappingKind == "exact" && innerSpan.mappingKind == "exact"
+          ? /** @type {const} */ ("exact")
+          : /** @type {const} */ ("anchor"),
+      name: outerSpan.name ?? innerSpan.name,
+      nodeId: innerSpan.nodeId,
+      origin: remapOriginSources(innerSpan.origin, inner.sources, sources, true),
+      role: innerSpan.role ?? outerSpan.role,
+      symbolId: innerSpan.symbolId
+    })
   }
 }
 
@@ -259,6 +315,7 @@ export function composeSourceMaps(outer, inner) {
  */
 export function mappingFromSourceMap(sourceMap, {content, filename, language, sources: provided = []}) {
   const trace = new TraceMap(sourceMap)
+  const generatedCoordinates = createCoordinateIndex(content)
   /** @type {import("./semantic/types.js").RegisteredSource[]} */
   const sources = []
 
@@ -273,38 +330,29 @@ export function mappingFromSourceMap(sourceMap, {content, filename, language, so
       language: providedSource?.language ?? null
     })
   })
+  const sourceCoordinates = new Map(sources.filter((source) => source.content != null)
+    .map((source) => [source.id, createCoordinateIndex(/** @type {string} */ (source.content))]))
 
   /** @type {{generatedOffset: number, mapping: import("@jridgewell/trace-mapping").EachMapping}[]} */
   const points = []
 
   eachMapping(trace, (mapping) => {
-    points.push({generatedOffset: offsetAt(content, mapping.generatedLine, mapping.generatedColumn + 1), mapping})
+    points.push({generatedOffset: indexedOffsetAt(generatedCoordinates, mapping.generatedLine, mapping.generatedColumn + 1), mapping})
   })
 
   /** @type {import("./semantic/types.js").SemantifoldMappingSpan[]} */
-  const spans = []
-
-  if (points.length == 0 && content.length > 0) {
-    spans.push({
-      generated: locationFromOffsets(filename, content, 0, content.length),
-      mappingKind: "synthetic",
-      origin: {kind: "synthetic", reason: "unmapped Source Map content", relatedOrigins: []}
-    })
-  } else if (points[0]?.generatedOffset > 0) {
-    spans.push({
-      generated: locationFromOffsets(filename, content, 0, points[0].generatedOffset),
-      mappingKind: "synthetic",
-      origin: {kind: "synthetic", reason: "unmapped Source Map prefix", relatedOrigins: []}
-    })
-  }
+  const mappedSpans = []
 
   points.forEach(({generatedOffset, mapping}, index) => {
-    const end = points[index + 1]?.generatedOffset ?? content.length
+    const next = points[index + 1]
+    const end = next?.mapping.generatedLine == mapping.generatedLine
+      ? next.generatedOffset
+      : lineEndOffset(content, generatedOffset)
 
     if (end <= generatedOffset) return
 
     if (mapping.source == null || mapping.originalLine == null || mapping.originalColumn == null) {
-      spans.push({
+      mappedSpans.push({
         generated: locationFromOffsets(filename, content, generatedOffset, end),
         mappingKind: "synthetic",
         origin: {kind: "synthetic", reason: "unmapped Source Map segment", relatedOrigins: []}
@@ -316,7 +364,10 @@ export function mappingFromSourceMap(sourceMap, {content, filename, language, so
 
     if (!source) throw new RangeError(`Source Map references unregistered source '${mapping.source}'.`)
 
-    const originalOffset = source.content == null ? 0 : offsetAt(source.content, mapping.originalLine, mapping.originalColumn + 1)
+    const originalOffset = source.content == null
+      ? 0
+      : indexedOffsetAt(/** @type {ReturnType<typeof createCoordinateIndex>} */ (sourceCoordinates.get(source.id)),
+          mapping.originalLine, mapping.originalColumn + 1)
     const originalEnd = source.content == null ? originalOffset : Math.min(source.content.length, originalOffset + 1)
     const originalLocation = source.content == null
       ? {
@@ -326,7 +377,7 @@ export function mappingFromSourceMap(sourceMap, {content, filename, language, so
         }
       : locationFromOffsets(source.filename, source.content, originalOffset, originalEnd)
 
-    spans.push(definedProperties({
+    mappedSpans.push(definedProperties({
       generated: locationFromOffsets(filename, content, generatedOffset, end),
       mappingKind: "anchor",
       name: mapping.name ?? undefined,
@@ -334,7 +385,23 @@ export function mappingFromSourceMap(sourceMap, {content, filename, language, so
     }))
   })
 
-  return {
+  /** @type {import("./semantic/types.js").SemantifoldMappingSpan[]} */
+  const spans = []
+  let cursor = 0
+
+  for (const span of mappedSpans) {
+    if (span.generated.start.offset > cursor) spans.push(unmappedSpan(cursor, span.generated.start.offset))
+    if (span.generated.end.offset > cursor) {
+      spans.push(span.generated.start.offset < cursor ? {
+        ...span,
+        generated: locationFromOffsets(filename, content, cursor, span.generated.end.offset)
+      } : span)
+      cursor = span.generated.end.offset
+    }
+  }
+  if (cursor < content.length) spans.push(unmappedSpan(cursor, content.length))
+
+  return finalizeMapping({
     coordinateSystem: "utf16",
     generated: {content, filename, language},
     nodes: [],
@@ -343,6 +410,20 @@ export function mappingFromSourceMap(sourceMap, {content, filename, language, so
     spans,
     symbols: [],
     version: 1
+  })
+
+  /**
+   * Creates one explicit unmapped range.
+   * @param {number} start - Generated start offset.
+   * @param {number} end - Generated end offset.
+   * @returns {import("./semantic/types.js").SemantifoldMappingSpan} Synthetic span.
+   */
+  function unmappedSpan(start, end) {
+    return {
+      generated: locationFromOffsets(filename, content, start, end),
+      mappingKind: "synthetic",
+      origin: {kind: "synthetic", reason: "unmapped Source Map range", relatedOrigins: []}
+    }
   }
 }
 
@@ -418,6 +499,19 @@ export function validateMapping(value) {
     }
     sourceIds.add(source.id)
   }
+  const sourceCoordinates = new Map(mapping.sources.filter((source) => source.content != null)
+    .map((source) => [source.id, createCoordinateIndex(/** @type {string} */ (source.content))]))
+  const sourcesById = new Map(mapping.sources.map((source) => [source.id, source]))
+  /** @type {Map<string, import("./semantic/types.js").RegisteredSource[]>} */
+  const sourcesByFilename = new Map()
+
+  for (const source of mapping.sources) {
+    const sameName = sourcesByFilename.get(source.filename) ?? []
+
+    sameName.push(source)
+    sourcesByFilename.set(source.filename, sameName)
+  }
+  const generatedCoordinates = createCoordinateIndex(content)
 
   const nodeIds = new Set()
   const nodePaths = new Set()
@@ -443,10 +537,10 @@ export function validateMapping(value) {
   }
 
   for (const node of mapping.nodes) {
-    validateOrigin(node.origin, mapping.sources, nodeIds, symbolIds)
+    validateOrigin(node.origin, sourcesById, sourceCoordinates, nodeIds, symbolIds)
     for (const [role, location] of Object.entries(node.ranges)) {
       if (role.length == 0) throw new TypeError("Semantic node range roles must be non-empty strings.")
-      validateLocationForSources(location, mapping.sources)
+      validateLocationForSources(location, sourcesByFilename, sourceCoordinates)
     }
     if (node.symbolId !== undefined && (typeof node.symbolId != "string" || !symbolIds.has(node.symbolId))) {
       throw new TypeError("Semantic node references an unknown symbol.")
@@ -454,13 +548,13 @@ export function validateMapping(value) {
   }
 
   for (const symbol of mapping.symbols) {
-    validateLocationForSources(symbol.location, mapping.sources)
+    validateLocationForSources(symbol.location, sourcesByFilename, sourceCoordinates)
     for (const reference of symbol.references) {
       if (!reference || typeof reference != "object" || !nodeIds.has(reference.nodeId) ||
         !["declaration", "read", "write", "call"].includes(reference.role)) {
         throw new TypeError("Malformed semantic symbol reference.")
       }
-      validateLocationForSources(reference.location, mapping.sources)
+      validateLocationForSources(reference.location, sourcesByFilename, sourceCoordinates)
     }
   }
 
@@ -476,13 +570,14 @@ export function validateMapping(value) {
 
     if (!location.start || !location.end || location.filename != filename || location.start.offset != previousEnd ||
       location.end.offset <= location.start.offset || location.end.offset > content.length ||
-      !samePoint(pointAt(content, location.start.offset), location.start) ||
-      !samePoint(pointAt(content, location.end.offset), location.end)) {
+      !samePoint(indexedPointAt(generatedCoordinates, location.start.offset), location.start) ||
+      !samePoint(indexedPointAt(generatedCoordinates, location.end.offset), location.end)) {
       throw new TypeError("SemantifoldMapping spans must exactly cover ordered normalized generated ranges.")
     }
     validateOrigin(
       /** @type {import("./semantic/types.js").SemanticOrigin} */ (Reflect.get(span, "origin")),
-      mapping.sources,
+      sourcesById,
+      sourceCoordinates,
       nodeIds,
       symbolIds
     )
@@ -502,28 +597,170 @@ export function validateMapping(value) {
 }
 
 /**
+ * Validates, freezes, and indexes one mapping produced at a trust boundary.
+ * @param {unknown} value - Candidate mapping.
+ * @returns {import("./semantic/types.js").SemantifoldMapping} Immutable indexed mapping.
+ */
+export function finalizeMapping(value) {
+  validateMapping(value)
+  const mapping = /** @type {import("./semantic/types.js").SemantifoldMapping} */ (value)
+
+  freezeJson(mapping)
+  mappingIndexes.set(mapping, buildMappingIndex(mapping))
+
+  return mapping
+}
+
+/**
+ * Gets an index, validating mutable caller mappings on every trust-boundary use.
+ * @param {import("./semantic/types.js").SemantifoldMapping} mapping - Mapping.
+ * @returns {MappingIndex} Lookup index.
+ */
+function mappingIndex(mapping) {
+  const cached = mappingIndexes.get(mapping)
+
+  if (cached) return cached
+
+  validateMapping(mapping)
+
+  return buildMappingIndex(mapping)
+}
+
+/**
+ * Builds generated, original, node, and symbol indexes in one pass.
+ * @param {import("./semantic/types.js").SemantifoldMapping} mapping - Validated mapping.
+ * @returns {{generatedCoordinates: ReturnType<typeof createCoordinateIndex>, nodeSpans: Map<string, import("./semantic/types.js").SemantifoldMappingSpan[]>, originalBySource: Map<string, {end: number, prefixEnd: number, span: import("./semantic/types.js").SemantifoldMappingSpan, start: number}[]>, sourceCoordinates: Map<string, ReturnType<typeof createCoordinateIndex>>, sourcesById: Map<string, import("./semantic/types.js").RegisteredSource>, symbolSpans: Map<string, import("./semantic/types.js").SemantifoldMappingSpan[]>}} Mapping index.
+ */
+function buildMappingIndex(mapping) {
+  const generatedCoordinates = createCoordinateIndex(mapping.generated.content)
+  const sourcesById = new Map(mapping.sources.map((source) => [source.id, source]))
+  const sourceCoordinates = new Map(mapping.sources.filter((source) => source.content != null)
+    .map((source) => [source.id, createCoordinateIndex(/** @type {string} */ (source.content))]))
+  const nodeSpans = new Map(mapping.nodes.map((node) => [node.id, /** @type {import("./semantic/types.js").SemantifoldMappingSpan[]} */ ([])]))
+  const symbolSpans = new Map(mapping.symbols.map((symbol) => [symbol.id, /** @type {import("./semantic/types.js").SemantifoldMappingSpan[]} */ ([])]))
+  /** @type {Map<string, {end: number, prefixEnd: number, span: import("./semantic/types.js").SemantifoldMappingSpan, start: number}[]>} */
+  const originalBySource = new Map(mapping.sources.map((source) => [source.id, []]))
+
+  for (const span of mapping.spans) {
+    if (span.nodeId) nodeSpans.get(span.nodeId)?.push(span)
+    if (span.symbolId) symbolSpans.get(span.symbolId)?.push(span)
+    const location = primaryLocation(span.origin)
+    const sourceId = sourceIdForOrigin(span.origin)
+
+    if (location && sourceId && location.end.offset > location.start.offset) {
+      originalBySource.get(sourceId)?.push({
+        end: location.end.offset,
+        prefixEnd: location.end.offset,
+        span,
+        start: location.start.offset
+      })
+    }
+  }
+
+  for (const entries of originalBySource.values()) {
+    entries.sort((left, right) => left.start - right.start || left.span.generated.start.offset - right.span.generated.start.offset)
+    let prefixEnd = 0
+
+    for (const entry of entries) {
+      prefixEnd = Math.max(prefixEnd, entry.end)
+      entry.prefixEnd = prefixEnd
+    }
+  }
+
+  return {generatedCoordinates, nodeSpans, originalBySource, sourceCoordinates, sourcesById, symbolSpans}
+}
+
+/**
+ * Finds the generated span containing an offset by binary search.
+ * @param {import("./semantic/types.js").SemantifoldMappingSpan[]} spans - Ordered spans.
+ * @param {number} offset - Generated offset.
+ * @returns {import("./semantic/types.js").SemantifoldMappingSpan | undefined} Containing span.
+ */
+function spanForGenerated(spans, offset) {
+  let low = 0
+  let high = spans.length
+
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2)
+
+    if (spans[middle].generated.start.offset <= offset) low = middle + 1
+    else high = middle
+  }
+  const candidate = spans[low - 1]
+
+  return candidate && offset < candidate.generated.end.offset ? candidate : undefined
+}
+
+/**
+ * Finds ordered generated spans intersecting a half-open range.
+ * @param {import("./semantic/types.js").SemantifoldMappingSpan[]} spans - Ordered spans.
+ * @param {number} start - Inclusive generated offset.
+ * @param {number} end - Exclusive generated offset.
+ * @returns {import("./semantic/types.js").SemantifoldMappingSpan[]} Overlapping spans.
+ */
+function spansOverlappingGenerated(spans, start, end) {
+  if (end <= start) {
+    const containing = spanForGenerated(spans, start)
+
+    return containing ? [containing] : []
+  }
+
+  let low = 0
+  let high = spans.length
+
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2)
+
+    if (spans[middle].generated.end.offset <= start) low = middle + 1
+    else high = middle
+  }
+  const overlapping = []
+
+  for (let index = low; index < spans.length && spans[index].generated.start.offset < end; index++) {
+    overlapping.push(spans[index])
+  }
+
+  return overlapping
+}
+
+/**
+ * Deep-freezes a JSON tree.
+ * @param {unknown} value - JSON value.
+ * @param {WeakSet<object>} [visited] - Cycle protection for rejected caller extras.
+ * @returns {void}
+ */
+function freezeJson(value, visited = new WeakSet()) {
+  if (!value || typeof value != "object" || visited.has(value)) return
+
+  visited.add(value)
+  for (const child of Object.values(value)) freezeJson(child, visited)
+  if (!Object.isFrozen(value)) Object.freeze(value)
+}
+
+/**
  * Validates one closed mapping origin.
  * @param {import("./semantic/types.js").SemanticOrigin} origin - Origin.
- * @param {import("./semantic/types.js").RegisteredSource[]} sources - Sources.
+ * @param {Map<string, import("./semantic/types.js").RegisteredSource>} sourcesById - Sources by identity.
+ * @param {Map<string, ReturnType<typeof createCoordinateIndex>>} coordinates - Source coordinate indexes.
  * @param {Set<unknown>} [nodeIds] - Known semantic nodes.
  * @param {Set<unknown>} [symbolIds] - Known semantic symbols.
  * @returns {void}
  */
-function validateOrigin(origin, sources, nodeIds, symbolIds) {
+function validateOrigin(origin, sourcesById, coordinates, nodeIds, symbolIds) {
   if (!origin || typeof origin != "object") throw new TypeError("Mapping origin must be a closed provenance value.")
 
   if (origin.kind == "source") {
-    validateRelated({location: origin.location, sourceId: origin.sourceId}, sources, nodeIds, symbolIds)
+    validateRelated({location: origin.location, sourceId: origin.sourceId}, sourcesById, coordinates, nodeIds, symbolIds)
     return
   }
   if (origin.kind == "derived") {
     if (!Array.isArray(origin.origins) || origin.origins.length == 0) throw new TypeError("Derived provenance requires origins.")
-    origin.origins.forEach((related) => validateRelated(related, sources, nodeIds, symbolIds))
+    origin.origins.forEach((related) => validateRelated(related, sourcesById, coordinates, nodeIds, symbolIds))
     return
   }
   if (origin.kind == "synthetic") {
     if (typeof origin.reason != "string" || !Array.isArray(origin.relatedOrigins)) throw new TypeError("Malformed synthetic provenance.")
-    origin.relatedOrigins.forEach((related) => validateRelated(related, sources, nodeIds, symbolIds))
+    origin.relatedOrigins.forEach((related) => validateRelated(related, sourcesById, coordinates, nodeIds, symbolIds))
     return
   }
 
@@ -533,13 +770,14 @@ function validateOrigin(origin, sources, nodeIds, symbolIds) {
 /**
  * Validates one source-related origin.
  * @param {import("./semantic/types.js").RelatedOrigin} related - Related origin.
- * @param {import("./semantic/types.js").RegisteredSource[]} sources - Sources.
+ * @param {Map<string, import("./semantic/types.js").RegisteredSource>} sourcesById - Sources by identity.
+ * @param {Map<string, ReturnType<typeof createCoordinateIndex>>} coordinates - Source coordinate indexes.
  * @param {Set<unknown> | undefined} nodeIds - Known semantic nodes.
  * @param {Set<unknown> | undefined} symbolIds - Known semantic symbols.
  * @returns {void}
  */
-function validateRelated(related, sources, nodeIds, symbolIds) {
-  const source = sources.find((candidate) => candidate.id == related.sourceId)
+function validateRelated(related, sourcesById, coordinates, nodeIds, symbolIds) {
+  const source = sourcesById.get(related.sourceId)
 
   if (!source || !related.location || related.location.filename != source.filename ||
     related.nodeId !== undefined && typeof related.nodeId != "string" ||
@@ -549,21 +787,22 @@ function validateRelated(related, sources, nodeIds, symbolIds) {
   if (symbolIds && related.symbolId !== undefined && !symbolIds.has(related.symbolId)) {
     throw new TypeError("Origin references an unknown symbol.")
   }
-  validateLocationForSource(related.location, source)
+  validateLocationForSource(related.location, source, coordinates.get(source.id))
 }
 
 /**
  * Validates a location against at least one same-filename source.
  * @param {unknown} value - Candidate location.
- * @param {import("./semantic/types.js").RegisteredSource[]} sources - Sources.
+ * @param {Map<string, import("./semantic/types.js").RegisteredSource[]>} sourcesByFilename - Sources by filename.
+ * @param {Map<string, ReturnType<typeof createCoordinateIndex>>} coordinates - Source coordinate indexes.
  * @returns {void}
  */
-function validateLocationForSources(value, sources) {
+function validateLocationForSources(value, sourcesByFilename, coordinates) {
   if (!value || typeof value != "object") throw new TypeError("Malformed original location.")
   const location = /** @type {import("./semantic/types.js").SourceLocation} */ (value)
-  const candidates = sources.filter((source) => source.filename == location.filename)
+  const candidates = sourcesByFilename.get(location.filename) ?? []
 
-  if (candidates.length == 0 || !candidates.some((source) => locationMatchesSource(location, source))) {
+  if (candidates.length == 0 || !candidates.some((source) => locationMatchesSource(location, source, coordinates.get(source.id)))) {
     throw new TypeError("Stale original location.")
   }
 }
@@ -572,11 +811,12 @@ function validateLocationForSources(value, sources) {
  * Validates a location against its identified source.
  * @param {unknown} value - Candidate location.
  * @param {import("./semantic/types.js").RegisteredSource} source - Source.
+ * @param {ReturnType<typeof createCoordinateIndex> | undefined} coordinates - Source coordinates when content exists.
  * @returns {void}
  */
-function validateLocationForSource(value, source) {
+function validateLocationForSource(value, source, coordinates) {
   if (!value || typeof value != "object" || !locationMatchesSource(
-    /** @type {import("./semantic/types.js").SourceLocation} */ (value), source
+    /** @type {import("./semantic/types.js").SourceLocation} */ (value), source, coordinates
   )) throw new TypeError("Stale original location.")
 }
 
@@ -584,16 +824,18 @@ function validateLocationForSource(value, source) {
  * Tests a location against one source entry.
  * @param {import("./semantic/types.js").SourceLocation} location - Location.
  * @param {import("./semantic/types.js").RegisteredSource} source - Source.
+ * @param {ReturnType<typeof createCoordinateIndex> | undefined} coordinates - Source coordinates when content exists.
  * @returns {boolean} Whether the range is normalized for the source.
  */
-function locationMatchesSource(location, source) {
+function locationMatchesSource(location, source, coordinates) {
   if (!location || location.filename != source.filename || !location.start || !location.end ||
     !validPoint(location.start) || !validPoint(location.end) || location.end.offset < location.start.offset) return false
 
   if (source.content == null) return true
 
-  return location.end.offset <= source.content.length && samePoint(pointAt(source.content, location.start.offset), location.start) &&
-    samePoint(pointAt(source.content, location.end.offset), location.end)
+  return location.end.offset <= source.content.length && coordinates !== undefined &&
+    samePoint(indexedPointAt(coordinates, location.start.offset), location.start) &&
+    samePoint(indexedPointAt(coordinates, location.end.offset), location.end)
 }
 
 /**
@@ -637,39 +879,30 @@ function mappingResult(span) {
 
 /**
  * Resolves an offset-form or line/column-form position.
- * @param {string} content - Source content.
+ * @param {ReturnType<typeof createCoordinateIndex>} coordinates - Source coordinate index.
  * @param {{offset: number} | {line: number, column: number}} position - Position.
  * @returns {number} UTF-16 offset.
  */
-function positionOffset(content, position) {
+function positionOffset(coordinates, position) {
   if ("offset" in position) {
-    pointAt(content, position.offset)
+    indexedPointAt(coordinates, position.offset)
 
     return position.offset
   }
 
-  return offsetAt(content, position.line, position.column)
+  return indexedOffsetAt(coordinates, position.line, position.column)
 }
 
 /**
- * Converts a one-based line and column to a UTF-16 offset.
- * @param {string} content - Source content.
- * @param {number} line - One-based line.
- * @param {number} column - One-based UTF-16 column.
- * @returns {number} UTF-16 offset.
+ * Finds the exclusive content offset before the next generated line break.
+ * @param {string} content - Generated content.
+ * @param {number} offset - Offset on the current line.
+ * @returns {number} End of the current line or content.
  */
-function offsetAt(content, line, column) {
-  if (!Number.isInteger(line) || line < 1 || !Number.isInteger(column) || column < 1) {
-    throw new RangeError(`Invalid source position ${line}:${column}.`)
-  }
+function lineEndOffset(content, offset) {
+  const newline = content.indexOf("\n", offset)
 
-  for (let offset = 0; offset <= content.length; offset++) {
-    const point = pointAt(content, offset)
-
-    if (point.line == line && point.column == column) return offset
-  }
-
-  throw new RangeError(`Invalid source position ${line}:${column}.`)
+  return newline == -1 ? content.length : newline
 }
 
 /**
@@ -687,11 +920,12 @@ function samePoint(left, right) {
  * @param {import("./semantic/types.js").SemantifoldMapping} mapping - Mapping.
  * @param {import("./semantic/types.js").SemanticOrigin} origin - Origin.
  * @param {import("./semantic/types.js").SourceLocation} location - Primary location.
+ * @param {Map<string, import("./semantic/types.js").RegisteredSource>} sourcesById - Indexed sources.
  * @returns {import("./semantic/types.js").RegisteredSource} Registered source.
  */
-function sourceForOrigin(mapping, origin, location) {
+function sourceForOrigin(mapping, origin, location, sourcesById) {
   const sourceId = sourceIdForOrigin(origin)
-  const source = mapping.sources.find((candidate) => candidate.id == sourceId) ??
+  const source = sourcesById.get(sourceId ?? "") ??
     mapping.sources.find((candidate) => candidate.filename == location.filename)
 
   if (!source) throw new RangeError(`Unknown mapping source for ${location.filename}.`)

@@ -59,6 +59,14 @@
 /** @typedef {SourceOrigin | DerivedOrigin | SyntheticOrigin} SemanticOrigin */
 
 /**
+ * @typedef SemanticNodeSourceProvenance
+ * @property {"SemantifoldNodeProvenance"} schema - Association discriminator.
+ * @property {1} version - Association version.
+ * @property {SemanticOrigin} origin - Source association independent of traversal position.
+ * @property {Readonly<Record<string, SourceLocation>>} ranges - Exact semantic-token subranges by role.
+ */
+
+/**
  * @typedef SemanticNodeProvenance
  * @property {string} id - Deterministic module-local node identity.
  * @property {string} path - JSON Pointer from the semantic module root.
@@ -141,6 +149,7 @@
  * @typedef TypeReference
  * @property {"TypeReference"} kind - Node discriminator.
  * @property {SemanticTypeName} name - Normalized type name.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance that survives semantic transforms.
  */
 
 /**
@@ -149,6 +158,7 @@
  * @property {string} name - Parameter name.
  * @property {TypeReference} type - Parameter type.
  * @property {SourceLocation} location - Source location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
  */
 
 /**
@@ -156,6 +166,7 @@
  * @property {"IdentifierExpression"} kind - Node discriminator.
  * @property {string} name - Referenced name.
  * @property {SourceLocation} location - Source location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
  */
 
 /**
@@ -163,6 +174,7 @@
  * @property {"IntegerLiteral"} kind - Node discriminator.
  * @property {number} value - JavaScript-safe integer value.
  * @property {SourceLocation} location - Source location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
  */
 
 /**
@@ -170,6 +182,7 @@
  * @property {"BooleanLiteral"} kind - Node discriminator.
  * @property {boolean} value - Boolean value.
  * @property {SourceLocation} location - Source location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
  */
 
 /**
@@ -177,6 +190,7 @@
  * @property {"StringLiteral"} kind - Node discriminator.
  * @property {string} value - Unicode string value.
  * @property {SourceLocation} location - Source location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
  */
 
 /**
@@ -186,6 +200,7 @@
  * @property {Expression} left - Left operand.
  * @property {Expression} right - Right operand.
  * @property {SourceLocation} location - Source location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
  */
 
 /**
@@ -194,6 +209,7 @@
  * @property {string} callee - Function name.
  * @property {Expression[]} arguments - Positional arguments.
  * @property {SourceLocation} location - Source location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
  */
 
 /** @typedef {IdentifierExpression | IntegerLiteral | BooleanLiteral | StringLiteral | BinaryExpression | CallExpression} Expression */
@@ -206,6 +222,7 @@
  * @property {boolean} mutable - Whether later assignment is allowed.
  * @property {Expression} initializer - Required initializer expression.
  * @property {SourceLocation} location - Declaration source location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
  */
 
 /**
@@ -214,6 +231,7 @@
  * @property {IdentifierExpression} target - Simple local assignment target.
  * @property {Expression} expression - Assigned expression.
  * @property {SourceLocation} location - Assignment source location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
  */
 
 /**
@@ -221,6 +239,7 @@
  * @property {"ReturnStatement"} kind - Node discriminator.
  * @property {Expression} expression - Returned expression.
  * @property {SourceLocation} location - Source location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
  */
 
 /**
@@ -230,6 +249,7 @@
  * @property {(LocalDeclaration | AssignmentStatement | ReturnStatement)[]} consequent - True branch.
  * @property {(LocalDeclaration | AssignmentStatement | ReturnStatement)[]} alternate - False branch.
  * @property {SourceLocation} location - Source location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
  */
 
 /** @typedef {LocalDeclaration | AssignmentStatement} LocalStatement */
@@ -243,6 +263,7 @@
  * @property {TypeReference} returnType - Return type.
  * @property {FunctionStatement[]} body - Function body.
  * @property {SourceLocation} location - Source location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
  */
 
 /**
@@ -250,6 +271,7 @@
  * @property {"PrintStatement"} kind - Node discriminator.
  * @property {Expression} expression - Printed expression.
  * @property {SourceLocation} location - Source location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
  */
 
 /**
@@ -257,6 +279,7 @@
  * @property {"EntryPoint"} kind - Node discriminator.
  * @property {(LocalStatement | PrintStatement)[]} body - Entry-point statements.
  * @property {SourceLocation} location - Source location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
  */
 
 /**
@@ -265,6 +288,7 @@
  * @property {FunctionDeclaration[]} functions - Top-level functions.
  * @property {EntryPoint} entryPoint - Executable entry point.
  * @property {SourceLocation} location - Source location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
  * @property {SemanticProvenance} [provenance] - Parser-authored source and identity index; optional for legacy caller-authored modules.
  */
 

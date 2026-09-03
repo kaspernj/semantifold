@@ -1,9 +1,11 @@
 // @ts-check
 
-import {pointAt} from "./location.js"
+import {createCoordinateIndex, indexedPointAt} from "./location.js"
 
 /** @type {WeakMap<object, Readonly<Record<string, import("./types.js").SourceLocation>>>} */
 const parserRanges = new WeakMap()
+/** @type {WeakMap<import("./types.js").RegisteredSource, ReturnType<typeof createCoordinateIndex>>} */
+const sourceCoordinateIndexes = new WeakMap()
 
 /**
  * Records parser-provided semantic-token ranges without exposing parser trees.
@@ -46,15 +48,22 @@ export function annotateParsedModule(module, {filename, language, source}) {
   for (const [index, entry] of entries.entries()) {
     const ranges = parserRanges.get(entry.node) ?? {}
     const location = "location" in entry.node ? entry.node.location : ranges.type ?? entry.ownerLocation
+    const sourceProvenance = /** @type {import("./types.js").SemanticNodeSourceProvenance} */ ({
+      origin: {kind: "source", location, sourceId: "source:0"},
+      ranges,
+      schema: "SemantifoldNodeProvenance",
+      version: 1
+    })
     const record = {
       id: `node:${index}`,
       kind: entry.node.kind,
-      origin: /** @type {const} */ ({kind: "source", location, sourceId: "source:0"}),
+      origin: sourceProvenance.origin,
       path: entry.path,
-      ranges
+      ranges: sourceProvenance.ranges
     }
 
     records.set(entry.node, record)
+    entry.node.sourceProvenance = sourceProvenance
   }
 
   const symbols = resolveSymbols(module, records)
@@ -80,7 +89,6 @@ export function annotateParsedModule(module, {filename, language, source}) {
 export function createGenerationIndex(module, providedSources = []) {
   const entries = semanticEntries(module)
   const priorSources = usableSourceProvenance(module.provenance)
-  const prior = usablePriorProvenance(module.provenance, entries)
   /** @type {import("./types.js").RegisteredSource[]} */
   const sources = []
   /** @type {Map<string, import("./types.js").RegisteredSource>} */
@@ -100,18 +108,17 @@ export function createGenerationIndex(module, providedSources = []) {
     if (!sources.some((source) => source.filename == location.filename)) addSource(location.filename, null, null)
   }
 
-  const priorNodes = new Map(prior?.nodes.map((record) => [record.path, record]) ?? [])
   /** @type {Map<object, import("./types.js").SemanticNodeProvenance>} */
   const records = new Map()
 
   for (const [index, entry] of entries.entries()) {
     const located = "location" in entry.node ? entry.node.location : entry.ownerLocation
-    const priorRecord = priorNodes.get(entry.path)
-    const ranges = priorRecord ? validRanges(priorRecord.ranges, sources) : {}
+    const associated = usableNodeProvenance(entry.node.sourceProvenance)
+    const ranges = associated ? validRanges(associated.ranges, sources) : {}
     const fallbackLocation = ranges.type ?? located
     const fallbackSource = sourceForLocation(fallbackLocation, sources)
-    const origin = priorRecord
-      ? normalizeOrigin(priorRecord.origin, priorSourcesById, sources) ?? sourceOrigin(fallbackSource, fallbackLocation)
+    const origin = associated
+      ? normalizeOrigin(associated.origin, priorSourcesById, sources) ?? sourceOrigin(fallbackSource, fallbackLocation)
       : sourceOrigin(fallbackSource, fallbackLocation)
 
     records.set(entry.node, {
@@ -182,27 +189,17 @@ export function primaryLocation(origin) {
 }
 
 /**
- * Accepts only structurally current prior metadata; identities are still rebuilt.
- * @param {import("./types.js").SemanticProvenance | undefined} provenance - Caller metadata.
- * @param {{node: import("./types.js").SemanticNode, path: string}[]} entries - Current semantic entries.
- * @returns {import("./types.js").SemanticProvenance | undefined} Usable prior metadata.
+ * Accepts source metadata only when it is attached to the semantic node it describes.
+ * Registry-local IDs and paths are intentionally ignored and rebuilt.
+ * @param {import("./types.js").SemanticNodeSourceProvenance | undefined} record - Candidate node association.
+ * @returns {import("./types.js").SemanticNodeSourceProvenance | undefined} Usable association.
  */
-function usablePriorProvenance(provenance, entries) {
-  const usable = usableSourceProvenance(provenance)
+function usableNodeProvenance(record) {
+  if (!record || record.schema != "SemantifoldNodeProvenance" || record.version != 1 ||
+    !record.origin || typeof record.origin != "object" ||
+    !record.ranges || typeof record.ranges != "object" || Array.isArray(record.ranges)) return undefined
 
-  if (!usable || !Array.isArray(usable.nodes) ||
-    !Array.isArray(usable.symbols) || usable.nodes.length != entries.length) return undefined
-
-  const paths = new Set()
-
-  for (const [index, record] of usable.nodes.entries()) {
-    const entry = entries[index]
-
-    if (!record || record.path != entry.path || record.kind != entry.node.kind || paths.has(record.path)) return undefined
-    paths.add(record.path)
-  }
-
-  return usable
+  return record
 }
 
 /**
@@ -256,7 +253,8 @@ function normalizeOrigin(origin, priorSources, sources) {
   if (!origin || typeof origin != "object") return undefined
 
   if (origin.kind == "source" && validLocation(origin.location, sources)) {
-    const source = priorSources.get(origin.sourceId) ?? sourceForLocation(origin.location, sources)
+    const claimed = priorSources.get(origin.sourceId)
+    const source = claimed && sourceOwnsLocation(claimed, origin.location) ? claimed : sourceForLocation(origin.location, sources)
 
     return sourceOrigin(source, origin.location)
   }
@@ -286,7 +284,8 @@ function normalizeOrigin(origin, priorSources, sources) {
 function normalizeRelatedOrigin(related, priorSources, sources) {
   if (!related || !validLocation(related.location, sources)) return undefined
 
-  const source = priorSources.get(related.sourceId) ?? sourceForLocation(related.location, sources)
+  const claimed = priorSources.get(related.sourceId)
+  const source = claimed && sourceOwnsLocation(claimed, related.location) ? claimed : sourceForLocation(related.location, sources)
   const normalized = {location: related.location, sourceId: source.id}
 
   if (typeof related.role == "string") Object.assign(normalized, {role: related.role})
@@ -307,13 +306,28 @@ function validLocation(location, sources) {
 
   const candidates = sources.filter((source) => source.filename == location.filename)
 
-  return candidates.some((source) => {
-    if (source.content == null) return true
-    if (location.end.offset > source.content.length) return false
+  return candidates.some((source) => sourceOwnsLocation(source, location))
+}
 
-    return samePoint(pointAt(source.content, location.start.offset), location.start) &&
-      samePoint(pointAt(source.content, location.end.offset), location.end)
-  })
+/**
+ * Checks that one identified registry source owns a normalized location.
+ * @param {import("./types.js").RegisteredSource} source - Identified source.
+ * @param {import("./types.js").SourceLocation} location - Candidate location.
+ * @returns {boolean} Whether the source owns the location.
+ */
+function sourceOwnsLocation(source, location) {
+  if (source.filename != location.filename) return false
+  if (source.content == null) return true
+  if (location.end.offset > source.content.length) return false
+  let coordinates = sourceCoordinateIndexes.get(source)
+
+  if (!coordinates) {
+    coordinates = createCoordinateIndex(source.content)
+    sourceCoordinateIndexes.set(source, coordinates)
+  }
+
+  return samePoint(indexedPointAt(coordinates, location.start.offset), location.start) &&
+    samePoint(indexedPointAt(coordinates, location.end.offset), location.end)
 }
 
 /**
@@ -342,8 +356,7 @@ function samePoint(left, right) {
  * @returns {import("./types.js").RegisteredSource} Owning source.
  */
 function sourceForLocation(location, sources) {
-  const source = sources.find((candidate) => candidate.filename == location.filename &&
-    (candidate.content == null || location.end.offset <= candidate.content.length))
+  const source = sources.find((candidate) => sourceOwnsLocation(candidate, location))
 
   if (!source) throw new RangeError(`No registered source owns ${location.filename}:${location.start.offset}.`)
 
@@ -367,11 +380,13 @@ function sourceOrigin(source, location) {
  * @returns {import("./types.js").SemanticNodeProvenance} Provenance record.
  */
 export function getNodeProvenance(module, node) {
-  const provenance = requireProvenance(module)
-  const id = typeof node == "string" ? node : nodeIdForObject(module, node, provenance.nodes)
-  const record = provenance.nodes.find((candidate) => candidate.id == id)
+  requireProvenance(module)
+  const index = createGenerationIndex(module)
+  const record = typeof node == "string"
+    ? index.provenance.nodes.find((candidate) => candidate.id == node)
+    : index.recordFor(node)
 
-  if (!record) throw new RangeError(`Unknown semantic node: ${id}`)
+  if (!record) throw new RangeError(`Unknown semantic node: ${node}`)
 
   return record
 }
@@ -383,7 +398,8 @@ export function getNodeProvenance(module, node) {
  * @returns {import("./types.js").SemanticSymbolProvenance} Symbol record.
  */
 export function getSymbolProvenance(module, symbolId) {
-  const symbol = requireProvenance(module).symbols.find((candidate) => candidate.id == symbolId)
+  requireProvenance(module)
+  const symbol = createGenerationIndex(module).provenance.symbols.find((candidate) => candidate.id == symbolId)
 
   if (!symbol) throw new RangeError(`Unknown semantic symbol: ${symbolId}`)
 
@@ -399,25 +415,6 @@ function requireProvenance(module) {
   if (!module.provenance) throw new TypeError("Semantic module does not contain source provenance.")
 
   return module.provenance
-}
-
-/**
- * Resolves a semantic object to its current deterministic path.
- * @param {import("./types.js").SemanticModule} module - Semantic module.
- * @param {import("./types.js").SemanticNode} node - Semantic node.
- * @param {import("./types.js").SemanticNodeProvenance[]} records - Indexed records.
- * @returns {string} Node identity.
- */
-function nodeIdForObject(module, node, records) {
-  const entry = semanticEntries(module).find((candidate) => candidate.node === node)
-
-  if (!entry) throw new RangeError("Semantic node is not part of this module.")
-
-  const record = records.find((candidate) => candidate.path == entry.path && candidate.kind == node.kind)
-
-  if (!record) throw new RangeError(`Stale semantic provenance at ${entry.path}.`)
-
-  return record.id
 }
 
 /**

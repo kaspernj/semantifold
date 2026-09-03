@@ -8,7 +8,7 @@ import {generateRuby} from "./ruby.js"
 import {validateBackendModule} from "./shared.js"
 import {generateTypeScript} from "./typescript.js"
 import {SourceWriter} from "./writer.js"
-import {toSourceMapV3} from "../mapping.js"
+import {finalizeMapping, toSourceMapV3} from "../mapping.js"
 
 /** @type {Readonly<Record<import("../semantic/types.js").SemanticLanguage, string>>} */
 const defaultFilenames = Object.freeze({
@@ -18,6 +18,7 @@ const defaultFilenames = Object.freeze({
   ruby: "program.rb",
   typescript: "program.ts"
 })
+const lineTerminatorPattern = /[\n\r\u2028\u2029]/u
 
 /**
  * Generates target source from a semantic module.
@@ -44,11 +45,15 @@ export function generateSource({language, module}) {
 export function generateArtifactSource({language, filename = defaultFilenames[language], mapDirective = "none", module, sourceMapFilename = `${filename}.map`, sources}) {
   validateBackendModule(module, language)
 
-  if (typeof filename != "string" || filename.length == 0 || filename.includes("\r") || filename.includes("\n")) {
+  if (typeof filename != "string" || filename.length == 0 || lineTerminatorPattern.test(filename)) {
     throw new TypeError("Generated filename must be a non-empty single-line string.")
   }
-  if (typeof sourceMapFilename != "string" || sourceMapFilename.length == 0 || sourceMapFilename.includes("\r") ||
-    sourceMapFilename.includes("\n")) throw new TypeError("Source map filename must be a non-empty single-line string.")
+  if (typeof sourceMapFilename != "string" || sourceMapFilename.length == 0 || lineTerminatorPattern.test(sourceMapFilename)) {
+    throw new TypeError("Source map filename must be a non-empty single-line string.")
+  }
+  if (language == "java" && filename.split(/[\\/]/u).at(-1) != "Main.java") {
+    throw new TypeError("Java artifact filename must have the basename Main.java.")
+  }
   if (!["none", "external", "inline"].includes(mapDirective)) throw new TypeError(`Unsupported map directive: ${mapDirective}`)
   if (mapDirective != "none" && language != "javascript" && language != "typescript") {
     throw new TypeError("Source map directives are supported only for JavaScript and TypeScript outputs.")
@@ -80,7 +85,7 @@ export function generateArtifactSource({language, filename = defaultFilenames[la
     writer.synthetic(`//# sourceMappingURL=data:application/json;charset=utf-8;base64,${encoded}\n`, "inline source map directive", [module])
   }
 
-  const mapping = writer.finish()
+  const mapping = finalizeMapping(writer.finish())
 
   return {
     code: mapping.generated.content,

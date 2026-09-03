@@ -33,6 +33,11 @@ describe("semantic source provenance", () => {
         assert.equal(node.origin.sourceId, "source:0")
         assert.equal(node.origin.location.filename, filename)
       }
+      const associated = first.functions[0].sourceProvenance
+
+      assert.equal(associated.schema, "SemantifoldNodeProvenance")
+      assert.equal(associated.version, 1)
+      assert.deepEqual(JSON.parse(JSON.stringify(associated)), associated)
 
       const declaration = first.functions[0]
       const declarationProvenance = getNodeProvenance(first, declaration)

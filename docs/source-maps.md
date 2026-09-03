@@ -10,7 +10,7 @@ This works for PHP, Ruby, JavaScript, TypeScript, and Java inputs and outputs. I
 
 ## Parsing and semantic provenance
 
-`parse()` preserves the existing `location.filename/start/end` shape. Lines and columns are one-based, ranges are half-open, and offsets and columns count UTF-16 code units. CRLF is one line break, a lone CR is one line break, and astral characters occupy two columns and offsets. Source content and its original newlines are preserved exactly.
+`parse()` preserves the existing `location.filename/start/end` shape. Lines and columns are one-based, ranges are half-open, and offsets and columns count UTF-16 code units. CRLF is one line break, a lone CR is one line break, and astral characters occupy two columns and offsets. A CRLF start-of-line coordinate resolves after both code units; the interior offset remains a unique position on the preceding line rather than aliasing the next line. Source content and its original newlines are preserved exactly.
 
 Parsed modules additionally have a JSON-safe `provenance` value:
 
@@ -31,7 +31,9 @@ module.provenance // {
 // }
 ```
 
-Node IDs follow deterministic semantic traversal order, node paths are JSON Pointers, and symbol IDs identify validated function, parameter, and local bindings. Declaration records and resolved identifier/call records share a symbol ID. `ranges` contains parser-owned semantic tokens such as `name`, `type`, `callee`, `literal`, and `operator`. Parser AST/CST values never enter the public object.
+Node IDs follow deterministic semantic traversal order, node paths are JSON Pointers, and symbol IDs identify validated function, parameter, and local bindings. Declaration records and resolved identifier/call records share a symbol ID. `ranges` contains parser-owned semantic tokens such as `name`, `type`, `callee`, `literal`, and `operator`. Babel identifier ranges use token offsets, including the complete source spelling of escaped identifiers while excluding TypeScript annotations. Parser AST/CST values never enter the public object.
+
+Each semantic node also carries its own JSON-safe `sourceProvenance` record. That object association—not an array position, old JSON Pointer, or caller-controlled ID—is the source of provenance after a semantic transformation. Reordering, inserting, deleting, serializing, or cloning nodes therefore moves their source ranges with them. Generation rebuilds current paths and registry-local node/symbol IDs; cloned nodes receive distinct generated identities even when they intentionally share one original origin.
 
 Origins are a closed union:
 
@@ -43,7 +45,7 @@ Origins are a closed union:
 
 `primaryLocation(origin)` returns the direct location, the first derived origin, the first related synthetic origin, or `undefined`. `getNodeProvenance(module, nodeOrId)` and `getSymbolProvenance(module, symbolId)` query parsed-module identities.
 
-Provenance is mutable JSON because semantic transformations need ordinary data. Generation therefore treats caller metadata as evidence, never authority: it validates paths, ranges, source bounds, and coordinate consistency, then rebuilds all node and symbol IDs. Missing, malformed, duplicate, or stale metadata falls back safely to semantic `location` values. Legacy caller-authored modules without `provenance` remain accepted.
+Provenance is mutable JSON because semantic transformations need ordinary data. Generation therefore treats caller metadata as evidence, never authority: it validates node association, ranges, source bounds, coordinate consistency, and that a claimed `sourceId` actually owns its location, then rebuilds all paths and node/symbol IDs. Aggregate records are never reassigned to nodes merely because an old path and kind happen to match. Missing, malformed, duplicate, or stale metadata falls back safely to semantic `location` values. Legacy caller-authored modules without provenance remain accepted.
 
 ## Generated artifacts
 
@@ -64,7 +66,7 @@ artifact.sourceMap     // encoded Source Map v3 object
 artifact.sourceMapFilename
 ```
 
-Default filenames are `program.php`, `program.rb`, `program.js`, `program.ts`, and `Main.java`. `sources` may supply exact content for legacy or caller-assembled multi-source IR:
+Default filenames are `program.php`, `program.rb`, `program.js`, `program.ts`, and `Main.java`. Java artifacts may include directories but must retain the basename `Main.java`, matching the generated public class and making the returned filename directly compilable. `sources` may supply exact content for legacy or caller-assembled multi-source IR:
 
 ```js
 generateArtifact({
@@ -79,7 +81,7 @@ generateArtifact({
 
 This single-artifact envelope is intentionally reusable as an element in task 010's future ordered artifact set. Generation never writes files.
 
-All outputs have deterministic LF newlines. The rich map's `generated.content` is the exact returned code and its ordered, non-empty spans cover every UTF-16 code unit without gaps or overlaps:
+All outputs have deterministic LF newlines. Returned rich mappings are deeply immutable and internally indexed after trust-boundary validation. The rich map's `generated.content` is the exact returned code and its ordered, non-empty spans cover every UTF-16 code unit without gaps or overlaps:
 
 - `exact` maps a generated semantic token to an exact parser token/range.
 - `anchor` maps target syntax such as a keyword or delimiter to the owning semantic origin.
@@ -98,7 +100,7 @@ generateArtifact({language: "javascript", module, mapDirective: "external"})
 generateArtifact({language: "typescript", module, mapDirective: "inline"})
 ```
 
-`external` appends `//# sourceMappingURL=<sourceMapFilename>`. `inline` appends a UTF-8 base64 data URL. The default is `none`. PHP, Ruby, and Java still receive sidecar map objects but never receive non-native map comments. Native Java debugger mapping such as JSR-45 would require class-file/toolchain integration and is not part of v1.
+`external` appends `//# sourceMappingURL=<sourceMapFilename>`. Names containing any ECMAScript line terminator—LF, CR, U+2028, or U+2029—are rejected before emission. `inline` appends a UTF-8 base64 data URL. The default is `none`. PHP, Ruby, and Java still receive sidecar map objects but never receive non-native map comments. Native Java debugger mapping such as JSR-45 would require class-file/toolchain integration and is not part of v1.
 
 The directive itself is an unmapped synthetic rich-map span. `artifact.sourceMap` is computed for the program before that self-referential comment is appended; this is required for a stable inline data URL and is the conventional v3 behavior. Use the rich mapping when the directive span itself matters. Rich registries may distinguish same-named sources by `sourceId`; Source Map v3 identifies sources by filename, so callers should use unique filenames when exporting such an assembled registry to v3.
 
@@ -117,7 +119,9 @@ const restored = parseMapping(json)
 
 Rich positions accept zero-based UTF-16 offsets or one-based line/column pairs. Serialization recursively sorts object keys and preserves semantically ordered arrays. Parsing rejects the wrong schema/version, malformed identities, unknown source references, stale source coordinates, non-LF generated content, and span gaps/overlaps.
 
-`composeMappings(outer, inner)` composes generated ranges through an intermediate rich mapping. `mappingFromSourceMap(v3, generated)` imports a point map as anchor/synthetic ranges. `composeSourceMaps(outerV3, innerV3)` composes v3 maps using the maintained mapping libraries. The test suite compiles a generated TypeScript artifact with real `tsc`, then verifies both JavaScript -> generated TypeScript -> original Ruby compositions.
+`composeMappings(outer, inner)` composes generated ranges through an intermediate rich mapping. Exact equal-length outer ranges are split at every inner mapping boundary; ranges without a provable one-to-one subdivision remain anchored. `mappingFromSourceMap(v3, generated)` imports a point map as anchor/synthetic ranges, terminates each segment at its generated line end, and explicitly represents unmapped prefixes, newlines, and lines as synthetic. `composeSourceMaps(outerV3, innerV3)` composes v3 maps using the maintained mapping libraries. The test suite compiles a generated TypeScript artifact with real `tsc`, then verifies both JavaScript -> generated TypeScript -> original Ruby compositions.
+
+Validation constructs source line starts once, verifies ranges in linear passes, and creates binary-search/interval indexes for generated and original positions. Immutable mappings produced by Semantifold reuse that validated index for subsequent queries. Mutable caller mappings are deliberately revalidated on every public operation so cache reuse never weakens the trust boundary.
 
 `remapLocation(generatedLocation, mapping)` returns the complete lookup result. `remapDiagnostic(diagnostic, mapping)` returns a `SemantifoldDiagnostic` at the original location while preserving the prior range as `generatedLocation` and the original diagnostic as `cause`.
 

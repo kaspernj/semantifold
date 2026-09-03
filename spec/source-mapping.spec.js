@@ -28,6 +28,8 @@ describe("generated source mappings", () => {
 
       assert.equal(artifact.code, generate({language, module}))
       assert.deepEqual(artifact, repeated)
+      assert.equal(Object.isFrozen(artifact.mapping), true)
+      assert.equal(Object.isFrozen(artifact.mapping.spans), true)
       assert.equal(artifact.mapping.schema, "SemantifoldMapping")
       assert.equal(artifact.mapping.version, 1)
       assert.equal(artifact.mapping.coordinateSystem, "utf16")
@@ -59,6 +61,12 @@ describe("generated source mappings", () => {
     assert.equal(forward.name, "select")
     assert.ok(reverse.some((result) => result.generatedLocation.start.offset == generatedOffset))
     assert.equal(stringifyMapping(parseMapping(serialized)), serialized)
+
+    const mutable = structuredClone(artifact.mapping)
+
+    originalPositionFor(mutable, {offset: generatedOffset})
+    mutable.spans[1].generated.start.offset++
+    assert.throws(() => originalPositionFor(mutable, {offset: generatedOffset}), /cover|range/u)
   })
 
   it("emits map directives only when requested and only for JavaScript-family targets", async () => {
@@ -81,7 +89,8 @@ describe("generated source mappings", () => {
   it("rebuilds malformed caller metadata and maps legacy and multi-source semantic modules", async () => {
     const source = await readFile(new URL("fixtures/program.ts", import.meta.url), "utf8")
     const parsed = parse({filename: "first.ts", language: "typescript", source})
-    const legacy = JSON.parse(JSON.stringify(parsed, (key, value) => key == "provenance" ? undefined : value))
+    const legacy = JSON.parse(JSON.stringify(parsed, (key, value) =>
+      key == "provenance" || key == "sourceProvenance" ? undefined : value))
     const legacyArtifact = generateArtifact({
       language: "java",
       module: legacy,
@@ -111,7 +120,7 @@ describe("generated source mappings", () => {
     assert.deepEqual(repaired.mapping.sources.map((registered) => registered.content), [source])
 
     const malformed = structuredClone(parsed)
-    const malformedName = malformed.provenance.nodes.find((node) => node.path == "/functions/0").ranges.name
+    const malformedName = malformed.functions[0].sourceProvenance.ranges.name
 
     malformedName.start.offset = source.length + 100
     malformedName.end.offset = source.length + 110
@@ -157,8 +166,8 @@ describe("generated source mappings", () => {
   it("preserves validated derived and synthetic semantic origins", async () => {
     const source = await readFile(new URL("fixtures/program.ts", import.meta.url), "utf8")
     const module = parse({filename: "program.ts", language: "typescript", source})
-    const functionRecord = module.provenance.nodes.find((node) => node.path == "/functions/0")
-    const entryRecord = module.provenance.nodes.find((node) => node.path == "/entryPoint")
+    const functionRecord = module.functions[0].sourceProvenance
+    const entryRecord = module.entryPoint.sourceProvenance
     const functionSource = functionRecord.origin
     const entrySource = entryRecord.origin
 
