@@ -602,9 +602,10 @@ export function validateMapping(value) {
  * @returns {import("./semantic/types.js").SemantifoldMapping} Immutable indexed mapping.
  */
 export function finalizeMapping(value) {
-  validateMapping(value)
-  const mapping = /** @type {import("./semantic/types.js").SemantifoldMapping} */ (value)
+  // Producers may retain references to mutable semantic locations; mappings own their immutable copy.
+  const mapping = structuredClone(value)
 
+  validateMapping(mapping)
   freezeJson(mapping)
   mappingIndexes.set(mapping, buildMappingIndex(mapping))
 

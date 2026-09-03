@@ -81,7 +81,7 @@ generateArtifact({
 
 This single-artifact envelope is intentionally reusable as an element in task 010's future ordered artifact set. Generation never writes files.
 
-All outputs have deterministic LF newlines. Returned rich mappings are deeply immutable and internally indexed after trust-boundary validation. The rich map's `generated.content` is the exact returned code and its ordered, non-empty spans cover every UTF-16 code unit without gaps or overlaps:
+All outputs have deterministic LF newlines. Returned rich mappings are detached from caller-owned semantic locations and provenance before they are deeply frozen and internally indexed after trust-boundary validation. Freezing an artifact mapping therefore never freezes the mutable semantic module used to generate it. The rich map's `generated.content` is the exact returned code and its ordered, non-empty spans cover every UTF-16 code unit without gaps or overlaps:
 
 - `exact` maps a generated semantic token to an exact parser token/range.
 - `anchor` maps target syntax such as a keyword or delimiter to the owning semantic origin.
@@ -100,7 +100,7 @@ generateArtifact({language: "javascript", module, mapDirective: "external"})
 generateArtifact({language: "typescript", module, mapDirective: "inline"})
 ```
 
-`external` appends `//# sourceMappingURL=<sourceMapFilename>`. Names containing any ECMAScript line terminator—LF, CR, U+2028, or U+2029—are rejected before emission. `inline` appends a UTF-8 base64 data URL. The default is `none`. PHP, Ruby, and Java still receive sidecar map objects but never receive non-native map comments. Native Java debugger mapping such as JSR-45 would require class-file/toolchain integration and is not part of v1.
+`external` appends `//# sourceMappingURL=<relative-map-url>`. `artifact.sourceMapFilename` remains the map artifact's logical filename, while the directive is relative to `artifact.filename`'s directory; for example, `dist/program.js` advertises `dist/program.js.map` and emits `sourceMappingURL=program.js.map`. Names containing any ECMAScript line terminator—LF, CR, U+2028, or U+2029—are rejected before emission. `inline` appends a UTF-8 base64 data URL. The default is `none`. PHP, Ruby, and Java still receive sidecar map objects but never receive non-native map comments. Native Java debugger mapping such as JSR-45 would require class-file/toolchain integration and is not part of v1.
 
 The directive itself is an unmapped synthetic rich-map span. `artifact.sourceMap` is computed for the program before that self-referential comment is appended; this is required for a stable inline data URL and is the conventional v3 behavior. Use the rich mapping when the directive span itself matters. Rich registries may distinguish same-named sources by `sourceId`; Source Map v3 identifies sources by filename, so callers should use unique filenames when exporting such an assembled registry to v3.
 

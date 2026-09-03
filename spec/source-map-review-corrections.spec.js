@@ -6,7 +6,7 @@ import {mkdir, mkdtemp, rm, writeFile} from "node:fs/promises"
 import {tmpdir} from "node:os"
 import path from "node:path"
 import {promisify} from "node:util"
-import {describe, it} from "@velocious/testing"
+import {describe, expect, it} from "@velocious/testing"
 import {originalPositionFor as traceOriginalPositionFor, TraceMap} from "@jridgewell/trace-mapping"
 import {
   composeMappings,
@@ -31,6 +31,36 @@ console.log(difference(4, 9))
 `
 
 describe("reviewed source-map corrections", () => {
+  it("keeps caller-owned semantic locations mutable after freezing generated mappings", () => {
+    const module = parse({filename: "program.ts", language: "typescript", source: baseSource})
+    const declaration = module.functions[0]
+    const provenance = declaration.sourceProvenance
+
+    assert.equal(provenance.origin.kind, "source")
+    const locations = [declaration.location, provenance.origin.location, provenance.ranges.name]
+    const artifact = generateArtifact({language: "javascript", module})
+    const mappedDeclaration = artifact.mapping.nodes.find((node) => node.path == "/functions/0")
+
+    expect(locations.flatMap((location) => [location, location.start, location.end]).map(Object.isFrozen))
+      .toEqual(Array(9).fill(false))
+    const mappedStart = mappedDeclaration.ranges.name.start.offset
+
+    provenance.ranges.name.start.offset++
+    expect(provenance.ranges.name.start.offset).toEqual(mappedStart + 1)
+    expect(mappedDeclaration.ranges.name.start.offset).toEqual(mappedStart)
+  })
+
+  it("emits an external map URL relative to a nested generated artifact", () => {
+    const module = parse({filename: "program.ts", language: "typescript", source: baseSource})
+    const artifact = generateArtifact({filename: "dist/program.js", language: "javascript", mapDirective: "external", module})
+    const directive = artifact.code.match(/\/\/# sourceMappingURL=(.+)\n$/u)
+
+    expect(artifact.sourceMapFilename).toEqual("dist/program.js.map")
+    assert.ok(directive)
+    expect(directive[1]).toEqual("program.js.map")
+    expect(new URL(directive[1], "https://example.invalid/dist/program.js").pathname).toEqual("/dist/program.js.map")
+  })
+
   it("rejects every ECMAScript line terminator in external map names and executes normal directives", async () => {
     const module = parse({filename: "program.ts", language: "typescript", source: baseSource})
 

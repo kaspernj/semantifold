@@ -78,7 +78,9 @@ export function generateArtifactSource({language, filename = defaultFilenames[la
   const sourceMap = toSourceMapV3(writer.finish())
 
   if (mapDirective == "external") {
-    writer.synthetic(`//# sourceMappingURL=${sourceMapFilename}\n`, "external source map directive", [module])
+    const sourceMapUrl = relativeArtifactPath(filename, sourceMapFilename)
+
+    writer.synthetic(`//# sourceMappingURL=${sourceMapUrl}\n`, "external source map directive", [module])
   } else if (mapDirective == "inline") {
     const encoded = base64Utf8(JSON.stringify(sourceMap))
 
@@ -95,6 +97,41 @@ export function generateArtifactSource({language, filename = defaultFilenames[la
     sourceMap,
     sourceMapFilename
   }
+}
+
+/**
+ * Resolves one logical artifact filename relative to another artifact's directory.
+ * @param {string} generatedFilename - Generated code artifact filename.
+ * @param {string} relatedFilename - Related artifact filename.
+ * @returns {string} Portable forward-slash relative path.
+ */
+function relativeArtifactPath(generatedFilename, relatedFilename) {
+  const generatedDirectory = normalizedPathParts(generatedFilename)
+  const related = normalizedPathParts(relatedFilename)
+
+  generatedDirectory.pop()
+  let common = 0
+
+  while (common < generatedDirectory.length && common < related.length && generatedDirectory[common] == related[common]) common++
+
+  return [...generatedDirectory.slice(common).map(() => ".."), ...related.slice(common)].join("/") || "."
+}
+
+/**
+ * Normalizes separators and dot segments in one logical artifact filename.
+ * @param {string} filename - Logical artifact filename.
+ * @returns {string[]} Normalized path parts.
+ */
+function normalizedPathParts(filename) {
+  const parts = []
+
+  for (const part of filename.replaceAll("\\", "/").split("/")) {
+    if (part == "" || part == ".") continue
+    if (part == ".." && parts.length > 0 && parts.at(-1) != "..") parts.pop()
+    else parts.push(part)
+  }
+
+  return parts
 }
 
 /**
