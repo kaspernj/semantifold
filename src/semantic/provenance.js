@@ -110,6 +110,7 @@ export function createGenerationIndex(module, providedSources = []) {
 
     if (!sources.some((source) => source.filename == location.filename)) addSource(location.filename, null, null)
   }
+  const verifiableSources = sources.filter((source) => source.content != null)
 
   /** @type {Map<object, import("./types.js").SemanticNodeProvenance[]>} */
   const recordsByNode = new Map()
@@ -121,12 +122,12 @@ export function createGenerationIndex(module, providedSources = []) {
   for (const [index, entry] of entries.entries()) {
     const located = "location" in entry.node ? entry.node.location : entry.ownerLocation
     const associated = usableNodeProvenance(entry.node.sourceProvenance)
-    const ranges = associated ? validRanges(associated.ranges, sources) : {}
-    const fallbackLocation = ranges.type ?? located
-    const fallbackSource = sourceForLocation(fallbackLocation, sources)
-    const origin = associated
-      ? normalizeOrigin(associated.origin, priorSourcesById, sources) ?? sourceOrigin(fallbackSource, fallbackLocation)
-      : sourceOrigin(fallbackSource, fallbackLocation)
+    const ranges = associated ? validRanges(associated.ranges, verifiableSources) : {}
+    const normalizedOrigin = associated
+      ? normalizeOrigin(associated.origin, priorSourcesById, verifiableSources)
+      : undefined
+    const fallbackSource = sourceForLocation(located, sources)
+    const origin = normalizedOrigin ?? sourceOrigin(fallbackSource, located)
 
     const record = {
       id: `node:${index}`,

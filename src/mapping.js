@@ -466,12 +466,16 @@ export function composeSourceMaps(outer, inner) {
   const intermediateIndex = intermediateIndexes.length == 1 ? intermediateIndexes[0] : undefined
   const intermediateSource = intermediateIndex === undefined ? undefined : outerMap.resolvedSources[intermediateIndex]
 
-  for (const source of innerMap.sources) {
-    if (source != null) setSourceContent(composed, source, sourceContentFor(innerMap, source))
-  }
-  outerMap.sources.forEach((source, index) => {
+  innerMap.sources.forEach((rawSource, index) => {
+    const source = innerMap.resolvedSources[index] ?? rawSource
+
+    if (source != null) setSourceContent(composed, source, innerMap.sourcesContent?.[index] ?? null)
+  })
+  outerMap.sources.forEach((rawSource, index) => {
+    const source = outerMap.resolvedSources[index] ?? rawSource
+
     if (source != null && index != intermediateIndex) {
-      setSourceContent(composed, source, sourceContentFor(outerMap, source))
+      setSourceContent(composed, source, outerMap.sourcesContent?.[index] ?? null)
     }
   })
 
