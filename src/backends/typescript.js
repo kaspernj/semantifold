@@ -134,7 +134,12 @@ function emitLocal(writer, statement, indent) {
   writer.synthetic(" ", "declaration spacing", [statement])
   writer.mapped(statement.name, {mappingKind: "exact", node: statement, role: "name"})
   writer.synthetic(": ", "type separator", [statement])
-  writer.mapped(emitScalarType("typescript", statement.type), {mappingKind: "exact", node: statement.type, role: "type"})
+  writer.mapped(emitScalarType("typescript", statement.type), {
+    mappingKind: "exact",
+    node: statement.type,
+    path: `${writer.occurrencePath(statement)}/type`,
+    role: "type"
+  })
   writer.synthetic(" ", "assignment spacing", [statement])
   writer.mapped("=", {mappingKind: "exact", node: statement, role: "operator"})
   writer.synthetic(" ", "assignment spacing", [statement])

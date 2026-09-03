@@ -231,7 +231,7 @@ export function composeMappings(outer, inner) {
           outer.generated.content,
           generatedStart,
           generatedEnd
-        ), preservesWholeOrigin, selectedRelated)
+        ), preservesWholeOrigin, selectedRelated, true)
       })
     }
 
@@ -259,9 +259,10 @@ export function composeMappings(outer, inner) {
    * @param {import("./semantic/types.js").SourceLocation} generated - Final generated subrange.
    * @param {boolean} preservesWholeOrigin - Whether adopting the inner origin retains its complete range.
    * @param {import("./semantic/types.js").RelatedOrigin} selectedRelated - Outer origin traced through this inner span.
+   * @param {boolean} [restrictSelectedTrace] - Whether an exact split selects only this inner span.
    * @returns {import("./semantic/types.js").SemantifoldMappingSpan} Composed span.
    */
-  function composedSpan(outerSpan, innerSpan, generated, preservesWholeOrigin, selectedRelated) {
+  function composedSpan(outerSpan, innerSpan, generated, preservesWholeOrigin, selectedRelated, restrictSelectedTrace = false) {
     if (outerSpan.mappingKind == "synthetic" && outerSpan.origin.kind == "synthetic") {
       return definedProperties({
         generated,
@@ -270,7 +271,7 @@ export function composeMappings(outer, inner) {
         origin: {
           kind: /** @type {const} */ ("synthetic"),
           reason: outerSpan.origin.reason,
-          relatedOrigins: composeRelatedOrigins(outerSpan.origin.relatedOrigins, selectedRelated, innerSpan)
+          relatedOrigins: composeRelatedOrigins(outerSpan.origin.relatedOrigins, selectedRelated, innerSpan, restrictSelectedTrace)
         },
         role: outerSpan.role
       })
@@ -286,11 +287,14 @@ export function composeMappings(outer, inner) {
       name: outerSpan.name ?? innerSpan.name,
       nodeId: innerSpan.nodeId,
       origin: outerSpan.origin.kind == "source" ? innerSpan.origin : outerSpan.origin.kind == "derived"
-        ? {kind: /** @type {const} */ ("derived"), origins: composeRelatedOrigins(outerSpan.origin.origins, selectedRelated, innerSpan)}
+        ? {
+            kind: /** @type {const} */ ("derived"),
+            origins: composeRelatedOrigins(outerSpan.origin.origins, selectedRelated, innerSpan, restrictSelectedTrace)
+          }
         : {
             kind: /** @type {const} */ ("synthetic"),
             reason: outerSpan.origin.reason,
-            relatedOrigins: composeRelatedOrigins(outerSpan.origin.relatedOrigins, selectedRelated, innerSpan)
+            relatedOrigins: composeRelatedOrigins(outerSpan.origin.relatedOrigins, selectedRelated, innerSpan, restrictSelectedTrace)
           },
       role: innerSpan.role ?? outerSpan.role,
       symbolId: innerSpan.symbolId
@@ -324,25 +328,31 @@ export function composeMappings(outer, inner) {
    * @param {import("./semantic/types.js").RelatedOrigin[]} relatedOrigins - Outer related origins.
    * @param {import("./semantic/types.js").RelatedOrigin} selectedRelated - Origin using the selected inner span.
    * @param {import("./semantic/types.js").SemantifoldMappingSpan} selectedSpan - Selected inner span.
+   * @param {boolean} restrictSelectedTrace - Whether an exact split selects only the supplied span.
    * @returns {import("./semantic/types.js").RelatedOrigin[]} Composed related origins.
    */
-  function composeRelatedOrigins(relatedOrigins, selectedRelated, selectedSpan) {
+  function composeRelatedOrigins(relatedOrigins, selectedRelated, selectedSpan, restrictSelectedTrace) {
     return relatedOrigins.flatMap((related) => {
       const source = outerIndex.sourcesById.get(related.sourceId)
 
       if (!source || !sourceRepresentsGenerated(source, inner.generated)) {
         return [remapRelatedOriginSourceId(related, outerSourceIds)]
       }
-      const tracedSpan = related === selectedRelated ? selectedSpan : traceRelatedOrigin(related)?.traced
+      const trace = traceRelatedOrigin(related)
+      const tracedSpans = restrictSelectedTrace && related === selectedRelated
+        ? [selectedSpan]
+        : trace?.overlapping.length
+          ? trace.overlapping
+          : trace?.traced ? [trace.traced] : []
 
-      if (!tracedSpan) throw new RangeError(`Unable to trace intermediate origin '${related.location.filename}'.`)
+      if (tracedSpans.length == 0) throw new RangeError(`Unable to trace intermediate origin '${related.location.filename}'.`)
 
-      return relatedOriginsForSpan(tracedSpan).map((tracedRelated) => definedProperties({
-        ...tracedRelated,
-        nodeId: tracedRelated.nodeId ?? tracedSpan.nodeId,
-        role: related.role ?? tracedRelated.role,
-        symbolId: tracedRelated.symbolId ?? tracedSpan.symbolId
-      }))
+      return tracedSpans.flatMap((tracedSpan) => relatedOriginsForSpan(tracedSpan).map((tracedRelated) => definedProperties({
+          ...tracedRelated,
+          nodeId: tracedRelated.nodeId ?? tracedSpan.nodeId,
+          role: related.role ?? tracedRelated.role,
+          symbolId: tracedRelated.symbolId ?? tracedSpan.symbolId
+        })))
     })
   }
 }
@@ -462,13 +472,21 @@ export function mappingFromSourceMap(sourceMap, {content, filename, language, so
   const overridesBySourceIndex = new Map()
 
   for (const override of provided) {
-    const exact = trace.sources.flatMap((source, index) => source == override.filename ? [index] : [])
+    const exact = trace.sources.flatMap((source, index) => {
+      const resolved = trace.resolvedSources[index]
+
+      return source == override.filename || resolved == override.filename ? [index] : []
+    })
 
     if (exact.length > 0) {
       for (const index of exact) overridesBySourceIndex.set(index, override)
       continue
     }
-    const suffix = trace.sources.flatMap((source, index) => source?.endsWith(`/${override.filename}`) ? [index] : [])
+    const suffix = trace.sources.flatMap((source, index) => {
+      const resolved = trace.resolvedSources[index]
+
+      return source?.endsWith(`/${override.filename}`) || resolved?.endsWith(`/${override.filename}`) ? [index] : []
+    })
 
     if (suffix.length > 1) {
       throw new RangeError(`Ambiguous Source Map source content override '${override.filename}' matches multiple sources.`)
@@ -481,16 +499,17 @@ export function mappingFromSourceMap(sourceMap, {content, filename, language, so
   trace.sources.forEach((source, index) => {
     if (source == null) return
 
+    const resolvedSource = trace.resolvedSources[index] ?? source
     const providedSource = overridesBySourceIndex.get(index)
     const registered = {
       content: providedSource?.content ?? trace.sourcesContent?.[index] ?? null,
-      filename: providedSource?.filename ?? source,
+      filename: providedSource?.filename ?? resolvedSource,
       id: `source:${sources.length}`,
       language: providedSource?.language ?? null
     }
 
     sources.push(registered)
-    if (!sourcesByMapName.has(source)) sourcesByMapName.set(source, registered)
+    if (!sourcesByMapName.has(resolvedSource)) sourcesByMapName.set(resolvedSource, registered)
   })
   const sourceCoordinates = new Map(sources.filter((source) => source.content != null)
     .map((source) => [source.id, createCoordinateIndex(/** @type {string} */ (source.content))]))

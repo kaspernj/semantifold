@@ -36,6 +36,15 @@ export class SourceWriter {
   }
 
   /**
+   * Returns the current JSON Pointer for one unambiguous semantic occurrence.
+   * @param {import("../semantic/types.js").SemanticNode} node - Semantic node occurrence.
+   * @returns {string} Current occurrence path.
+   */
+  occurrencePath(node) {
+    return this.index.recordFor(node).path
+  }
+
+  /**
    * Writes text mapped to a semantic node.
    * @param {string} text - Generated text.
    * @param {object} annotation - Mapping annotation.

@@ -132,7 +132,12 @@ function emitLocal(writer, statement, indent) {
   }
 
   writer.synthetic("/** @type {", "JavaScript local type scaffolding", [statement])
-  writer.mapped(emitScalarType("javascript", statement.type), {mappingKind: "exact", node: statement.type, role: "type"})
+  writer.mapped(emitScalarType("javascript", statement.type), {
+    mappingKind: "exact",
+    node: statement.type,
+    path: `${writer.occurrencePath(statement)}/type`,
+    role: "type"
+  })
   writer.synthetic("} */\n", "JavaScript local type scaffolding", [statement])
   writer.synthetic(indent, "indentation", [statement])
   writer.mapped(statement.mutable ? "let" : "const", {mappingKind: "anchor", node: statement})

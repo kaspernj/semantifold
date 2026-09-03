@@ -118,7 +118,12 @@ function emitLocal(writer, statement, indent) {
   }
 
   writer.synthetic("# @type [", "Ruby local type scaffolding", [statement])
-  writer.mapped(emitScalarType("ruby", statement.type), {mappingKind: "exact", node: statement.type, role: "type"})
+  writer.mapped(emitScalarType("ruby", statement.type), {
+    mappingKind: "exact",
+    node: statement.type,
+    path: `${writer.occurrencePath(statement)}/type`,
+    role: "type"
+  })
   writer.synthetic("]\n", "Ruby local type scaffolding", [statement])
   if (!statement.mutable) {
     writer.synthetic(`${indent}# @semantifold-immutable\n`, "Ruby immutability scaffolding", [statement])

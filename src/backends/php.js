@@ -130,14 +130,24 @@ function emitLocal(writer, statement, indent) {
 
   if (statement.mutable) {
     writer.synthetic("/** @var ", "PHP local type scaffolding", [statement])
-    writer.mapped(emitScalarType("php", statement.type), {mappingKind: "exact", node: statement.type, role: "type"})
+    writer.mapped(emitScalarType("php", statement.type), {
+      mappingKind: "exact",
+      node: statement.type,
+      path: `${writer.occurrencePath(statement)}/type`,
+      role: "type"
+    })
     writer.synthetic(" ", "PHP local type scaffolding", [statement])
     writer.mapped(`$${statement.name}`, {mappingKind: "exact", node: statement, role: "name"})
     writer.synthetic(" */\n", "PHP local type scaffolding", [statement])
   } else {
     writer.synthetic("/**\n", "PHP local type scaffolding", [statement])
     writer.synthetic(`${indent} * @var `, "PHP local type scaffolding", [statement])
-    writer.mapped(emitScalarType("php", statement.type), {mappingKind: "exact", node: statement.type, role: "type"})
+    writer.mapped(emitScalarType("php", statement.type), {
+      mappingKind: "exact",
+      node: statement.type,
+      path: `${writer.occurrencePath(statement)}/type`,
+      role: "type"
+    })
     writer.synthetic(" ", "PHP local type scaffolding", [statement])
     writer.mapped(`$${statement.name}`, {mappingKind: "exact", node: statement, role: "name"})
     writer.synthetic(`\n${indent} * @semantifold-immutable\n${indent} */\n`, "PHP local type scaffolding", [statement])

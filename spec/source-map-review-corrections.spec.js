@@ -167,6 +167,24 @@ describe("reviewed source-map corrections", () => {
     ]), /ambiguous.*foo\.js/iu)
   })
 
+  it("imports source-rooted V3 mappings through resolved source names", () => {
+    const mapping = mappingFromSourceMap({
+      file: "generated.js",
+      mappings: "AAAA",
+      names: [],
+      sourceRoot: "../src",
+      sources: ["input.ts"],
+      sourcesContent: ["x"],
+      version: 3
+    }, {content: "x", filename: "generated.js", language: "javascript"})
+    const original = originalPositionFor(mapping, {offset: 0})
+
+    expect(mapping.sources.map(({content, filename}) => ({content, filename}))).toEqual([
+      {content: "x", filename: "../src/input.ts"}
+    ])
+    expect(original.location?.filename).toEqual("../src/input.ts")
+  })
+
   it("maps aliased semantic nodes by occurrence path deterministically", () => {
     const module = parse({filename: "program.ts", language: "typescript", source: baseSource})
     const declaration = module.functions[0]
@@ -193,6 +211,42 @@ describe("reviewed source-map corrections", () => {
 
     expect(typeSpans.map((span) => [recordPaths.get(span.nodeId), primaryOffset(span.origin)])).toEqual(expected)
     expect(JSON.stringify(first.mapping)).toEqual(JSON.stringify(second.mapping))
+  })
+
+  it("maps shared local TypeReferences by occurrence in all five backends", () => {
+    const source = `function choose(flag: boolean, fallback: string): string {
+  const first: string = "yes"
+  let second: string = fallback
+  if (flag) {
+    return first
+  } else {
+    return second
+  }
+}
+
+console.log(choose(true, "no"))
+`
+    const module = parse({filename: "locals.ts", language: "typescript", source})
+    const declaration = module.functions[0]
+    const first = /** @type {import("../src/semantic/types.js").LocalDeclaration} */ (declaration.body[0])
+    const second = /** @type {import("../src/semantic/types.js").LocalDeclaration} */ (declaration.body[1])
+    const sharedType = /** @type {import("../src/semantic/types.js").TypeReference} */ ({
+      kind: "TypeReference",
+      name: "string"
+    })
+    const expectedPaths = ["/functions/0/body/0/type", "/functions/0/body/1/type"]
+
+    first.type = sharedType
+    second.type = sharedType
+    for (const language of ["php", "ruby", "javascript", "typescript", "java"]) {
+      const artifact = generateArtifact({language, module})
+      const records = artifact.mapping.nodes.filter((record) => expectedPaths.includes(record.path))
+      const nodeIds = new Set(records.map((record) => record.id))
+
+      expect(records.map((record) => record.path)).toEqual(expectedPaths)
+      expect(artifact.mapping.spans.filter((span) => span.role == "type" && nodeIds.has(span.nodeId))
+        .map((span) => span.nodeId)).toEqual(records.map((record) => record.id))
+    }
   })
 
   it("retains and deduplicates every transformed origin in synthetic context", () => {
@@ -395,6 +449,49 @@ console.log(ch\\u006fose(true, "no"))
     expect({filename: related.location.filename, role: related.role}).toEqual({filename: "original.ts", role: "context"})
     assert.ok(related.nodeId)
     expect(composed.nodes.some((node) => node.id == related.nodeId)).toEqual(true)
+  })
+
+  it("composes every inner span covered by synthetic context", () => {
+    const inner = mappingFromSourceMap({
+      file: "middle.js",
+      mappings: "AAAA,CAAC",
+      names: [],
+      sources: ["original.js"],
+      sourcesContent: ["xy"],
+      version: 3
+    }, {content: "ab", filename: "middle.js", language: "javascript"})
+    const outer = structuredClone(mappingFromSourceMap({
+      file: "final.js",
+      mappings: "AAAA",
+      names: [],
+      sources: ["middle.js"],
+      sourcesContent: ["ab"],
+      version: 3
+    }, {content: "Z", filename: "final.js", language: "javascript"}))
+    const intermediate = outer.spans[0].origin
+
+    assert.equal(intermediate.kind, "source")
+    const fullIntermediate = {
+      ...intermediate.location,
+      end: {column: 3, line: 1, offset: 2}
+    }
+
+    outer.spans[0].mappingKind = "synthetic"
+    outer.spans[0].origin = {
+      kind: "synthetic",
+      reason: "generated wrapper",
+      relatedOrigins: [{location: fullIntermediate, role: "context", sourceId: intermediate.sourceId}]
+    }
+    const composed = composeMappings(outer, inner)
+    const span = composed.spans[0]
+
+    assert.equal(span.origin.kind, "synthetic")
+    expect({mappingKind: span.mappingKind, reason: span.origin.reason}).toEqual({
+      mappingKind: "synthetic",
+      reason: "generated wrapper"
+    })
+    expect(span.origin.relatedOrigins.map((related) => related.location.start.offset)).toEqual([0, 1])
+    expect(generatedPositionFor(composed, {filename: "original.js", offset: 1}).length).toEqual(1)
   })
 
   it("indexes every related origin once for reverse lookup", () => {
