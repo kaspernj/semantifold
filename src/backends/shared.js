@@ -18,7 +18,7 @@ export function validateBackendModule(module, language) {
   validateScaffoldingNames(module, language)
 
   for (const functionDeclaration of module.functions) {
-    validateTargetIdentifier(language, functionDeclaration.name, "function", functionDeclaration.location)
+    validateTargetBindingIdentifier(language, functionDeclaration.name, "function", functionDeclaration.location)
 
     if (functionDeclaration.parameters.length != 2) {
       unsupportedCapability(language, "function parameter count other than two", functionDeclaration.location)

@@ -105,6 +105,18 @@ function expectUnsupportedCapability(callback, language) {
   })
 }
 
+/**
+ * Checks captured process output for an expected compiler or runtime diagnostic.
+ * @param {unknown} error - Rejected process error.
+ * @param {string} fragment - Expected output fragment.
+ * @returns {boolean} Whether stdout or stderr contains the fragment.
+ */
+function processFailureIncludes(error, fragment) {
+  return error instanceof Error &&
+    (("stdout" in error && typeof error.stdout == "string" && error.stdout.includes(fragment)) ||
+      ("stderr" in error && typeof error.stderr == "string" && error.stderr.includes(fragment)))
+}
+
 describe("source backends", () => {
   it("generates independently executable exact-output programs for all five languages", async () => {
     const source = await readFile(new URL("fixtures/program.js", import.meta.url), "utf8")
@@ -206,9 +218,7 @@ console.log(select(true, "no"))
       expect(await executeGenerated("javascript", javascript)).toEqual("yes\n")
       await assert.rejects(
         () => executeGenerated("typescript", javascript),
-        (error) => error instanceof Error &&
-          (("stdout" in error && typeof error.stdout == "string" && error.stdout.includes("TS1215")) ||
-            ("stderr" in error && typeof error.stderr == "string" && error.stderr.includes("TS1215"))),
+        (error) => processFailureIncludes(error, "TS1215"),
         name
       )
       assert.throws(
@@ -223,6 +233,179 @@ console.log(select(true, "no"))
       const generated = generate({language: "typescript", module: moduleWithLocal(name)})
 
       expect({name, output: await executeGenerated("typescript", generated)}).toEqual({name, output: "yes\n"})
+    }
+  })
+
+  it("rejects TypeScript strict-mode function bindings before the real compiler", async () => {
+    const moduleWithFunction = (name) => parse({
+      filename: `${name}-function.js`,
+      language: "javascript",
+      source: `/**
+ * @param {boolean} flag - Selection flag.
+ * @param {string} fallback - Fallback value.
+ * @returns {string} Selected value.
+ */
+function ${name}(flag, fallback) {
+  if (flag) return fallback
+  else return fallback
+}
+console.log(${name}(true, "safe"))
+`
+    })
+
+    for (const name of ["arguments", "eval"]) {
+      const module = moduleWithFunction(name)
+      const javascript = generate({language: "javascript", module})
+
+      expect(await executeGenerated("javascript", javascript)).toEqual("safe\n")
+      await assert.rejects(
+        () => executeGenerated("typescript", javascript),
+        (error) => processFailureIncludes(error, "TS1215"),
+        name
+      )
+      assert.throws(
+        () => generate({language: "typescript", module}),
+        (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
+          error.language == "typescript" && error.location?.filename == `${name}-function.js` &&
+          error.location.start.line == 6,
+        name
+      )
+    }
+
+    for (const name of ["argument", "evaluate"]) {
+      const generated = generate({language: "typescript", module: moduleWithFunction(name)})
+
+      expect({name, output: await executeGenerated("typescript", generated)}).toEqual({name, output: "safe\n"})
+    }
+  })
+
+  it("rejects exact PHP GLOBALS variable bindings while preserving callable and near-collision names", async () => {
+    const moduleWithLocal = (keyword, name) => parse({
+      filename: `${name}-local.ts`,
+      language: "typescript",
+      source: `function select(flag: boolean, fallback: string): string {
+  if (flag) return fallback
+  else return fallback
+}
+${keyword} ${name}: string = "safe"
+console.log(select(true, ${name}))
+`
+    })
+    const moduleWithParameter = (name) => parse({
+      filename: `${name}-parameter.ts`,
+      language: "typescript",
+      source: `function select(flag: boolean, ${name}: string): string {
+  if (flag) return ${name}
+  else return ${name}
+}
+console.log(select(true, "safe"))
+`
+    })
+    const moduleWithFunction = (name) => parse({
+      filename: `${name}-function.ts`,
+      language: "typescript",
+      source: `function ${name}(flag: boolean, fallback: string): string {
+  if (flag) return fallback
+  else return fallback
+}
+console.log(${name}(true, "safe"))
+`
+    })
+
+    for (const source of [
+      "<?php\n$GLOBALS = \"safe\";\n",
+      "<?php\nfunction select($GLOBALS, $fallback) { return $fallback; }\n"
+    ]) {
+      await assert.rejects(
+        () => executeGenerated("php", source),
+        (error) => processFailureIncludes(error, "GLOBALS")
+      )
+    }
+
+    for (const keyword of ["let", "const"]) {
+      assert.throws(
+        () => generate({language: "php", module: moduleWithLocal(keyword, "GLOBALS")}),
+        (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
+          error.language == "php" && error.location?.filename == "GLOBALS-local.ts" && error.location.start.line == 5,
+        keyword
+      )
+    }
+    assert.throws(
+      () => generate({language: "php", module: moduleWithParameter("GLOBALS")}),
+      (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
+        error.language == "php" && error.location?.filename == "GLOBALS-parameter.ts" && error.location.start.line == 1
+    )
+
+    expect(await executeGenerated("php", generate({language: "php", module: moduleWithLocal("let", "globals")}))).toEqual("safe\n")
+    expect(await executeGenerated("php", generate({language: "php", module: moduleWithFunction("GLOBALS")}))).toEqual("safe\n")
+  })
+
+  it("rejects Ruby numbered binding names while preserving _10", async () => {
+    const moduleWithLocal = (name) => parse({
+      filename: `${name}-local.ts`,
+      language: "typescript",
+      source: `function select(flag: boolean, fallback: string): string {
+  if (flag) return fallback
+  else return fallback
+}
+let ${name}: string = "safe"
+console.log(select(true, ${name}))
+`
+    })
+    const moduleWithParameter = (name) => parse({
+      filename: `${name}-parameter.ts`,
+      language: "typescript",
+      source: `function select(flag: boolean, ${name}: string): string {
+  if (flag) return ${name}
+  else return ${name}
+}
+console.log(select(true, "safe"))
+`
+    })
+    const moduleWithFunction = (name) => parse({
+      filename: `${name}-function.ts`,
+      language: "typescript",
+      source: `function ${name}(flag: boolean, fallback: string): string {
+  if (flag) return fallback
+  else return fallback
+}
+console.log(${name}(true, "safe"))
+`
+    })
+
+    for (const source of [
+      "_1 = \"safe\"\nputs _1\n",
+      "def select(_1, fallback)\n  fallback\nend\n",
+      "def _1(flag, fallback)\n  fallback\nend\n"
+    ]) {
+      await assert.rejects(
+        () => executeGenerated("ruby", source),
+        (error) => processFailureIncludes(error, "reserved for numbered parameter")
+      )
+    }
+
+    for (let index = 1; index <= 9; index++) {
+      const name = `_${index}`
+
+      assert.throws(
+        () => generate({language: "ruby", module: moduleWithLocal(name)}),
+        (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
+          error.language == "ruby" && error.location?.filename == `${name}-local.ts` && error.location.start.line == 5,
+        name
+      )
+    }
+    for (const [role, module] of [["parameter", moduleWithParameter("_1")], ["function", moduleWithFunction("_9")]]) {
+      assert.throws(
+        () => generate({language: "ruby", module}),
+        (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
+          error.language == "ruby" && error.location?.filename == `_${role == "parameter" ? "1" : "9"}-${role}.ts` &&
+          error.location.start.line == 1,
+        role
+      )
+    }
+
+    for (const module of [moduleWithLocal("_10"), moduleWithParameter("_10"), moduleWithFunction("_10")]) {
+      expect(await executeGenerated("ruby", generate({language: "ruby", module}))).toEqual("safe\n")
     }
   })
 

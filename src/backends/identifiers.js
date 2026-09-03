@@ -84,7 +84,12 @@ export function validateTargetIdentifier(language, name, role, location) {
 export function validateTargetBindingIdentifier(language, name, role, location) {
   validateTargetIdentifier(language, name, role, location)
 
-  if (language == "typescript" && (name == "arguments" || name == "eval")) {
+  const invalidTypeScriptBinding = language == "typescript" && (name == "arguments" || name == "eval")
+  const invalidPhpVariable = language == "php" && name == "GLOBALS" &&
+    (role == "parameter" || role == "local" || role == "assignment target")
+  const invalidRubyBinding = language == "ruby" && typeof name == "string" && /^_[1-9]$/u.test(name)
+
+  if (invalidTypeScriptBinding || invalidPhpVariable || invalidRubyBinding) {
     unsupportedCapability(language, `${role} identifier '${name}'`, location)
   }
 }

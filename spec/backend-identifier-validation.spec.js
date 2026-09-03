@@ -109,6 +109,32 @@ console.log(select(true, "no"))
     assert.doesNotThrow(() => generate({language: "javascript", module: parameterModule}))
   })
 
+  it("applies PHP and Ruby runtime binding restrictions to assignment targets", () => {
+    const source = `function select(flag: boolean, fallback: string): string {
+  let result: string = fallback
+  result = "safe"
+  if (flag) return result
+  else return fallback
+}
+console.log(select(true, "no"))
+`
+
+    for (const [language, name] of [["php", "GLOBALS"], ["ruby", "_1"]]) {
+      const module = parse({filename: `${name}-assignment.ts`, language: "typescript", source})
+      const assignment = /** @type {import("../src/semantic/types.js").AssignmentStatement} */ (module.functions[0].body[1])
+
+      assignment.target.name = name
+
+      assert.throws(
+        () => generate({language, module}),
+        (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
+          error.language == language && error.location?.filename == `${name}-assignment.ts` &&
+          error.location.start.line == 3 && error.message.includes("assignment target identifier"),
+        `${language} ${name}`
+      )
+    }
+  })
+
   it("rejects only entry locals that capture backend-owned scaffolding names", () => {
     const moduleWithEntryLocal = (name) => parse({
       filename: `${name}.ts`,
