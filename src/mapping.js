@@ -236,8 +236,20 @@ export function composeMappings(outer, inner) {
 
     const preservesWholeOrigin = Boolean(location && location.start.offset == traced.generated.start.offset &&
       location.end.offset == traced.generated.end.offset)
+    const composed = composedSpan(span, traced, span.generated, preservesWholeOrigin, selectedRelated)
 
-    return [composedSpan(span, traced, span.generated, preservesWholeOrigin, selectedRelated)]
+    if (span.origin.kind == "source" && overlapping.length > 1) {
+      const origins = composeRelatedOrigins([selectedRelated], selectedRelated, traced, false)
+
+      if (origins.length > 0) {
+        return [{...composed, mappingKind: /** @type {const} */ ("anchor"), origin: {
+          kind: /** @type {const} */ ("derived"),
+          origins
+        }}]
+      }
+    }
+
+    return [composed]
   })
 
   return finalizeMapping({
