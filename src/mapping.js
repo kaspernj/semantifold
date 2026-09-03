@@ -104,13 +104,14 @@ export function generatedPositionFor(mapping, position) {
     else high = middle
   }
 
-  const matches = []
+  /** @type {Set<import("./semantic/types.js").SemantifoldMappingSpan>} */
+  const matches = new Set()
 
   for (let candidate = low - 1; candidate >= 0 && entries[candidate].prefixEnd > offset; candidate--) {
-    if (entries[candidate].end > offset) matches.push(entries[candidate].span)
+    if (entries[candidate].end > offset) matches.add(entries[candidate].span)
   }
 
-  return matches.sort((left, right) => left.generated.start.offset - right.generated.start.offset).map(mappingResult)
+  return [...matches].sort((left, right) => left.generated.start.offset - right.generated.start.offset).map(mappingResult)
 }
 
 /**
@@ -193,16 +194,16 @@ export function composeMappings(outer, inner) {
   }
 
   const spans = outer.spans.flatMap((span) => {
-    const location = primaryLocation(span.origin)
-    const sourceId = sourceIdForOrigin(span.origin)
-    const source = sourceId ? outerIndex.sourcesById.get(sourceId) : undefined
-    const tracesIntermediate = source ? sourceRepresentsGenerated(source, inner.generated) : false
-    const overlapping = tracesIntermediate && location
-      ? spansOverlappingGenerated(inner.spans, location.start.offset, location.end.offset)
-      : []
-    const traced = overlapping[0] ?? (tracesIntermediate && location
-      ? spanForGenerated(inner.spans, location.start.offset)
-      : undefined)
+    /** @type {ReturnType<typeof traceRelatedOrigin> | undefined} */
+    let trace
+
+    for (const related of relatedOriginsForOrigin(span.origin)) {
+      trace = traceRelatedOrigin(related)
+      if (trace) break
+    }
+    const location = trace?.related.location
+    const overlapping = trace?.overlapping ?? []
+    const traced = trace?.traced
 
     if (!traced) {
       const unidentified = {...span}
@@ -212,6 +213,9 @@ export function composeMappings(outer, inner) {
 
       return [{...unidentified, origin: remapOriginSourceIds(span.origin, outerSourceIds)}]
     }
+    const selectedRelated = trace?.related
+
+    if (!selectedRelated) throw new RangeError("Intermediate trace selection is missing its related origin.")
 
     if (location && overlapping.length > 1 && span.mappingKind == "exact" &&
       span.generated.end.offset - span.generated.start.offset == location.end.offset - location.start.offset) {
@@ -227,14 +231,14 @@ export function composeMappings(outer, inner) {
           outer.generated.content,
           generatedStart,
           generatedEnd
-        ), preservesWholeOrigin)
+        ), preservesWholeOrigin, selectedRelated)
       })
     }
 
     const preservesWholeOrigin = Boolean(location && location.start.offset == traced.generated.start.offset &&
       location.end.offset == traced.generated.end.offset)
 
-    return [composedSpan(span, traced, span.generated, preservesWholeOrigin)]
+    return [composedSpan(span, traced, span.generated, preservesWholeOrigin, selectedRelated)]
   })
 
   return finalizeMapping({
@@ -254,12 +258,11 @@ export function composeMappings(outer, inner) {
    * @param {import("./semantic/types.js").SemantifoldMappingSpan} innerSpan - Inner span.
    * @param {import("./semantic/types.js").SourceLocation} generated - Final generated subrange.
    * @param {boolean} preservesWholeOrigin - Whether adopting the inner origin retains its complete range.
+   * @param {import("./semantic/types.js").RelatedOrigin} selectedRelated - Outer origin traced through this inner span.
    * @returns {import("./semantic/types.js").SemantifoldMappingSpan} Composed span.
    */
-  function composedSpan(outerSpan, innerSpan, generated, preservesWholeOrigin) {
+  function composedSpan(outerSpan, innerSpan, generated, preservesWholeOrigin, selectedRelated) {
     if (outerSpan.mappingKind == "synthetic" && outerSpan.origin.kind == "synthetic") {
-      const relationship = outerSpan.origin.relatedOrigins[0]
-
       return definedProperties({
         generated,
         mappingKind: /** @type {const} */ ("synthetic"),
@@ -267,12 +270,7 @@ export function composeMappings(outer, inner) {
         origin: {
           kind: /** @type {const} */ ("synthetic"),
           reason: outerSpan.origin.reason,
-          relatedOrigins: relatedOriginsForSpan(innerSpan).map((related) => definedProperties({
-            ...related,
-            nodeId: related.nodeId ?? innerSpan.nodeId,
-            role: relationship?.role ?? related.role,
-            symbolId: related.symbolId ?? innerSpan.symbolId
-          }))
+          relatedOrigins: composeRelatedOrigins(outerSpan.origin.relatedOrigins, selectedRelated, innerSpan)
         },
         role: outerSpan.role
       })
@@ -287,9 +285,64 @@ export function composeMappings(outer, inner) {
           : /** @type {const} */ ("anchor"),
       name: outerSpan.name ?? innerSpan.name,
       nodeId: innerSpan.nodeId,
-      origin: innerSpan.origin,
+      origin: outerSpan.origin.kind == "source" ? innerSpan.origin : outerSpan.origin.kind == "derived"
+        ? {kind: /** @type {const} */ ("derived"), origins: composeRelatedOrigins(outerSpan.origin.origins, selectedRelated, innerSpan)}
+        : {
+            kind: /** @type {const} */ ("synthetic"),
+            reason: outerSpan.origin.reason,
+            relatedOrigins: composeRelatedOrigins(outerSpan.origin.relatedOrigins, selectedRelated, innerSpan)
+          },
       role: innerSpan.role ?? outerSpan.role,
       symbolId: innerSpan.symbolId
+    })
+  }
+
+  /**
+   * Finds the inner span selected by one related intermediate origin.
+   * @param {import("./semantic/types.js").RelatedOrigin} related - Outer related origin.
+   * @returns {{
+   *   overlapping: import("./semantic/types.js").SemantifoldMappingSpan[],
+   *   related: import("./semantic/types.js").RelatedOrigin,
+   *   traced: import("./semantic/types.js").SemantifoldMappingSpan | undefined
+   * } | undefined} Trace selection when the related source is the intermediate artifact.
+   */
+  function traceRelatedOrigin(related) {
+    const source = outerIndex.sourcesById.get(related.sourceId)
+
+    if (!source || !sourceRepresentsGenerated(source, inner.generated)) return undefined
+    const overlapping = spansOverlappingGenerated(inner.spans, related.location.start.offset, related.location.end.offset)
+
+    return {
+      overlapping,
+      related,
+      traced: overlapping[0] ?? spanForGenerated(inner.spans, related.location.start.offset)
+    }
+  }
+
+  /**
+   * Traces intermediate related origins and remaps unrelated source identities in order.
+   * @param {import("./semantic/types.js").RelatedOrigin[]} relatedOrigins - Outer related origins.
+   * @param {import("./semantic/types.js").RelatedOrigin} selectedRelated - Origin using the selected inner span.
+   * @param {import("./semantic/types.js").SemantifoldMappingSpan} selectedSpan - Selected inner span.
+   * @returns {import("./semantic/types.js").RelatedOrigin[]} Composed related origins.
+   */
+  function composeRelatedOrigins(relatedOrigins, selectedRelated, selectedSpan) {
+    return relatedOrigins.flatMap((related) => {
+      const source = outerIndex.sourcesById.get(related.sourceId)
+
+      if (!source || !sourceRepresentsGenerated(source, inner.generated)) {
+        return [remapRelatedOriginSourceId(related, outerSourceIds)]
+      }
+      const tracedSpan = related === selectedRelated ? selectedSpan : traceRelatedOrigin(related)?.traced
+
+      if (!tracedSpan) throw new RangeError(`Unable to trace intermediate origin '${related.location.filename}'.`)
+
+      return relatedOriginsForSpan(tracedSpan).map((tracedRelated) => definedProperties({
+        ...tracedRelated,
+        nodeId: tracedRelated.nodeId ?? tracedSpan.nodeId,
+        role: related.role ?? tracedRelated.role,
+        symbolId: tracedRelated.symbolId ?? tracedSpan.symbolId
+      }))
     })
   }
 }
@@ -300,12 +353,19 @@ export function composeMappings(outer, inner) {
  * @returns {import("./semantic/types.js").RelatedOrigin[]} Related original ranges.
  */
 function relatedOriginsForSpan(span) {
-  if (span.origin.kind == "source") {
-    return [{location: span.origin.location, sourceId: span.origin.sourceId}]
-  }
-  if (span.origin.kind == "derived") return span.origin.origins
+  return relatedOriginsForOrigin(span.origin)
+}
 
-  return span.origin.relatedOrigins
+/**
+ * Returns every related range in one closed origin.
+ * @param {import("./semantic/types.js").SemanticOrigin} origin - Closed origin.
+ * @returns {import("./semantic/types.js").RelatedOrigin[]} Related ranges in semantic order.
+ */
+function relatedOriginsForOrigin(origin) {
+  if (origin.kind == "source") return [{location: origin.location, sourceId: origin.sourceId}]
+  if (origin.kind == "derived") return origin.origins
+
+  return origin.relatedOrigins
 }
 
 /**
@@ -725,15 +785,14 @@ function buildMappingIndex(mapping) {
   for (const span of mapping.spans) {
     if (span.nodeId) nodeSpans.get(span.nodeId)?.push(span)
     if (span.symbolId) symbolSpans.get(span.symbolId)?.push(span)
-    const location = primaryLocation(span.origin)
-    const sourceId = sourceIdForOrigin(span.origin)
 
-    if (location && sourceId && location.end.offset > location.start.offset) {
-      originalBySource.get(sourceId)?.push({
-        end: location.end.offset,
-        prefixEnd: location.end.offset,
+    for (const related of relatedOriginsForOrigin(span.origin)) {
+      if (related.location.end.offset <= related.location.start.offset) continue
+      originalBySource.get(related.sourceId)?.push({
+        end: related.location.end.offset,
+        prefixEnd: related.location.end.offset,
         span,
-        start: location.start.offset
+        start: related.location.start.offset
       })
     }
   }
@@ -1040,23 +1099,32 @@ function remapOriginSourceIds(origin, sourceIds) {
 
     return {kind: "source", location: origin.location, sourceId}
   }
+  if (origin.kind == "derived") return {kind: "derived", origins: origin.origins.map((related) => remapRelatedOriginSourceId(related, sourceIds))}
 
-  const remapRelated = (/** @type {import("./semantic/types.js").RelatedOrigin} */ related) => {
-    const sourceId = sourceIds.get(related.sourceId)
-
-    if (!sourceId) throw new RangeError(`Composed mapping omitted source '${related.location.filename}'.`)
-
-    const unidentified = {...related}
-
-    delete unidentified.nodeId
-    delete unidentified.symbolId
-
-    return {...unidentified, sourceId}
+  return {
+    kind: "synthetic",
+    reason: origin.reason,
+    relatedOrigins: origin.relatedOrigins.map((related) => remapRelatedOriginSourceId(related, sourceIds))
   }
+}
 
-  if (origin.kind == "derived") return {kind: "derived", origins: origin.origins.map(remapRelated)}
+/**
+ * Rewrites one related source identity while dropping identities from a discarded node registry.
+ * @param {import("./semantic/types.js").RelatedOrigin} related - Related origin.
+ * @param {Map<string, string>} sourceIds - Original-to-composed source identities.
+ * @returns {import("./semantic/types.js").RelatedOrigin} Rewritten related origin.
+ */
+function remapRelatedOriginSourceId(related, sourceIds) {
+  const sourceId = sourceIds.get(related.sourceId)
 
-  return {kind: "synthetic", reason: origin.reason, relatedOrigins: origin.relatedOrigins.map(remapRelated)}
+  if (!sourceId) throw new RangeError(`Composed mapping omitted source '${related.location.filename}'.`)
+
+  const unidentified = {...related}
+
+  delete unidentified.nodeId
+  delete unidentified.symbolId
+
+  return {...unidentified, sourceId}
 }
 
 /**

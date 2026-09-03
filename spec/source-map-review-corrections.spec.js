@@ -295,6 +295,82 @@ console.log(ch\\u006fose(true, "no"))
     expect(composed.nodes.some((node) => node.id == related.nodeId)).toEqual(true)
   })
 
+  it("indexes every related origin once for reverse lookup", () => {
+    const module = parse({filename: "original.ts", language: "typescript", source: baseSource})
+    const artifact = generateArtifact({language: "javascript", module})
+    const spanIndex = artifact.mapping.spans.findIndex((span) => span.origin.kind == "source" && span.role == "name")
+    const span = artifact.mapping.spans[spanIndex]
+
+    assert.ok(span)
+    assert.equal(span.origin.kind, "source")
+    const secondarySourceId = "source:secondary"
+    const primary = {location: span.origin.location, role: "primary", sourceId: span.origin.sourceId}
+    const secondary = {location: {...span.origin.location, filename: "secondary.ts"}, role: "secondary", sourceId: secondarySourceId}
+    const covering = {location: {...module.location, filename: "secondary.ts"}, role: "covering", sourceId: secondarySourceId}
+    /** @type {import("../src/semantic/types.js").SemanticOrigin[]} */
+    const origins = [
+      {kind: "derived", origins: [primary, secondary, covering]},
+      {kind: "synthetic", reason: "multi-source context", relatedOrigins: [primary, secondary, covering]}
+    ]
+
+    for (const origin of origins) {
+      const mapping = structuredClone(artifact.mapping)
+
+      mapping.sources.push({content: baseSource, filename: "secondary.ts", id: secondarySourceId, language: "typescript"})
+      mapping.spans[spanIndex].origin = origin
+      if (origin.kind == "synthetic") mapping.spans[spanIndex].mappingKind = "synthetic"
+      const results = generatedPositionFor(mapping, {offset: span.origin.location.start.offset, sourceId: secondarySourceId})
+
+      expect(results.length).toEqual(1)
+      expect(results[0].generatedLocation).toEqual(span.generated)
+    }
+  })
+
+  it("composes derived intermediate provenance before unrelated provenance", () => {
+    const {inner, intermediate, outer, unrelated} = mixedCompositionFixture()
+
+    outer.spans[0].origin = {kind: "derived", origins: [intermediate, unrelated]}
+    const composed = composeMappings(outer, inner)
+    const origin = composed.spans[0].origin
+
+    assert.equal(origin.kind, "derived")
+    expect(origin.origins.map((related) => ({
+      filename: related.location.filename,
+      registeredFilename: composed.sources.find((source) => source.id == related.sourceId)?.filename,
+      role: related.role
+    }))).toEqual([
+      {filename: "original.js", registeredFilename: "original.js", role: "intermediate"},
+      {filename: "unrelated.js", registeredFilename: "unrelated.js", role: "unrelated"}
+    ])
+  })
+
+  it("composes synthetic intermediate provenance after unrelated provenance", () => {
+    const {inner, intermediate, outer, unrelated} = mixedCompositionFixture()
+
+    outer.spans[0].mappingKind = "synthetic"
+    outer.spans[0].origin = {
+      kind: "synthetic",
+      reason: "mixed scaffolding",
+      relatedOrigins: [unrelated, intermediate]
+    }
+    const composed = composeMappings(outer, inner)
+    const span = composed.spans[0]
+
+    assert.equal(span.origin.kind, "synthetic")
+    expect({mappingKind: span.mappingKind, reason: span.origin.reason}).toEqual({
+      mappingKind: "synthetic",
+      reason: "mixed scaffolding"
+    })
+    expect(span.origin.relatedOrigins.map((related) => ({
+      filename: related.location.filename,
+      registeredFilename: composed.sources.find((source) => source.id == related.sourceId)?.filename,
+      role: related.role
+    }))).toEqual([
+      {filename: "unrelated.js", registeredFilename: "unrelated.js", role: "unrelated"},
+      {filename: "original.js", registeredFilename: "original.js", role: "intermediate"}
+    ])
+  })
+
   it("does not trace an unrelated suffix-matched V3 source", () => {
     const composed = composeSourceMaps({
       file: "final.js",
@@ -421,5 +497,52 @@ function renameOriginSourceId(origin, priorSourceId, sourceId) {
 
   for (const related of relatedOrigins) {
     if (related.sourceId == priorSourceId) related.sourceId = sourceId
+  }
+}
+
+/**
+ * Builds a rich composition fixture with one intermediate and one unrelated origin.
+ * @returns {{
+ *   inner: import("../src/semantic/types.js").SemantifoldMapping,
+ *   intermediate: import("../src/semantic/types.js").RelatedOrigin,
+ *   outer: import("../src/semantic/types.js").SemantifoldMapping,
+ *   unrelated: import("../src/semantic/types.js").RelatedOrigin
+ * }} Mutable mappings and related origins.
+ */
+function mixedCompositionFixture() {
+  const inner = mappingFromSourceMap({
+    file: "middle.js",
+    mappings: "AAAA",
+    names: [],
+    sources: ["original.js"],
+    sourcesContent: ["xy"],
+    version: 3
+  }, {content: "ab", filename: "middle.js", language: "javascript"})
+  const outer = structuredClone(mappingFromSourceMap({
+    file: "final.js",
+    mappings: "AAAA",
+    names: [],
+    sources: ["middle.js"],
+    sourcesContent: ["ab"],
+    version: 3
+  }, {content: "Z", filename: "final.js", language: "javascript"}))
+  const origin = outer.spans[0].origin
+
+  assert.equal(origin.kind, "source")
+  outer.sources.push({content: "u", filename: "unrelated.js", id: "source:unrelated", language: "javascript"})
+
+  return {
+    inner,
+    intermediate: {location: origin.location, role: "intermediate", sourceId: origin.sourceId},
+    outer,
+    unrelated: {
+      location: {
+        end: {column: 2, line: 1, offset: 1},
+        filename: "unrelated.js",
+        start: {column: 1, line: 1, offset: 0}
+      },
+      role: "unrelated",
+      sourceId: "source:unrelated"
+    }
   }
 }
