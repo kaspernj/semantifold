@@ -36,8 +36,7 @@ const binaryOperationSyntax = Object.freeze({
 export function validateBackendModule(module, language) {
   if (module.kind != "Module") unsupportedCapability(language, module.kind, module.location)
   if (module.functions.length == 0) unsupportedCapability(language, "module without functions", module.location)
-  validateRestrictedSequence(module.entryPoint.body, "PrintStatement", language, module.entryPoint.location)
-  validateScaffoldingNames(module, language)
+  validateBlock(module.entryPoint.body, language, module.entryPoint.location)
 
   for (const functionDeclaration of module.functions) {
     validateTargetBindingIdentifier(language, functionDeclaration.name, "function", functionDeclaration.location)
@@ -45,29 +44,15 @@ export function validateBackendModule(module, language) {
     if (functionDeclaration.parameters.length != 2) {
       unsupportedCapability(language, "function parameter count other than two", functionDeclaration.location)
     }
-    validateRestrictedSequence(functionDeclaration.body, "IfStatement", language, functionDeclaration.location)
+    validateBlock(functionDeclaration.body, language, functionDeclaration.location)
 
     for (const parameter of functionDeclaration.parameters) {
       validateTargetBindingIdentifier(language, parameter.name, "parameter", parameter.location)
 
     }
 
-    const branch = /** @type {import("../semantic/types.js").IfStatement} */ (functionDeclaration.body.at(-1))
-
-    validateRestrictedSequence(branch.consequent, "ReturnStatement", language, branch.location)
-    validateRestrictedSequence(branch.alternate, "ReturnStatement", language, branch.location)
-
-    validateExpression(branch.condition, language, branch.location)
-    const consequentReturn = /** @type {import("../semantic/types.js").ReturnStatement} */ (branch.consequent.at(-1))
-    const alternateReturn = /** @type {import("../semantic/types.js").ReturnStatement} */ (branch.alternate.at(-1))
-
-    validateExpression(consequentReturn.expression, language, consequentReturn.location)
-    validateExpression(alternateReturn.expression, language, alternateReturn.location)
   }
-
-  const print = /** @type {import("../semantic/types.js").PrintStatement} */ (module.entryPoint.body.at(-1))
-
-  validateExpression(print.expression, language, print.location)
+  validateScaffoldingNames(module, language)
   validateBackendTypes(module, language)
 }
 
@@ -80,10 +65,12 @@ export function validateBackendModule(module, language) {
 function validateScaffoldingNames(module, language) {
   const ownedEntryNames = language == "java" ? new Set(["args", "System"]) :
     ["javascript", "typescript"].includes(language) ? new Set(["console"]) : new Set()
+  const ownedPrintReceiverNames = language == "java" ? new Set(["System"]) :
+    ["javascript", "typescript"].includes(language) ? new Set(["console"]) : new Set()
   const ownedCallableNames = ["javascript", "typescript"].includes(language) ? new Set(["console"]) :
     language == "ruby" ? new Set(["puts"]) : new Set()
 
-  for (const statement of module.entryPoint.body.slice(0, -1)) {
+  for (const statement of allStatements(module.entryPoint.body)) {
     if (statement.kind == "LocalDeclaration" && ownedEntryNames.has(statement.name)) {
       unsupportedCapability(language, `entry local '${statement.name}' captures backend scaffolding`, statement.location)
     }
@@ -92,45 +79,59 @@ function validateScaffoldingNames(module, language) {
     if (ownedCallableNames.has(declaration.name)) {
       unsupportedCapability(language, `function '${declaration.name}' captures backend scaffolding`, declaration.location)
     }
+    for (const parameter of declaration.parameters) {
+      if (ownedPrintReceiverNames.has(parameter.name)) {
+        unsupportedCapability(language, `function parameter '${parameter.name}' captures backend scaffolding`, parameter.location)
+      }
+    }
+    for (const statement of allStatements(declaration.body)) {
+      if (statement.kind == "LocalDeclaration" && ownedPrintReceiverNames.has(statement.name)) {
+        unsupportedCapability(language, `function local '${statement.name}' captures backend scaffolding`, statement.location)
+      }
+    }
   }
 }
 
 /**
- * Validates a task-002 local prefix and exact terminal statement.
- * @param {unknown} statements - Candidate statements.
- * @param {"IfStatement" | "ReturnStatement" | "PrintStatement"} terminalKind - Required terminal kind.
- * @param {import("../semantic/types.js").SemanticLanguage} language - Backend language.
- * @param {import("../semantic/types.js").SourceLocation | undefined} ownerLocation - Enclosing body location.
- * @returns {void}
+ * Returns every statement nested beneath a block in semantic order.
+ * @param {import("../semantic/types.js").Block} block - Semantic block.
+ * @returns {import("../semantic/types.js").Statement[]} Statements including nested branches.
  */
-function validateRestrictedSequence(statements, terminalKind, language, ownerLocation) {
-  if (!Array.isArray(statements)) {
-    unsupportedCapability(language, "missing or invalid statement sequence", ownerLocation)
-  }
-
-  const terminal = statements.at(-1)
-  const terminalIsObject = Boolean(terminal) && typeof terminal == "object" && !Array.isArray(terminal)
-  const terminalLocation = terminalIsObject
-    ? /** @type {import("../semantic/types.js").SourceLocation | undefined} */ (Reflect.get(terminal, "location") ?? ownerLocation)
-    : ownerLocation
-
-  if (!terminalIsObject || Reflect.get(terminal, "kind") != terminalKind) {
-    unsupportedCapability(language, `statement sequence without terminal ${terminalKind}`, terminalLocation)
-  }
-
-  for (const statement of statements.slice(0, -1)) {
-    validatePrefixStatement(statement, language, ownerLocation)
-  }
+function allStatements(block) {
+  return block.statements.flatMap((statement) => statement.kind == "IfStatement"
+    ? [statement, ...allStatements(statement.consequent), ...(statement.alternate ? allStatements(statement.alternate) : [])]
+    : [statement])
 }
 
 /**
- * Validates one task-002 prefix statement before reading statement-specific fields.
- * @param {unknown} statement - Candidate local declaration or assignment.
+ * Validates one complete semantic block before emission.
+ * @param {unknown} block - Candidate block.
+ * @param {import("../semantic/types.js").SemanticLanguage} language - Backend language.
+ * @param {import("../semantic/types.js").SourceLocation | undefined} ownerLocation - Enclosing location.
+ * @returns {void}
+ */
+function validateBlock(block, language, ownerLocation) {
+  if (!block || typeof block != "object" || Array.isArray(block)) {
+    return unsupportedCapability(language, "missing or invalid block", ownerLocation)
+  }
+
+  const candidate = /** @type {import("../semantic/types.js").Block} */ (block)
+  const location = candidate.location ?? ownerLocation
+
+  if (candidate.kind != "Block") unsupportedCapability(language, `block ${String(Reflect.get(block, "kind"))}`, location)
+  if (!Array.isArray(candidate.statements)) unsupportedCapability(language, "missing or invalid block statements", location)
+
+  for (const statement of candidate.statements) validateStatement(statement, language, location)
+}
+
+/**
+ * Validates one supported statement recursively.
+ * @param {unknown} statement - Candidate statement.
  * @param {import("../semantic/types.js").SemanticLanguage} language - Backend language.
  * @param {import("../semantic/types.js").SourceLocation | undefined} ownerLocation - Enclosing body location.
  * @returns {void}
  */
-function validatePrefixStatement(statement, language, ownerLocation) {
+function validateStatement(statement, language, ownerLocation) {
   if (!statement || typeof statement != "object" || Array.isArray(statement)) {
     return unsupportedCapability(language, "missing or invalid statement", ownerLocation)
   }
@@ -156,6 +157,18 @@ function validatePrefixStatement(statement, language, ownerLocation) {
 
     validateAssignmentTarget(assignment.target, language, location)
     validateExpression(assignment.expression, language, location)
+    return
+  }
+  if (kind == "ReturnStatement" || kind == "PrintStatement") {
+    validateExpression(Reflect.get(statement, "expression"), language, location)
+    return
+  }
+  if (kind == "IfStatement") {
+    const branch = /** @type {import("../semantic/types.js").IfStatement} */ (statement)
+
+    validateExpression(branch.condition, language, location)
+    validateBlock(branch.consequent, language, location)
+    if (Object.hasOwn(branch, "alternate")) validateBlock(branch.alternate, language, location)
     return
   }
 
@@ -382,20 +395,21 @@ export function emitExpression(writer, expression, path, language, emitIdentifie
  * @returns {boolean} Whether canonical output rendering is required.
  */
 export function requiresCanonicalZeroRendering(module) {
-  return module.functions.some((declaration) => statementsContainSignProducingOperation(declaration.body)) ||
-    statementsContainSignProducingOperation(module.entryPoint.body)
+  return module.functions.some((declaration) => blockContainsSignProducingOperation(declaration.body)) ||
+    blockContainsSignProducingOperation(module.entryPoint.body)
 }
 
 /**
- * Checks one statement sequence for sign-producing integer operations.
- * @param {(import("../semantic/types.js").FunctionStatement | import("../semantic/types.js").LocalStatement | import("../semantic/types.js").PrintStatement)[]} statements - Semantic statements.
+ * Checks one block for sign-producing integer operations.
+ * @param {import("../semantic/types.js").Block} block - Semantic block.
  * @returns {boolean} Whether a nested expression can produce signed zero in JavaScript.
  */
-function statementsContainSignProducingOperation(statements) {
-  return statements.some((statement) => {
+function blockContainsSignProducingOperation(block) {
+  return block.statements.some((statement) => {
     if (statement.kind == "IfStatement") {
       return expressionContainsSignProducingOperation(statement.condition) ||
-        statementsContainSignProducingOperation(statement.consequent) || statementsContainSignProducingOperation(statement.alternate)
+        blockContainsSignProducingOperation(statement.consequent) ||
+        Boolean(statement.alternate && blockContainsSignProducingOperation(statement.alternate))
     }
     if (statement.kind == "LocalDeclaration") return expressionContainsSignProducingOperation(statement.initializer)
     if (statement.kind == "AssignmentStatement" || statement.kind == "ReturnStatement" || statement.kind == "PrintStatement") {

@@ -259,14 +259,22 @@
  * @typedef IfStatement
  * @property {"IfStatement"} kind - Node discriminator.
  * @property {Expression} condition - Branch condition.
- * @property {(LocalDeclaration | AssignmentStatement | ReturnStatement)[]} consequent - True branch.
- * @property {(LocalDeclaration | AssignmentStatement | ReturnStatement)[]} alternate - False branch.
+ * @property {Block} consequent - True branch.
+ * @property {Block} [alternate] - False branch, absent when execution falls through.
  * @property {SourceLocation} location - Source location.
  * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
  */
 
 /** @typedef {LocalDeclaration | AssignmentStatement} LocalStatement */
-/** @typedef {LocalStatement | IfStatement | ReturnStatement} FunctionStatement */
+/** @typedef {LocalStatement | IfStatement | ReturnStatement | PrintStatement} Statement */
+
+/**
+ * @typedef Block
+ * @property {"Block"} kind - Node discriminator.
+ * @property {Statement[]} statements - Ordered statements in one lexical scope.
+ * @property {SourceLocation} location - Source location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
+ */
 
 /**
  * @typedef FunctionDeclaration
@@ -274,7 +282,7 @@
  * @property {string} name - Function name.
  * @property {Parameter[]} parameters - Function parameters.
  * @property {TypeReference} returnType - Return type.
- * @property {FunctionStatement[]} body - Function body.
+ * @property {Block} body - Function body.
  * @property {SourceLocation} location - Source location.
  * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
  */
@@ -290,7 +298,7 @@
 /**
  * @typedef EntryPoint
  * @property {"EntryPoint"} kind - Node discriminator.
- * @property {(LocalStatement | PrintStatement)[]} body - Entry-point statements.
+ * @property {Block} body - Entry-point body.
  * @property {SourceLocation} location - Source location.
  * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
  */
@@ -305,7 +313,7 @@
  * @property {SemanticProvenance} [provenance] - Parser-authored source and identity index; optional for legacy caller-authored modules.
  */
 
-/** @typedef {SemanticModule | FunctionDeclaration | Parameter | FunctionStatement | PrintStatement | EntryPoint | Expression | TypeReference} SemanticNode */
+/** @typedef {SemanticModule | FunctionDeclaration | Parameter | Block | Statement | EntryPoint | Expression | TypeReference} SemanticNode */
 /** @typedef {SemanticNode} SemanticNodeWithoutLocations */
 
 export {}

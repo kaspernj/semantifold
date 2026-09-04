@@ -474,7 +474,9 @@ export function semanticEntries(module) {
     } else if (node.kind == "FunctionDeclaration") {
       node.parameters.forEach((child, index) => visit(child, `${path}/parameters/${index}`, location))
       visit(node.returnType, `${path}/returnType`, location)
-      node.body.forEach((child, index) => visit(child, `${path}/body/${index}`, location))
+      visit(node.body, `${path}/body`, location)
+    } else if (node.kind == "Block") {
+      node.statements.forEach((child, index) => visit(child, `${path}/statements/${index}`, location))
     } else if (node.kind == "Parameter") {
       visit(node.type, `${path}/type`, location)
     } else if (node.kind == "LocalDeclaration") {
@@ -487,10 +489,10 @@ export function semanticEntries(module) {
       visit(node.expression, `${path}/expression`, location)
     } else if (node.kind == "IfStatement") {
       visit(node.condition, `${path}/condition`, location)
-      node.consequent.forEach((child, index) => visit(child, `${path}/consequent/${index}`, location))
-      node.alternate.forEach((child, index) => visit(child, `${path}/alternate/${index}`, location))
+      visit(node.consequent, `${path}/consequent`, location)
+      if (node.alternate) visit(node.alternate, `${path}/alternate`, location)
     } else if (node.kind == "EntryPoint") {
-      node.body.forEach((child, index) => visit(child, `${path}/body/${index}`, location))
+      visit(node.body, `${path}/body`, location)
     } else if (node.kind == "UnaryExpression") {
       visit(node.operand, `${path}/operand`, location)
     } else if (node.kind == "BinaryExpression") {
@@ -525,10 +527,10 @@ function resolveSymbols(module, records) {
     for (const [parameterIndex, parameter] of declaration.parameters.entries()) {
       scope.set(parameter.name, declare(parameter, parameter.name, "parameter", `${declarationPath}/parameters/${parameterIndex}`))
     }
-    visitStatements(declaration.body, scope, `${declarationPath}/body`)
+    visitBlock(declaration.body, scope, `${declarationPath}/body`)
   }
 
-  visitStatements(module.entryPoint.body, new Map(), "/entryPoint/body")
+  visitBlock(module.entryPoint.body, new Map(), "/entryPoint/body")
 
   return symbols
 
@@ -555,17 +557,17 @@ function resolveSymbols(module, records) {
   }
 
   /**
-   * Resolves references in one statement sequence.
-   * @param {(import("./types.js").FunctionStatement | import("./types.js").PrintStatement)[]} statements - Statements.
+   * Resolves references in one lexical block.
+   * @param {import("./types.js").Block} block - Semantic block.
    * @param {Map<string, string>} parent - Visible bindings.
    * @param {string} path - Statement sequence path.
    * @returns {void}
    */
-  function visitStatements(statements, parent, path) {
+  function visitBlock(block, parent, path) {
     const scope = new Map(parent)
 
-    for (const [index, statement] of statements.entries()) {
-      const statementPath = `${path}/${index}`
+    for (const [index, statement] of block.statements.entries()) {
+      const statementPath = `${path}/statements/${index}`
 
       if (statement.kind == "LocalDeclaration") {
         visitExpression(statement.initializer, scope, `${statementPath}/initializer`)
@@ -577,8 +579,8 @@ function resolveSymbols(module, records) {
         visitExpression(statement.expression, scope, `${statementPath}/expression`)
       } else if (statement.kind == "IfStatement") {
         visitExpression(statement.condition, scope, `${statementPath}/condition`)
-        visitStatements(statement.consequent, scope, `${statementPath}/consequent`)
-        visitStatements(statement.alternate, scope, `${statementPath}/alternate`)
+        visitBlock(statement.consequent, scope, `${statementPath}/consequent`)
+        if (statement.alternate) visitBlock(statement.alternate, scope, `${statementPath}/alternate`)
       }
     }
   }

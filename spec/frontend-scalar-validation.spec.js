@@ -41,8 +41,8 @@ function label(bool $flag, string $fallback): string {
 echo label(true, 'no'), PHP_EOL;
 `
       const module = parse({filename: "unicode.php", language: "php", source})
-      const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (module.functions[0].body[0])
-      const literal = branch.consequent[0].expression
+      const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (module.functions[0].body.statements[0])
+      const literal = branch.consequent.statements[0].expression
 
       assert.equal(literal.location.start.line, 5)
       assert.equal(literal.location.start.column, 12)
@@ -218,8 +218,8 @@ console.log(label(true, "no"))
 
     for (const [filename, language, source] of cases) {
       const module = parse({filename, language, source})
-      const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (module.functions[0].body[0])
-      const expression = branch.consequent[0].expression
+      const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (module.functions[0].body.statements[0])
+      const expression = branch.consequent.statements[0].expression
 
       assert.equal(expression.kind, "StringLiteral")
       assert.equal(/** @type {import("../src/semantic/types.js").StringLiteral} */ (expression).value, "yes\n")

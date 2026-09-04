@@ -269,8 +269,8 @@ describe("typed operator validation", () => {
       language: "php",
       source: phpStringExpression("$left . $right", '"left"', '"right"')
     })
-    const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (module.functions[0].body[0])
-    const expression = /** @type {import("../src/semantic/types.js").BinaryExpression} */ (branch.consequent[0].expression)
+    const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (module.functions[0].body.statements[0])
+    const expression = /** @type {import("../src/semantic/types.js").BinaryExpression} */ (branch.consequent.statements[0].expression)
 
     expect({operation: expression.operation, type: expression.type}).toEqual({operation: "StringConcat", type: "string"})
   })
@@ -300,8 +300,8 @@ describe("typed operator validation", () => {
 
   it("accepts only prefix bang for Ruby Boolean not", () => {
     const accepted = parse({filename: "bang.rb", language: "ruby", source: rubyBooleanExpression("!flag")})
-    const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (accepted.functions[0].body[0])
-    const expression = /** @type {import("../src/semantic/types.js").UnaryExpression} */ (branch.consequent[0].expression)
+    const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (accepted.functions[0].body.statements[0])
+    const expression = /** @type {import("../src/semantic/types.js").UnaryExpression} */ (branch.consequent.statements[0].expression)
 
     expect({operation: expression.operation, type: expression.type}).toEqual({operation: "BooleanNot", type: "boolean"})
 
@@ -326,8 +326,8 @@ describe("typed operator validation", () => {
 
   it("rejects qualified Ruby unary negation calls", () => {
     const module = parse({filename: "ordinary-negation.rb", language: "ruby", source: rubyIntegerExpression("-left")})
-    const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (module.functions[0].body[0])
-    const expression = /** @type {import("../src/semantic/types.js").UnaryExpression} */ (branch.consequent[0].expression)
+    const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (module.functions[0].body.statements[0])
+    const expression = /** @type {import("../src/semantic/types.js").UnaryExpression} */ (branch.consequent.statements[0].expression)
 
     expect({operation: expression.operation, type: expression.type}).toEqual({operation: "IntegerNegate", type: "integer"})
 
@@ -346,8 +346,8 @@ describe("typed operator validation", () => {
 
   it("rejects qualified Ruby binary operator calls", () => {
     const module = parse({filename: "ordinary-multiply.rb", language: "ruby", source: rubyIntegerExpression("left * right")})
-    const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (module.functions[0].body[0])
-    const expression = /** @type {import("../src/semantic/types.js").BinaryExpression} */ (branch.consequent[0].expression)
+    const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (module.functions[0].body.statements[0])
+    const expression = /** @type {import("../src/semantic/types.js").BinaryExpression} */ (branch.consequent.statements[0].expression)
 
     expect({operation: expression.operation, type: expression.type}).toEqual({operation: "IntegerMultiply", type: "integer"})
 
@@ -377,8 +377,8 @@ describe("typed operator validation", () => {
 console.log(value(0, 0))
 `
     })
-    const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (module.functions[0].body[0])
-    const expression = /** @type {import("../src/semantic/types.js").BinaryExpression} */ (branch.consequent[0].expression)
+    const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (module.functions[0].body.statements[0])
+    const expression = /** @type {import("../src/semantic/types.js").BinaryExpression} */ (branch.consequent.statements[0].expression)
 
     expect({kind: expression.kind, operation: expression.operation, rightKind: expression.right.kind}).toEqual({
       kind: "BinaryExpression",
@@ -390,8 +390,8 @@ console.log(value(0, 0))
   it("rejects unknown operations and malformed operation shapes before every emitter", async () => {
     for (const language of targets) {
       const module = await operatorModule()
-      const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (module.functions[0].body[0])
-      const expression = /** @type {import("../src/semantic/types.js").BinaryExpression} */ (branch.consequent[0].expression)
+      const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (module.functions[0].body.statements[0])
+      const expression = /** @type {import("../src/semantic/types.js").BinaryExpression} */ (branch.consequent.statements[0].expression)
 
       Reflect.set(expression, "operation", "IntegerDivide")
       assert.throws(
@@ -404,8 +404,8 @@ console.log(value(0, 0))
 
     for (const malformed of ["missing left", "missing result", "wrong result", "missing operand", "transient source intent"]) {
       const module = await operatorModule()
-      const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (module.functions[0].body[0])
-      const expression = /** @type {import("../src/semantic/types.js").BinaryExpression} */ (branch.consequent[0].expression)
+      const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (module.functions[0].body.statements[0])
+      const expression = /** @type {import("../src/semantic/types.js").BinaryExpression} */ (branch.consequent.statements[0].expression)
       const unary = /** @type {import("../src/semantic/types.js").UnaryExpression} */ (expression.left)
 
       if (malformed == "missing left") Reflect.deleteProperty(expression, "left")

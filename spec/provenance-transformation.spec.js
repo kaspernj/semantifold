@@ -54,7 +54,7 @@ describe("provenance through semantic transformations", () => {
 
     const deleted = parse({filename: "two.ts", language: "typescript", source})
     const second = deleted.functions[1]
-    const entryCall = /** @type {import("../src/semantic/types.js").CallExpression} */ (deleted.entryPoint.body[0].expression)
+    const entryCall = /** @type {import("../src/semantic/types.js").CallExpression} */ (deleted.entryPoint.body.statements[0].expression)
 
     deleted.functions.splice(0, 1)
     entryCall.callee = "second"

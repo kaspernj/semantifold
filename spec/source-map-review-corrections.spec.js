@@ -228,13 +228,13 @@ console.log(choose(true, "no"))
 `
     const module = parse({filename: "locals.ts", language: "typescript", source})
     const declaration = module.functions[0]
-    const first = /** @type {import("../src/semantic/types.js").LocalDeclaration} */ (declaration.body[0])
-    const second = /** @type {import("../src/semantic/types.js").LocalDeclaration} */ (declaration.body[1])
+    const first = /** @type {import("../src/semantic/types.js").LocalDeclaration} */ (declaration.body.statements[0])
+    const second = /** @type {import("../src/semantic/types.js").LocalDeclaration} */ (declaration.body.statements[1])
     const sharedType = /** @type {import("../src/semantic/types.js").TypeReference} */ ({
       kind: "TypeReference",
       name: "string"
     })
-    const expectedPaths = ["/functions/0/body/0/type", "/functions/0/body/1/type"]
+    const expectedPaths = ["/functions/0/body/statements/0/type", "/functions/0/body/statements/1/type"]
 
     first.type = sharedType
     second.type = sharedType
@@ -251,7 +251,7 @@ console.log(choose(true, "no"))
 
   it("retains and deduplicates every transformed origin in synthetic context", () => {
     const module = parse({filename: "program.ts", language: "typescript", source: baseSource})
-    const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (module.functions[0].body.at(-1))
+    const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (module.functions[0].body.statements.at(-1))
     const provenance = branch.sourceProvenance
 
     assert.ok(provenance)
@@ -349,9 +349,9 @@ console.log(ch\\u006fose(true, "no"))
 `
       const module = parse({filename: `escaped.${language == "typescript" ? "ts" : "js"}`, language, source})
       const declaration = module.functions[0]
-      const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (declaration.body[0])
+      const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (declaration.body.statements[0])
       const condition = branch.condition
-      const call = /** @type {import("../src/semantic/types.js").CallExpression} */ (module.entryPoint.body[0].expression)
+      const call = /** @type {import("../src/semantic/types.js").CallExpression} */ (module.entryPoint.body.statements[0].expression)
       const artifact = generateArtifact({language: "ruby", module})
 
       assert.equal(slice(source, getNodeProvenance(module, declaration).ranges.name), "ch\\u006fose")

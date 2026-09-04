@@ -54,8 +54,8 @@ console.log(select(true, "no"))
         error.language == "ruby" && error.location?.filename == "reserved-local.ts" && error.location.start.line == 2
     )
 
-    const declaration = /** @type {import("../src/semantic/types.js").LocalDeclaration} */ (module.functions[0].body[0])
-    const assignment = /** @type {import("../src/semantic/types.js").AssignmentStatement} */ (module.functions[0].body[1])
+    const declaration = /** @type {import("../src/semantic/types.js").LocalDeclaration} */ (module.functions[0].body.statements[0])
+    const assignment = /** @type {import("../src/semantic/types.js").AssignmentStatement} */ (module.functions[0].body.statements[1])
 
     declaration.name = "value"
     assignment.target.name = "end"
@@ -75,7 +75,7 @@ console.log(select(true, "no"))
 console.log(select(true, "no"))
 `
     const parameterModule = parse({filename: "strict-parameter.ts", language: "typescript", source: parameterSource})
-    const parameterBranch = /** @type {import("../src/semantic/types.js").IfStatement} */ (parameterModule.functions[0].body[0])
+    const parameterBranch = /** @type {import("../src/semantic/types.js").IfStatement} */ (parameterModule.functions[0].body.statements[0])
     const parameterReference = /** @type {import("../src/semantic/types.js").IdentifierExpression} */ (parameterBranch.condition)
 
     parameterModule.functions[0].parameters[0].name = "arguments"
@@ -96,7 +96,7 @@ console.log(select(true, "no"))
 console.log(select(true, "no"))
 `
     const assignmentModule = parse({filename: "strict-assignment.ts", language: "typescript", source: assignmentSource})
-    const assignment = /** @type {import("../src/semantic/types.js").AssignmentStatement} */ (assignmentModule.functions[0].body[1])
+    const assignment = /** @type {import("../src/semantic/types.js").AssignmentStatement} */ (assignmentModule.functions[0].body.statements[1])
 
     assignment.target.name = "eval"
 
@@ -121,7 +121,7 @@ console.log(select(true, "no"))
 
     for (const [language, name] of [["php", "GLOBALS"], ["php", "this"], ["ruby", "_1"]]) {
       const module = parse({filename: `${name}-assignment.ts`, language: "typescript", source})
-      const assignment = /** @type {import("../src/semantic/types.js").AssignmentStatement} */ (module.functions[0].body[1])
+      const assignment = /** @type {import("../src/semantic/types.js").AssignmentStatement} */ (module.functions[0].body.statements[1])
 
       assignment.target.name = name
 

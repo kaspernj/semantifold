@@ -37,32 +37,37 @@ function withoutLocations(value) {
 
 const expectedModule = {
   entryPoint: {
-    body: [{
-      expression: {
-        arguments: [
-          {kind: "BooleanLiteral", value: true},
-          {kind: "StringLiteral", value: "no"}
-        ],
-        callee: "label",
-        kind: "CallExpression"
-      },
-      kind: "PrintStatement"
-    }],
+    body: {
+      kind: "Block",
+      statements: [{
+        expression: {
+          arguments: [
+            {kind: "BooleanLiteral", value: true},
+            {kind: "StringLiteral", value: "no"}
+          ],
+          callee: "label",
+          kind: "CallExpression"
+        },
+        kind: "PrintStatement"
+      }]
+    },
     kind: "EntryPoint"
   },
   functions: [{
-    body: [{
-      alternate: [{
+    body: {
+      kind: "Block",
+      statements: [{
+      alternate: {kind: "Block", statements: [{
         expression: {kind: "IdentifierExpression", name: "fallback"},
         kind: "ReturnStatement"
-      }],
+      }]},
       condition: {kind: "IdentifierExpression", name: "flag"},
-      consequent: [{
+      consequent: {kind: "Block", statements: [{
         expression: {kind: "StringLiteral", value: "yes"},
         kind: "ReturnStatement"
-      }],
+      }]},
       kind: "IfStatement"
-    }],
+    }]},
     kind: "FunctionDeclaration",
     name: "label",
     parameters: [
@@ -82,14 +87,14 @@ describe("portable scalar values and types", () => {
       const source = await readFile(new URL(`fixtures/scalars/${filename}`, import.meta.url), "utf8")
       const module = parse({filename, language, source})
       const functionDeclaration = module.functions[0]
-      const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (functionDeclaration.body[0])
-      const call = /** @type {import("../src/semantic/types.js").CallExpression} */ (module.entryPoint.body[0].expression)
+      const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (functionDeclaration.body.statements[0])
+      const call = /** @type {import("../src/semantic/types.js").CallExpression} */ (module.entryPoint.body.statements[0].expression)
 
       assert.deepEqual(withoutLocations(module), expectedModule, language)
       assert.equal(functionDeclaration.location.filename, filename)
       assert.equal(functionDeclaration.location.start.line, lines.function)
       assert.equal(functionDeclaration.parameters[0].location.start.line, lines.parameter)
-      assert.equal(branch.consequent[0].expression.location.start.line, lines.returnedLiteral)
+      assert.equal(branch.consequent.statements[0].expression.location.start.line, lines.returnedLiteral)
       assert.equal(call.arguments[0].location.start.line, lines.entry)
       assert.equal(call.arguments[1].location.start.line, lines.entry)
       modules.push(withoutLocations(module))

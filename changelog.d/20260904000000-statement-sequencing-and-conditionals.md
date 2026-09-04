@@ -1,0 +1,1 @@
+Implemented located ordered semantic blocks across all five frontends and backends, including sequenced supported statements, nested and optional conditionals, strict Boolean conditions, lexical scopes, unreachable-statement rejection, and non-void all-path return validation.

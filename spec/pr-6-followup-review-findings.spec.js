@@ -30,28 +30,28 @@ describe("PR 6 follow-up automatic review findings", () => {
   it("maps aliased statements and branches by occurrence across every backend", () => {
     const module = parse({filename: "locals.ts", language: "typescript", source: localSource})
     const declaration = module.functions[0]
-    const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (declaration.body.at(-1))
-    const assignment = /** @type {import("../src/semantic/types.js").AssignmentStatement} */ (branch.consequent[0])
-    const returned = /** @type {import("../src/semantic/types.js").ReturnStatement} */ (branch.consequent.at(-1))
+    const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (declaration.body.statements.at(-1))
+    const assignment = /** @type {import("../src/semantic/types.js").AssignmentStatement} */ (branch.consequent.statements[0])
+    const returned = /** @type {import("../src/semantic/types.js").ReturnStatement} */ (branch.consequent.statements.at(-1))
     const clone = structuredClone(declaration)
 
-    branch.consequent.splice(1, 0, assignment)
-    branch.alternate[0] = returned
+    branch.consequent.statements.splice(1, 0, assignment)
+    branch.alternate.statements[0] = returned
     clone.name = "selectAgain"
-    clone.body[clone.body.length - 1] = branch
+    clone.body.statements[clone.body.statements.length - 1] = branch
     module.functions.push(clone)
 
     const expectedPaths = [
-      "/functions/0/body/2",
-      "/functions/0/body/2/consequent/0",
-      "/functions/0/body/2/consequent/1",
-      "/functions/0/body/2/consequent/2",
-      "/functions/0/body/2/alternate/0",
-      "/functions/1/body/2",
-      "/functions/1/body/2/consequent/0",
-      "/functions/1/body/2/consequent/1",
-      "/functions/1/body/2/consequent/2",
-      "/functions/1/body/2/alternate/0"
+      "/functions/0/body/statements/2",
+      "/functions/0/body/statements/2/consequent/statements/0",
+      "/functions/0/body/statements/2/consequent/statements/1",
+      "/functions/0/body/statements/2/consequent/statements/2",
+      "/functions/0/body/statements/2/alternate/statements/0",
+      "/functions/1/body/statements/2",
+      "/functions/1/body/statements/2/consequent/statements/0",
+      "/functions/1/body/statements/2/consequent/statements/1",
+      "/functions/1/body/statements/2/consequent/statements/2",
+      "/functions/1/body/statements/2/alternate/statements/0"
     ]
 
     for (const language of /** @type {const} */ (["php", "ruby", "javascript", "typescript", "java"])) {

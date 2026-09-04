@@ -147,7 +147,7 @@ describe("typed operators and richer expressions", () => {
 console.log(compute(3, 10))
 `
     })
-    const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (module.functions[0].body[0])
+    const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (module.functions[0].body.statements[0])
 
     expect(withoutSourceMetadata(branch.condition)).toEqual({
       kind: "BinaryExpression",
@@ -173,7 +173,7 @@ console.log(compute(3, 10))
       },
       type: "boolean"
     })
-    expect(withoutSourceMetadata(branch.consequent[0].expression)).toEqual({
+    expect(withoutSourceMetadata(branch.consequent.statements[0].expression)).toEqual({
       kind: "BinaryExpression",
       left: {
         kind: "UnaryExpression",
@@ -307,9 +307,9 @@ console.log(guarded(true, false))
           const source = integerOperationSource(sourceLanguage, testCase.expression, arguments_)
           const filename = sourceLanguage == "javascript" ? "signed-zero.js" : "signed-zero.ts"
           const module = parse({filename, language: sourceLanguage, source})
-          const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (module.functions[0].body[0])
+          const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (module.functions[0].body.statements[0])
           const returned = /** @type {import("../src/semantic/types.js").UnaryExpression | import("../src/semantic/types.js").BinaryExpression} */ (
-            branch.consequent[0].expression)
+            branch.consequent.statements[0].expression)
 
           expect({operation: returned.operation, type: returned.type}).toEqual({operation: testCase.operation, type: "integer"})
 

@@ -355,43 +355,49 @@ function localJavaScriptType(node, name, filename, source) {
 }
 
 /**
- * Converts a restricted declaration/assignment prefix and one terminal statement.
- * @template {import("@babel/types").Statement} Node
- * @template {import("../semantic/types.js").FunctionStatement | import("../semantic/types.js").PrintStatement} Terminal
- * @param {Node[]} statements - Source statements.
- * @param {"IfStatement" | "ReturnStatement" | "ExpressionStatement"} terminalKind - Terminal kind.
- * @param {(node: Node) => Terminal} convertTerminal - Terminal converter.
+ * Converts one exhaustive Babel statement.
+ * @param {import("@babel/types").Statement} node - Babel statement.
  * @param {"javascript" | "typescript"} language - Frontend language.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
- * @returns {(import("../semantic/types.js").LocalStatement | Terminal)[]} Semantic statements.
+ * @param {boolean} canonicalZeroRequired - Whether generated scalar output may contain signed zero.
+ * @returns {import("../semantic/types.js").Statement} Semantic statement.
  */
-function convertRestrictedSequence(statements, terminalKind, convertTerminal, language, filename, source) {
-  const terminal = statements.at(-1)
-
-  if (!terminal || terminal.type != terminalKind) {
-    const location = terminal ? nodeLocation(terminal, filename, source) : moduleLocation(filename, source)
-
-    return unsupportedSyntax(language, `statement sequence without terminal ${terminalKind}`, location)
+function convertStatement(node, language, filename, source, canonicalZeroRequired) {
+  if (node.type == "ReturnStatement") return convertReturn(node, language, filename, source)
+  if (node.type == "IfStatement") return convertIf(node, language, filename, source, canonicalZeroRequired)
+  if (node.type == "VariableDeclaration" || node.type == "ExpressionStatement" && node.expression.type == "AssignmentExpression") {
+    return convertLocalStatement(node, language, filename, source)
   }
+  if (node.type == "ExpressionStatement") return convertPrint(node, language, filename, source, canonicalZeroRequired)
 
-  return [...statements.slice(0, -1).map((statement) => convertLocalStatement(statement, language, filename, source)), convertTerminal(terminal)]
+  return unsupportedSyntax(language, node.type, nodeLocation(node, filename, source))
 }
 
 /**
- * Converts a block containing only supported return statements.
- * @param {import("@babel/types").Statement} node - Babel statement or block.
+ * Converts one Babel block or normalized single-statement body.
+ * @param {import("@babel/types").BlockStatement | import("@babel/types").Statement[]} input - Parser block or statements.
  * @param {"javascript" | "typescript"} language - Frontend language.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
- * @returns {(import("../semantic/types.js").LocalStatement | import("../semantic/types.js").ReturnStatement)[]} Semantic branch statements.
+ * @param {boolean} canonicalZeroRequired - Whether generated scalar output may contain signed zero.
+ * @param {import("../semantic/types.js").SourceLocation} [location] - Location for a statement-array block.
+ * @returns {import("../semantic/types.js").Block} Semantic block.
  */
-function convertReturnBlock(node, language, filename, source) {
-  const statements = node.type == "BlockStatement" ? node.body : [node]
+function convertBlock(input, language, filename, source, canonicalZeroRequired, location) {
+  const statements = Array.isArray(input) ? input : input.body
+  const directives = Array.isArray(input) ? [] : input.directives
+  const blockLocation = location ?? nodeLocation(/** @type {import("@babel/types").BlockStatement} */ (input), filename, source)
 
-  return /** @type {(import("../semantic/types.js").LocalStatement | import("../semantic/types.js").ReturnStatement)[]} */ (
-    convertRestrictedSequence(statements, "ReturnStatement", (statement) => convertReturn(statement, language, filename, source), language, filename, source)
-  )
+  if (directives.length > 0) {
+    return unsupportedSyntax(language, "directive", nodeLocation(directives[0], filename, source))
+  }
+
+  return {
+    kind: "Block",
+    location: blockLocation,
+    statements: statements.map((statement) => convertStatement(statement, language, filename, source, canonicalZeroRequired))
+  }
 }
 
 /**
@@ -468,9 +474,10 @@ function convertTypeScriptType(annotation, subject, ownerLocation, filename, sou
  * @param {"javascript" | "typescript"} language - Frontend language.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
+ * @param {boolean} canonicalZeroRequired - Whether generated scalar output may contain signed zero.
  * @returns {import("../semantic/types.js").FunctionDeclaration} Semantic function.
  */
-function convertFunction(node, language, filename, source) {
+function convertFunction(node, language, filename, source, canonicalZeroRequired) {
   const location = nodeLocation(node, filename, source)
 
   if (!node.id) return unsupportedSyntax(language, "anonymous function", location)
@@ -499,17 +506,10 @@ function convertFunction(node, language, filename, source) {
   const returnType = language == "javascript"
     ? convertType(documentedTypes?.returnType?.sourceType, language, `Function '${node.id.name}' return`, location, documentedTypes?.returnType?.location)
     : convertTypeScriptType(returnAnnotation, `Function '${node.id.name}' return`, location, filename, source)
-  const body = convertRestrictedSequence(
-    node.body.body,
-    "IfStatement",
-    (statement) => convertIf(/** @type {import("@babel/types").IfStatement} */ (statement), language, filename, source),
-    language,
-    filename,
-    source
-  )
+  const body = convertBlock(node.body, language, filename, source, canonicalZeroRequired)
 
   return withParserRanges({
-    body: /** @type {import("../semantic/types.js").FunctionStatement[]} */ (body),
+    body,
     kind: "FunctionDeclaration",
     location,
     name: node.id.name,
@@ -524,17 +524,24 @@ function convertFunction(node, language, filename, source) {
  * @param {"javascript" | "typescript"} language - Frontend language.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
+ * @param {boolean} canonicalZeroRequired - Whether generated scalar output may contain signed zero.
  * @returns {import("../semantic/types.js").IfStatement} Semantic branch.
  */
-function convertIf(node, language, filename, source) {
+function convertIf(node, language, filename, source, canonicalZeroRequired) {
   const location = nodeLocation(node, filename, source)
-
-  if (!node.alternate) return unsupportedSyntax(language, "if without else", location)
+  const consequent = node.consequent.type == "BlockStatement"
+    ? convertBlock(node.consequent, language, filename, source, canonicalZeroRequired)
+    : convertBlock([node.consequent], language, filename, source, canonicalZeroRequired, nodeLocation(node.consequent, filename, source))
+  const alternate = node.alternate
+    ? node.alternate.type == "BlockStatement"
+      ? convertBlock(node.alternate, language, filename, source, canonicalZeroRequired)
+      : convertBlock([node.alternate], language, filename, source, canonicalZeroRequired, nodeLocation(node.alternate, filename, source))
+    : undefined
 
   return {
-    alternate: convertReturnBlock(node.alternate, language, filename, source),
+    ...(alternate ? {alternate} : {}),
     condition: convertExpression(node.test, language, filename, source),
-    consequent: convertReturnBlock(node.consequent, language, filename, source),
+    consequent,
     kind: "IfStatement",
     location
   }
@@ -640,28 +647,28 @@ export function parseJavaScriptTypeScript({filename, language, source}) {
   const canonicalZeroRequired = parserTreeRequiresCanonicalZero(file.program)
 
   rememberTokens(file, tokenIndex)
+  if (file.program.directives.length > 0) {
+    return unsupportedSyntax(language, "top-level directive", nodeLocation(file.program.directives[0], filename, source))
+  }
   const functions = file.program.body.filter((node) => node.type == "FunctionDeclaration")
-    .map((node) => convertFunction(node, language, filename, source))
+    .map((node) => convertFunction(node, language, filename, source, canonicalZeroRequired))
   const entryNodes = file.program.body.filter((node) => node.type != "FunctionDeclaration")
   const location = moduleLocation(filename, source)
 
   if (functions.length == 0) return unsupportedSyntax(language, "module without a function", location)
-  if (entryNodes.length == 0) return unsupportedSyntax(language, "module without an entry point", location)
-
-  const entryStatements = convertRestrictedSequence(
-    entryNodes,
-    "ExpressionStatement",
-    (statement) => convertPrint(statement, language, filename, source, canonicalZeroRequired),
-    language,
+  const entryLocation = entryNodes.length == 0 ? location : locationFromOffsets(
     filename,
-    source
+    source,
+    entryNodes[0].start ?? 0,
+    entryNodes.at(-1)?.end ?? source.length
   )
+  const entryBlock = convertBlock(entryNodes, language, filename, source, canonicalZeroRequired, entryLocation)
 
   return {
     entryPoint: {
-      body: /** @type {(import("../semantic/types.js").LocalStatement | import("../semantic/types.js").PrintStatement)[]} */ (entryStatements),
+      body: entryBlock,
       kind: "EntryPoint",
-      location: entryStatements[0].location
+      location: entryLocation
     },
     functions,
     kind: "Module",

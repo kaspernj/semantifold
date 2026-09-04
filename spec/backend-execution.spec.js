@@ -149,8 +149,8 @@ describe("source backends", () => {
 }
 `
     const semanticModule = parse({filename: "Main.java", language: "java", source})
-    const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (semanticModule.functions[0].body[0])
-    const literal = /** @type {import("../src/semantic/types.js").StringLiteral} */ (branch.consequent[0].expression)
+    const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (semanticModule.functions[0].body.statements[0])
+    const literal = /** @type {import("../src/semantic/types.js").StringLiteral} */ (branch.consequent.statements[0].expression)
 
     expect(literal.value).toEqual("a\n")
 
@@ -162,8 +162,8 @@ describe("source backends", () => {
   it("round-trips and executes boolean and string scalar programs in all five languages", async () => {
     const source = await readFile(new URL("fixtures/scalars/program.js", import.meta.url), "utf8")
     const semanticModule = parse({filename: "program.js", language: "javascript", source})
-    const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (semanticModule.functions[0].body[0])
-    const literal = /** @type {import("../src/semantic/types.js").StringLiteral} */ (branch.consequent[0].expression)
+    const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (semanticModule.functions[0].body.statements[0])
+    const literal = /** @type {import("../src/semantic/types.js").StringLiteral} */ (branch.consequent.statements[0].expression)
     const expected = "quote \" slash \\ line\n tab\t dollar $ hash #{ snowman ☃ emoji 😀 nul \0"
 
     literal.value = expected
@@ -319,7 +319,7 @@ console.log(${sourceName}(true, "safe"))
 
       if (name == "this") {
         module.functions[0].name = name
-        const print = /** @type {import("../src/semantic/types.js").PrintStatement} */ (module.entryPoint.body[0])
+        const print = /** @type {import("../src/semantic/types.js").PrintStatement} */ (module.entryPoint.body.statements[0])
         const call = /** @type {import("../src/semantic/types.js").CallExpression} */ (print.expression)
 
         call.callee = name
@@ -462,7 +462,7 @@ console.log(${name}(true, "safe"))
   it("reparses generated Ruby local metadata after a multibyte initializer", async () => {
     const source = await readFile(new URL("fixtures/locals/program.js", import.meta.url), "utf8")
     const semanticModule = parse({filename: "program.js", language: "javascript", source})
-    const preferred = /** @type {import("../src/semantic/types.js").LocalDeclaration} */ (semanticModule.functions[0].body[0])
+    const preferred = /** @type {import("../src/semantic/types.js").LocalDeclaration} */ (semanticModule.functions[0].body.statements[0])
 
     Reflect.set(preferred.initializer, "value", "☃")
 

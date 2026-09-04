@@ -51,67 +51,65 @@ export function generateRuby(module, writer) {
     writer.mapped(")", {mappingKind: "anchor", node: declaration})
     writer.synthetic("\n", "line break", [declaration])
 
-    const branch = /** @type {import("../semantic/types.js").IfStatement} */ (declaration.body.at(-1))
-    const branchPath = `/functions/${functionIndex}/body/${declaration.body.length - 1}`
-
-    for (const [statementIndex, statement] of /** @type {import("../semantic/types.js").LocalStatement[]} */ (
-      declaration.body.slice(0, -1)).entries()) {
-      emitLocal(writer, statement, "  ", `/functions/${functionIndex}/body/${statementIndex}`)
-    }
-
-    writer.synthetic("  ", "indentation", [branch], [branchPath])
-    writer.mapped("if", {mappingKind: "anchor", node: branch, path: branchPath})
-    writer.synthetic(" ", "conditional spacing", [branch], [branchPath])
-    emitExpression(writer, branch.condition, `${branchPath}/condition`, "ruby", identity)
-    writer.synthetic("\n", "line break", [branch], [branchPath])
-    emitBranch(writer, branch.consequent, branch, "    ", branchPath, `${branchPath}/consequent`)
-    writer.synthetic("  ", "indentation", [branch], [branchPath])
-    writer.mapped("else", {mappingKind: "anchor", node: branch, path: branchPath})
-    writer.synthetic("\n", "line break", [branch], [branchPath])
-    emitBranch(writer, branch.alternate, branch, "    ", branchPath, `${branchPath}/alternate`)
-    writer.synthetic("  ", "indentation", [branch], [branchPath])
-    writer.mapped("end", {mappingKind: "anchor", node: branch, path: branchPath})
-    writer.synthetic("\n", "line break", [branch], [branchPath])
+    emitBlock(writer, declaration.body, "  ", `/functions/${functionIndex}/body`)
     writer.mapped("end", {mappingKind: "anchor", node: declaration})
   })
 
   writer.synthetic("\n\n", "entry-point separator", [module.entryPoint])
-  const statements = module.entryPoint.body
-
-  for (const [statementIndex, statement] of /** @type {import("../semantic/types.js").LocalStatement[]} */ (
-    statements.slice(0, -1)).entries()) emitLocal(writer, statement, "", `/entryPoint/body/${statementIndex}`)
-
-  const print = /** @type {import("../semantic/types.js").PrintStatement} */ (statements.at(-1))
-  const printPath = `/entryPoint/body/${statements.length - 1}`
-
-  writer.mapped("puts", {mappingKind: "anchor", node: print, path: printPath})
-  writer.synthetic(" ", "print spacing", [print], [printPath])
-  emitExpression(writer, print.expression, `${printPath}/expression`, "ruby", identity)
-  writer.synthetic("\n", "final line break", [module.entryPoint])
+  emitBlock(writer, module.entryPoint.body, "", "/entryPoint/body")
 }
 
 /**
- * Emits one Ruby return branch.
+ * Emits one ordered Ruby block body.
  * @param {import("./writer.js").SourceWriter} writer - Source-aware writer.
- * @param {(import("../semantic/types.js").LocalStatement | import("../semantic/types.js").ReturnStatement)[]} statements - Branch statements.
- * @param {import("../semantic/types.js").IfStatement} branch - Owning branch.
+ * @param {import("../semantic/types.js").Block} block - Semantic block.
  * @param {string} indent - Indentation.
- * @param {string} branchPath - Exact JSON Pointer for the owning branch occurrence.
- * @param {string} statementsPath - JSON Pointer for the branch statement sequence.
+ * @param {string} path - Exact block path.
  * @returns {void}
  */
-function emitBranch(writer, statements, branch, indent, branchPath, statementsPath) {
-  for (const [statementIndex, statement] of /** @type {import("../semantic/types.js").LocalStatement[]} */ (
-    statements.slice(0, -1)).entries()) emitLocal(writer, statement, indent, `${statementsPath}/${statementIndex}`)
+function emitBlock(writer, block, indent, path) {
+  block.statements.forEach((statement, index) => emitStatement(writer, statement, indent, `${path}/statements/${index}`))
+}
 
-  const returned = /** @type {import("../semantic/types.js").ReturnStatement} */ (statements.at(-1))
-  const returnedPath = `${statementsPath}/${statements.length - 1}`
-
-  writer.synthetic(indent, "indentation", [branch], [branchPath])
-  writer.mapped("return", {mappingKind: "anchor", node: returned, path: returnedPath})
-  writer.synthetic(" ", "return spacing", [returned], [returnedPath])
-  emitExpression(writer, returned.expression, `${returnedPath}/expression`, "ruby", identity)
-  writer.synthetic("\n", "line break", [returned], [returnedPath])
+/**
+ * Emits one Ruby statement.
+ * @param {import("./writer.js").SourceWriter} writer - Source-aware writer.
+ * @param {import("../semantic/types.js").Statement} statement - Semantic statement.
+ * @param {string} indent - Indentation.
+ * @param {string} path - Exact statement path.
+ * @returns {void}
+ */
+function emitStatement(writer, statement, indent, path) {
+  if (statement.kind == "LocalDeclaration" || statement.kind == "AssignmentStatement") return emitLocal(writer, statement, indent, path)
+  writer.synthetic(indent, "indentation", [statement], [path])
+  if (statement.kind == "ReturnStatement") {
+    writer.mapped("return", {mappingKind: "anchor", node: statement, path})
+    writer.synthetic(" ", "return spacing", [statement], [path])
+    emitExpression(writer, statement.expression, `${path}/expression`, "ruby", identity)
+    writer.synthetic("\n", "line break", [statement], [path])
+    return
+  }
+  if (statement.kind == "PrintStatement") {
+    writer.mapped("puts", {mappingKind: "anchor", node: statement, path})
+    writer.synthetic(" ", "print spacing", [statement], [path])
+    emitExpression(writer, statement.expression, `${path}/expression`, "ruby", identity)
+    writer.synthetic("\n", "line break", [statement], [path])
+    return
+  }
+  writer.mapped("if", {mappingKind: "anchor", node: statement, path})
+  writer.synthetic(" ", "conditional spacing", [statement], [path])
+  emitExpression(writer, statement.condition, `${path}/condition`, "ruby", identity)
+  writer.synthetic("\n", "line break", [statement], [path])
+  emitBlock(writer, statement.consequent, `${indent}  `, `${path}/consequent`)
+  if (statement.alternate) {
+    writer.synthetic(indent, "indentation", [statement], [path])
+    writer.mapped("else", {mappingKind: "anchor", node: statement, path})
+    writer.synthetic("\n", "line break", [statement], [path])
+    emitBlock(writer, statement.alternate, `${indent}  `, `${path}/alternate`)
+  }
+  writer.synthetic(indent, "indentation", [statement], [path])
+  writer.mapped("end", {mappingKind: "anchor", node: statement, path})
+  writer.synthetic("\n", "line break", [statement], [path])
 }
 
 /**

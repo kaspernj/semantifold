@@ -58,8 +58,8 @@ describe("five-language mapping acceptance", () => {
     const source = fixture.replace('"yes"', '"😀"')
     const module = parse({filename: "astral.ts", language: "typescript", source})
     const artifact = generateArtifact({language: "java", module})
-    const literal = module.functions[0].body.at(-1).consequent.at(-1).expression
-    const record = module.provenance.nodes.find((node) => node.path == "/functions/0/body/0/consequent/0/expression")
+    const literal = module.functions[0].body.statements.at(-1).consequent.statements.at(-1).expression
+    const record = module.provenance.nodes.find((node) => node.path == "/functions/0/body/statements/0/consequent/statements/0/expression")
 
     assert.equal(source.slice(record.origin.location.start.offset, record.origin.location.end.offset).includes("😀"), true)
     assert.equal(record.origin.location.end.offset - record.origin.location.start.offset, literal.location.end.offset - literal.location.start.offset)

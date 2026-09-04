@@ -162,8 +162,8 @@ describe("generated source mappings", () => {
 }
 `
     const module = parse({filename: "Main.java", language: "java", source})
-    const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (module.functions[0].body[0])
-    const equality = /** @type {import("../src/semantic/types.js").BinaryExpression} */ (branch.consequent[0].expression)
+    const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (module.functions[0].body.statements[0])
+    const equality = /** @type {import("../src/semantic/types.js").BinaryExpression} */ (branch.consequent.statements[0].expression)
     const record = getNodeProvenance(module, equality)
     const equalityOperator = record.ranges.equalityOperator
 
