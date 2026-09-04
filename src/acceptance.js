@@ -139,10 +139,16 @@ function validateRequest(input) {
       seen.add(stage.stage)
       const argumentCandidate = stage.arguments
       const stageArguments = isDenseArray(argumentCandidate) ? [...argumentCandidate] : undefined
+      const toolCandidate = stage.tool
+      const tool = isPlainObject(toolCandidate) ? Object.freeze({
+        executable: toolCandidate.executable,
+        id: toolCandidate.id,
+        source: toolCandidate.source,
+        version: toolCandidate.version
+      }) : undefined
 
       if (stageArguments == undefined || !stageArguments.every((argument) => typeof argument == "string" && !argument.includes("\0")) ||
-        !isTool(stage.tool)) invalidRunner(`Acceptance stage '${stage.stage}' has an invalid tool or argument array.`, input.target)
-      const tool = Object.freeze({executable: stage.tool.executable, version: stage.tool.version})
+        !isTool(tool)) invalidRunner(`Acceptance stage '${stage.stage}' has an invalid tool or argument array.`, input.target)
 
       return Object.freeze({arguments: stageArguments, stage: stage.stage, tool})
     })

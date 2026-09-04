@@ -71,12 +71,12 @@ export function finalizeByteMapping(candidate) {
     if (!isSafeArtifactPath(generatedPath)) {
       invalidByteMapping("Byte mapping requires a safe generated artifact path.")
     }
-    if (typeof candidate.generated.byteLength != "number" || !Number.isSafeInteger(candidate.generated.byteLength) ||
-      candidate.generated.byteLength < 0) {
+    const byteLength = candidate.generated.byteLength
+
+    if (typeof byteLength != "number" || !Number.isSafeInteger(byteLength) || byteLength < 0) {
       invalidByteMapping("Byte mapping requires a non-negative safe byte length.")
     }
     if (!isDenseArray(candidate.ranges)) invalidByteMapping("Byte mapping ranges must be an ordered dense array.")
-    const byteLength = /** @type {number} */ (candidate.generated.byteLength)
     let previousEnd = 0
     const ranges = candidate.ranges.map((range, index) => {
       if (!isPlainObject(range) || !isPlainObject(range.generated)) invalidByteMapping(`Byte range ${index} is malformed.`)

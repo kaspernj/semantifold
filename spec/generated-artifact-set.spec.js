@@ -190,6 +190,29 @@ describe("generated artifact sets", () => {
     assert.deepEqual(binarySet.artifacts[0].content, new Uint8Array([1, 2]))
   })
 
+  it("rejects lone content surrogates while preserving complete Unicode scalar pairs", () => {
+    const artifact = {
+      contentKind: "text",
+      mediaType: "text/plain",
+      ownership: "generated",
+      path: "program.txt",
+      provenance: synthetic(),
+      role: "entry"
+    }
+
+    for (const content of ["high \uD800\n", "low \uDC00\n"]) {
+      expectInvalid(() => createGeneratedArtifactSet({
+        artifacts: [{...artifact, content}],
+        target: "demo"
+      }))
+    }
+
+    const content = "rocket \uD83D\uDE80\n"
+    const set = createGeneratedArtifactSet({artifacts: [{...artifact, content}], target: "demo"})
+
+    expect(set.artifacts[0].content).toEqual(content)
+  })
+
   it("deeply detaches and freezes synthetic related origins and location points", () => {
     const relatedOrigin = {
       location: {

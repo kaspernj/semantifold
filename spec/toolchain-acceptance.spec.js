@@ -683,6 +683,71 @@ printf 'expected\n'
     })
   })
 
+  it("reads every consumed acceptance tool field once before validation and execution", async () => {
+    await withTemporaryDirectory("semantifold-runner-tool-accessors-", async (directory) => {
+      const unexpectedMarker = path.join(directory, "unexpected-executable")
+      const expectedExecutable = await fakeExecutable(directory, "expected-accessor-tool", "#!/bin/sh\nprintf 'expected\\n'\n")
+      const unexpectedExecutable = await fakeExecutable(directory, "unexpected-accessor-tool", `#!/bin/sh
+printf 'unexpected\n' > "${unexpectedMarker}"
+printf 'unexpected\n'
+`)
+      const reads = {executable: 0, id: 0, source: 0, version: 0}
+      const tool = {}
+
+      Object.defineProperties(tool, {
+        executable: {
+          enumerable: true,
+          get() {
+            reads.executable += 1
+            return reads.executable <= 3 ? expectedExecutable : unexpectedExecutable
+          }
+        },
+        id: {
+          enumerable: true,
+          get() {
+            reads.id += 1
+            return reads.id == 1 ? "expected-accessor-tool" : 7
+          }
+        },
+        source: {
+          enumerable: true,
+          get() {
+            reads.source += 1
+            return reads.source == 1 ? "canonical" : "invalid"
+          }
+        },
+        version: {
+          enumerable: true,
+          get() {
+            reads.version += 1
+            return reads.version <= 2 ? "expected-accessor-tool 1" : "unexpected-version"
+          }
+        }
+      })
+      const artifacts = createGeneratedArtifactSet({artifacts: [{
+        content: "input\n",
+        contentKind: "text",
+        mediaType: "text/plain",
+        ownership: "generated",
+        path: "input.txt",
+        provenance: synthetic(),
+        role: "entry"
+      }], target: "demo"})
+      const result = await runAcceptanceStages({
+        artifacts,
+        stages: [{arguments: [], stage: "execute", tool: /** @type {any} */ (tool)}],
+        target: "demo"
+      })
+
+      expect(result.stages[0].stdout).toEqual("expected\n")
+      expect(result.stages[0].executable).toEqual(expectedExecutable)
+      expect(result.stages[0].version).toEqual("expected-accessor-tool 1")
+      expect(reads).toEqual({executable: 1, id: 1, source: 1, version: 1})
+      await assert.rejects(access(unexpectedMarker),
+        (error) => error instanceof Error && "code" in error && error.code == "ENOENT")
+    })
+  })
+
   it("reads each acceptance-stage argument once before validation and execution", async () => {
     await withTemporaryDirectory("semantifold-stage-argument-accessor-", async (directory) => {
       const marker = path.join(directory, "executed-argument")

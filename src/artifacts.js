@@ -7,6 +7,7 @@ import {finalizeByteMapping} from "./binary-mapping.js"
 import {SemantifoldDiagnostic} from "./diagnostic.js"
 import {finalizeMapping, toSourceMapV3} from "./mapping.js"
 import {isSourceRangeOrdered} from "./semantic/location.js"
+import {hasOnlyUnicodeScalars} from "./semantic/scalars.js"
 
 const artifactRoles = new Set(["entry", "source", "manifest", "support", "mapping", "resource", "loader"])
 const mediaTypePattern = /^[A-Za-z0-9!#$&^_.+-]+\/[A-Za-z0-9!#$&^_.+-]+(?:;[\u0020-\u007e]+)?$/u
@@ -67,7 +68,7 @@ export function createGeneratedArtifactSet(candidate) {
       let content
 
       if (contentKind == "text") {
-        if (typeof contentValue != "string" || contentValue.length == 0) {
+        if (typeof contentValue != "string" || contentValue.length == 0 || !hasOnlyUnicodeScalars(contentValue)) {
           invalidArtifactSet(`Text artifact '${artifactPath}' requires non-empty string content.`, target)
         }
         content = contentValue
