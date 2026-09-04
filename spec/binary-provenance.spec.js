@@ -77,6 +77,19 @@ describe("binary and resource provenance", () => {
     expectInvalid(() => createByteMapping(undefined))
   })
 
+  it("rejects non-numeric serialized schema-version discriminators", () => {
+    const mapping = {
+      coordinateSystem: "bytes",
+      generated: {byteLength: 0, path: "module.bin"},
+      ranges: [],
+      schema: "SemantifoldByteMapping"
+    }
+
+    for (const version of ["1", true]) {
+      expectInvalid(() => parseByteMapping(JSON.stringify({...mapping, version})))
+    }
+  })
+
   it("rejects sparse byte-range and provenance-origin arrays", () => {
     const location = {
       end: {column: 2, line: 1, offset: 1},

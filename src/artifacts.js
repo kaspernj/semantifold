@@ -62,19 +62,20 @@ export function createGeneratedArtifactSet(candidate) {
         entryPaths.push(artifactPath)
       }
 
+      const contentValue = artifact.content
       /** @type {string | Uint8Array} */
       let content
 
       if (contentKind == "text") {
-        if (typeof artifact.content != "string" || artifact.content.length == 0) {
+        if (typeof contentValue != "string" || contentValue.length == 0) {
           invalidArtifactSet(`Text artifact '${artifactPath}' requires non-empty string content.`, target)
         }
-        content = artifact.content
+        content = contentValue
       } else if (contentKind == "binary") {
-        if (!(artifact.content instanceof Uint8Array) || artifact.content.byteLength == 0) {
+        if (!(contentValue instanceof Uint8Array) || contentValue.byteLength == 0) {
           invalidArtifactSet(`Binary artifact '${artifactPath}' requires non-empty bytes.`, target)
         }
-        content = new Uint8Array(artifact.content)
+        content = new Uint8Array(contentValue)
       } else invalidArtifactSet(`Artifact '${artifactPath}' has an invalid content kind.`, target)
 
       const provenance = validateArtifactProvenance(artifact.provenance, contentKind, artifactPath, content, target)

@@ -7,6 +7,7 @@ import {isDenseArray} from "./array.js"
 import {createGeneratedArtifactSet} from "./artifacts.js"
 import {SemantifoldDiagnostic} from "./diagnostic.js"
 import {exceededOwnedDeadline, executeFileWithDeadline} from "./subprocess.js"
+import {isSupportedTimeoutMs, maximumTimeoutMs} from "./timeout.js"
 import {deterministicEnvironment} from "./toolchains.js"
 
 const acceptanceMaxBuffer = 16 * 1024 * 1024
@@ -117,8 +118,10 @@ export async function runAcceptanceStages(input) {
  */
 function validateRequest(input) {
   try {
-    if (typeof input.target != "string" || input.target.length == 0 || !Number.isSafeInteger(input.timeoutMs) || input.timeoutMs <= 0 ||
-      !isDenseArray(input.stages) || input.stages.length == 0) invalidRunner("Acceptance requires a target, positive timeout, and non-empty ordered stages.", input.target)
+    if (typeof input.target != "string" || input.target.length == 0 || !isSupportedTimeoutMs(input.timeoutMs) ||
+      !isDenseArray(input.stages) || input.stages.length == 0) {
+      invalidRunner(`Acceptance requires a target, timeout from 1 through ${maximumTimeoutMs}ms, and non-empty ordered stages.`, input.target)
+    }
     const artifacts = createGeneratedArtifactSet(input.artifacts)
 
     if (artifacts.target != input.target) invalidRunner("Acceptance target must match the generated artifact-set target.", input.target)

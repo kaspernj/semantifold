@@ -60,7 +60,7 @@ export function stringifyByteMapping(mapping) {
 export function finalizeByteMapping(candidate) {
   try {
     if (!isPlainObject(candidate)) invalidByteMapping("Byte mapping must be a plain object.")
-    if (candidate.schema != "SemantifoldByteMapping" || candidate.version != 1 || candidate.coordinateSystem != "bytes") {
+    if (candidate.schema != "SemantifoldByteMapping" || candidate.version !== 1 || candidate.coordinateSystem != "bytes") {
       invalidByteMapping("Byte mapping requires SemantifoldByteMapping version 1 with byte coordinates.")
     }
     if (!isPlainObject(candidate.generated) || !isSafeArtifactPath(candidate.generated.path)) {

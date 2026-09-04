@@ -184,6 +184,68 @@ printf 'null-tool 1\n'
     })
   })
 
+  it("rejects timeout values above the supported Node timer range at every public runner boundary", async () => {
+    await withTemporaryDirectory("semantifold-timeout-range-", async (directory) => {
+      const executable = await fakeExecutable(directory, "timer-tool", "#!/bin/sh\nprintf 'v24.0.0\\n'\n")
+      const artifacts = createGeneratedArtifactSet({
+        artifacts: [{
+          content: "input\n",
+          contentKind: "text",
+          mediaType: "text/plain",
+          ownership: "generated",
+          path: "input.txt",
+          provenance: synthetic(),
+          role: "entry"
+        }],
+        target: "demo"
+      })
+      const tool = Object.freeze({
+        executable,
+        id: "timer-tool",
+        source: /** @type {const} */ ("override"),
+        version: "timer-tool 1",
+        versionArguments: Object.freeze([])
+      })
+      const unsupportedTimeoutMs = 2_147_483_648
+      const operations = [
+        () => discoverToolchain({
+          canonicalCommand: "timer-tool",
+          id: "timer-tool",
+          override: executable,
+          timeoutMs: unsupportedTimeoutMs,
+          versionArguments: []
+        }),
+        () => discoverCanonicalToolchain("node", {override: executable, timeoutMs: unsupportedTimeoutMs}),
+        () => runAcceptanceStages({
+          artifacts,
+          stages: [{arguments: [], stage: "execute", tool}],
+          target: "demo",
+          timeoutMs: unsupportedTimeoutMs
+        })
+      ]
+      /** @type {string[]} */
+      const outcomes = []
+
+      for (const operation of operations) {
+        try {
+          await operation()
+          outcomes.push("accepted")
+        } catch (error) {
+          outcomes.push(error instanceof SemantifoldDiagnostic ? error.code : "native")
+        }
+      }
+
+      expect(outcomes).toEqual(["INVALID_TOOLCHAIN", "INVALID_TOOLCHAIN", "INVALID_ACCEPTANCE_RUNNER"])
+      expect((await discoverToolchain({
+        canonicalCommand: "timer-tool",
+        id: "timer-tool",
+        override: executable,
+        timeoutMs: 2_147_483_647,
+        versionArguments: []
+      })).version).toEqual("v24.0.0")
+    })
+  })
+
   it("validates canonical toolchain IDs before lookup and diagnostic formatting", async () => {
     /** @type {any[]} */
     const malformedIds = [Symbol("node"), "", null, 1, {}, [], new String("node")]

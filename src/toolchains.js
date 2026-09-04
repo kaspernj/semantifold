@@ -6,6 +6,7 @@ import path from "node:path"
 import {isDenseArray} from "./array.js"
 import {SemantifoldDiagnostic} from "./diagnostic.js"
 import {exceededOwnedDeadline, executeFileWithDeadline} from "./subprocess.js"
+import {isSupportedTimeoutMs, maximumTimeoutMs} from "./timeout.js"
 
 const defaultTimeoutMs = 10_000
 
@@ -188,16 +189,14 @@ function definition(canonicalCommand, overrideEnvironmentVariable, versionArgume
  * @returns {void}
  */
 function validateDiscovery(input) {
-  const timeoutMs = typeof input.timeoutMs == "number" ? input.timeoutMs : Number.NaN
-
   if (typeof input.id != "string" || input.id.length == 0 ||
     typeof input.canonicalCommand != "string" || input.canonicalCommand.length == 0 ||
     input.canonicalCommand.includes("/") || input.canonicalCommand.includes("\\") || input.canonicalCommand.includes("\0") ||
     !isDenseArray(input.versionArguments) || !input.versionArguments.every(validArgument) ||
-    !isEnvironment(input.environment) || !Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 ||
+    !isEnvironment(input.environment) || !isSupportedTimeoutMs(input.timeoutMs) ||
     (input.override !== undefined && (typeof input.override != "string" || !path.isAbsolute(input.override) || input.override.includes("\0"))) ||
     (input.supportedVersion !== undefined && (!(input.supportedVersion instanceof RegExp) || input.supportedVersion.global || input.supportedVersion.sticky))) {
-    invalidToolchain("Toolchain discovery requires a canonical basename, absolute override, argument array, environment, and positive timeout.",
+    invalidToolchain(`Toolchain discovery requires a canonical basename, absolute override, argument array, environment, and timeout from 1 through ${maximumTimeoutMs}ms.`,
       typeof input.id == "string" ? input.id : "toolchain")
   }
 }

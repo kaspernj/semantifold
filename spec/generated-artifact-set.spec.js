@@ -132,6 +132,64 @@ describe("generated artifact sets", () => {
     expect(set.artifacts[0].provenance.kind).toEqual("bytes")
   })
 
+  it("retains exactly the text and binary content values read during validation", () => {
+    let textReads = 0
+    const textArtifact = {
+      contentKind: "text",
+      mediaType: "text/plain",
+      ownership: "generated",
+      path: "program.txt",
+      provenance: synthetic(),
+      role: "entry"
+    }
+
+    Object.defineProperty(textArtifact, "content", {
+      enumerable: true,
+      get() {
+        textReads += 1
+        return textReads == 1 ? "validated text\n" : textReads == 2 ? "changed text\n" : 7
+      }
+    })
+
+    let binaryReads = 0
+    const binaryValues = [new Uint8Array([1, 2]), new Uint8Array([3, 4]), new Uint8Array([9, 9])]
+    const binaryArtifact = {
+      contentKind: "binary",
+      mediaType: "application/octet-stream",
+      ownership: "generated",
+      path: "program.bin",
+      provenance: {
+        kind: "bytes",
+        mapping: {
+          coordinateSystem: "bytes",
+          generated: {byteLength: 2, path: "program.bin"},
+          ranges: [{generated: {end: 2, start: 0}, origin: synthetic("binary content")}],
+          schema: "SemantifoldByteMapping",
+          version: 1
+        }
+      },
+      role: "entry"
+    }
+
+    Object.defineProperty(binaryArtifact, "content", {
+      enumerable: true,
+      get() {
+        const content = binaryValues[Math.min(binaryReads, binaryValues.length - 1)]
+
+        binaryReads += 1
+        return content
+      }
+    })
+
+    const textSet = createGeneratedArtifactSet({artifacts: [textArtifact], target: "demo"})
+    const binarySet = createGeneratedArtifactSet({artifacts: [binaryArtifact], target: "demo"})
+
+    expect(textReads).toEqual(1)
+    expect(textSet.artifacts[0].content).toEqual("validated text\n")
+    expect(binaryReads).toEqual(1)
+    assert.deepEqual(binarySet.artifacts[0].content, new Uint8Array([1, 2]))
+  })
+
   it("deeply detaches and freezes synthetic related origins and location points", () => {
     const relatedOrigin = {
       location: {
