@@ -32,7 +32,12 @@ export function createGeneratedArtifactSet(candidate) {
     const directoryPaths = new Set()
     /** @type {string[]} */
     const entryPaths = []
-    const artifacts = candidate.artifacts.map((artifact, index) => {
+    /** @type {import("./semantic/types.js").GeneratedSetArtifact[]} */
+    const artifacts = []
+
+    for (let index = 0; index < candidate.artifacts.length; index += 1) {
+      const artifact = candidate.artifacts[index]
+
       if (!isPlainObject(artifact)) invalidArtifactSet(`Artifact ${index} must be a plain object.`, target)
       const artifactPath = artifact.path
       const mediaType = artifact.mediaType
@@ -81,7 +86,7 @@ export function createGeneratedArtifactSet(candidate) {
 
       const provenance = validateArtifactProvenance(artifact.provenance, contentKind, artifactPath, content, target)
 
-      return /** @type {import("./semantic/types.js").GeneratedSetArtifact} */ (freezeArtifact({
+      artifacts.push(/** @type {import("./semantic/types.js").GeneratedSetArtifact} */ (freezeArtifact({
         content,
         contentKind,
         mediaType,
@@ -89,8 +94,8 @@ export function createGeneratedArtifactSet(candidate) {
         path: artifactPath,
         provenance,
         role
-      }))
-    })
+      })))
+    }
 
     if (entryPaths.length != 1) invalidArtifactSet("Artifact set must declare exactly one entry artifact.", candidate.target)
 

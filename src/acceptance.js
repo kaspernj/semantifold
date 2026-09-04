@@ -128,7 +128,12 @@ function validateRequest(input) {
     const environment = deterministicEnvironment(input.environment)
     let previousIndex = -1
     const seen = new Set()
-    const stages = input.stages.map((stage) => {
+    /** @type {{arguments: string[], stage: import("./semantic/types.js").AcceptanceStage, tool: Readonly<{executable: string, version: string}>}[]} */
+    const stages = []
+
+    for (let stagePosition = 0; stagePosition < input.stages.length; stagePosition += 1) {
+      const stage = input.stages[stagePosition]
+
       if (!isPlainObject(stage) || typeof stage.stage != "string" || !stageIndexes.has(stage.stage) || seen.has(stage.stage)) {
         invalidRunner("Acceptance stages must be distinct known stage records.", input.target)
       }
@@ -150,8 +155,8 @@ function validateRequest(input) {
       if (stageArguments == undefined || !stageArguments.every((argument) => typeof argument == "string" && !argument.includes("\0")) ||
         !isTool(tool)) invalidRunner(`Acceptance stage '${stage.stage}' has an invalid tool or argument array.`, input.target)
 
-      return Object.freeze({arguments: stageArguments, stage: stage.stage, tool})
-    })
+      stages.push(Object.freeze({arguments: stageArguments, stage: stage.stage, tool}))
+    }
 
     return {artifacts, environment, stages, target: input.target, timeoutMs: input.timeoutMs}
   } catch (error) {

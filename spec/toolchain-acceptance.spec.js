@@ -1192,6 +1192,48 @@ kill -TERM $$
     })
   })
 
+  it("validates and executes stages without dispatching to a caller-owned map", async () => {
+    await withTemporaryDirectory("semantifold-hostile-stage-map-", async (directory) => {
+      const marker = path.join(directory, "executed")
+      const executable = await fakeExecutable(directory, "hostile-stage-map-tool", `#!/bin/sh
+printf 'executed\n' > "${marker}"
+printf 'executed\n'
+`)
+      const tool = Object.freeze({
+        executable,
+        id: "hostile-stage-map-tool",
+        source: /** @type {const} */ ("override"),
+        version: "hostile-stage-map-tool 1",
+        versionArguments: Object.freeze([])
+      })
+      const artifacts = createGeneratedArtifactSet({artifacts: [{
+        content: "input\n",
+        contentKind: "text",
+        mediaType: "text/plain",
+        ownership: "generated",
+        path: "input.txt",
+        provenance: synthetic(),
+        role: "entry"
+      }], target: "demo"})
+      const stages = [{arguments: [], stage: /** @type {const} */ ("execute"), tool}]
+      let hostileMapCalled = false
+
+      Object.defineProperty(stages, "map", {
+        value() {
+          hostileMapCalled = true
+          return []
+        }
+      })
+
+      const result = await runAcceptanceStages({artifacts, stages, target: "demo"})
+
+      expect(hostileMapCalled).toBeFalse()
+      expect(await readFile(marker, "utf8")).toEqual("executed\n")
+      expect(result.stages.length).toEqual(1)
+      expect(result.stages[0].stdout).toEqual("executed\n")
+    })
+  })
+
   it("preserves a primary stage failure when isolated-directory cleanup also fails", async () => {
     await withTemporaryDirectory("semantifold-runner-cleanup-", async (directory) => {
       const failingExecutable = await fakeExecutable(directory, "cleanup-fail-tool", "#!/bin/sh\nprintf 'primary output\\n'\nprintf 'primary error\\n' >&2\nexit 23\n")

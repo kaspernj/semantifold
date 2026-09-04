@@ -388,6 +388,35 @@ describe("generated artifact sets", () => {
     expect(accepted).toEqual([])
   })
 
+  it("constructs artifact snapshots without dispatching to a caller-owned map", () => {
+    const artifact = {
+      content: "ok\n",
+      contentKind: "text",
+      mediaType: "text/plain",
+      ownership: "generated",
+      path: "program.txt",
+      provenance: synthetic(),
+      role: "entry"
+    }
+    const artifacts = [artifact]
+    let hostileMapCalled = false
+
+    Object.defineProperty(artifacts, "map", {
+      value(callback) {
+        hostileMapCalled = true
+        callback(artifact, 0, artifacts)
+        return [undefined]
+      }
+    })
+
+    const set = createGeneratedArtifactSet({artifacts, target: "demo"})
+
+    expect(hostileMapCalled).toBeFalse()
+    expect(set.artifacts.length).toEqual(1)
+    expect(set.artifacts[0].path).toEqual("program.txt")
+    expect(Object.isFrozen(set.artifacts)).toBeTrue()
+  })
+
   it("requires Source Map v3 provenance to match the rich projection including an unmapped directive suffix", async () => {
     const source = await readFile(new URL("fixtures/program.ts", import.meta.url), "utf8")
     const module = parse({filename: "program.ts", language: "typescript", source})
