@@ -19,6 +19,7 @@ import {
 
 const synthetic = (reason = "acceptance fixture") => ({kind: "synthetic", reason, relatedOrigins: []})
 const ignoreSigtermFixture = fileURLToPath(new URL("fixtures/ignore-sigterm.js", import.meta.url))
+const ignoreSigtermTreeFixture = fileURLToPath(new URL("fixtures/ignore-sigterm-tree.js", import.meta.url))
 
 describe("toolchain discovery and staged acceptance", () => {
   it("discovers configured and canonical exact executables with captured versions", async () => {
@@ -270,6 +271,26 @@ printf 'null-tool 1\n'
         await assertForcedFixtureClosure(fixture)
       } finally {
         await terminateFixtureIfAlive(fixture.readyPath)
+      }
+    })
+  })
+
+  it("closes a TERM-resistant version-probe process group and all inherited output pipes", async () => {
+    await withTemporaryDirectory("semantifold-version-tree-timeout-", async (directory) => {
+      const fixture = await processTreeFixture(directory, "version-tree")
+      const startedAt = Date.now()
+
+      try {
+        await assert.rejects(() => discoverToolchain({
+          canonicalCommand: "node",
+          id: "version-tree",
+          override: process.execPath,
+          timeoutMs: 1_000,
+          versionArguments: [ignoreSigtermTreeFixture, "parent", fixture.stateDirectory]
+        }), (error) => error instanceof SemantifoldDiagnostic && error.code == "TOOL_VERSION_TIMEOUT" && error.signal == "SIGKILL")
+        await assertForcedProcessTreeClosure(fixture, Date.now() - startedAt)
+      } finally {
+        await terminateProcessTreeIfAlive(fixture)
       }
     })
   })
@@ -609,6 +630,46 @@ kill -TERM $$
     })
   })
 
+  it("closes a TERM-resistant acceptance process group and all inherited output pipes", async () => {
+    await withTemporaryDirectory("semantifold-acceptance-tree-timeout-", async (directory) => {
+      const fixture = await processTreeFixture(directory, "acceptance-tree")
+      const tool = Object.freeze({
+        executable: process.execPath,
+        id: "acceptance-tree",
+        source: /** @type {const} */ ("override"),
+        version: process.version,
+        versionArguments: Object.freeze([])
+      })
+      const artifacts = createGeneratedArtifactSet({artifacts: [{
+        content: "input\n",
+        contentKind: "text",
+        mediaType: "text/plain",
+        ownership: "generated",
+        path: "input.txt",
+        provenance: synthetic(),
+        role: "entry"
+      }], target: "demo"})
+      const startedAt = Date.now()
+
+      try {
+        await assert.rejects(() => runAcceptanceStages({
+          artifacts,
+          stages: [{
+            arguments: [ignoreSigtermTreeFixture, "parent", fixture.stateDirectory],
+            stage: "execute",
+            tool
+          }],
+          target: "demo",
+          timeoutMs: 1_000
+        }), (error) => error instanceof SemantifoldDiagnostic && error.code == "ACCEPTANCE_TIMEOUT" &&
+          error.stage == "execute" && error.signal == "SIGKILL")
+        await assertForcedProcessTreeClosure(fixture, Date.now() - startedAt)
+      } finally {
+        await terminateProcessTreeIfAlive(fixture)
+      }
+    })
+  })
+
   it("defaults acceptance environment and timeout only when they are undefined", async () => {
     await withTemporaryDirectory("semantifold-acceptance-null-boundaries-", async (directory) => {
       const executable = await fakeExecutable(directory, "acceptance-null-tool", "#!/bin/sh\nprintf 'launched\\n' > \"$1\"\n")
@@ -895,4 +956,93 @@ async function terminateFixtureIfAlive(readyPath) {
   } catch (error) {
     if (!(error instanceof Error && "code" in error && error.code == "ESRCH")) throw error
   }
+}
+
+/**
+ * Creates evidence storage for a parent/grandchild process-group fixture.
+ * @param {string} directory - Test-owned temporary directory.
+ * @param {string} name - Fixture directory name.
+ * @returns {Promise<{stateDirectory: string}>} Fixture state.
+ */
+async function processTreeFixture(directory, name) {
+  const stateDirectory = path.join(directory, name)
+
+  await mkdir(stateDirectory)
+
+  return {stateDirectory}
+}
+
+/**
+ * Proves both TERM-resistant processes closed before either safety exit.
+ * @param {{stateDirectory: string}} fixture - Process-tree evidence.
+ * @param {number} elapsedMs - Complete API duration.
+ * @returns {Promise<void>}
+ */
+async function assertForcedProcessTreeClosure(fixture, elapsedMs) {
+  const parentPid = await recordedPid(fixture, "parent")
+  const grandchildPid = await recordedPid(fixture, "grandchild")
+
+  assert.ok(elapsedMs < 3_000, `Process-tree timeout took ${elapsedMs}ms.`)
+  expect(await readFile(path.join(fixture.stateDirectory, "ready"), "utf8")).toEqual("parent and grandchild ready\n")
+  expect(await readFile(path.join(fixture.stateDirectory, "parent.term"), "utf8")).toEqual("SIGTERM\n")
+  expect(await readFile(path.join(fixture.stateDirectory, "grandchild.term"), "utf8")).toEqual("SIGTERM\n")
+  for (const name of ["parent.safety", "grandchild.safety"]) {
+    await assert.rejects(access(path.join(fixture.stateDirectory, name)),
+      (error) => error instanceof Error && "code" in error && error.code == "ENOENT")
+  }
+  await assertProcessNotAlive(parentPid)
+  await assertProcessNotAlive(grandchildPid)
+}
+
+/**
+ * Guarantees fixture cleanup when the lifecycle or an assertion fails.
+ * @param {{stateDirectory: string}} fixture - Process-tree evidence.
+ * @returns {Promise<void>}
+ */
+async function terminateProcessTreeIfAlive(fixture) {
+  const parentPid = await recordedPid(fixture, "parent", false)
+  const grandchildPid = await recordedPid(fixture, "grandchild", false)
+
+  if (grandchildPid != undefined) killIfAlive(grandchildPid)
+  if (parentPid != undefined) killIfAlive(parentPid)
+}
+
+/**
+ * Reads one fixture PID.
+ * @param {{stateDirectory: string}} fixture - Process-tree evidence.
+ * @param {"parent" | "grandchild"} name - Process name.
+ * @param {boolean} [required] - Whether missing evidence fails.
+ * @returns {Promise<number | undefined>} Recorded PID.
+ */
+async function recordedPid(fixture, name, required = true) {
+  try {
+    return Number.parseInt(await readFile(path.join(fixture.stateDirectory, `${name}.pid`), "utf8"), 10)
+  } catch (error) {
+    if (!required && error instanceof Error && "code" in error && error.code == "ENOENT") return undefined
+    throw error
+  }
+}
+
+/** @param {number} pid Process or negative process-group identity. */
+function killIfAlive(pid) {
+  try {
+    process.kill(pid, "SIGKILL")
+  } catch (error) {
+    if (!(error instanceof Error && "code" in error && error.code == "ESRCH")) throw error
+  }
+}
+
+/** @param {number} pid Exact recorded process identity. */
+async function assertProcessNotAlive(pid) {
+  try {
+    process.kill(pid, 0)
+  } catch (error) {
+    assert.ok(error instanceof Error && "code" in error && error.code == "ESRCH")
+    return
+  }
+
+  if (process.platform != "linux") assert.fail(`Process ${pid} remains signalable after process-group closure.`)
+  const fields = (await readFile(`/proc/${pid}/stat`, "utf8")).split(" ")
+
+  expect(fields[2]).toEqual("Z")
 }

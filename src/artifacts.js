@@ -6,6 +6,7 @@ import {isSafeArtifactPath, isValidFilenameMetadata} from "./artifact-path.js"
 import {finalizeByteMapping} from "./binary-mapping.js"
 import {SemantifoldDiagnostic} from "./diagnostic.js"
 import {finalizeMapping, toSourceMapV3} from "./mapping.js"
+import {isSourceRangeOrdered} from "./semantic/location.js"
 
 const artifactRoles = new Set(["entry", "source", "manifest", "support", "mapping", "resource", "loader"])
 const mediaTypePattern = /^[A-Za-z0-9!#$&^_.+-]+\/[A-Za-z0-9!#$&^_.+-]+(?:;[\u0020-\u007e]+)?$/u
@@ -253,7 +254,7 @@ function validateRelatedOrigin(value, artifactPath, index, target) {
   if (!isPlainObject(value) || typeof value.sourceId != "string" || value.sourceId.length == 0 ||
     !isPlainObject(value.location) || typeof value.location.filename != "string" || value.location.filename.length == 0 ||
     !validSourcePoint(value.location.start) || !validSourcePoint(value.location.end) ||
-    value.location.end.offset < value.location.start.offset) {
+    value.location.end.offset < value.location.start.offset || !isSourceRangeOrdered(value.location.start, value.location.end)) {
     invalidArtifactSet(`Artifact '${artifactPath}' has malformed related origin ${index}.`, target)
   }
 

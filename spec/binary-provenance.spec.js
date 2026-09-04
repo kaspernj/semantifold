@@ -162,6 +162,37 @@ describe("binary and resource provenance", () => {
       })))
     }
   })
+
+  it("rejects backwards source coordinates while preserving equal zero-width locations", () => {
+    const base = {byteLength: 1, path: "coordinates.bin"}
+    const locations = [
+      {
+        end: {column: 1, line: 1, offset: 1},
+        filename: "source.ts",
+        start: {column: 1, line: 2, offset: 0}
+      },
+      {
+        end: {column: 2, line: 1, offset: 1},
+        filename: "source.ts",
+        start: {column: 3, line: 1, offset: 0}
+      }
+    ]
+
+    for (const location of locations) {
+      expectInvalid(() => createByteMapping({...base, ranges: [{
+        generated: {end: 1, start: 0},
+        origin: {kind: "source", location, sourceId: "source:0"}
+      }]}))
+    }
+
+    const point = {column: 2, line: 1, offset: 0}
+    const valid = createByteMapping({...base, ranges: [{
+      generated: {end: 1, start: 0},
+      origin: {kind: "source", location: {end: point, filename: "source.ts", start: point}, sourceId: "source:0"}
+    }]})
+
+    expect(valid.ranges.length).toEqual(1)
+  })
 })
 
 /**

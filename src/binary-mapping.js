@@ -3,6 +3,7 @@
 import {isDenseArray} from "./array.js"
 import {isSafeArtifactPath} from "./artifact-path.js"
 import {SemantifoldDiagnostic} from "./diagnostic.js"
+import {isSourceRangeOrdered} from "./semantic/location.js"
 
 /**
  * Creates and validates an immutable byte-coordinate provenance map.
@@ -172,7 +173,8 @@ function validateRelatedOrigin(value, label) {
  */
 function validateLocation(value, label) {
   if (!isPlainObject(value) || typeof value.filename != "string" || value.filename.length == 0 ||
-    !validPoint(value.start) || !validPoint(value.end) || value.end.offset < value.start.offset) {
+    !validPoint(value.start) || !validPoint(value.end) || value.end.offset < value.start.offset ||
+    !isSourceRangeOrdered(value.start, value.end)) {
     invalidByteMapping(`${label} contains an invalid source location.`)
   }
 

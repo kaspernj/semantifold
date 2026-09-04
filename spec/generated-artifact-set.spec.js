@@ -418,6 +418,54 @@ describe("generated artifact sets", () => {
     }
   })
 
+  it("rejects backwards artifact origin coordinates while preserving equal zero-width locations", () => {
+    const valid = {
+      content: "support\n",
+      contentKind: "text",
+      mediaType: "text/plain",
+      ownership: "generated",
+      path: "support.txt",
+      role: "entry"
+    }
+    const locations = [
+      {
+        end: {column: 1, line: 1, offset: 1},
+        filename: "source.ts",
+        start: {column: 1, line: 2, offset: 0}
+      },
+      {
+        end: {column: 2, line: 1, offset: 1},
+        filename: "source.ts",
+        start: {column: 3, line: 1, offset: 0}
+      }
+    ]
+
+    for (const location of locations) {
+      expectInvalid(() => createGeneratedArtifactSet({
+        artifacts: [{
+          ...valid,
+          provenance: {kind: "synthetic", reason: "support", relatedOrigins: [{location, sourceId: "source:0"}]}
+        }],
+        target: "demo"
+      }))
+    }
+
+    const point = {column: 2, line: 1, offset: 0}
+    const set = createGeneratedArtifactSet({
+      artifacts: [{
+        ...valid,
+        provenance: {
+          kind: "synthetic",
+          reason: "support",
+          relatedOrigins: [{location: {end: point, filename: "source.ts", start: point}, sourceId: "source:0"}]
+        }
+      }],
+      target: "demo"
+    })
+
+    expect(set.entry).toEqual("support.txt")
+  })
+
   it("rejects unsafe paths, duplicates, malformed content, ownership, and entry declarations transactionally", () => {
     const valid = {
       content: "ok\n",
