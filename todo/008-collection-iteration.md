@@ -14,6 +14,8 @@ No loop or abrupt loop-control statement exists in [`../src/semantic/types.js`](
 
 ## Language matrix
 
+This matrix records the original-five mappings researched for this task. Tasks 015–021 complete transitively first; implementation must add Python, C#, C, C++, and Rust frontend/backend loop mappings and the browser Wasm structured-control lowering or an explicit documented and tested target capability rejection. Task 013 remains intentionally original-five-only.
+
 | Language | Representative accepted source | Required constraint/rejection |
 | --- | --- | --- |
 | Ruby | `items.each do |item| ... end` | Use `each` block only on a resolved semantic list. Reject `Hash#each`, `for` scope difference, arbitrary block calls, `while`/`until`, `times`, ranges, nonlocal block return, redo/retry, and iterator mutation. |
@@ -53,10 +55,10 @@ No loop or abrupt loop-control statement exists in [`../src/semantic/types.js`](
 
 ## Tests and acceptance
 
-- Five-language equivalence fixtures iterate lists in deterministic order, use nested conditionals, continue one item, break later, and accumulate/print scalar results.
+- Registered-language equivalence fixtures iterate lists in deterministic order, use nested conditionals, continue one item, break later, and accumulate/print scalar results.
 - Negative specs cover map iteration in every language, Ruby `for`/arbitrary blocks, JS/TS `for...in`/classic/await/destructuring, PHP key binding/by-reference/alternative syntax, Java `entrySet`/basic-for/array/stream/raw types, illegal controls, and mutation.
 - Test collection expression evaluation exactly once and iteration binding scope/immutability.
-- Generate/reparse and execute all five targets through real toolchains, asserting exact ordered output and equivalent loop/control nodes.
+- Generate/reparse and execute every required registered target through real toolchains, asserting exact ordered output and equivalent loop/control nodes.
 
 ## Documentation and changelog
 
@@ -71,4 +73,4 @@ Map iteration/entry bindings (deferred to [014-ordered-map-iteration.md](014-ord
 - One parser-neutral loop node represents list iteration with exact order, scope, and one-time evaluation; map operands are rejected.
 - All five adapters exhaustively recognize only their canonical forms; all backends validate and emit reparsable equivalents.
 - Loop-control/type/location diagnostics are focused and stable.
-- Ordered real five-runtime execution and semantic round-trip specs pass with docs/changelog updates.
+- Ordered real registered-runtime execution and semantic round-trip specs pass with docs/changelog updates.

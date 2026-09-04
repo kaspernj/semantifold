@@ -14,6 +14,8 @@ The semantic IR models only return as abrupt completion. There is no error value
 
 ## Language matrix
 
+This matrix records the original-five mappings researched for this conditional task. Its implementation must extend the error model to Python, C#, C, C++, and Rust frontends/backends and state an exact browser Wasm lowering or documented tested rejection; C's lack of exceptions and Rust's `Result`/panic split must not be approximated. Task 013 remains intentionally original-five-only.
+
 | Language | Representative accepted source | Required constraint/rejection |
 | --- | --- | --- |
 | Ruby | canonical `class ValidationError < StandardError`; `raise ValidationError, "bad"`; `begin ... rescue ValidationError => error ... end` | Require explicit rescue class/binding. Reject bare raise/re-raise, broad/default rescue, multiple rescue, retry, rescue modifiers, else/ensure, fatal exception classes, and arbitrary payloads. |
@@ -57,7 +59,7 @@ The semantic IR models only return as abrupt completion. There is no error value
 - Equivalent fixtures raise/catch one error, inspect/print its message, exercise non-throw and caught paths, and propagate an unmatched nested error to an outer exact handler.
 - Negative specs cover arbitrary JS throws, unguarded/broad catches, Ruby default rescue/retry/ensure, PHP multi-catch/finally/throw expressions, Java checked/multi-catch/resources/finally, wrong payloads, and malformed error classes.
 - Flow tests cover returns versus raises, statements after raise, catch scope, and malformed externally built IR.
-- Generate/reparse and run all five targets through real toolchains with exact caught/non-caught observable output (without depending on runtime stack-trace text).
+- Generate/reparse and run every required registered target through real toolchains with exact caught/non-caught observable output (without depending on runtime stack-trace text).
 
 ## Documentation and changelog
 
@@ -72,4 +74,4 @@ Checked effects/exceptions, arbitrary thrown values, multiple/union/broad catche
 - One nominal error meaning, abrupt raise, exact catch, and propagation are represented and flow-validated language-neutrally.
 - Canonical source profiles account for all parser children; arbitrary/broad target exception behavior is rejected.
 - Generated JS/TS typed guards and all other target handlers reparse to equivalent semantics.
-- Focused flow/diagnostic and real five-runtime handling tests pass with docs/changelog updates.
+- Focused flow/diagnostic and real registered-runtime handling tests pass with docs/changelog updates.

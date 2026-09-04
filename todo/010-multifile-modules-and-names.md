@@ -14,6 +14,8 @@ The public `parse` API accepts one filename/source and returns one `SemanticModu
 
 ## Language matrix
 
+This matrix records the original-five mappings researched for this conditional task. Its implementation must extend semantic module/artifact layout to Python, C#, C, C++, and Rust and decide explicitly whether the browser Wasm backend links modules, emits one combined module, or rejects the capability. Generated project/helper files from Task 015 are not semantic modules. Task 013 remains intentionally original-five-only.
+
 | Language | Representative accepted source | Required constraint/rejection |
 | --- | --- | --- |
 | Ruby | `require_relative "math_tools"`; `module MathTools`; qualified `MathTools.difference(...)` under one canonical module-function profile | Reject load-path/gem resolution, autoload, dynamic require, include/extend/prepend, reopening, top-level constant fallback, and cyclic initialization. |
@@ -53,7 +55,7 @@ The public `parse` API accepts one filename/source and returns one `SemanticModu
 
 ## Tests and acceptance
 
-- Add three-file equivalent projects for all five source languages with shared record/type and function modules plus one entry module.
+- Add three-file equivalent projects for every required registered source language with shared record/type and function modules plus one entry module.
 - Negative specs cover unresolved/private/wrong-kind imports, duplicate aliases, cycles, dynamic/default/star/CommonJS/bare-package forms, Composer/gem/classpath discovery, path traversal, and target case/name collisions.
 - Generated artifact sets are reparsed as a program and compared by resolved declaration identity after locations/artifact-specific spelling are removed.
 - Materialize every generated target project in a temporary directory and run real PHP/Ruby/Node, local `tsc`+Node, and `javac`+Java commands with exact output; missing commands fail.

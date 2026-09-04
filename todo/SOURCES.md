@@ -1,10 +1,11 @@
 # Roadmap research sources
 
-Access date for every external source below: **2026-09-02**.
+Access date for existing semantic-roadmap sources: **2026-09-02**. Language-expansion sources were checked **2026-09-04**.
 
 ## Repository baseline and inspected evidence
 
-- Exact baseline: `9e85016b927040f8b2a056ad4136ae3c5fa6fae7` (`docs/language-feature-todos`, identical to merged `master` when this roadmap was researched).
+- Original roadmap baseline: `9e85016b927040f8b2a056ad4136ae3c5fa6fae7` (`docs/language-feature-todos`, identical to merged `master` when the semantic roadmap was researched).
+- Language-expansion baseline: `de60a179ea5d3d320ad1323c36dbb0b31e0857d6` (`master`, with Tasks 001–004 implemented). The current public language IDs and closed frontend/backend dispatch were re-inspected at this commit.
 - Product scope and documentation: [`../README.md`](../README.md), [`../docs/goals.md`](../docs/goals.md), [`../docs/architecture.md`](../docs/architecture.md), [`../docs/language-support.md`](../docs/language-support.md), [`../docs/testing.md`](../docs/testing.md), and [`../docs/plans/2026-09-02-initial-toolchain.md`](../docs/plans/2026-09-02-initial-toolchain.md).
 - Public/semantic boundary: [`../index.js`](../index.js), [`../src/semantic/types.js`](../src/semantic/types.js), [`../src/semantic/validate.js`](../src/semantic/validate.js), [`../src/semantic/location.js`](../src/semantic/location.js), and [`../src/diagnostic.js`](../src/diagnostic.js).
 - Parser adapters: [`../src/frontends/javascript-typescript.js`](../src/frontends/javascript-typescript.js), [`../src/frontends/php.js`](../src/frontends/php.js), [`../src/frontends/ruby.js`](../src/frontends/ruby.js), and [`../src/frontends/java.js`](../src/frontends/java.js).
@@ -12,7 +13,24 @@ Access date for every external source below: **2026-09-02**.
 - Fixtures/specs: all files in [`../spec/fixtures/`](../spec/fixtures/) and [`../spec/`](../spec/), especially frontend equivalence, numeric/flag rejection, language-specific frontend validation, backend execution, identifier/shape validation, diagnostics, and repository contracts.
 - Packaging/tooling: [`../package.json`](../package.json), [`../package-lock.json`](../package-lock.json), [`../tsconfig.json`](../tsconfig.json), [`../Dockerfile`](../Dockerfile), [`../compose.yml`](../compose.yml), and [`../tensorbuzz.yml`](../tensorbuzz.yml).
 
-Evidence note: the baseline semantic schema has only `integer`, four expression variants, two function-statement variants, exact two-parameter/two-argument checks, one `if` with one return per branch, and one entry print. Frontends enumerate or structurally select the accepted parser children; backend validation separately enforces shape, identifiers, safe literals, and Java `int` range.
+Evidence note: the original schema had only `integer` and the minimal fixture shape. By the language-expansion baseline it also has Boolean/string scalars, typed locals/assignment, typed operators, ordered blocks, nested/optional conditionals, explicit flow validation, and rich provenance, while functions/calls still have exact two-parameter/two-argument shape. Frontends enumerate or structurally select accepted parser children; backend validation separately enforces shape, identifiers, scalar payloads, flow, safe literals, and Java `int` range.
+
+## Selected parser-distribution route for expansion
+
+Tasks 016–020 select the official Tree-sitter Node binding and the language grammar maintained in the official `tree-sitter` GitHub organization: [Node binding documentation](https://tree-sitter.github.io/node-tree-sitter/), [parser-use overview](https://tree-sitter.github.io/tree-sitter/using-parsers/), [Python grammar](https://github.com/tree-sitter/tree-sitter-python), [C# grammar](https://github.com/tree-sitter/tree-sitter-c-sharp), [C grammar](https://github.com/tree-sitter/tree-sitter-c), [C++ grammar](https://github.com/tree-sitter/tree-sitter-cpp), and [Rust grammar](https://github.com/tree-sitter/tree-sitter-rust).
+
+This is a selected integration route, not approval of unpinned future dependencies. Task 015 must qualify exact npm releases and lockfile integrity before any manifest edit: compatible Tree-sitter language ABI, Node 24 install/load behavior on the canonical lane, typed APIs, licenses, UTF-8 byte locations converted to Semantifold UTF-16 locations, comments/error/recovery nodes, complete Tasks 001–004 syntax coverage, and absence of postinstall downloads or bundled/generated archives. Dependencies must be ordinary npm registry packages; GitHub tarball/archive dependencies and vendored parser binaries are forbidden. A failed qualification blocks the task and requires an explicit roadmap/source amendment rather than a parser or source-text fallback.
+
+Registry metadata observed on 2026-09-04 identifies the following candidates. These are evidence that the selected route is distributed, not version pins or an ABI-compatibility conclusion:
+
+| Package | Observed latest | Upstream/license metadata |
+| --- | --- | --- |
+| [`tree-sitter`](https://registry.npmjs.org/tree-sitter/0.25.1) | `0.25.1` | official `tree-sitter/node-tree-sitter`, MIT |
+| [`tree-sitter-python`](https://registry.npmjs.org/tree-sitter-python/0.25.0) | `0.25.0` | official `tree-sitter/tree-sitter-python`, MIT |
+| [`tree-sitter-c-sharp`](https://registry.npmjs.org/tree-sitter-c-sharp/0.23.5) | `0.23.5` | official `tree-sitter/tree-sitter-c-sharp`, MIT |
+| [`tree-sitter-c`](https://registry.npmjs.org/tree-sitter-c/0.24.1) | `0.24.1` | official `tree-sitter/tree-sitter-c`, MIT |
+| [`tree-sitter-cpp`](https://registry.npmjs.org/tree-sitter-cpp/0.23.4) | `0.23.4` | official `tree-sitter/tree-sitter-cpp`, MIT |
+| [`tree-sitter-rust`](https://registry.npmjs.org/tree-sitter-rust/0.24.0) | `0.24.0` | official `tree-sitter/tree-sitter-rust`, MIT |
 
 ## Pinned parser and tool versions
 
@@ -94,6 +112,59 @@ Evidence note: PHP `array` intentionally combines list and map behavior and coer
 - [`@lezer/java` 1.1.3 registry record](https://registry.npmjs.org/%40lezer%2Fjava/1.1.3), [Lezer guide](https://lezer.codemirror.net/docs/guide/), and [Lezer reference](https://lezer.codemirror.net/docs/ref/) — pinned grammar identity, recovery behavior, tree offsets, and traversal APIs.
 
 Evidence note: Java requires boolean conditions, distinguishes primitives from references, has fixed-width numeric behavior, checks call signatures, has checked exceptions, and has nominal generic types. `Optional<T>` is the selected portable absence mapping because bare Java reference types do not declare non-nullability and the roadmap does not assume third-party annotations. Fully qualified `java.util` names avoid creating an import dependency before Task 010. The `Map` API explicitly states that the iteration order of `Map.of`, `Map.ofEntries`, and `Map.copyOf` results is unspecified and subject to change. Task 006 may therefore use those factories only for non-iterated construction, lookup, and size; Task 008 is list-only. Deferred Task 014 requires an insertion-ordered `LinkedHashMap` backing hidden behind `Collections.unmodifiableSequencedMap` (or another separately proven ordered representation) before map iteration is accepted or emitted.
+
+## Python
+
+- [Python language reference](https://docs.python.org/3/reference/index.html), [lexical analysis](https://docs.python.org/3/reference/lexical_analysis.html), [simple statements](https://docs.python.org/3/reference/simple_stmts.html), [compound statements and annotations](https://docs.python.org/3/reference/compound_stmts.html), and [expressions](https://docs.python.org/3/reference/expressions.html) — official syntax and runtime rules for literals, annotations, assignment, functions, conditions, calls, and operators.
+- [Python typing specification](https://typing.python.org/en/latest/spec/index.html) and [`typing` documentation](https://docs.python.org/3/library/typing.html) — distinction between annotation metadata/static tooling and runtime enforcement, plus dynamic/wider type forms excluded by Task 016.
+- [Python Unicode text](https://docs.python.org/3/library/stdtypes.html#text-sequence-type-str), [integer numeric types](https://docs.python.org/3/library/stdtypes.html#numeric-types-int-float-complex), and [Boolean values](https://docs.python.org/3/library/stdtypes.html#boolean-type-bool) — arbitrary-precision integers, `bool`'s runtime relationship to `int`, and Unicode string behavior.
+- [`py_compile`](https://docs.python.org/3/library/py_compile.html) and [Python command-line interface](https://docs.python.org/3/using/cmdline.html) — real compiler/runtime acceptance commands.
+
+Evidence note: Python annotations do not enforce types at runtime, conditions are truthy, `bool` is a subclass of `int`, and integers do not have the repository's safe/fixed-width boundary. Task 016 therefore parses exact `int`/`bool`/`str` annotations itself, keeps the types distinct in the IR, rejects dynamic forms and truthiness, and retains the existing safe-integer contract.
+
+## C# and .NET
+
+- [C# language specification](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/language-specification/), especially [types](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/language-specification/types), [variables](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/language-specification/variables), [expressions](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/language-specification/expressions), and [statements](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/language-specification/statements) — value/reference types, conversions, operators, calls, blocks, and control flow.
+- [Nullable reference types](https://learn.microsoft.com/en-us/dotnet/csharp/nullable-references), [nullable compiler option](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/compiler-options/language#nullable), and [integral numeric types](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/builtin-types/integral-numeric-types) — exact nullable-analysis and signed `long` boundaries.
+- [.NET project SDK overview](https://learn.microsoft.com/en-us/dotnet/core/project-sdk/overview), [`dotnet restore`](https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-restore), [`dotnet build`](https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-build), and [`dotnet run`](https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-run) — deterministic project artifact and real managed compile/runtime lane.
+
+Evidence note: C# `long` and `bool` are value types, while `string` is a sealed immutable reference type; nullable reference annotations are compile-time metadata backed by flow warnings, not distinct runtime types. Task 017 requires a pinned SDK/target framework, nullable enabled with warnings as errors, exact scalar types, and no boxing, `dynamic`, overload, identity, or nullable approximation.
+
+## C and Clang
+
+- [WG14 document log](https://www.open-std.org/jtc1/sc22/wg14/www/wg14_document_log.htm) and [C23 working draft N3096](https://www.open-std.org/jtc1/sc22/wg14/www/docs/n3096.pdf) — ISO working-group language/types/expressions/declaration/control/library evidence. The implementation task must state the exact selected C standard rather than assuming the newest draft.
+- [Clang command-line reference](https://clang.llvm.org/docs/ClangCommandLineReference.html), [language compatibility](https://clang.llvm.org/compatibility.html), [diagnostics reference](https://clang.llvm.org/docs/DiagnosticsReference.html), and [UndefinedBehaviorSanitizer](https://clang.llvm.org/docs/UndefinedBehaviorSanitizer.html) — compiler profile, warning/error flags, and focused native validation.
+- [Tree-sitter C grammar](https://github.com/tree-sitter/tree-sitter-c) — selected parser grammar, subject to Task 015 qualification.
+
+Evidence note: standard C exposes fixed-width types only through the implementation-provided `<stdint.h>` contract, signed overflow can be undefined, strings conventionally use NUL termination, and the language has neither exceptions nor garbage collection. Task 018 therefore selects `int64_t`, length-bearing immutable UTF-8 slices, explicit generated arena ownership/cleanup, strict Clang flags, and no pointers/preprocessor/user allocation in the source profile.
+
+## C++ and Clang
+
+- [ISO C++ working draft source](https://github.com/cplusplus/draft) and [WG21 papers index](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/) — working-group evidence for values, references, object lifetime, overloads, templates, exceptions, expressions, and the standard library.
+- [Clang C++ language status](https://clang.llvm.org/cxx_status.html), [Clang command-line reference](https://clang.llvm.org/docs/ClangCommandLineReference.html), and [AddressSanitizer](https://clang.llvm.org/docs/AddressSanitizer.html) — selected standard support, compiler flags, and focused lifetime validation.
+- [Tree-sitter C++ grammar](https://github.com/tree-sitter/tree-sitter-cpp) — selected parser grammar, distinct from C and subject to Task 015 qualification.
+
+Evidence note: C++ parsing and semantics include overload resolution, templates, value categories, references, object lifetime, exceptions, and undefined behavior that cannot be inferred from C. Task 019 therefore remains a separate adapter/backend with owned `std::string` values, fixed scalar types, no source references/templates/overloads/exceptions, and a fixed build-mode-independent overflow policy.
+
+## Rust and Cargo
+
+- [Rust Reference](https://doc.rust-lang.org/reference/), especially [types](https://doc.rust-lang.org/reference/types.html), [expressions](https://doc.rust-lang.org/reference/expressions.html), [statements](https://doc.rust-lang.org/reference/statements.html), and [items/functions](https://doc.rust-lang.org/reference/items/functions.html) — official language structure and semantics.
+- [Ownership](https://doc.rust-lang.org/book/ch04-01-what-is-ownership.html), [references and borrowing](https://doc.rust-lang.org/book/ch04-02-references-and-borrowing.html), [`Result` error handling](https://doc.rust-lang.org/book/ch09-02-recoverable-errors-with-result.html), and [panic reference](https://doc.rust-lang.org/reference/panic.html) — value moves/clones/borrows and the failure boundaries Task 020 must make explicit.
+- [Cargo manifest](https://doc.rust-lang.org/cargo/reference/manifest.html), [package layout](https://doc.rust-lang.org/cargo/guide/project-layout.html), [lockfile](https://doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html), and [offline option](https://doc.rust-lang.org/cargo/commands/cargo-build.html#manifest-options) — deterministic dependency-free generated crate and real toolchain acceptance.
+- [Tree-sitter Rust grammar](https://github.com/tree-sitter/tree-sitter-rust) — selected parser grammar, subject to Task 015 qualification.
+
+Evidence note: Rust ownership can move a `String`, source references introduce lifetime/borrow meaning, debug/release overflow defaults can differ, and `Result`/panic are distinct failure mechanisms. Task 020 uses owned strings with explicit generated clones/borrows, fixed Cargo profiles, no dependencies, and rejects source ownership/failure constructs beyond the initial IR.
+
+## WebAssembly and browser interoperability
+
+- [WebAssembly Core Specification](https://webassembly.github.io/spec/core/), [binary format](https://webassembly.github.io/spec/core/binary/index.html), [validation](https://webassembly.github.io/spec/core/valid/index.html), and [execution](https://webassembly.github.io/spec/core/exec/index.html) — normative module, instruction, binary, validation, memory, and trap behavior.
+- [WebAssembly JavaScript Interface](https://www.w3.org/TR/wasm-js-api-1/) and [Web API](https://www.w3.org/TR/wasm-web-api-1/) — standard browser compilation, instantiation, streaming, exports, memory, and error mapping.
+- [MDN WebAssembly JavaScript API](https://developer.mozilla.org/en-US/docs/WebAssembly/JavaScript_interface), [`instantiateStreaming`](https://developer.mozilla.org/en-US/docs/WebAssembly/Reference/JavaScript_interface/instantiateStreaming_static), and [loading and running Wasm](https://developer.mozilla.org/en-US/docs/WebAssembly/Guides/Loading_and_running) — durable browser integration and MIME/streaming behavior documentation.
+- [WebAssembly tool conventions](https://github.com/WebAssembly/tool-conventions), especially [debugging/source maps](https://github.com/WebAssembly/tool-conventions/blob/main/Debugging.md) — a Wasm source map uses generated line 1 with the column as binary byte offset and a `sourceMappingURL` custom section.
+- [WABT repository and command documentation](https://github.com/WebAssembly/wabt) — official `wasm-validate` implementation used as an independent installed validator, not as the production encoder.
+- [Chrome Headless mode](https://developer.chrome.com/docs/chromium/headless) — official real-browser command-line lane for deterministic local HTTP acceptance.
+
+Evidence note: core Wasm is a low-level binary instruction/module format with no ambient browser access or string type. Browser interaction is supplied through explicit imports and the JavaScript API. Task 021 is therefore target-only: an internal deterministic binary encoder, versioned imports/exports, exported memory with UTF-8 pointer/length strings, a JavaScript loader/HTML harness, byte-offset provenance, external source map/custom section, independent validation, and mandatory real headless-browser execution. It does not claim WAT or `.wasm` source normalization.
 
 ## Disposition evidence
 

@@ -1,42 +1,75 @@
 # Language feature roadmap
 
-## Purpose and baseline
+## Purpose and current baseline
 
-This folder is the durable, dependency-ordered implementation backlog for expanding Semantifold's language-neutral semantic subset. It is research and planning, not a claim that any listed capability is implemented. The evidence baseline is merged `master` commit `9e85016b927040f8b2a056ad4136ae3c5fa6fae7`; exact repository and external sources are recorded in [SOURCES.md](SOURCES.md).
+This folder is the durable, dependency-ordered implementation backlog for Semantifold. It is planning, not a claim that todo work is implemented. The current evidence baseline is merged `master` commit `de60a179ea5d3d320ad1323c36dbb0b31e0857d6`; repository and external evidence is recorded in [SOURCES.md](SOURCES.md).
 
-At that baseline, Semantifold models one `integer` type; safe integer literals; identifiers; `+`, `-`, and `>` binary expressions; unqualified calls; functions with exactly two required integer parameters; a body containing exactly one `if`/`else`; one return in each branch; and an entry point containing exactly one print. PHP, Ruby, JavaScript with JSDoc, TypeScript, and Java frontends normalize that slice, and all five backends generate executable source. This roadmap does not broaden that baseline by documentation alone.
+Tasks 001–004 are delivered. Semantifold currently models safe integer, boolean, and Unicode string scalars; explicitly typed locals and assignment; typed unary/binary expressions; ordered lexical blocks; nested strict-boolean conditionals; explicit returns; two-argument direct calls; and entry-point printing. PHP, Ruby, JavaScript with JSDoc, TypeScript, and Java are implemented as both frontends and source backends, with real-runtime and provenance/source-map coverage. Tasks 005–014 remain roadmap work.
+
+The next work is language expansion, not richer semantics. Adding adapters while the IR is small and stable exposes registration, artifact, toolchain, ownership, and diagnostic mistakes once; waiting until collections, optionals, records, modules, errors, and generics exist would multiply that work across every new language.
 
 ## Guiding principles
 
-1. Model meaning once. Semantic nodes describe values, types, evaluation order, bindings, control flow, and named program structure without embedding parser nodes or target spelling.
-2. Keep source and target capabilities separate. A frontend raises `UNSUPPORTED_SYNTAX`, `MISSING_TYPE`, or `PARSE_ERROR` at the best source span; a backend raises `UNSUPPORTED_CAPABILITY` at the originating semantic span before emitting any source.
-3. Never recover meaning from source text after an adapter rejects a parser node. Extend the existing Prism, Babel, `php-parser`, and Lezer adapters through their trees.
-4. Prefer a precisely portable subset over coincidentally similar syntax. Truthiness, numeric division and overflow, missing map keys, nullability, call binding, equality, exceptions, and concurrency differ and require explicit semantic contracts.
-5. Keep source-only rules in frontends (annotation association, declaration forms, parser errors) and target-only rules in backends (identifier legality, representable values, runtime/library availability, file layout).
-6. Add a focused spec and matching documentation with each behavior change. When generated execution applies, invoke real `php`, `ruby`, `node`, local `tsc`, `javac`, and `java`; unavailable commands fail rather than skip.
-7. Preserve source locations on every new semantic node, type constituent, declaration, binding, branch, argument, member, and import edge. Generated reparses have generated locations; semantic diagnostics retain original locations.
-8. Do not replace the current parsers, add a custom parser, expose parser trees publicly, or redesign Semantifold into a compiler framework.
+1. Model meaning once. Semantic nodes describe values, types, evaluation order, bindings, control flow, and named program structure without embedding parser nodes, ABI details, or target spelling.
+2. Register frontend and backend capabilities separately. A language may be a source frontend, a textual source backend, a binary backend, or a browser artifact lane; one `supportedLanguages` list must not imply all roles.
+3. Fail loudly. Frontends raise `UNSUPPORTED_SYNTAX`, `MISSING_TYPE`, or `PARSE_ERROR` at the best parser-owned span. Backends raise `UNSUPPORTED_CAPABILITY` at the originating semantic span before emitting any partial artifact.
+4. Never recover meaning from source text after an adapter rejects a parser node. Parser integrations traverse typed trees and reject recovery/error nodes and every unmodeled child.
+5. Prefer a precisely portable subset over coincidentally similar syntax. Numeric overflow, truthiness, string encoding/ownership, nullability, value/reference behavior, exceptions, panics, and browser host calls require explicit contracts.
+6. Keep source-only rules in frontends and target-only rules in backends. Generated runtime helpers, project manifests, browser glue, and ABI conventions do not enter the semantic IR.
+7. Preserve original source locations and rich provenance through every adapter. Text targets retain range mappings; binary targets additionally map generated byte offsets and ship a standards-compatible external source map where specified.
+8. Tests compile and execute with real installed toolchains. Missing compilers, runtimes, validators, or browsers fail the applicable acceptance lane rather than skip it.
+9. Parser/runtime dependencies must come from qualified registry or distribution packages. Do not bundle generated parser archives, download release tarballs during tests, or add source-text parsing fallbacks.
+10. Do not redesign Semantifold into a general compiler framework. Project artifacts for one semantic module do not implement Task 010 multi-file semantic modules or package-manager resolution.
 
 ## Prioritized phases
 
-### Phase 0 — semantic foundations (P0)
+### Delivered foundation — Tasks 001–004
 
 - [001 — Portable scalar values and types](001-portable-scalar-values-and-types.md)
 - [002 — Local declarations and assignment](002-local-declarations-and-assignment.md)
 - [003 — Typed operators and richer expressions](003-typed-operators-and-expressions.md)
 - [004 — Statement sequencing and general conditionals](004-statement-sequencing-and-conditionals.md)
+
+These tasks are present as durable design records and describe the implemented baseline.
+
+### Phase L0 — shared language-expansion contract (P0, next)
+
+- [015 — Shared language-expansion foundation](015-language-expansion-foundation.md)
+
+Task 015 separates language roles and capabilities, defines single-module project/artifact bundles, qualifies parser distribution, standardizes toolchain discovery and native/browser acceptance, and extends provenance rules to non-text artifacts.
+
+### Phase L1 — higher-level source and target languages (P0)
+
+- [016 — Python source and target support](016-python-source-and-target.md)
+- [017 — C# source and target support](017-csharp-source-and-target.md)
+
+Python first proves that explicit annotations can bound a dynamic language without admitting dynamic behavior. C# then proves managed compilation, project artifacts, nullable-reference discipline, and value/reference distinctions.
+
+### Phase L2 — native source and target languages (P0)
+
+- [018 — C source and target support](018-c-source-and-target.md)
+- [019 — C++ source and target support](019-cpp-source-and-target.md)
+- [020 — Rust source and target support](020-rust-source-and-target.md)
+
+C establishes compile/link/run, fixed-width scalar, explicit allocation, and no-GC/no-exception contracts. C++ is separate because value categories, overloads, templates, RAII, and standard-library ownership are not C semantics. Rust follows with an explicit owned-string lowering, generated crate layout, and bounded borrow/panic/`Result` profile.
+
+### Phase L3 — browser WebAssembly target (P0)
+
+- [021 — Browser-oriented WebAssembly target](021-browser-webassembly-target.md)
+
+Task 021 is a binary target/backend and browser-interoperability lane, not a Wasm source frontend. It defines the module ABI, memory/string representation, imports/exports, JavaScript loader, HTML harness, byte provenance/source map, validation, and real headless-browser execution. A future WebAssembly text or binary source frontend would require a separate proposal with a useful semantic normalization story.
+
+Tasks 015–021 form a deliberate adoption sequence. The dependencies are delivery gates as well as technical prerequisites: each step must leave the shared contracts proven before the next adds a more constrained execution or ownership model.
+
+### Phase 1 — portable semantic expansion (P1, after language adoption)
+
 - [005 — General required function signatures and calls](005-general-function-signatures-and-calls.md)
-
-These tasks remove hard-coded fixture shape while retaining explicit types, synchronous direct calls, and structured control flow.
-
-### Phase 1 — portable data and iteration (P1)
-
 - [006 — Immutable lists and maps](006-immutable-lists-and-maps.md)
 - [007 — Optional values and presence narrowing](007-optional-values-and-presence-narrowing.md)
 - [008 — Ordered list iteration](008-collection-iteration.md)
 - [013 — Five-language compatibility acceptance](013-five-language-compatibility-acceptance.md)
 
-Task 013 is the terminal acceptance task for the selected near-term slice, tasks 001–008. It does not wait for the conditional Phase 2/3 work.
+Tasks 005–008 begin only after Task 021. Task 013 retains its original purpose: it is the compatibility proof for Tasks 001–008 across the original five languages. It is a legacy regression gate, not acceptance for Python, C#, C, C++, Rust, or WebAssembly. Expanded-language coverage is owned by Tasks 015–021 and by the capability matrix that every later semantic task must update.
 
 ### Phase 2 — named structure and failure (P2, conditional)
 
@@ -45,95 +78,115 @@ Task 013 is the terminal acceptance task for the selected near-term slice, tasks
 - [011 — Typed errors and handling](011-typed-errors-and-handling.md)
 - [014 — Ordered map iteration](014-ordered-map-iteration.md)
 
-These are implementation-ready directions, but should start only after the portable slice is green. Task 014 also requires a distinct ordered-map semantic type and a genuinely ordered target representation; ordinary maps from Task 006 remain non-iterable. General inheritance, mutable object identity, arbitrary thrown values, and dependency installation remain excluded.
+These start only after the portable slice is green. Task 010 owns semantic multi-file programs; the generated helper/project files introduced by Task 015 remain artifacts for one semantic module. Task 014 requires a distinct ordered-map semantic type and a genuinely ordered representation in every required target.
 
 ### Phase 3 — parametric abstraction (P3, conditional)
 
 - [012 — Type parameters and generic declarations](012-type-parameters-and-generics.md)
 
-Generic declarations come after concrete collection and record types. PHP has no native generic declarations, so PHP support remains conditional on an explicit, parser-backed documentation convention; erasing unknown type parameters is not acceptable.
+Generic declarations come after concrete collection and record types. A backend or frontend must never erase an unsupported type parameter into `mixed`, `object`, a raw type, `void *`, or an unconstrained dynamic value.
 
-## Feature and language coverage matrix
+## Language-role and adoption matrix
 
-Legend: **now** is implemented at the baseline; **next** is in the Phase 0/1 portable slice; **later** is a conditional Phase 2/3 task; **reject** is deliberately out of scope for this roadmap.
+Legend: **implemented** describes the baseline, **planned** names the owning task, and **none** is an intentional role exclusion.
 
-| Semantic area | Ruby | JavaScript + JSDoc | TypeScript | PHP | Java | Disposition |
-| --- | --- | --- | --- | --- | --- | --- |
-| Integer fixture slice | now | now | now | now | now | Preserve while generalizing shape. |
-| Boolean and string values/types | next | next | next | next | next | Task 001; explicit annotations and exact literal preservation. |
-| Floating-point values | later | later | later | later | later | Conditional on a written IEEE-754/printing contract and JS/TS `number` disambiguation; exclude NaN, infinities, and negative zero initially. |
-| Local declarations and assignment | next | next | next | next | next | Task 002; simple identifiers, explicit types, initializer required. |
-| Richer operators | next | next | next | next | next | Task 003; type-directed portable operators, strict boolean conditions. |
-| Sequenced blocks and broader `if` | next | next | next | next | next | Task 004; optional `else`, nested branches, multiple statements. |
-| Required function signatures/calls of arbitrary arity | next | next | next | next | next | Task 005; optional/rest/keyword/overloaded/higher-order calls later or rejected. |
-| Immutable lists and maps | next | next | next | next | next | Task 006; lists preserve order; maps support construction, lookup, and size without a portable iteration-order promise. |
-| Optional values | next | next | next | next | next | Task 007; Java maps to `Optional<T>`, not implicit nullable references. |
-| Arbitrary unions | later | later | later | later | later | Defer until closed variants can be represented after Task 009; do not emit `Object`, `mixed`, or untyped unions. |
-| List iteration | next | next | next | next | next | Task 008; one insertion-ordered list `for-each` semantic operation. |
-| Map iteration | later | later | later | later | later | Task 014; defer until ordered maps are distinct in the IR and every target uses a validated ordered representation. Java `Map.of`/`Map.ofEntries` are not ordered representations. |
-| Records/member access | later | later | later | later | later | Task 009; immutable closed product values before general classes. |
-| Modules/imports/namespaces/packages | later | later | later | later | later | Task 010; explicit multi-file artifact API and name resolution. |
-| Exceptions/error handling | later | later | later | later | later | Task 011; one typed unchecked error path before full exception systems. |
-| Type parameters/generics | later | later | later | conditional | later | Task 012; no silent PHP erasure. |
-| Async/concurrency | reject | reject | reject | reject | reject | No shared scheduling, cancellation, ordering, or memory model is selected. |
-| Language-specific dynamic features | reject | reject | reject | reject | reject | No metaprogramming, `eval`, monkey-patching, prototype mutation, variable variables, reflection, dynamic loading, or unchecked casts. |
+| Language/artifact lane | Source frontend | Target backend | Artifact shape | Parser route | Initial acceptance |
+| --- | --- | --- | --- | --- | --- |
+| Ruby | implemented | implemented source | `.rb` | Prism | Tasks 001–004 |
+| JavaScript + JSDoc | implemented | implemented source | `.js` | Babel + comment parser | Tasks 001–004 |
+| TypeScript | implemented | implemented source | `.ts` | Babel | Tasks 001–004 |
+| PHP | implemented | implemented source | `.php` | `php-parser` | Tasks 001–004 |
+| Java | implemented | implemented source | `Main.java` | Lezer Java | Tasks 001–004 |
+| Python | planned in 016 | planned source in 016 | `program.py` | Tree-sitter Python, qualification required by 015 | Exact Tasks 001–004 profile |
+| C# | planned in 017 | planned source/project in 017 | `.cs` + deterministic `.csproj` | Tree-sitter C#, qualification required by 015 | Exact Tasks 001–004 profile |
+| C | planned in 018 | planned source/project in 018 | `.c` + generated support header | Tree-sitter C, qualification required by 015 | Exact Tasks 001–004 profile |
+| C++ | planned in 019 | planned source in 019 | `.cpp` | Tree-sitter C++, qualification required by 015 | Exact Tasks 001–004 profile |
+| Rust | planned in 020 | planned Cargo project in 020 | `Cargo.toml`, lockfile, `src/main.rs` | Tree-sitter Rust, qualification required by 015 | Exact Tasks 001–004 profile |
+| Browser WebAssembly | none | planned binary/browser target in 021 | `.wasm`, `.wasm.map`, `.mjs`, `.html` | no source parser | Exact Tasks 001–004 profile |
 
-## Dependency graph
+Wasm is intentionally absent from the source column. Textual WAT may be emitted only as an optional debug artifact if Task 021 justifies it; accepting WAT as input is not part of this roadmap.
+
+## Semantic coverage after adoption
+
+| Semantic area | Original five | Python/C#/C/C++/Rust | Browser Wasm | Disposition |
+| --- | --- | --- | --- | --- |
+| Tasks 001–004 scalar/expression/block subset | implemented | required by Tasks 016–020 | required by Task 021 | First adoption target; do not add semantic nodes. |
+| Task 005 calls/void/general arity | planned | must extend every registered frontend/backend | target backend required | Begins after Task 021. |
+| Tasks 006–008 data/optionals/list iteration | planned | mapping must be added or the owning task remains incomplete | capability must be specified and tested | Do not infer support from registration. |
+| Task 013 acceptance | original five only | not covered | not covered | Historical five-language regression role is preserved explicitly. |
+| Tasks 009–012 and 014 | conditional | each task must extend its language matrix before implementation | each task must state a Wasm lowering or explicit rejection | Richer semantics do not silently inherit support. |
+| Floating point, arbitrary dynamic features, async/concurrency | excluded/deferred | excluded/deferred | excluded/deferred | Requires separate semantic proposals. |
+
+## Dependency graph and required delivery order
 
 ```text
-001 portable scalars
-├── 002 locals and assignment
-│   └── 004 sequencing and conditionals
-│       ├── 005 signatures and calls
-│       │   ├── 006 lists and maps
-│       │   │   ├── 008 ordered list iteration
-│       │   │   │   └── 014 ordered map iteration (also 006)
-│       │   │   └── 009 closed records
-│       │   └── 010 multi-file modules (also 009)
-│       └── 011 typed errors (also 007 and 009)
-├── 003 operators ───────────────┘
-└── 007 optionals (also 003 and 004)
+001 portable scalars ─┐
+002 locals ───────────┤
+003 operators ────────┼── 004 blocks/conditionals
+                      └──────┬─────────────────────────────────────────────┐
+                             015 shared language-expansion foundation      │
+                              └── 016 Python                               │
+                                   └── 017 C#                              │
+                                        └── 018 C                          │
+                                             └── 019 C++                   │
+                                                  └── 020 Rust             │
+                                                       └── 021 browser Wasm
+                                                            ├── 005 calls
+                                                            └── 007 optionals
 
-012 type parameters depends on 005, 006, and 009
-013 terminal portable acceptance depends on 001 through 008
+005 ── 006 lists/maps ── 008 list iteration ── 014 ordered-map iteration
+005 + 006 + 007 ── 009 records ── 010 modules
+004 + 007 + 009 ── 011 typed errors
+005 + 006 + 009 ── 012 generics
+001–008 ── 013 original-five compatibility acceptance
 ```
 
-Dependencies in each task file are authoritative. The graph shows the major flow; work on siblings may proceed independently only after their listed dependencies are complete.
+Dependencies in task files are authoritative. Old filenames and IDs remain stable; numerical order does not override dependency order.
 
 ## Task index
 
 | Task | Phase | Priority | Capability | Direct dependencies |
 | --- | --- | --- | --- | --- |
-| [001](001-portable-scalar-values-and-types.md) | 0 | P0 | Boolean/string scalar foundation and numeric contract | none |
-| [002](002-local-declarations-and-assignment.md) | 0 | P0 | Typed locals and simple assignment | 001 |
-| [003](003-typed-operators-and-expressions.md) | 0 | P0 | Type-directed unary/binary expressions | 001 |
-| [004](004-statement-sequencing-and-conditionals.md) | 0 | P0 | General blocks and conditionals | 002, 003 |
-| [005](005-general-function-signatures-and-calls.md) | 0 | P0 | Arbitrary required arity and void/direct calls | 001, 004 |
+| [001](001-portable-scalar-values-and-types.md) | delivered | — | Boolean/string scalar foundation and numeric contract | none |
+| [002](002-local-declarations-and-assignment.md) | delivered | — | Typed locals and simple assignment | 001 |
+| [003](003-typed-operators-and-expressions.md) | delivered | — | Type-directed unary/binary expressions | 001 |
+| [004](004-statement-sequencing-and-conditionals.md) | delivered | — | General blocks and conditionals | 002, 003 |
+| [015](015-language-expansion-foundation.md) | L0 | P0 | Registration, capabilities, artifacts, toolchains, provenance | 001–004 |
+| [016](016-python-source-and-target.md) | L1 | P0 | Typed-profile Python frontend/backend | 015 |
+| [017](017-csharp-source-and-target.md) | L1 | P0 | Managed C# frontend/backend/project | 016 |
+| [018](018-c-source-and-target.md) | L2 | P0 | Native C frontend/backend and explicit string ownership | 017 |
+| [019](019-cpp-source-and-target.md) | L2 | P0 | Native C++ frontend/backend and bounded value model | 018 |
+| [020](020-rust-source-and-target.md) | L2 | P0 | Rust frontend/backend and deterministic crate | 019 |
+| [021](021-browser-webassembly-target.md) | L3 | P0 | Browser Wasm binary backend and interoperability artifacts | 020 |
+| [005](005-general-function-signatures-and-calls.md) | 1 | P1 | Arbitrary required arity and void/direct calls | 001, 004, 021 |
 | [006](006-immutable-lists-and-maps.md) | 1 | P1 | Homogeneous immutable lists/maps and reads | 002, 003, 005 |
-| [007](007-optional-values-and-presence-narrowing.md) | 1 | P1 | Explicit optional values and narrowing | 001, 003, 004 |
+| [007](007-optional-values-and-presence-narrowing.md) | 1 | P1 | Explicit optional values and narrowing | 001, 003, 004, 021 |
 | [008](008-collection-iteration.md) | 1 | P1 | Ordered list iteration | 002, 004, 006 |
 | [009](009-closed-records-and-member-access.md) | 2 | P2 | Immutable records, construction, members | 002, 005, 006, 007 |
 | [010](010-multifile-modules-and-names.md) | 2 | P2 | Multi-file symbols and target artifacts | 005, 009 |
 | [011](011-typed-errors-and-handling.md) | 2 | P2 | Typed raise/try/catch | 004, 007, 009 |
 | [012](012-type-parameters-and-generics.md) | 3 | P3 | Generic declarations and applications | 005, 006, 009 |
-| [013](013-five-language-compatibility-acceptance.md) | 1 | P1 | Terminal near-term compatibility proof | 001–008 |
+| [013](013-five-language-compatibility-acceptance.md) | 1 | P1 legacy | Original-five terminal compatibility proof | 001–008 |
 | [014](014-ordered-map-iteration.md) | 2 | P2 | Distinct ordered maps and insertion-order iteration | 006, 008 |
 
 ## Definition of done
 
-A task is complete only when all of its completion criteria are met and the following repository-wide rules hold:
+A task is complete only when its own criteria and these repository-wide rules hold:
 
-- semantic public values use only discriminated types from `src/semantic/types.js`; parser values remain inside `src/frontends/` and target syntax remains inside `src/backends/`;
-- every accepted source child is converted and every unmodeled child fails loudly at its own location;
-- shared semantic validation checks well-formedness and symbol/type rules, while every backend validates its own complete capability before emission;
-- stable diagnostic codes and source locations are asserted for representative frontend, semantic, and backend failures;
-- focused fixtures prove equivalent modeled meaning across all five languages, and applicable generation specs compile/run real PHP, Ruby, JavaScript, TypeScript, and Java programs with exact behavior rather than snapshots;
-- generated source reparses to equivalent modeled meaning wherever the feature is intended to round-trip;
-- README and `docs/language-support.md` distinguish implemented behavior, source constraints, target constraints, and remaining exclusions, and a changelog fragment accompanies the behavior change;
-- `npm test`, lint, typecheck, build, packaging/audit gates, and `git diff --check` pass as required by `AGENTS.md`.
+- public semantic values use only discriminated types from `src/semantic/types.js`; parser values remain in `src/frontends/`, target syntax/encoding remains in `src/backends/`, and host/project scaffolding does not leak into the IR;
+- language descriptors state frontend, textual-backend, binary-backend, artifact, mapping, and acceptance capabilities independently; public discovery APIs and documentation do not overstate a role;
+- every accepted parser child is converted and every unmodeled or recovered child fails at its own location; no adapter scans source text to recover rejected meaning;
+- every backend validates the complete module and its target/ABI constraints before returning any artifact; unsupported semantics never receive a lossy runtime approximation;
+- text artifacts retain deterministic rich mappings and Source Map v3 data; binary artifacts retain deterministic byte-range provenance and any required interoperable external map/custom-section reference;
+- applicable tests invoke the real compiler/runtime/validator/browser declared by the task, assert exact behavior, and fail when the command is unavailable;
+- Tasks 016–021 prove the complete Tasks 001–004 profile for their declared roles. Starting with Tasks 005 and 007, each semantic task must update the registered-language capability matrix and add implementation or explicit tested rejection for every role; Task 013 is the sole intentional original-five-only acceptance task;
+- README and `docs/language-support.md` distinguish implemented behavior, source constraints, target constraints, artifact shapes, and exclusions, and each behavior change has focused specs plus a changelog fragment;
+- `npm test`, lint, typecheck, build, audit/dependency/package gates, and `git diff --check` pass as required by `AGENTS.md`.
 
 ## Explicit exclusions
 
-This roadmap does not authorize production changes by itself. It excludes parser replacement, source-text parsing fallbacks, a custom grammar, parser AST exposure, lossless formatting, macro systems, project dependency installation, package-manager resolution, reflection, runtime code evaluation, native/Wasm/JVM-bytecode backends, an interpreter, optimizer, or compiler-framework rewrite.
+This planning change authorizes no adapter, backend, dependency, runtime, or semantic implementation. The expansion tasks exclude bundled parser archives, runtime downloads during tests, package-manager resolution for user programs, source-text parser fallbacks, parser AST exposure, lossless formatting, macros/preprocessor metaprogramming, reflection, FFI, unsafe code, inline assembly, native shared-library APIs, WASI, component-model bindings, DOM access from Wasm, an optimizer, and a compiler-framework rewrite.
 
-Async functions, promises/futures as effects, generators, threads, fibers, ractors, event loops, locks, atomics, Java virtual threads, and cancellation are non-goals until a separate proposal defines shared effect, scheduling, cancellation, ordering, error, and resource-lifetime semantics. Ruby metaprogramming and monkey-patching, JavaScript prototype mutation and coercive dynamic calls, PHP variable variables/magic methods, TypeScript `any`/unchecked assertions, and Java reflection/dynamic class loading are likewise explicit non-goals. Source-valid occurrences must continue to fail loudly rather than be approximated.
+Python dynamic dispatch/reflection, C# `dynamic`/unsafe/reflection, C preprocessor computation/pointer arithmetic/manual user ownership, C++ templates/overload-dependent semantics/undefined behavior, and Rust unsafe/macros/general borrowing are outside their initial source profiles. They must be rejected, not approximated.
+
+Async functions, promises/futures as effects, generators, threads, fibers, tasks, atomics, shared Wasm memory, event loops, cancellation, and general host I/O remain non-goals until a separate proposal defines portable scheduling, memory, failure, and resource-lifetime semantics. Browser Wasm initially receives only the exact generated imports and exported entry point defined by Task 021.

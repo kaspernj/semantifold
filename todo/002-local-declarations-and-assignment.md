@@ -1,6 +1,6 @@
 # 002 — Local declarations and assignment
 
-- Status: `todo`
+- Status: `delivered` on `master`
 - Phase/priority: Phase 0 / P0
 - Dependencies: [001-portable-scalar-values-and-types.md](001-portable-scalar-values-and-types.md)
 

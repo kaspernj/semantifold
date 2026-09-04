@@ -14,6 +14,8 @@ Task 006 deliberately gives ordinary maps no observable iteration order, and Tas
 
 ## Language matrix
 
+This matrix records the original-five mappings researched for this conditional task. Its implementation must add deterministic ordered-map representations for Python, C#, C, C++, and Rust frontends/backends and the browser Wasm backend or explicitly document and test a target rejection. Native runtime iteration order must be guaranteed, not observed accidentally. Task 013 remains intentionally original-five-only.
+
 | Language | Representative accepted source | Required constraint/rejection |
 | --- | --- | --- |
 | Ruby | a typed string-key `Hash` literal followed by `values.each do |key, value| ... end` | Require the exact `Hash` profile whose literal establishes creation order. Reject subclasses, default/default-proc behavior, key/value-only iteration, mutation, destructuring beyond two simple bindings, and arbitrary enumerable receivers. |
@@ -53,10 +55,10 @@ Task 006 deliberately gives ordinary maps no observable iteration order, and Tas
 
 ## Tests and acceptance
 
-- Add equivalent five-language fixtures whose entry order (`"b"`, then `"a"`, then `"c"`) differs from lexical/sorted order. Iterate key/value pairs, use `continue` and `break`, and assert exact output proving insertion rather than hash or sorted order.
+- Add equivalent registered-language fixtures whose entry order (`"b"`, then `"a"`, then `"c"`) differs from lexical/sorted order. Iterate key/value pairs, use `continue` and `break`, and assert exact output proving insertion rather than hash or sorted order.
 - Cover empty, singleton, and multi-entry ordered maps; one-time operand evaluation; immutable binding scope; lookup/size compatibility; and generated semantic round-trip.
 - Negative specs cover ordinary Task 006 map iteration in every language, duplicate/coercible keys, mutation/aliasing, unsupported binding forms, and each language-specific unordered/dynamic form. Java negatives must include every `Map.of` family, `HashMap`, access-ordered `LinkedHashMap`, sorted maps, and leaked backings.
-- Generate/reparse and execute all five targets using real `php`, `ruby`, `node`, local `tsc`, `javac`, and `java`. Assert the Java source uses insertion-ordered backing plus an unmodifiable sequenced view and never relies on a `Map.of`-family iteration order; source assertions supplement rather than replace runtime proof.
+- Generate/reparse and execute every required registered target using its real toolchain. Assert the Java source uses insertion-ordered backing plus an unmodifiable sequenced view and never relies on a `Map.of`-family iteration order; source assertions supplement rather than replace runtime proof.
 
 ## Documentation and changelog
 
@@ -71,4 +73,4 @@ Adding map iteration to Task 008 or Task 013; assigning order to Task 006 `MapTy
 - A distinct ordered-map semantic type and loop node define insertion order, pair bindings, one-time evaluation, immutability, and scope without changing ordinary Task 006 map meaning.
 - All five frontends accept only parser-proven ordered construction/iteration profiles and reject unordered or alias-unsafe forms with stable located diagnostics.
 - All five backends validate and emit a genuinely ordered representation; Java uses a non-escaping insertion-ordered backing behind an unmodifiable sequenced view and never depends on `Map.of`-family iteration order.
-- Focused negative/equivalence specs and real five-runtime generated execution prove non-lexical insertion order, control flow, and semantic round-trip, with documentation and changelog updated.
+- Focused negative/equivalence specs and real registered-runtime generated execution prove non-lexical insertion order, control flow, and semantic round-trip, with documentation and changelog updated.

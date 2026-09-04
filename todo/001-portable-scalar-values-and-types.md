@@ -1,6 +1,6 @@
 # 001 — Portable scalar values and types
 
-- Status: `todo`
+- Status: `delivered` on `master`
 - Phase/priority: Phase 0 / P0
 - Dependencies: none
 
