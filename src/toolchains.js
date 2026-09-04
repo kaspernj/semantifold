@@ -29,13 +29,15 @@ export async function discoverCanonicalToolchain(id, options = {}) {
   const definition = canonicalToolchains[id]
 
   if (!definition) invalidToolchain(`Unknown canonical toolchain '${id}'.`, String(id))
-  const configurationEnvironment = options.environment === undefined ? process.env : options.environment
-
-  if (!isEnvironment(configurationEnvironment)) {
-    invalidToolchain("Canonical toolchain environment must contain only string or undefined values.", String(id))
-  }
-  const environment = options.environment === undefined ? defaultEnvironment() : options.environment
-  const configured = options.override === undefined ? configurationEnvironment[definition.overrideEnvironmentVariable] : options.override
+  const configurationEnvironment = options.environment === undefined
+    ? undefined
+    : snapshotEnvironment(options.environment, String(id))
+  const environment = configurationEnvironment ?? defaultEnvironment()
+  const configured = options.override === undefined
+    ? configurationEnvironment === undefined
+      ? process.env[definition.overrideEnvironmentVariable]
+      : configurationEnvironment[definition.overrideEnvironmentVariable]
+    : options.override
 
   return discoverToolchain({
     canonicalCommand: definition.canonicalCommand,
@@ -288,11 +290,13 @@ async function resolveExecutableFile(candidate) {
  * @returns {Readonly<Record<string, string>>} Normalized environment.
  */
 export function deterministicEnvironment(environment = defaultEnvironment()) {
-  if (!isEnvironment(environment)) invalidToolchain("Process environment must contain only string or undefined values.", "environment")
-  /** @type {Record<string, string>} */
-  const normalized = {}
+  const entries = environmentEntries(environment)
 
-  for (const [key, value] of Object.entries(environment)) {
+  if (entries == undefined) invalidToolchain("Process environment must be a plain own-property data record of string or undefined values.", "environment")
+  /** @type {Record<string, string>} */
+  const normalized = Object.create(null)
+
+  for (const [key, value] of entries) {
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(key) || key.includes("\0") || (value !== undefined && value.includes("\0"))) {
       invalidToolchain("Process environment contains an invalid key or value.", "environment")
     }
@@ -346,8 +350,57 @@ function validArgument(value) {
  * @returns {value is Readonly<Record<string, string | undefined>>} Whether entries are strings or undefined.
  */
 function isEnvironment(value) {
-  return typeof value == "object" && value != null && !Array.isArray(value) &&
-    Object.entries(value).every(([key, entry]) => typeof key == "string" && (entry === undefined || typeof entry == "string"))
+  return environmentEntries(value) != undefined
+}
+
+/**
+ * Detaches an explicit environment before canonical override lookup can yield.
+ * @param {unknown} value - Candidate environment record.
+ * @param {string} id - Toolchain identity.
+ * @returns {Readonly<Record<string, string | undefined>>} Owned environment data.
+ */
+function snapshotEnvironment(value, id) {
+  const entries = environmentEntries(value)
+
+  if (entries == undefined) {
+    invalidToolchain("Canonical toolchain environment must be a plain own-property data record of string or undefined values.", id)
+  }
+  /** @type {Record<string, string | undefined>} */
+  const snapshot = Object.create(null)
+
+  for (const [key, entry] of entries) snapshot[key] = entry
+
+  return Object.freeze(snapshot)
+}
+
+/**
+ * Reads only enumerable own data properties from an ordinary or null-prototype record.
+ * @param {unknown} value - Candidate environment record.
+ * @returns {[string, string | undefined][] | undefined} Detached entries when valid.
+ */
+function environmentEntries(value) {
+  if (typeof value != "object" || value == null || Array.isArray(value)) return undefined
+
+  try {
+    const prototype = Object.getPrototypeOf(value)
+
+    if (prototype !== Object.prototype && prototype !== null) return undefined
+    /** @type {[string, string | undefined][]} */
+    const entries = []
+
+    for (const key of Reflect.ownKeys(value)) {
+      if (typeof key != "string") return undefined
+      const descriptor = Object.getOwnPropertyDescriptor(value, key)
+
+      if (descriptor == undefined || !descriptor.enumerable || !("value" in descriptor) ||
+        (descriptor.value !== undefined && typeof descriptor.value != "string")) return undefined
+      entries.push([key, descriptor.value])
+    }
+
+    return entries
+  } catch {
+    return undefined
+  }
 }
 
 /**

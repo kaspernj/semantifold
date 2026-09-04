@@ -182,6 +182,115 @@ printf 'null-tool 1\n'
     })
   })
 
+  it("requires detached plain data environment records for discovery and acceptance", async () => {
+    await withTemporaryDirectory("semantifold-environment-records-", async (directory) => {
+      const marker = path.join(directory, "invalid-environment-launched")
+      const invalidExecutable = await fakeExecutable(directory, "invalid-environment-tool", `#!/bin/sh
+printf 'launched\n' >> "${marker}"
+printf 'environment-tool 1\n'
+`)
+      const validExecutable = await fakeExecutable(directory, "valid-environment-tool", `#!/bin/sh
+printf 'environment-tool %s\n' "$EXPECTED"
+`)
+      const tool = Object.freeze({
+        executable: invalidExecutable,
+        id: "environment-tool",
+        source: /** @type {const} */ ("override"),
+        version: "environment-tool 1",
+        versionArguments: Object.freeze([])
+      })
+      const artifacts = createGeneratedArtifactSet({artifacts: [{
+        content: "input\n",
+        contentKind: "text",
+        mediaType: "text/plain",
+        ownership: "generated",
+        path: "input.txt",
+        provenance: synthetic(),
+        role: "entry"
+      }], target: "demo"})
+      const inherited = Object.assign(Object.create({SEMANTIFOLD_NODE: invalidExecutable}), {PATH: directory})
+      const accessor = {}
+      let accessorRead = false
+
+      Object.defineProperty(accessor, "PATH", {
+        enumerable: true,
+        get() {
+          accessorRead = true
+          return directory
+        }
+      })
+      class CustomEnvironment {
+        PATH = directory
+      }
+      const nonEnumerable = {}
+
+      Object.defineProperty(nonEnumerable, "PATH", {value: directory})
+      /** @type {any[]} */
+      const invalidEnvironments = [new Date(0), new Map([["PATH", directory]]), inherited, new CustomEnvironment(), accessor,
+        nonEnumerable, {[Symbol("PATH")]: directory}, []]
+
+      for (const environment of invalidEnvironments) {
+        await expectDiagnostic(() => discoverToolchain({
+          canonicalCommand: "environment-tool",
+          environment,
+          id: "environment-tool",
+          override: invalidExecutable,
+          versionArguments: []
+        }), "INVALID_TOOLCHAIN")
+        await expectDiagnostic(() => runAcceptanceStages({
+          artifacts,
+          environment,
+          stages: [{arguments: [], stage: "execute", tool}],
+          target: "demo"
+        }), "INVALID_ACCEPTANCE_RUNNER")
+      }
+      await expectDiagnostic(() => discoverCanonicalToolchain("node", {environment: inherited}), "INVALID_TOOLCHAIN")
+      expect(accessorRead).toBeFalse()
+      await assert.rejects(access(marker), (error) => error instanceof Error && "code" in error && error.code == "ENOENT")
+
+      const nullPrototypeEnvironment = Object.assign(Object.create(null), {EXPECTED: "owned", PATH: directory, UNUSED: undefined})
+      const nullPrototypeTool = await discoverToolchain({
+        canonicalCommand: "environment-tool",
+        environment: nullPrototypeEnvironment,
+        id: "null-prototype-environment",
+        override: validExecutable,
+        versionArguments: []
+      })
+
+      expect(nullPrototypeTool.version).toEqual("environment-tool owned")
+      const nullPrototypeAcceptance = await runAcceptanceStages({
+        artifacts,
+        environment: nullPrototypeEnvironment,
+        stages: [{arguments: [], stage: "execute", tool: Object.freeze({...tool, executable: validExecutable})}],
+        target: "demo"
+      })
+
+      expect(nullPrototypeAcceptance.stages[0].stdout).toEqual("environment-tool owned\n")
+      const discoveryEnvironment = {EXPECTED: "owned", PATH: directory}
+      const pendingDiscovery = discoverToolchain({
+        canonicalCommand: "environment-tool",
+        environment: discoveryEnvironment,
+        id: "detached-environment",
+        override: validExecutable,
+        versionArguments: []
+      })
+
+      discoveryEnvironment.EXPECTED = "caller-mutated"
+      expect((await pendingDiscovery).version).toEqual("environment-tool owned")
+      const acceptanceEnvironment = {EXPECTED: "owned", PATH: directory}
+      const acceptanceTool = Object.freeze({...tool, executable: validExecutable})
+      const pendingAcceptance = runAcceptanceStages({
+        artifacts,
+        environment: acceptanceEnvironment,
+        stages: [{arguments: [], stage: "execute", tool: acceptanceTool}],
+        target: "demo"
+      })
+
+      acceptanceEnvironment.EXPECTED = "caller-mutated"
+      expect((await pendingAcceptance).stages[0].stdout).toEqual("environment-tool owned\n")
+    })
+  })
+
   it("accepts only regular executable files without polluting canonical ambiguity", async () => {
     await withTemporaryDirectory("semantifold-regular-tools-", async (root) => {
       const directoryCandidateRoot = await mkdtemp(path.join(root, "directory-"))
