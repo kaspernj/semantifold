@@ -795,6 +795,48 @@ printf '%s\n' "$1"
     })
   })
 
+  it("reads each acceptance stage name once before validation and execution", async () => {
+    await withTemporaryDirectory("semantifold-stage-name-accessor-", async (directory) => {
+      const executable = await fakeExecutable(directory, "stage-name-accessor-tool", "#!/bin/sh\nprintf 'expected\\n'\n")
+      const tool = Object.freeze({
+        executable,
+        id: "stage-name-accessor-tool",
+        source: /** @type {const} */ ("override"),
+        version: "stage-name-accessor-tool 1",
+        versionArguments: Object.freeze([])
+      })
+      const artifacts = createGeneratedArtifactSet({artifacts: [{
+        content: "input\n",
+        contentKind: "text",
+        mediaType: "text/plain",
+        ownership: "generated",
+        path: "input.txt",
+        provenance: synthetic(),
+        role: "entry"
+      }], target: "demo"})
+      const stage = {arguments: [], tool}
+      let reads = 0
+
+      Object.defineProperty(stage, "stage", {
+        enumerable: true,
+        get() {
+          reads += 1
+          return reads <= 5 ? "execute" : "bogus"
+        }
+      })
+
+      const result = await runAcceptanceStages({
+        artifacts,
+        stages: [/** @type {any} */ (stage)],
+        target: "demo"
+      })
+
+      expect(reads).toEqual(1)
+      expect(result.stages[0].stage).toEqual("execute")
+      expect(result.stages[0].stdout).toEqual("expected\n")
+    })
+  })
+
   it("reports post-launch output overflow with bounded stage evidence", async () => {
     await withTemporaryDirectory("semantifold-runner-output-limit-", async (directory) => {
       const outputChunk = "x".repeat(1024)

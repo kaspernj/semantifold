@@ -61,7 +61,9 @@ export function createLanguageRegistry(candidateRecords) {
   /** @type {import("./semantic/types.js").LanguageCapabilities[]} */
   const descriptors = []
 
-  for (const candidate of candidateRecords) {
+  for (let recordIndex = 0; recordIndex < candidateRecords.length; recordIndex += 1) {
+    const candidate = candidateRecords[recordIndex]
+
     if (!isPlainObject(candidate)) invalidRegistry("Every registry record must be a plain object.")
     const id = candidate.id
 
@@ -76,7 +78,9 @@ export function createLanguageRegistry(candidateRecords) {
         invalidRegistry(`Registry role '${role}' for '${id}' must be a function when present.`, id)
       }
     }
-    if (candidate.artifactMultiplicity != "single" && candidate.artifactMultiplicity != "multiple") {
+    const artifactMultiplicity = candidate.artifactMultiplicity
+
+    if (artifactMultiplicity != "single" && artifactMultiplicity != "multiple") {
       invalidRegistry(`Registry record '${id}' has an invalid artifact multiplicity.`, id)
     }
     if (typeof candidate.roundTrip != "boolean") invalidRegistry(`Registry record '${id}' requires a Boolean round-trip declaration.`, id)
@@ -157,7 +161,7 @@ export function createLanguageRegistry(candidateRecords) {
     const mapping = deepFreeze(/** @type {import("./semantic/types.js").LanguageMappingCapabilities} */ ({...candidate.mapping}))
     const record = deepFreeze(/** @type {LanguageRegistryRecord} */ ({
       acceptance,
-      artifactMultiplicity: candidate.artifactMultiplicity,
+      artifactMultiplicity,
       id,
       mapping,
       roundTrip: candidate.roundTrip,
@@ -171,7 +175,7 @@ export function createLanguageRegistry(candidateRecords) {
     }))
     const descriptor = deepFreeze(/** @type {import("./semantic/types.js").LanguageCapabilities} */ ({
       acceptance,
-      artifactMultiplicity: candidate.artifactMultiplicity,
+      artifactMultiplicity,
       id,
       mapping,
       roles: {

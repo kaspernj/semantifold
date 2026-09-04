@@ -134,14 +134,17 @@ function validateRequest(input) {
     for (let stagePosition = 0; stagePosition < input.stages.length; stagePosition += 1) {
       const stage = input.stages[stagePosition]
 
-      if (!isPlainObject(stage) || typeof stage.stage != "string" || !stageIndexes.has(stage.stage) || seen.has(stage.stage)) {
+      if (!isPlainObject(stage)) invalidRunner("Acceptance stages must be distinct known stage records.", input.target)
+      const stageName = stage.stage
+
+      if (typeof stageName != "string" || !stageIndexes.has(stageName) || seen.has(stageName)) {
         invalidRunner("Acceptance stages must be distinct known stage records.", input.target)
       }
-      const index = /** @type {number} */ (stageIndexes.get(stage.stage))
+      const index = /** @type {number} */ (stageIndexes.get(stageName))
 
       if (index < previousIndex) invalidRunner("Acceptance stages must follow parse-to-execute order.", input.target)
       previousIndex = index
-      seen.add(stage.stage)
+      seen.add(stageName)
       const argumentCandidate = stage.arguments
       const stageArguments = isDenseArray(argumentCandidate) ? [...argumentCandidate] : undefined
       const toolCandidate = stage.tool
@@ -153,9 +156,9 @@ function validateRequest(input) {
       }) : undefined
 
       if (stageArguments == undefined || !stageArguments.every((argument) => typeof argument == "string" && !argument.includes("\0")) ||
-        !isTool(tool)) invalidRunner(`Acceptance stage '${stage.stage}' has an invalid tool or argument array.`, input.target)
+        !isTool(tool)) invalidRunner(`Acceptance stage '${stageName}' has an invalid tool or argument array.`, input.target)
 
-      stages.push(Object.freeze({arguments: stageArguments, stage: stage.stage, tool}))
+      stages.push(Object.freeze({arguments: stageArguments, stage: stageName, tool}))
     }
 
     return {artifacts, environment, stages, target: input.target, timeoutMs: input.timeoutMs}

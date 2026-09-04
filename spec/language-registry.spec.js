@@ -169,6 +169,54 @@ console.log(choose(true, "no"))
     expect(calls).toEqual({stages: false, toolchains: false})
   })
 
+  it("traverses registry records by trusted numeric index instead of a caller-owned iterator", () => {
+    const record = (id) => ({
+      acceptance: {stages: [], toolchains: []},
+      artifactMultiplicity: "single",
+      id,
+      mapping: {binaryRanges: false, richText: false, sourceMapV3: false},
+      roundTrip: false
+    })
+    const records = [record("first"), record("second")]
+    let hostileIteratorCalled = false
+
+    Object.defineProperty(records, Symbol.iterator, {
+      value() {
+        hostileIteratorCalled = true
+        return [][Symbol.iterator]()
+      }
+    })
+
+    const registry = createLanguageRegistry(records)
+
+    expect(hostileIteratorCalled).toBeFalse()
+    expect(registry.ids).toEqual(["first", "second"])
+  })
+
+  it("retains exactly the artifact multiplicity read during registry validation", () => {
+    const record = {
+      acceptance: {stages: [], toolchains: []},
+      id: "multiplicity",
+      mapping: {binaryRanges: false, richText: false, sourceMapV3: false},
+      roundTrip: false
+    }
+    let reads = 0
+
+    Object.defineProperty(record, "artifactMultiplicity", {
+      enumerable: true,
+      get() {
+        reads += 1
+        return reads == 1 ? "single" : 7
+      }
+    })
+
+    const registry = createLanguageRegistry([record])
+
+    expect(reads).toEqual(1)
+    expect(registry.record("multiplicity").artifactMultiplicity).toEqual("single")
+    expect(registry.descriptors[0].artifactMultiplicity).toEqual("single")
+  })
+
   it("treats only undefined optional registry fields as omitted", () => {
     const record = {
       acceptance: {stages: [], toolchains: []},
