@@ -76,7 +76,7 @@ export async function discoverToolchain(input) {
   const override = /** @type {string | undefined} */ (candidate.override)
   const supportedVersion = /** @type {RegExp | undefined} */ (candidate.supportedVersion)
   const timeoutMs = /** @type {number} */ (candidate.timeoutMs)
-  const versionArguments = /** @type {string[]} */ (candidate.versionArguments)
+  const versionArguments = [.../** @type {string[]} */ (candidate.versionArguments)]
   const normalizedEnvironment = deterministicEnvironment(environment)
   const {executable, source} = override == undefined
     ? await resolveCanonical(id, canonicalCommand, normalizedEnvironment.PATH ?? "")

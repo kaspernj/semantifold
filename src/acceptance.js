@@ -50,7 +50,7 @@ export async function runAcceptanceStages(input) {
         })
 
         results.push(Object.freeze({
-          arguments: stage.arguments,
+          arguments: Object.freeze([...stage.arguments]),
           executable: stage.tool.executable,
           stage: stage.stage,
           stderr: result.stderr,

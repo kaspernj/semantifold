@@ -247,7 +247,7 @@ function validateRelatedOrigin(value, artifactPath, index, target) {
     invalidArtifactSet(`Artifact '${artifactPath}' has malformed related origin ${index}.`, target)
   }
 
-  return {
+  return deepFreeze({
     location: {
       end: {...value.location.end},
       filename: value.location.filename,
@@ -257,7 +257,7 @@ function validateRelatedOrigin(value, artifactPath, index, target) {
     ...(optionalString(value.nodeId, "nodeId", artifactPath, index, target)),
     ...(optionalString(value.symbolId, "symbolId", artifactPath, index, target)),
     ...(optionalString(value.role, "role", artifactPath, index, target))
-  }
+  })
 }
 
 /**

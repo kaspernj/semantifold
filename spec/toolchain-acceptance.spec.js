@@ -72,6 +72,31 @@ printf '%s|%s|%s|%s\\n' "$1" "$LC_ALL" "$TZ" "$PWD"
     })
   })
 
+  it("detaches version arguments before asynchronous executable lookup", async () => {
+    await withTemporaryDirectory("semantifold-version-arguments-", async (directory) => {
+      const executable = await fakeExecutable(directory, "argument-tool", `#!/bin/sh
+if [ "$1" = "--expected" ]; then printf 'argument-tool 1\n'; exit 0; fi
+printf 'unexpected argument: %s\n' "$1" >&2
+exit 11
+`)
+      const versionArguments = ["--expected"]
+      const pendingDiscovery = discoverToolchain({
+        canonicalCommand: "argument-tool",
+        environment: {PATH: directory},
+        id: "argument-tool",
+        override: executable,
+        versionArguments
+      })
+
+      versionArguments[0] = "--caller-mutated"
+      const tool = await pendingDiscovery
+
+      expect(tool.version).toEqual("argument-tool 1")
+      expect(tool.versionArguments).toEqual(["--expected"])
+      expect(Object.isFrozen(tool.versionArguments)).toBeTrue()
+    })
+  })
+
   it("reports missing, ambiguous, unsupported-version, and version-command failures distinctly", async () => {
     await expectDiagnostic(
       // @ts-expect-error Deliberately malformed canonical discovery options.
@@ -153,10 +178,11 @@ printf '%s|%s|%s|%s\\n' "$1" "$LC_ALL" "$TZ" "$PWD"
         }],
         target: "demo"
       })
+      const parseArguments = ["parse"]
       const result = await runAcceptanceStages({
         artifacts,
         stages: [
-          {arguments: ["parse"], stage: "parse", tool},
+          {arguments: parseArguments, stage: "parse", tool},
           {arguments: ["generate"], stage: "generate", tool},
           {arguments: ["compile"], stage: "compile", tool},
           {arguments: ["link"], stage: "link", tool},
@@ -168,9 +194,15 @@ printf '%s|%s|%s|%s\\n' "$1" "$LC_ALL" "$TZ" "$PWD"
         timeoutMs: 2_000
       })
 
+      parseArguments[0] = "caller-mutated"
       expect(result.stages.map(({stage}) => stage)).toEqual([
         "parse", "generate", "compile", "link", "validate", "instantiate", "execute"
       ])
+      expect(result.stages[0].arguments).toEqual(["parse"])
+      expect(Object.isFrozen(result.stages[0].arguments)).toBeTrue()
+      assert.throws(() => {
+        /** @type {string[]} */ (result.stages[0].arguments)[0] = "result-mutated"
+      }, TypeError)
       for (const stage of result.stages) {
         assert.match(stage.stdout, new RegExp(`^${stage.stage}\\|C\\.UTF-8\\|UTC\\|`, "u"))
         expect(stage.executable).toEqual(executable)

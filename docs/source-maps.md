@@ -114,7 +114,7 @@ const mapping = createByteMapping({
 
 The discriminator is `SemantifoldByteMapping`, version is `1`, and `coordinateSystem` is exactly `bytes`. Ranges contain non-negative safe-integer half-open offsets, are non-empty, ordered, non-overlapping, and bounded by `generated.byteLength`. Source/derived origins retain ordinary UTF-16 original `SourceLocation` values; only the generated side is in bytes. Synthetic regions require a non-empty reason. `nodeId`, `symbolId`, and `role` associate encoded regions without fabricating source positions. `parseByteMapping()` validates serialized input and `stringifyByteMapping()` emits canonical key-sorted JSON with one LF.
 
-Text artifact provenance embeds the validated rich mapping and Source Map v3 projection. Binary artifact provenance must embed a matching byte map whose path and byte length equal its artifact. Manifest, support, loader, and other source-free text/resources may instead carry an explicit artifact-level synthetic reason and related source origins.
+Text artifact provenance embeds the validated rich mapping and Source Map v3 projection. Binary artifact provenance must embed a matching byte map whose path and byte length equal its artifact. Manifest, support, loader, and other source-free text/resources may instead carry an explicit artifact-level synthetic reason and related source origins. Artifact-set construction detaches and deeply freezes every such related origin, including its location and start/end points.
 
 ## Source Map v3 and directives
 

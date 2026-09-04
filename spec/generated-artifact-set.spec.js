@@ -131,6 +131,48 @@ describe("generated artifact sets", () => {
     expect(set.artifacts[0].provenance.kind).toEqual("bytes")
   })
 
+  it("deeply detaches and freezes synthetic related origins and location points", () => {
+    const relatedOrigin = {
+      location: {
+        end: {column: 5, line: 1, offset: 4},
+        filename: "source.ts",
+        start: {column: 1, line: 1, offset: 0}
+      },
+      nodeId: "node:0",
+      role: "generated support",
+      sourceId: "source:0",
+      symbolId: "symbol:0"
+    }
+    const set = createGeneratedArtifactSet({
+      artifacts: [{
+        content: "support\n",
+        contentKind: "text",
+        mediaType: "text/plain",
+        ownership: "generated",
+        path: "support.txt",
+        provenance: {kind: "synthetic", reason: "generated support", relatedOrigins: [relatedOrigin]},
+        role: "entry"
+      }],
+      target: "demo"
+    })
+    const provenance = set.artifacts[0].provenance
+
+    assert.equal(provenance.kind, "synthetic")
+    const [returnedOrigin] = provenance.relatedOrigins
+
+    relatedOrigin.location.start.offset = 3
+    relatedOrigin.sourceId = "caller-mutated"
+    expect(returnedOrigin.location.start.offset).toEqual(0)
+    expect(returnedOrigin.sourceId).toEqual("source:0")
+    expect(Object.isFrozen(returnedOrigin)).toBeTrue()
+    expect(Object.isFrozen(returnedOrigin.location)).toBeTrue()
+    expect(Object.isFrozen(returnedOrigin.location.start)).toBeTrue()
+    expect(Object.isFrozen(returnedOrigin.location.end)).toBeTrue()
+    assert.throws(() => {
+      returnedOrigin.location.start.offset = 3
+    }, TypeError)
+  })
+
   it("includes the serialized sidecar referenced by an external map directive", async () => {
     const source = await readFile(new URL("fixtures/program.ts", import.meta.url), "utf8")
     const module = parse({filename: "program.ts", language: "typescript", source})
