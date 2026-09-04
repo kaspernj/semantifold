@@ -10,6 +10,10 @@ import {SemantifoldDiagnostic} from "./diagnostic.js"
 import {deterministicEnvironment} from "./toolchains.js"
 
 const execFileAsync = promisify(execFile)
+const acceptanceMaxBuffer = 16 * 1024 * 1024
+const launchErrorCodes = new Set([
+  "E2BIG", "EACCES", "EAGAIN", "ELOOP", "EMFILE", "ENAMETOOLONG", "ENFILE", "ENOENT", "ENOEXEC", "ENOMEM", "ENOTDIR", "EPERM", "ETXTBSY"
+])
 const orderedStages = Object.freeze(["parse", "generate", "compile", "link", "validate", "instantiate", "execute"])
 const stageIndexes = new Map(orderedStages.map((stage, index) => [stage, index]))
 
@@ -45,7 +49,7 @@ export async function runAcceptanceStages(input) {
           cwd: directory,
           encoding: "utf8",
           env: request.environment,
-          maxBuffer: 16 * 1024 * 1024,
+          maxBuffer: acceptanceMaxBuffer,
           timeout: request.timeoutMs
         })
 
@@ -137,19 +141,22 @@ function validateRequest(input) {
  */
 function processDiagnostic(error, stage, target, timeoutMs) {
   const fields = processErrorFields(error)
-  const timedOut = fields.killed
-  const launchFailure = typeof fields.nativeCode == "string"
-  const signaled = !timedOut && fields.signal != undefined
-  const code = timedOut ? "ACCEPTANCE_TIMEOUT" : launchFailure ? "ACCEPTANCE_LAUNCH_FAILURE" : signaled
+  const outputLimited = fields.nativeCode == "ERR_CHILD_PROCESS_STDIO_MAXBUFFER"
+  const timedOut = !outputLimited && fields.killed
+  const launchFailure = fields.nativeCode != undefined && launchErrorCodes.has(fields.nativeCode)
+  const signaled = !outputLimited && !timedOut && fields.signal != undefined
+  const code = outputLimited ? "ACCEPTANCE_OUTPUT_LIMIT" : timedOut ? "ACCEPTANCE_TIMEOUT" : launchFailure ? "ACCEPTANCE_LAUNCH_FAILURE" : signaled
     ? "ACCEPTANCE_SIGNAL"
     : "ACCEPTANCE_NONZERO_EXIT"
-  const reason = timedOut ? `timed out after ${timeoutMs}ms` : launchFailure
+  const reason = outputLimited ? `exceeded the ${acceptanceMaxBuffer}-byte output capture limit (${fields.nativeCode})` : timedOut
+    ? `timed out after ${timeoutMs}ms` : launchFailure
     ? `could not launch (${fields.nativeCode})`
     : signaled ? `terminated by signal ${fields.signal}`
-    : `exited nonzero (${fields.exitCode ?? fields.signal ?? "unknown"})`
+    : fields.exitCode != undefined ? `exited nonzero (${fields.exitCode})`
+    : `failed after launch (${fields.nativeCode ?? "unknown"})`
 
   return new SemantifoldDiagnostic({
-    cause: error instanceof Error ? error : undefined,
+    cause: outputLimited ? undefined : error instanceof Error ? error : undefined,
     code,
     executable: stage.tool.executable,
     exitCode: fields.exitCode,
@@ -171,14 +178,16 @@ function processDiagnostic(error, stage, target, timeoutMs) {
 function processErrorFields(error) {
   if (!error || typeof error != "object") return {exitCode: undefined, killed: false, nativeCode: undefined, signal: undefined, stderr: "", stdout: ""}
   const value = /** @type {Record<string, unknown>} */ (error)
+  const nativeCode = typeof value.code == "string" ? value.code : undefined
+  const outputLimited = nativeCode == "ERR_CHILD_PROCESS_STDIO_MAXBUFFER"
 
   return {
     exitCode: typeof value.code == "number" ? value.code : undefined,
     killed: value.killed === true,
-    nativeCode: typeof value.code == "string" ? value.code : undefined,
+    nativeCode,
     signal: typeof value.signal == "string" ? value.signal : undefined,
-    stderr: typeof value.stderr == "string" ? value.stderr : "",
-    stdout: typeof value.stdout == "string" ? value.stdout : ""
+    stderr: !outputLimited && typeof value.stderr == "string" ? value.stderr : "",
+    stdout: !outputLimited && typeof value.stdout == "string" ? value.stdout : ""
   }
 }
 

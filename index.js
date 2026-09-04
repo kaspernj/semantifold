@@ -6,6 +6,8 @@ import {createGeneratedArtifactSet as constructArtifactSet} from "./src/artifact
 import {SemantifoldDiagnostic} from "./src/diagnostic.js"
 import {languageRegistry} from "./src/language-registry.js"
 
+const artifactBackendRoles = new Set(["text", "binary", "application"])
+
 export {SemantifoldDiagnostic}
 export {languageCapabilities, supportedLanguages} from "./src/language-registry.js"
 export {createGeneratedArtifactSet} from "./src/artifacts.js"
@@ -89,6 +91,14 @@ export function generateArtifactSet(input) {
   }
   const {filename, language, mapDirective, module, role = "text", sourceMapFilename, sources} = input
 
+  if (typeof role != "string" || !artifactBackendRoles.has(role)) {
+    throw new SemantifoldDiagnostic({
+      code: "INVALID_ARTIFACT_SET",
+      language: typeof language == "string" && language.length > 0 ? language : "artifact",
+      message: "Artifact backend role must be 'text', 'binary', or 'application'."
+    })
+  }
+
   if (role == "text") {
     const record = languageRegistry.record(language)
 
@@ -144,15 +154,7 @@ export function generateArtifactSet(input) {
     })
   }
 
-  const registryRole = role == "binary" ? "binaryBackend" : role == "application" ? "applicationBackend" : undefined
-
-  if (!registryRole) {
-    throw new SemantifoldDiagnostic({
-      code: "INVALID_ARTIFACT_SET",
-      language,
-      message: `Unknown artifact backend role '${role}'.`
-    })
-  }
+  const registryRole = role == "binary" ? "binaryBackend" : "applicationBackend"
   const backend = languageRegistry.resolve(language, registryRole, module?.location)
 
   return constructArtifactSet(backend({filename, language, module, sources}))

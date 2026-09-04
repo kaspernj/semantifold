@@ -337,6 +337,22 @@ describe("generated artifact sets", () => {
     expectInvalid(() => generateArtifactSet(undefined))
   })
 
+  it("normalizes malformed artifact backend roles without coercing caller values", async () => {
+    const source = await readFile(new URL("fixtures/program.ts", import.meta.url), "utf8")
+    const module = parse({filename: "program.ts", language: "typescript", source})
+    const malformedRoles = [Symbol("binary"), "archive", null, 1, {}, []]
+
+    for (const role of malformedRoles) {
+      assert.throws(
+        // @ts-expect-error Deliberately malformed public artifact role.
+        () => generateArtifactSet({language: "typescript", module, role}),
+        (error) => error instanceof SemantifoldDiagnostic && error.code == "INVALID_ARTIFACT_SET" &&
+          error.language == "typescript" &&
+          error.detail == "Artifact backend role must be 'text', 'binary', or 'application'."
+      )
+    }
+  })
+
   it("requires the artifact-set API for unavailable binary and application roles", async () => {
     const source = await readFile(new URL("fixtures/program.ts", import.meta.url), "utf8")
     const module = parse({filename: "program.ts", language: "typescript", source})

@@ -354,6 +354,53 @@ printf 'expected\n'
     })
   })
 
+  it("reports post-launch output overflow with bounded stage evidence", async () => {
+    await withTemporaryDirectory("semantifold-runner-output-limit-", async (directory) => {
+      const outputChunk = "x".repeat(1024)
+      const executable = await fakeExecutable(directory, "output-tool", `#!/bin/sh
+if [ "$1" = "--version" ]; then printf 'output 1\n'; exit 0; fi
+counter=0
+while [ "$counter" -lt 16385 ]; do
+  printf '%s' '${outputChunk}'
+  counter=$((counter + 1))
+done
+`)
+      const tool = await discoverToolchain({
+        canonicalCommand: "output-tool",
+        id: "output-tool",
+        override: executable,
+        versionArguments: ["--version"]
+      })
+      const artifacts = createGeneratedArtifactSet({artifacts: [{
+        content: "input\n",
+        contentKind: "text",
+        mediaType: "text/plain",
+        ownership: "generated",
+        path: "input.txt",
+        provenance: synthetic(),
+        role: "entry"
+      }], target: "demo"})
+      /** @type {SemantifoldDiagnostic | undefined} */
+      let failure
+
+      try {
+        await runAcceptanceStages({artifacts, stages: [{arguments: [], stage: "compile", tool}], target: "demo"})
+      } catch (error) {
+        assert.ok(error instanceof SemantifoldDiagnostic)
+        failure = error
+      }
+
+      assert.ok(failure)
+      expect(failure.code).toEqual("ACCEPTANCE_OUTPUT_LIMIT")
+      expect(failure.stage).toEqual("compile")
+      expect(failure.stdout).toEqual("")
+      expect(failure.stderr).toEqual("")
+      expect(failure.cause).toEqual(undefined)
+      assert.ok(failure.detail.length < 512)
+      assert.doesNotMatch(failure.detail, /xxx/u)
+    })
+  })
+
   it("normalizes invalid runner input, nonzero exits, launch failures, and timeouts by exact stage", async () => {
     await expectDiagnostic(
       // @ts-expect-error Deliberately malformed public runner request.
