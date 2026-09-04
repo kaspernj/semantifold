@@ -5,6 +5,7 @@ import {mkdir, mkdtemp, rm, writeFile} from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import {promisify} from "node:util"
+import {isDenseArray} from "./array.js"
 import {createGeneratedArtifactSet} from "./artifacts.js"
 import {SemantifoldDiagnostic} from "./diagnostic.js"
 import {deterministicEnvironment} from "./toolchains.js"
@@ -117,7 +118,7 @@ export async function runAcceptanceStages(input) {
 function validateRequest(input) {
   try {
     if (typeof input.target != "string" || input.target.length == 0 || !Number.isSafeInteger(input.timeoutMs) || input.timeoutMs <= 0 ||
-      !Array.isArray(input.stages) || input.stages.length == 0) invalidRunner("Acceptance requires a target, positive timeout, and non-empty ordered stages.", input.target)
+      !isDenseArray(input.stages) || input.stages.length == 0) invalidRunner("Acceptance requires a target, positive timeout, and non-empty ordered stages.", input.target)
     const artifacts = createGeneratedArtifactSet(input.artifacts)
 
     if (artifacts.target != input.target) invalidRunner("Acceptance target must match the generated artifact-set target.", input.target)
@@ -133,7 +134,7 @@ function validateRequest(input) {
       if (index < previousIndex) invalidRunner("Acceptance stages must follow parse-to-execute order.", input.target)
       previousIndex = index
       seen.add(stage.stage)
-      if (!Array.isArray(stage.arguments) || !stage.arguments.every((argument) => typeof argument == "string" && !argument.includes("\0")) ||
+      if (!isDenseArray(stage.arguments) || !stage.arguments.every((argument) => typeof argument == "string" && !argument.includes("\0")) ||
         !isTool(stage.tool)) invalidRunner(`Acceptance stage '${stage.stage}' has an invalid tool or argument array.`, input.target)
       const tool = Object.freeze({executable: stage.tool.executable, version: stage.tool.version})
 

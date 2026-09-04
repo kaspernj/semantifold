@@ -1,5 +1,6 @@
 // @ts-check
 
+import {isDenseArray} from "./array.js"
 import {SemantifoldDiagnostic, unsupportedRole} from "./diagnostic.js"
 import {generateJava} from "./backends/java.js"
 import {generateJavaScript} from "./backends/javascript.js"
@@ -53,7 +54,7 @@ const registryKeys = new Set([
  * @returns {Readonly<LanguageRegistry>} Registry.
  */
 export function createLanguageRegistry(candidateRecords) {
-  if (!Array.isArray(candidateRecords)) invalidRegistry("Registry records must be an ordered array.")
+  if (!isDenseArray(candidateRecords)) invalidRegistry("Registry records must be an ordered dense array.")
 
   /** @type {Map<string, Readonly<LanguageRegistryRecord>>} */
   const recordsById = new Map()
@@ -85,8 +86,8 @@ export function createLanguageRegistry(candidateRecords) {
       typeof candidate.mapping.binaryRanges != "boolean") {
       invalidRegistry(`Registry record '${id}' has an invalid mapping declaration.`, id)
     }
-    if (!isPlainObject(candidate.acceptance) || !Array.isArray(candidate.acceptance.stages) ||
-      !Array.isArray(candidate.acceptance.toolchains) ||
+    if (!isPlainObject(candidate.acceptance) || !isDenseArray(candidate.acceptance.stages) ||
+      !isDenseArray(candidate.acceptance.toolchains) ||
       !candidate.acceptance.stages.every((stage) => typeof stage == "string" && acceptanceStages.has(stage)) ||
       !candidate.acceptance.toolchains.every((toolchain) => typeof toolchain == "string" && toolchain.length > 0)) {
       invalidRegistry(`Registry record '${id}' has an invalid acceptance declaration.`, id)
@@ -95,7 +96,7 @@ export function createLanguageRegistry(candidateRecords) {
     const declaredStages = new Set()
 
     for (const stage of candidate.acceptance.stages) {
-      const stageIndex = /** @type {number} */ (acceptanceStages.get(stage))
+      const stageIndex = /** @type {number} */ (acceptanceStages.get(/** @type {string} */ (stage)))
 
       if (declaredStages.has(stage) || stageIndex < previousStage) invalidRegistry(`Registry record '${id}' has unordered or duplicate acceptance stages.`, id)
       declaredStages.add(stage)

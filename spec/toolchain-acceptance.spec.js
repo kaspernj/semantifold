@@ -498,6 +498,59 @@ kill -TERM $$
     })
   })
 
+  it("rejects sparse discovery and acceptance arrays before asynchronous work", async () => {
+    await withTemporaryDirectory("semantifold-sparse-runner-", async (directory) => {
+      const executable = await fakeExecutable(directory, "sparse-tool", "#!/bin/sh\nprintf 'sparse 1\\n'\n")
+      const tool = Object.freeze({
+        executable,
+        id: "sparse-tool",
+        source: /** @type {const} */ ("override"),
+        version: "sparse 1",
+        versionArguments: Object.freeze([])
+      })
+      const artifacts = createGeneratedArtifactSet({artifacts: [{
+        content: "input\n",
+        contentKind: "text",
+        mediaType: "text/plain",
+        ownership: "generated",
+        path: "input.txt",
+        provenance: synthetic(),
+        role: "entry"
+      }], target: "demo"})
+      const sparseVersionArguments = ["--version"]
+      const sparseStages = [{arguments: [], stage: /** @type {const} */ ("execute"), tool}]
+      const sparseArguments = ["argument"]
+
+      Reflect.deleteProperty(sparseVersionArguments, "0")
+      Reflect.deleteProperty(sparseStages, "0")
+      Reflect.deleteProperty(sparseArguments, "0")
+      const operations = [
+        () => discoverToolchain({
+          canonicalCommand: "sparse-tool",
+          id: "sparse-tool",
+          override: executable,
+          versionArguments: sparseVersionArguments
+        }),
+        () => runAcceptanceStages({artifacts, stages: sparseStages, target: "demo"}),
+        () => runAcceptanceStages({artifacts, stages: [{arguments: sparseArguments, stage: "execute", tool}], target: "demo"})
+      ]
+      const expectedCodes = ["INVALID_TOOLCHAIN", "INVALID_ACCEPTANCE_RUNNER", "INVALID_ACCEPTANCE_RUNNER"]
+      /** @type {string[]} */
+      const outcomes = []
+
+      for (const operation of operations) {
+        try {
+          await operation()
+          outcomes.push("accepted")
+        } catch (error) {
+          outcomes.push(error instanceof SemantifoldDiagnostic ? error.code : error instanceof Error ? error.name : "non-error")
+        }
+      }
+
+      expect(outcomes).toEqual(expectedCodes)
+    })
+  })
+
   it("preserves a primary stage failure when isolated-directory cleanup also fails", async () => {
     await withTemporaryDirectory("semantifold-runner-cleanup-", async (directory) => {
       const failingExecutable = await fakeExecutable(directory, "cleanup-fail-tool", "#!/bin/sh\nprintf 'primary output\\n'\nprintf 'primary error\\n' >&2\nexit 23\n")

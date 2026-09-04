@@ -5,6 +5,7 @@ import {constants as fsConstants} from "node:fs"
 import {access, realpath, stat} from "node:fs/promises"
 import path from "node:path"
 import {promisify} from "node:util"
+import {isDenseArray} from "./array.js"
 import {SemantifoldDiagnostic} from "./diagnostic.js"
 
 const execFileAsync = promisify(execFile)
@@ -182,7 +183,7 @@ function validateDiscovery(input) {
   if (typeof input.id != "string" || input.id.length == 0 ||
     typeof input.canonicalCommand != "string" || input.canonicalCommand.length == 0 ||
     input.canonicalCommand.includes("/") || input.canonicalCommand.includes("\\") || input.canonicalCommand.includes("\0") ||
-    !Array.isArray(input.versionArguments) || !input.versionArguments.every(validArgument) ||
+    !isDenseArray(input.versionArguments) || !input.versionArguments.every(validArgument) ||
     !isEnvironment(input.environment) || !Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 ||
     (input.override != undefined && (typeof input.override != "string" || !path.isAbsolute(input.override) || input.override.includes("\0"))) ||
     (input.supportedVersion != undefined && (!(input.supportedVersion instanceof RegExp) || input.supportedVersion.global || input.supportedVersion.sticky))) {

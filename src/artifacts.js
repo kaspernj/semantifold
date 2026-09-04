@@ -1,6 +1,7 @@
 // @ts-check
 
 import {decodedMappings, encodedMappings, presortedDecodedMap, TraceMap} from "@jridgewell/trace-mapping"
+import {isDenseArray} from "./array.js"
 import {isSafeArtifactPath} from "./artifact-path.js"
 import {finalizeByteMapping} from "./binary-mapping.js"
 import {SemantifoldDiagnostic} from "./diagnostic.js"
@@ -20,7 +21,7 @@ export function createGeneratedArtifactSet(candidate) {
       !/^[a-z][a-z0-9-]*$/u.test(candidate.target)) {
       invalidArtifactSet("Artifact set requires a stable lowercase target ID.", targetOf(candidate))
     }
-    if (!Array.isArray(candidate.artifacts) || candidate.artifacts.length == 0) {
+    if (!isDenseArray(candidate.artifacts) || candidate.artifacts.length == 0) {
       invalidArtifactSet("Artifact set requires a non-empty ordered artifact array.", candidate.target)
     }
     const target = candidate.target
@@ -117,7 +118,7 @@ function validateArtifactProvenance(value, contentKind, artifactPath, content, t
   if (!isPlainObject(value)) invalidArtifactSet(`Artifact '${artifactPath}' requires provenance.`, target)
 
   if (value.kind == "synthetic") {
-    if (typeof value.reason != "string" || value.reason.length == 0 || !Array.isArray(value.relatedOrigins)) {
+    if (typeof value.reason != "string" || value.reason.length == 0 || !isDenseArray(value.relatedOrigins)) {
       invalidArtifactSet(`Synthetic artifact '${artifactPath}' requires an explicit reason and related origins.`, target)
     }
     if (contentKind == "binary") {
@@ -304,9 +305,9 @@ function validSourcePoint(value) {
  */
 function validateSourceMap(value, artifactPath, target) {
   if (!isPlainObject(value) || value.version != 3 || value.file != artifactPath || typeof value.mappings != "string" ||
-    !Array.isArray(value.names) || !value.names.every((name) => typeof name == "string") ||
-    !Array.isArray(value.sources) || !value.sources.every((source) => typeof source == "string") ||
-    (value.sourcesContent != undefined && (!Array.isArray(value.sourcesContent) ||
+    !isDenseArray(value.names) || !value.names.every((name) => typeof name == "string") ||
+    !isDenseArray(value.sources) || !value.sources.every((source) => typeof source == "string") ||
+    (value.sourcesContent != undefined && (!isDenseArray(value.sourcesContent) ||
       !value.sourcesContent.every((source) => source == null || typeof source == "string")))) {
     invalidArtifactSet(`Text artifact '${artifactPath}' has malformed Source Map v3 provenance.`, target)
   }

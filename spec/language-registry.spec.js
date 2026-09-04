@@ -94,6 +94,40 @@ console.log(choose(true, "no"))
     }
   })
 
+  it("rejects sparse registry acceptance-stage and toolchain arrays", () => {
+    const frontend = () => ({kind: "Module"})
+    const sparseStages = ["parse"]
+    const sparseToolchains = ["demo"]
+
+    Reflect.deleteProperty(sparseStages, "0")
+    Reflect.deleteProperty(sparseToolchains, "0")
+    const acceptanceDeclarations = [
+      {stages: sparseStages, toolchains: []},
+      {stages: [], toolchains: sparseToolchains}
+    ]
+    /** @type {number[]} */
+    const accepted = []
+
+    for (const [index, acceptance] of acceptanceDeclarations.entries()) {
+      try {
+        createLanguageRegistry([{
+          acceptance,
+          artifactMultiplicity: "single",
+          frontend,
+          id: `sparse-${index}`,
+          mapping: {binaryRanges: false, richText: false, sourceMapV3: false},
+          roundTrip: false
+        }])
+        accepted.push(index)
+      } catch (error) {
+        assert.ok(error instanceof SemantifoldDiagnostic)
+        expect(error.code).toEqual("INVALID_REGISTRY")
+      }
+    }
+
+    expect(accepted).toEqual([])
+  })
+
   it("distinguishes an unknown language from a known language missing a requested role", () => {
     const registry = createLanguageRegistry([{
       acceptance: {stages: [], toolchains: []},

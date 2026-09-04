@@ -76,6 +76,51 @@ describe("binary and resource provenance", () => {
     // @ts-expect-error Deliberately malformed public input.
     expectInvalid(() => createByteMapping(undefined))
   })
+
+  it("rejects sparse byte-range and provenance-origin arrays", () => {
+    const location = {
+      end: {column: 2, line: 1, offset: 1},
+      filename: "source.ts",
+      start: {column: 1, line: 1, offset: 0}
+    }
+    const related = {location, sourceId: "source:0"}
+    const range = {generated: {end: 1, start: 0}, origin: synthetic("byte")}
+    const sparseRanges = [range]
+    const sparseRelatedOrigins = [related]
+    const sparseDerivedOrigins = [related]
+
+    Reflect.deleteProperty(sparseRanges, "0")
+    Reflect.deleteProperty(sparseRelatedOrigins, "0")
+    Reflect.deleteProperty(sparseDerivedOrigins, "0")
+
+    const candidates = [
+      {byteLength: 1, path: "ranges.bin", ranges: sparseRanges},
+      {
+        byteLength: 1,
+        path: "synthetic.bin",
+        ranges: [{generated: {end: 1, start: 0}, origin: {kind: "synthetic", reason: "byte", relatedOrigins: sparseRelatedOrigins}}]
+      },
+      {
+        byteLength: 1,
+        path: "derived.bin",
+        ranges: [{generated: {end: 1, start: 0}, origin: {kind: "derived", origins: sparseDerivedOrigins}}]
+      }
+    ]
+    /** @type {number[]} */
+    const accepted = []
+
+    for (const [index, candidate] of candidates.entries()) {
+      try {
+        createByteMapping(candidate)
+        accepted.push(index)
+      } catch (error) {
+        assert.ok(error instanceof SemantifoldDiagnostic)
+        expect(error.code).toEqual("INVALID_BYTE_MAPPING")
+      }
+    }
+
+    expect(accepted).toEqual([])
+  })
 })
 
 /**

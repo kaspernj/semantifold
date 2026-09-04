@@ -249,6 +249,63 @@ describe("generated artifact sets", () => {
     }
   })
 
+  it("rejects sparse artifact, related-origin, and Source Map metadata arrays", async () => {
+    const valid = {
+      content: "ok\n",
+      contentKind: "text",
+      mediaType: "text/plain",
+      ownership: "generated",
+      path: "program.txt",
+      provenance: synthetic(),
+      role: "entry"
+    }
+    const sparseArtifacts = [valid, valid]
+    const sparseRelatedOrigins = [{
+      location: {
+        end: {column: 2, line: 1, offset: 1},
+        filename: "source.ts",
+        start: {column: 1, line: 1, offset: 0}
+      },
+      sourceId: "source:0"
+    }]
+
+    Reflect.deleteProperty(sparseArtifacts, "0")
+    Reflect.deleteProperty(sparseRelatedOrigins, "0")
+
+    const source = await readFile(new URL("fixtures/program.ts", import.meta.url), "utf8")
+    const module = parse({filename: "program.ts", language: "typescript", source})
+    const generated = generateArtifact({filename: "program.js", language: "javascript", module})
+    const sparseNames = [...generated.sourceMap.names]
+    const sparseSources = [...generated.sourceMap.sources]
+    const sparseSourcesContent = [...generated.sourceMap.sourcesContent]
+
+    Reflect.deleteProperty(sparseNames, "0")
+    Reflect.deleteProperty(sparseSources, "0")
+    Reflect.deleteProperty(sparseSourcesContent, "0")
+
+    const candidates = [
+      {artifacts: sparseArtifacts, target: "demo"},
+      {artifacts: [{...valid, provenance: {kind: "synthetic", reason: "support", relatedOrigins: sparseRelatedOrigins}}], target: "demo"},
+      {artifacts: [textArtifact(generated, {...generated.sourceMap, names: sparseNames})], target: "javascript"},
+      {artifacts: [textArtifact(generated, {...generated.sourceMap, sources: sparseSources})], target: "javascript"},
+      {artifacts: [textArtifact(generated, {...generated.sourceMap, sourcesContent: sparseSourcesContent})], target: "javascript"}
+    ]
+    /** @type {number[]} */
+    const accepted = []
+
+    for (const [index, candidate] of candidates.entries()) {
+      try {
+        createGeneratedArtifactSet(candidate)
+        accepted.push(index)
+      } catch (error) {
+        assert.ok(error instanceof SemantifoldDiagnostic)
+        expect(error.code).toEqual("INVALID_ARTIFACT_SET")
+      }
+    }
+
+    expect(accepted).toEqual([])
+  })
+
   it("requires Source Map v3 provenance to match the rich projection including an unmapped directive suffix", async () => {
     const source = await readFile(new URL("fixtures/program.ts", import.meta.url), "utf8")
     const module = parse({filename: "program.ts", language: "typescript", source})

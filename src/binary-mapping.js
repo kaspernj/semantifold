@@ -1,5 +1,6 @@
 // @ts-check
 
+import {isDenseArray} from "./array.js"
 import {isSafeArtifactPath} from "./artifact-path.js"
 import {SemantifoldDiagnostic} from "./diagnostic.js"
 
@@ -68,7 +69,7 @@ export function finalizeByteMapping(candidate) {
       candidate.generated.byteLength < 0) {
       invalidByteMapping("Byte mapping requires a non-negative safe byte length.")
     }
-    if (!Array.isArray(candidate.ranges)) invalidByteMapping("Byte mapping ranges must be an ordered array.")
+    if (!isDenseArray(candidate.ranges)) invalidByteMapping("Byte mapping ranges must be an ordered dense array.")
     const byteLength = /** @type {number} */ (candidate.generated.byteLength)
     const generatedPath = candidate.generated.path
 
@@ -121,7 +122,7 @@ function validateOrigin(value, label) {
   if (!isPlainObject(value)) invalidByteMapping(`${label} requires provenance.`)
 
   if (value.kind == "synthetic") {
-    if (typeof value.reason != "string" || value.reason.length == 0 || !Array.isArray(value.relatedOrigins)) {
+    if (typeof value.reason != "string" || value.reason.length == 0 || !isDenseArray(value.relatedOrigins)) {
       invalidByteMapping(`${label} synthetic provenance requires an explicit reason and related-origin array.`)
     }
 
@@ -134,7 +135,7 @@ function validateOrigin(value, label) {
     return {kind: "source", location: validateLocation(value.location, label), sourceId: value.sourceId}
   }
   if (value.kind == "derived") {
-    if (!Array.isArray(value.origins) || value.origins.length == 0) invalidByteMapping(`${label} derived provenance requires origins.`)
+    if (!isDenseArray(value.origins) || value.origins.length == 0) invalidByteMapping(`${label} derived provenance requires origins.`)
 
     return {kind: "derived", origins: value.origins.map((origin, index) => validateRelatedOrigin(origin, `${label} origin ${index}`))}
   }
