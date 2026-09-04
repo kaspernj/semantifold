@@ -191,28 +191,39 @@ function validateRelatedOrigin(value, label) {
  * @returns {import("./semantic/types.js").SourceLocation} Detached source location.
  */
 function validateLocation(value, label) {
-  if (!isPlainObject(value) || typeof value.filename != "string" || value.filename.length == 0 ||
-    !validPoint(value.start) || !validPoint(value.end) || value.end.offset < value.start.offset ||
-    !isSourceRangeOrdered(value.start, value.end)) {
+  if (!isPlainObject(value) || typeof value.filename != "string" || value.filename.length == 0) {
+    invalidByteMapping(`${label} contains an invalid source location.`)
+  }
+  const start = snapshotPoint(value.start)
+  const end = snapshotPoint(value.end)
+
+  if (start == undefined || end == undefined || end.offset < start.offset || !isSourceRangeOrdered(start, end)) {
     invalidByteMapping(`${label} contains an invalid source location.`)
   }
 
   return {
-    end: {...value.end},
+    end,
     filename: value.filename,
-    start: {...value.start}
+    start
   }
 }
 
 /**
- * Checks one UTF-16 source point.
+ * Snapshots one valid UTF-16 source point without retaining undeclared fields.
  * @param {unknown} value - Candidate point.
- * @returns {value is import("./semantic/types.js").SourcePoint} Whether the point is valid.
+ * @returns {import("./semantic/types.js").SourcePoint | undefined} Canonical point when valid.
  */
-function validPoint(value) {
-  return isPlainObject(value) && typeof value.line == "number" && Number.isSafeInteger(value.line) && value.line > 0 &&
-    typeof value.column == "number" && Number.isSafeInteger(value.column) && value.column > 0 &&
-    typeof value.offset == "number" && Number.isSafeInteger(value.offset) && value.offset >= 0
+function snapshotPoint(value) {
+  if (!isPlainObject(value)) return undefined
+  const line = value.line
+  const column = value.column
+  const offset = value.offset
+
+  if (typeof line != "number" || !Number.isSafeInteger(line) || line <= 0 ||
+    typeof column != "number" || !Number.isSafeInteger(column) || column <= 0 ||
+    typeof offset != "number" || !Number.isSafeInteger(offset) || offset < 0) return undefined
+
+  return {column, line, offset}
 }
 
 /**

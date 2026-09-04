@@ -84,12 +84,20 @@ export function createLanguageRegistry(candidateRecords) {
       invalidRegistry(`Registry record '${id}' has an invalid artifact multiplicity.`, id)
     }
     if (typeof candidate.roundTrip != "boolean") invalidRegistry(`Registry record '${id}' requires a Boolean round-trip declaration.`, id)
-    if (!isPlainObject(candidate.mapping) ||
-      typeof candidate.mapping.richText != "boolean" ||
-      typeof candidate.mapping.sourceMapV3 != "boolean" ||
-      typeof candidate.mapping.binaryRanges != "boolean") {
+    const mappingCandidate = candidate.mapping
+
+    if (!isPlainObject(mappingCandidate)) invalidRegistry(`Registry record '${id}' has an invalid mapping declaration.`, id)
+    const mappingSnapshot = {
+      binaryRanges: mappingCandidate.binaryRanges,
+      richText: mappingCandidate.richText,
+      sourceMapV3: mappingCandidate.sourceMapV3
+    }
+
+    if (typeof mappingSnapshot.richText != "boolean" || typeof mappingSnapshot.sourceMapV3 != "boolean" ||
+      typeof mappingSnapshot.binaryRanges != "boolean") {
       invalidRegistry(`Registry record '${id}' has an invalid mapping declaration.`, id)
     }
+    const mapping = deepFreeze(/** @type {import("./semantic/types.js").LanguageMappingCapabilities} */ (mappingSnapshot))
     const acceptanceCandidate = candidate.acceptance
 
     if (!isPlainObject(acceptanceCandidate) || !isDenseArray(acceptanceCandidate.stages) ||
@@ -133,9 +141,9 @@ export function createLanguageRegistry(candidateRecords) {
     const hasApplicationBackend = typeof candidate.applicationBackend == "function"
     const hasBackend = hasTextBackend || hasBinaryBackend || hasApplicationBackend
 
-    if ((candidate.mapping.richText || candidate.mapping.sourceMapV3) && !hasTextBackend ||
-      candidate.mapping.sourceMapV3 && !candidate.mapping.richText ||
-      candidate.mapping.binaryRanges && !hasBinaryBackend && !hasApplicationBackend) {
+    if ((mapping.richText || mapping.sourceMapV3) && !hasTextBackend ||
+      mapping.sourceMapV3 && !mapping.richText ||
+      mapping.binaryRanges && !hasBinaryBackend && !hasApplicationBackend) {
       invalidRegistry(`Registry record '${id}' declares mapping support without its required backend role.`, id)
     }
     if (candidate.roundTrip && (!hasFrontend || !hasBackend)) {
@@ -158,7 +166,6 @@ export function createLanguageRegistry(candidateRecords) {
       stages,
       toolchains
     }))
-    const mapping = deepFreeze(/** @type {import("./semantic/types.js").LanguageMappingCapabilities} */ ({...candidate.mapping}))
     const record = deepFreeze(/** @type {LanguageRegistryRecord} */ ({
       acceptance,
       artifactMultiplicity,

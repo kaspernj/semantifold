@@ -53,6 +53,32 @@ describe("binary and resource provenance", () => {
     }))
   })
 
+  it("copies only declared source-point fields into serializable byte provenance", () => {
+    const mapping = createByteMapping({
+      byteLength: 1,
+      path: "resource.bin",
+      ranges: [{
+        generated: {end: 1, start: 0},
+        origin: {
+          kind: "source",
+          location: {
+            end: {column: 2, extra: 1n, line: 1, offset: 1},
+            filename: "input.ts",
+            start: {column: 1, extra: 1n, line: 1, offset: 0}
+          },
+          sourceId: "source:0"
+        }
+      }]
+    })
+    const serialized = stringifyByteMapping(mapping)
+    const origin = mapping.ranges[0].origin
+
+    assert.equal(origin.kind, "source")
+    expect(origin.location.start).toEqual({column: 1, line: 1, offset: 0})
+    expect(origin.location.end).toEqual({column: 2, line: 1, offset: 1})
+    expect(JSON.parse(serialized).ranges[0].origin.location).toEqual(origin.location)
+  })
+
   it("normalizes malformed, out-of-order, overlapping, and out-of-bounds mappings", () => {
     const base = {byteLength: 4, path: "module.bin"}
     const invalidRanges = [

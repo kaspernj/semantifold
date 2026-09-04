@@ -217,6 +217,36 @@ console.log(choose(true, "no"))
     expect(registry.descriptors[0].artifactMultiplicity).toEqual("single")
   })
 
+  it("retains exactly the mapping capabilities read during registry validation", () => {
+    const mapping = {}
+    const reads = {binaryRanges: 0, richText: 0, sourceMapV3: 0}
+    const validatedReads = {binaryRanges: 2, richText: 2, sourceMapV3: 3}
+
+    for (const property of ["binaryRanges", "richText", "sourceMapV3"]) {
+      Object.defineProperty(mapping, property, {
+        enumerable: true,
+        get() {
+          reads[property] += 1
+          return reads[property] <= validatedReads[property] ? false : "invalid"
+        }
+      })
+    }
+
+    const registry = createLanguageRegistry([{
+      acceptance: {stages: [], toolchains: []},
+      artifactMultiplicity: "single",
+      id: "mapping-accessors",
+      mapping,
+      roundTrip: false
+    }])
+    const expected = {binaryRanges: false, richText: false, sourceMapV3: false}
+
+    expect(reads).toEqual({binaryRanges: 1, richText: 1, sourceMapV3: 1})
+    expect(registry.record("mapping-accessors").mapping).toEqual(expected)
+    expect(registry.descriptors[0].mapping).toEqual(expected)
+    expect(Object.isFrozen(registry.descriptors[0].mapping)).toBeTrue()
+  })
+
   it("treats only undefined optional registry fields as omitted", () => {
     const record = {
       acceptance: {stages: [], toolchains: []},
