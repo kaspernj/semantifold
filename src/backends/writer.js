@@ -45,6 +45,17 @@ export class SourceWriter {
   }
 
   /**
+   * Reports whether an exact parser-owned role range is available.
+   * @param {import("../semantic/types.js").SemanticNode} node - Semantic node occurrence.
+   * @param {string} path - JSON Pointer for a shared node occurrence.
+   * @param {string} role - Semantic token role.
+   * @returns {boolean} Whether the role has an exact source range.
+   */
+  hasRange(node, path, role) {
+    return this.index.recordFor(node, path).ranges[role] !== undefined
+  }
+
+  /**
    * Writes text mapped to a semantic node.
    * @param {string} text - Generated text.
    * @param {object} annotation - Mapping annotation.

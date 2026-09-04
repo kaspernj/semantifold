@@ -341,6 +341,8 @@ export function emitExpression(writer, expression, path, language, emitIdentifie
   }
 
   if (language == "java" && (expression.operation == "StringEqual" || expression.operation == "StringNotEqual")) {
+    const compositeOperator = expression.operation == "StringNotEqual" && writer.hasRange(expression, path, "equalityOperator")
+
     writer.mapped("(", {mappingKind: "anchor", node: expression, path})
     if (expression.operation == "StringNotEqual") {
       writer.mapped("!", {mappingKind: "exact", node: expression, path, role: "operator"})
@@ -348,7 +350,9 @@ export function emitExpression(writer, expression, path, language, emitIdentifie
     writer.mapped("(", {mappingKind: "anchor", node: expression, path})
     emitExpression(writer, expression.left, `${path}/left`, language, emitIdentifier)
     writer.mapped(")", {mappingKind: "anchor", node: expression, path})
-    writer.mapped(".equals", {mappingKind: "exact", node: expression, path, role: "operator"})
+    writer.mapped(".equals", {
+      mappingKind: "exact", node: expression, path, role: compositeOperator ? "equalityOperator" : "operator"
+    })
     writer.mapped("(", {mappingKind: "anchor", node: expression, path})
     emitExpression(writer, expression.right, `${path}/right`, language, emitIdentifier)
     writer.mapped(")", {mappingKind: "anchor", node: expression, path})
@@ -359,7 +363,12 @@ export function emitExpression(writer, expression, path, language, emitIdentifie
   writer.mapped("(", {mappingKind: "anchor", node: expression, path})
   emitExpression(writer, expression.left, `${path}/left`, language, emitIdentifier)
   writer.synthetic(" ", "operator spacing", [expression], [path])
-  writer.mapped(binaryOperationSpelling(expression.operation, language), {mappingKind: "exact", node: expression, path, role: "operator"})
+  const spelling = binaryOperationSpelling(expression.operation, language)
+
+  if (expression.operation == "StringNotEqual" && writer.hasRange(expression, path, "equalityOperator")) {
+    writer.mapped(spelling.slice(0, 1), {mappingKind: "exact", node: expression, path, role: "operator"})
+    writer.mapped(spelling.slice(1), {mappingKind: "exact", node: expression, path, role: "equalityOperator"})
+  } else writer.mapped(spelling, {mappingKind: "exact", node: expression, path, role: "operator"})
   writer.synthetic(" ", "operator spacing", [expression], [path])
   emitExpression(writer, expression.right, `${path}/right`, language, emitIdentifier)
   writer.mapped(")", {mappingKind: "anchor", node: expression, path})

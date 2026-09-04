@@ -259,12 +259,19 @@ function convertStringEquality(node, negated, location, operatorLocation, filena
     return unsupportedSyntax("java", "string equals invocation", nodeLocation(node, filename, source))
   }
 
+  /** @type {Record<string, import("../semantic/types.js").SourceLocation>} */
+  const ranges = {operator: operatorLocation}
+
+  if (negated) {
+    ranges.equalityOperator = nodeLocation(requiredChild(node, "MethodName", filename, source), filename, source)
+  }
+
   const semantic = withAdaptedOperation(withParserRanges({
     kind: "BinaryExpression",
     left: convertExpression(receivers[0], filename, source),
     location,
     right: convertExpression(arguments_[0], filename, source)
-  }, {operator: operatorLocation}), negated ? "StringNotEqual" : "StringEqual")
+  }, ranges), negated ? "StringNotEqual" : "StringEqual")
 
   return /** @type {import("../semantic/types.js").Expression} */ (/** @type {unknown} */ (semantic))
 }
