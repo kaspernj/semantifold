@@ -132,8 +132,12 @@ function validateArtifactProvenance(value, contentKind, artifactPath, content, t
     if (contentKind == "binary") {
       invalidArtifactSet(`Binary artifact '${artifactPath}' requires byte-range provenance.`, target)
     }
+    /** @type {import("./semantic/types.js").RelatedOrigin[]} */
+    const relatedOrigins = []
 
-    const relatedOrigins = value.relatedOrigins.map((origin, index) => validateRelatedOrigin(origin, artifactPath, index, target))
+    for (let index = 0; index < value.relatedOrigins.length; index += 1) {
+      relatedOrigins.push(validateRelatedOrigin(value.relatedOrigins[index], artifactPath, index, target))
+    }
 
     return Object.freeze({kind: /** @type {const} */ ("synthetic"), reason: value.reason, relatedOrigins: Object.freeze(relatedOrigins)})
   }

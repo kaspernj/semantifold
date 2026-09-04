@@ -86,23 +86,40 @@ export function createLanguageRegistry(candidateRecords) {
       typeof candidate.mapping.binaryRanges != "boolean") {
       invalidRegistry(`Registry record '${id}' has an invalid mapping declaration.`, id)
     }
-    if (!isPlainObject(candidate.acceptance) || !isDenseArray(candidate.acceptance.stages) ||
-      !isDenseArray(candidate.acceptance.toolchains) ||
-      !candidate.acceptance.stages.every((stage) => typeof stage == "string" && acceptanceStages.has(stage)) ||
-      !candidate.acceptance.toolchains.every((toolchain) => typeof toolchain == "string" && toolchain.length > 0)) {
+    const acceptanceCandidate = candidate.acceptance
+
+    if (!isPlainObject(acceptanceCandidate) || !isDenseArray(acceptanceCandidate.stages) ||
+      !isDenseArray(acceptanceCandidate.toolchains)) {
       invalidRegistry(`Registry record '${id}' has an invalid acceptance declaration.`, id)
     }
+    /** @type {unknown[]} */
+    const stageSnapshot = []
+    /** @type {unknown[]} */
+    const toolchainSnapshot = []
+
+    for (let index = 0; index < acceptanceCandidate.stages.length; index += 1) {
+      stageSnapshot.push(acceptanceCandidate.stages[index])
+    }
+    for (let index = 0; index < acceptanceCandidate.toolchains.length; index += 1) {
+      toolchainSnapshot.push(acceptanceCandidate.toolchains[index])
+    }
+    if (!stageSnapshot.every((stage) => typeof stage == "string" && acceptanceStages.has(stage)) ||
+      !toolchainSnapshot.every((toolchain) => typeof toolchain == "string" && toolchain.length > 0)) {
+      invalidRegistry(`Registry record '${id}' has an invalid acceptance declaration.`, id)
+    }
+    const stages = /** @type {import("./semantic/types.js").AcceptanceStage[]} */ (stageSnapshot)
+    const toolchains = /** @type {string[]} */ (toolchainSnapshot)
     let previousStage = -1
     const declaredStages = new Set()
 
-    for (const stage of candidate.acceptance.stages) {
+    for (const stage of stages) {
       const stageIndex = /** @type {number} */ (acceptanceStages.get(/** @type {string} */ (stage)))
 
       if (declaredStages.has(stage) || stageIndex < previousStage) invalidRegistry(`Registry record '${id}' has unordered or duplicate acceptance stages.`, id)
       declaredStages.add(stage)
       previousStage = stageIndex
     }
-    if (new Set(candidate.acceptance.toolchains).size != candidate.acceptance.toolchains.length) {
+    if (new Set(toolchains).size != toolchains.length) {
       invalidRegistry(`Registry record '${id}' has duplicate acceptance toolchains.`, id)
     }
 
@@ -120,8 +137,7 @@ export function createLanguageRegistry(candidateRecords) {
     if (candidate.roundTrip && (!hasFrontend || !hasBackend)) {
       invalidRegistry(`Registry record '${id}' declares round-trip support without frontend and backend roles.`, id)
     }
-    if (candidate.acceptance.stages.includes("parse") && !hasFrontend ||
-      candidate.acceptance.stages.includes("generate") && !hasBackend) {
+    if (stages.includes("parse") && !hasFrontend || stages.includes("generate") && !hasBackend) {
       invalidRegistry(`Registry record '${id}' declares an acceptance stage without its required role.`, id)
     }
 
@@ -135,8 +151,8 @@ export function createLanguageRegistry(candidateRecords) {
     }
 
     const acceptance = deepFreeze(/** @type {import("./semantic/types.js").LanguageAcceptanceCapabilities} */ ({
-      stages: [...candidate.acceptance.stages],
-      toolchains: [...candidate.acceptance.toolchains]
+      stages,
+      toolchains
     }))
     const mapping = deepFreeze(/** @type {import("./semantic/types.js").LanguageMappingCapabilities} */ ({...candidate.mapping}))
     const record = deepFreeze(/** @type {LanguageRegistryRecord} */ ({

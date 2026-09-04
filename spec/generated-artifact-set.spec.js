@@ -255,6 +255,46 @@ describe("generated artifact sets", () => {
     }, TypeError)
   })
 
+  it("constructs synthetic origin snapshots without dispatching to a caller-owned map", () => {
+    const relatedOrigin = {
+      location: {
+        end: {column: 2, line: 1, offset: 1},
+        filename: "source.ts",
+        start: {column: 1, line: 1, offset: 0}
+      },
+      sourceId: "source:0"
+    }
+    const relatedOrigins = [relatedOrigin]
+    let hostileMapCalled = false
+
+    Object.defineProperty(relatedOrigins, "map", {
+      value(callback) {
+        hostileMapCalled = true
+        callback(relatedOrigin, 0, relatedOrigins)
+        return [undefined]
+      }
+    })
+
+    const set = createGeneratedArtifactSet({
+      artifacts: [{
+        content: "support\n",
+        contentKind: "text",
+        mediaType: "text/plain",
+        ownership: "generated",
+        path: "support.txt",
+        provenance: {kind: "synthetic", reason: "generated support", relatedOrigins},
+        role: "entry"
+      }],
+      target: "demo"
+    })
+    const provenance = set.artifacts[0].provenance
+
+    assert.equal(provenance.kind, "synthetic")
+    expect(hostileMapCalled).toBeFalse()
+    expect(provenance.relatedOrigins[0].sourceId).toEqual("source:0")
+    expect(Object.isFrozen(provenance.relatedOrigins)).toBeTrue()
+  })
+
   it("includes the serialized sidecar referenced by an external map directive", async () => {
     const source = await readFile(new URL("fixtures/program.ts", import.meta.url), "utf8")
     const module = parse({filename: "program.ts", language: "typescript", source})

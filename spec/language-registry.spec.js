@@ -131,6 +131,44 @@ console.log(choose(true, "no"))
     expect(accepted).toEqual([])
   })
 
+  it("validates registry acceptance arrays without dispatching to caller-owned every methods", () => {
+    const frontend = () => ({kind: "Module"})
+    const invalidStages = ["bogus"]
+    const invalidToolchains = [7]
+    const calls = {stages: false, toolchains: false}
+    const base = {
+      artifactMultiplicity: "single",
+      frontend,
+      mapping: {binaryRanges: false, richText: false, sourceMapV3: false},
+      roundTrip: false
+    }
+
+    Object.defineProperty(invalidStages, "every", {
+      value() {
+        calls.stages = true
+        return true
+      }
+    })
+    Object.defineProperty(invalidToolchains, "every", {
+      value() {
+        calls.toolchains = true
+        return true
+      }
+    })
+
+    for (const record of [
+      {...base, acceptance: {stages: invalidStages, toolchains: []}, id: "invalid-stages"},
+      {...base, acceptance: {stages: [], toolchains: invalidToolchains}, id: "invalid-toolchains"}
+    ]) {
+      assert.throws(
+        () => createLanguageRegistry([record]),
+        (error) => error instanceof SemantifoldDiagnostic && error.code == "INVALID_REGISTRY"
+      )
+    }
+
+    expect(calls).toEqual({stages: false, toolchains: false})
+  })
+
   it("treats only undefined optional registry fields as omitted", () => {
     const record = {
       acceptance: {stages: [], toolchains: []},

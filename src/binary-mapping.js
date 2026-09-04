@@ -78,7 +78,12 @@ export function finalizeByteMapping(candidate) {
     }
     if (!isDenseArray(candidate.ranges)) invalidByteMapping("Byte mapping ranges must be an ordered dense array.")
     let previousEnd = 0
-    const ranges = candidate.ranges.map((range, index) => {
+    /** @type {import("./semantic/types.js").GeneratedByteRange[]} */
+    const ranges = []
+
+    for (let index = 0; index < candidate.ranges.length; index += 1) {
+      const range = candidate.ranges[index]
+
       if (!isPlainObject(range) || !isPlainObject(range.generated)) invalidByteMapping(`Byte range ${index} is malformed.`)
       const end = range.generated.end
       const start = range.generated.start
@@ -98,8 +103,8 @@ export function finalizeByteMapping(candidate) {
         ...(optionalIdentity(range.role, "role", index))
       }
 
-      return result
-    })
+      ranges.push(result)
+    }
     const mapping = {
       coordinateSystem: /** @type {const} */ ("bytes"),
       generated: {byteLength, path: generatedPath},
@@ -129,9 +134,14 @@ function validateOrigin(value, label) {
     if (typeof value.reason != "string" || value.reason.length == 0 || !isDenseArray(value.relatedOrigins)) {
       invalidByteMapping(`${label} synthetic provenance requires an explicit reason and related-origin array.`)
     }
+    /** @type {import("./semantic/types.js").RelatedOrigin[]} */
+    const relatedOrigins = []
 
-    return {kind: "synthetic", reason: value.reason, relatedOrigins: value.relatedOrigins.map((origin, index) =>
-      validateRelatedOrigin(origin, `${label} related origin ${index}`))}
+    for (let index = 0; index < value.relatedOrigins.length; index += 1) {
+      relatedOrigins.push(validateRelatedOrigin(value.relatedOrigins[index], `${label} related origin ${index}`))
+    }
+
+    return {kind: "synthetic", reason: value.reason, relatedOrigins}
   }
   if (value.kind == "source") {
     if (typeof value.sourceId != "string" || value.sourceId.length == 0) invalidByteMapping(`${label} source provenance requires a source ID.`)
@@ -140,8 +150,14 @@ function validateOrigin(value, label) {
   }
   if (value.kind == "derived") {
     if (!isDenseArray(value.origins) || value.origins.length == 0) invalidByteMapping(`${label} derived provenance requires origins.`)
+    /** @type {import("./semantic/types.js").RelatedOrigin[]} */
+    const origins = []
 
-    return {kind: "derived", origins: value.origins.map((origin, index) => validateRelatedOrigin(origin, `${label} origin ${index}`))}
+    for (let index = 0; index < value.origins.length; index += 1) {
+      origins.push(validateRelatedOrigin(value.origins[index], `${label} origin ${index}`))
+    }
+
+    return {kind: "derived", origins}
   }
 
   return invalidByteMapping(`${label} has an unknown provenance kind.`)

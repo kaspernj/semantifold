@@ -183,6 +183,64 @@ describe("binary and resource provenance", () => {
     expect(accepted).toEqual([])
   })
 
+  it("constructs byte-provenance snapshots without dispatching to caller-owned map methods", () => {
+    const location = {
+      end: {column: 2, line: 1, offset: 1},
+      filename: "source.ts",
+      start: {column: 1, line: 1, offset: 0}
+    }
+    const relatedOrigin = {location, sourceId: "source:0"}
+    const range = {generated: {end: 1, start: 0}, origin: synthetic("byte")}
+    const ranges = [range]
+    const syntheticOrigins = [relatedOrigin]
+    const derivedOrigins = [relatedOrigin]
+    const calls = {derived: false, ranges: false, synthetic: false}
+
+    Object.defineProperty(ranges, "map", {
+      value(callback) {
+        calls.ranges = true
+        callback(range, 0, ranges)
+        return [undefined]
+      }
+    })
+    Object.defineProperty(syntheticOrigins, "map", {
+      value(callback) {
+        calls.synthetic = true
+        callback(relatedOrigin, 0, syntheticOrigins)
+        return [undefined]
+      }
+    })
+    Object.defineProperty(derivedOrigins, "map", {
+      value(callback) {
+        calls.derived = true
+        callback(relatedOrigin, 0, derivedOrigins)
+        return [undefined]
+      }
+    })
+
+    const ranged = createByteMapping({byteLength: 1, path: "ranges.bin", ranges})
+    const related = createByteMapping({
+      byteLength: 1,
+      path: "synthetic.bin",
+      ranges: [{
+        generated: {end: 1, start: 0},
+        origin: {kind: "synthetic", reason: "byte", relatedOrigins: syntheticOrigins}
+      }]
+    })
+    const derived = createByteMapping({
+      byteLength: 1,
+      path: "derived.bin",
+      ranges: [{generated: {end: 1, start: 0}, origin: {kind: "derived", origins: derivedOrigins}}]
+    })
+
+    expect(calls).toEqual({derived: false, ranges: false, synthetic: false})
+    expect(ranged.ranges[0].generated).toEqual({end: 1, start: 0})
+    assert.equal(related.ranges[0].origin.kind, "synthetic")
+    expect(related.ranges[0].origin.relatedOrigins[0].sourceId).toEqual("source:0")
+    assert.equal(derived.ranges[0].origin.kind, "derived")
+    expect(derived.ranges[0].origin.origins[0].sourceId).toEqual("source:0")
+  })
+
   it("treats only undefined byte-range and related-origin identities as omitted", () => {
     const location = {
       end: {column: 2, line: 1, offset: 1},
