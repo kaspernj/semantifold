@@ -114,6 +114,19 @@ describe("Python frontend validation", () => {
     expectDiagnostic("def choose(left: int, right: int) -> int:\n    value: int = left\n\nprint(choose(1, 2))\n", "MISSING_RETURN")
   })
 
+  it("rejects function type parameters at their exact span instead of erasing them", () => {
+    const source = "def choose[T](left: int, right: int) -> int:\n    return left\n\nprint(choose(1, 2))\n"
+
+    assert.throws(
+      () => parse({filename: "generic.py", language: "python", source}),
+      (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_SYNTAX" &&
+        error.language == "python" && error.detail.includes("type_parameter") &&
+        error.location?.filename == "generic.py" && error.location.start.line == 1 &&
+        error.location.start.column == 11 && error.location.start.offset == 10 &&
+        error.location.end.line == 1 && error.location.end.column == 14 && error.location.end.offset == 13
+    )
+  })
+
   it("preserves mutable locals and the exact adjacent immutable carrier without treating comments as code", () => {
     const source = `def choose(flag: bool, fallback: str) -> str:
     # ordinary comment

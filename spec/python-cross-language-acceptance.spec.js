@@ -65,6 +65,17 @@ describe("Python cross-language native acceptance", () => {
       }
     }
   })
+
+  it("round-trips and executes a valid Python function named object", async () => {
+    const source = "def object(left: int, right: int) -> int:\n    return left + right\n\nprint(object(3, 4))\n"
+    const module = parse({filename: "object.py", language: "python", source})
+    const generated = generate({language: "python", module})
+    const reparsed = parse({filename: "program.py", language: "python", source: generated})
+
+    expect(generated).toContain("def object(left: int, right: int) -> int:\n")
+    expect(withoutLocations(reparsed)).toEqual(withoutLocations(module))
+    expect(await executeGenerated("python", module)).toEqual("7\n")
+  })
 })
 
 /**

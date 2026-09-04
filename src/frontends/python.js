@@ -566,6 +566,11 @@ function convertFunction(node, context, filename, source) {
   if (node.type != "function_definition" || node.children.some((child) => !child.isNamed && child.type == "async")) {
     return unsupportedSyntax("python", node.type, location)
   }
+  const typeParametersNode = node.childForFieldName("type_parameters")
+
+  if (typeParametersNode) {
+    return unsupportedSyntax("python", typeParametersNode.type, nodeLocation(typeParametersNode, filename, source))
+  }
   const nameNode = requiredField(node, "name", filename, source)
   const parametersNode = requiredField(node, "parameters", filename, source)
   const returnNode = node.childForFieldName("return_type")
