@@ -80,7 +80,7 @@ export async function runAcceptanceStages(input) {
  * @returns {{
  *   artifacts: import("./semantic/types.js").GeneratedArtifactSet,
  *   environment: Readonly<Record<string, string>>,
- *   stages: {arguments: string[], stage: import("./semantic/types.js").AcceptanceStage, tool: import("./semantic/types.js").DiscoveredToolchain}[],
+ *   stages: {arguments: string[], stage: import("./semantic/types.js").AcceptanceStage, tool: Readonly<{executable: string, version: string}>}[],
  *   target: string,
  *   timeoutMs: number
  * }} Validated request.
@@ -106,8 +106,9 @@ function validateRequest(input) {
       seen.add(stage.stage)
       if (!Array.isArray(stage.arguments) || !stage.arguments.every((argument) => typeof argument == "string" && !argument.includes("\0")) ||
         !isTool(stage.tool)) invalidRunner(`Acceptance stage '${stage.stage}' has an invalid tool or argument array.`, input.target)
+      const tool = Object.freeze({executable: stage.tool.executable, version: stage.tool.version})
 
-      return Object.freeze({arguments: [...stage.arguments], stage: stage.stage, tool: stage.tool})
+      return Object.freeze({arguments: [...stage.arguments], stage: stage.stage, tool})
     })
 
     return {artifacts, environment, stages, target: input.target, timeoutMs: input.timeoutMs}
@@ -129,18 +130,22 @@ function validateRequest(input) {
 /**
  * Normalizes a subprocess failure with exact stage and toolchain context.
  * @param {unknown} error - Subprocess rejection.
- * @param {{arguments: string[], stage: string, tool: import("./semantic/types.js").DiscoveredToolchain}} stage - Failed stage.
+ * @param {{arguments: string[], stage: string, tool: Readonly<{executable: string, version: string}>}} stage - Failed stage.
  * @param {string} target - Acceptance target.
  * @param {number} timeoutMs - Configured stage timeout.
  * @returns {SemantifoldDiagnostic} Normalized failure.
  */
 function processDiagnostic(error, stage, target, timeoutMs) {
   const fields = processErrorFields(error)
-  const timedOut = fields.killed || fields.signal == "SIGTERM"
+  const timedOut = fields.killed
   const launchFailure = typeof fields.nativeCode == "string"
-  const code = timedOut ? "ACCEPTANCE_TIMEOUT" : launchFailure ? "ACCEPTANCE_LAUNCH_FAILURE" : "ACCEPTANCE_NONZERO_EXIT"
+  const signaled = !timedOut && fields.signal != undefined
+  const code = timedOut ? "ACCEPTANCE_TIMEOUT" : launchFailure ? "ACCEPTANCE_LAUNCH_FAILURE" : signaled
+    ? "ACCEPTANCE_SIGNAL"
+    : "ACCEPTANCE_NONZERO_EXIT"
   const reason = timedOut ? `timed out after ${timeoutMs}ms` : launchFailure
     ? `could not launch (${fields.nativeCode})`
+    : signaled ? `terminated by signal ${fields.signal}`
     : `exited nonzero (${fields.exitCode ?? fields.signal ?? "unknown"})`
 
   return new SemantifoldDiagnostic({

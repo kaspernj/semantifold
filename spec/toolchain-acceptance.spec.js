@@ -212,6 +212,45 @@ printf '%s|%s|%s|%s\\n' "$1" "$LC_ALL" "$TZ" "$PWD"
     })
   })
 
+  it("detaches structural stage tools before asynchronous acceptance setup", async () => {
+    await withTemporaryDirectory("semantifold-runner-tool-race-", async (directory) => {
+      const expectedExecutable = await fakeExecutable(directory, "expected-tool", `#!/bin/sh
+if [ "$1" = "--version" ]; then printf 'expected 1\n'; exit 0; fi
+printf 'expected\n'
+`)
+      const mutatedExecutable = await fakeExecutable(directory, "mutated-tool", "#!/bin/sh\nprintf 'mutated\\n'\n")
+      const discovered = await discoverToolchain({
+        canonicalCommand: "expected-tool",
+        id: "expected",
+        override: expectedExecutable,
+        versionArguments: ["--version"]
+      })
+      const mutableTool = {...discovered}
+      const artifacts = createGeneratedArtifactSet({artifacts: [{
+        content: "input\n",
+        contentKind: "text",
+        mediaType: "text/plain",
+        ownership: "generated",
+        path: "input.txt",
+        provenance: synthetic(),
+        role: "entry"
+      }], target: "demo"})
+      const pendingRun = runAcceptanceStages({
+        artifacts,
+        stages: [{arguments: [], stage: "execute", tool: mutableTool}],
+        target: "demo"
+      })
+
+      mutableTool.executable = mutatedExecutable
+      mutableTool.version = "caller-mutated"
+      const result = await pendingRun
+
+      expect(result.stages[0].stdout).toEqual("expected\n")
+      expect(result.stages[0].executable).toEqual(expectedExecutable)
+      expect(result.stages[0].version).toEqual("expected 1")
+    })
+  })
+
   it("normalizes invalid runner input, nonzero exits, launch failures, and timeouts by exact stage", async () => {
     await expectDiagnostic(
       // @ts-expect-error Deliberately malformed public runner request.
@@ -228,8 +267,13 @@ exit 9
 if [ "$1" = "--version" ]; then printf 'slow 1\\n'; exit 0; fi
 while :; do :; done
 `)
+      const signalExecutable = await fakeExecutable(directory, "signal-tool", `#!/bin/sh
+if [ "$1" = "--version" ]; then printf 'signal 1\\n'; exit 0; fi
+kill -TERM $$
+`)
       const failing = await discoverToolchain({canonicalCommand: "unused", id: "fail", override: failingExecutable, versionArguments: ["--version"]})
       const slow = await discoverToolchain({canonicalCommand: "unused", id: "slow", override: slowExecutable, versionArguments: ["--version"]})
+      const signaled = await discoverToolchain({canonicalCommand: "unused", id: "signal", override: signalExecutable, versionArguments: ["--version"]})
       const empty = createGeneratedArtifactSet({artifacts: [{
         content: "input\n",
         contentKind: "text",
@@ -258,6 +302,11 @@ while :; do :; done
         () => runAcceptanceStages({artifacts: empty, stages: [{arguments: [], stage: "validate", tool: slow}], target: "demo", timeoutMs: 50}),
         "ACCEPTANCE_TIMEOUT",
         "validate"
+      )
+      await assert.rejects(
+        () => runAcceptanceStages({artifacts: empty, stages: [{arguments: [], stage: "execute", tool: signaled}], target: "demo"}),
+        (error) => error instanceof SemantifoldDiagnostic && error.code == "ACCEPTANCE_SIGNAL" && error.stage == "execute" &&
+          error.signal == "SIGTERM"
       )
       await expectDiagnostic(
         () => runAcceptanceStages({

@@ -213,6 +213,41 @@ describe("generated artifact sets", () => {
     expect(mapping.provenance.kind).toEqual("synthetic")
   })
 
+  it("rejects malformed encoded Source Map segments and out-of-range source or name references", async () => {
+    const source = await readFile(new URL("fixtures/program.ts", import.meta.url), "utf8")
+    const module = parse({filename: "program.ts", language: "typescript", source})
+    const generated = generateArtifact({filename: "program.js", language: "javascript", module})
+
+    expect(generated.sourceMap.sources.length).toEqual(1)
+    assert.ok(generated.sourceMap.names.length > 0)
+    const invalidSourceMaps = [
+      {...generated.sourceMap, mappings: "!"},
+      {...generated.sourceMap, mappings: "AA"},
+      {...generated.sourceMap, mappings: "ACAA"},
+      {...generated.sourceMap, names: []}
+    ]
+
+    for (const sourceMap of invalidSourceMaps) {
+      expectInvalid(() => createGeneratedArtifactSet({
+        artifacts: [{
+          content: generated.code,
+          contentKind: "text",
+          mediaType: "text/javascript",
+          ownership: "generated",
+          path: generated.filename,
+          provenance: {
+            kind: "text",
+            mapping: generated.mapping,
+            sourceMap,
+            sourceMapFilename: generated.sourceMapFilename
+          },
+          role: "entry"
+        }],
+        target: "javascript"
+      }))
+    }
+  })
+
   it("rejects unsafe paths, duplicates, malformed content, ownership, and entry declarations transactionally", () => {
     const valid = {
       content: "ok\n",

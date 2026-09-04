@@ -1,5 +1,6 @@
 // @ts-check
 
+import {decodedMappings, encodedMappings, presortedDecodedMap, TraceMap} from "@jridgewell/trace-mapping"
 import {isSafeArtifactPath} from "./artifact-path.js"
 import {finalizeByteMapping} from "./binary-mapping.js"
 import {SemantifoldDiagnostic} from "./diagnostic.js"
@@ -304,10 +305,63 @@ function validateSourceMap(value, artifactPath, target) {
       !value.sourcesContent.every((source) => source == null || typeof source == "string")))) {
     invalidArtifactSet(`Text artifact '${artifactPath}' has malformed Source Map v3 provenance.`, target)
   }
+  validateEncodedSourceMapMappings(
+    /** @type {import("@jridgewell/trace-mapping").EncodedSourceMap} */ (/** @type {unknown} */ (value)),
+    artifactPath,
+    target
+  )
 
   const detached = /** @type {unknown} */ (structuredClone(value))
 
   return deepFreeze(/** @type {import("@jridgewell/gen-mapping").EncodedSourceMap} */ (detached))
+}
+
+/**
+ * Decodes and validates the Source Map payload with the installed mapping implementation.
+ * @param {import("@jridgewell/trace-mapping").EncodedSourceMap} sourceMap - Structurally validated map.
+ * @param {string} artifactPath - Owning artifact path.
+ * @param {string} target - Artifact target.
+ * @returns {void}
+ */
+function validateEncodedSourceMapMappings(sourceMap, artifactPath, target) {
+  /** @type {Readonly<import("@jridgewell/trace-mapping").SourceMapSegment[][]>} */
+  let decoded
+  let canonicalMappings
+
+  try {
+    decoded = decodedMappings(new TraceMap(sourceMap))
+    const decodedMap = /** @type {import("@jridgewell/trace-mapping").DecodedSourceMap} */ ({
+      ...sourceMap,
+      mappings: structuredClone(decoded)
+    })
+
+    canonicalMappings = encodedMappings(presortedDecodedMap(decodedMap))
+  } catch (error) {
+    invalidArtifactSet(`Text artifact '${artifactPath}' has invalid encoded Source Map mappings.`, target, error)
+  }
+
+  if (canonicalMappings != sourceMap.mappings ||
+    !validDecodedSourceMapMappings(decoded, sourceMap.sources.length, sourceMap.names.length)) {
+    invalidArtifactSet(`Text artifact '${artifactPath}' has invalid encoded Source Map mappings.`, target)
+  }
+}
+
+/**
+ * Validates decoded Source Map segment shape and referenced indices.
+ * @param {Readonly<import("@jridgewell/trace-mapping").SourceMapSegment[][]>} lines - Decoded mapping lines.
+ * @param {number} sourceCount - Declared source count.
+ * @param {number} nameCount - Declared name count.
+ * @returns {boolean} Whether every segment is semantically valid.
+ */
+function validDecodedSourceMapMappings(lines, sourceCount, nameCount) {
+  return lines.every((line) => line.every((segment) => {
+    if (segment.length != 1 && segment.length != 4 && segment.length != 5) return false
+    if (!segment.every((field) => Number.isSafeInteger(field) && field >= 0)) return false
+    if (segment.length == 1) return true
+    if (segment[1] >= sourceCount) return false
+
+    return segment.length == 4 || segment[4] < nameCount
+  }))
 }
 
 /**
