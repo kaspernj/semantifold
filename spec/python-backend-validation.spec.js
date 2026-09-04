@@ -74,7 +74,7 @@ describe("Python text backend", () => {
     const source = await readFile(new URL("fixtures/program.ts", import.meta.url), "utf8")
     const base = parse({filename: "program.ts", language: "typescript", source})
 
-    for (const name of ["match", "case", "type", "_", "print", "int", "bool", "str", "not-ascii-é", "K"]) {
+    for (const name of ["match", "case", "type", "_", "print", "int", "bool", "str", "__debug__", "not-ascii-é", "K"]) {
       const module = structuredClone(base)
       module.functions[0].name = name
       const printStatement = /** @type {import("../src/semantic/types.js").PrintStatement} */ (module.entryPoint.body.statements[0])

@@ -148,7 +148,7 @@ print(choose(True, "no"))
   })
 
   it("rejects hard/soft keywords and annotation or print capture hazards", () => {
-    for (const name of ["match", "case", "type", "_", "print", "int", "bool", "str", "K"]) {
+    for (const name of ["match", "case", "type", "_", "print", "int", "bool", "str", "__debug__", "K"]) {
       expectDiagnostic(`def ${name}(left: int, right: int) -> int:\n    return left\n\nprint(${name}(1, 2))\n`, "UNSUPPORTED_SYNTAX")
     }
   })

@@ -43,7 +43,7 @@ const reservedWords = {
     "False", "None", "True", "and", "as", "assert", "async", "await", "bool", "break", "case", "class",
     "continue", "def", "del", "elif", "else", "except", "exec", "finally", "for", "from", "global", "if",
     "import", "in", "int", "is", "lambda", "match", "nonlocal", "not", "or", "pass", "print",
-    "raise", "return", "str", "try", "type", "while", "with", "yield", "_"
+    "raise", "return", "str", "try", "type", "while", "with", "yield", "_", "__debug__"
   ]),
   ruby: new Set([
     "BEGIN", "END", "__ENCODING__", "__END__", "__FILE__", "__LINE__", "alias", "and", "begin", "break", "case",

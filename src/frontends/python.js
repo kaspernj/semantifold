@@ -18,7 +18,7 @@ const pythonReservedIdentifiers = new Set([
   "False", "None", "True", "and", "as", "assert", "async", "await", "break", "case", "class", "continue",
   "def", "del", "elif", "else", "except", "exec", "finally", "for", "from", "global", "if", "import", "in",
   "is", "lambda", "match", "nonlocal", "not", "or", "pass", "print", "raise", "return", "try", "type",
-  "while", "with", "yield", "_", "int", "bool", "str"
+  "while", "with", "yield", "_", "__debug__", "int", "bool", "str"
 ])
 const binaryOperations = new Map([
   ["+", "Add"],
