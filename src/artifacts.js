@@ -2,7 +2,7 @@
 
 import {decodedMappings, encodedMappings, presortedDecodedMap, TraceMap} from "@jridgewell/trace-mapping"
 import {isDenseArray} from "./array.js"
-import {isSafeArtifactPath} from "./artifact-path.js"
+import {isSafeArtifactPath, isValidFilenameMetadata} from "./artifact-path.js"
 import {finalizeByteMapping} from "./binary-mapping.js"
 import {SemantifoldDiagnostic} from "./diagnostic.js"
 import {finalizeMapping, toSourceMapV3} from "./mapping.js"
@@ -138,6 +138,9 @@ function validateArtifactProvenance(value, contentKind, artifactPath, content, t
       mappingCandidate.generated.content != content || !isPlainObject(value.sourceMap)) {
       invalidArtifactSet(`Text artifact '${artifactPath}' has mismatched rich or Source Map provenance.`, target)
     }
+    if (value.sourceMapFilename !== undefined && !isValidFilenameMetadata(value.sourceMapFilename)) {
+      invalidArtifactSet(`Text artifact '${artifactPath}' has invalid Source Map filename metadata.`, target)
+    }
     const mapping = finalizeMapping(mappingCandidate)
     const sourceMap = validateSourceMap(value.sourceMap, artifactPath, target)
     const projectedSourceMap = toSourceMapV3(mapping)
@@ -150,7 +153,7 @@ function validateArtifactProvenance(value, contentKind, artifactPath, content, t
       kind: /** @type {const} */ ("text"),
       mapping,
       sourceMap,
-      sourceMapFilename: typeof value.sourceMapFilename == "string" ? value.sourceMapFilename : undefined
+      sourceMapFilename: value.sourceMapFilename
     })
   }
 

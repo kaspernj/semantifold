@@ -66,7 +66,7 @@ artifact.sourceMap     // encoded Source Map v3 object
 artifact.sourceMapFilename
 ```
 
-Default filenames are `program.php`, `program.rb`, `program.js`, `program.ts`, and `Main.java`. Java artifacts may include directories but must retain the basename `Main.java`, matching the generated public class and making the returned filename directly compilable; any other basename is a located `UNSUPPORTED_CAPABILITY` diagnostic for the Java backend. `sources` may supply exact content for legacy or caller-assembled multi-source IR:
+Default filenames are `program.php`, `program.rb`, `program.js`, `program.ts`, and `Main.java`. Defaults apply only when `filename` or `sourceMapFilename` is omitted (`undefined`); an explicitly supplied `null` remains invalid. Java artifacts may include directories but must retain the basename `Main.java`, matching the generated public class and making the returned filename directly compilable; any other basename is a located `UNSUPPORTED_CAPABILITY` diagnostic for the Java backend. `sources` may supply exact content for legacy or caller-assembled multi-source IR:
 
 ```js
 generateArtifact({
@@ -114,7 +114,7 @@ const mapping = createByteMapping({
 
 The discriminator is `SemantifoldByteMapping`, version is `1`, and `coordinateSystem` is exactly `bytes`. The range array and every nested provenance-origin array are dense; ranges contain non-negative safe-integer half-open offsets, are non-empty, ordered, non-overlapping, and bounded by `generated.byteLength`. Source/derived origins retain ordinary UTF-16 original `SourceLocation` values; only the generated side is in bytes. Synthetic regions require a non-empty reason. `nodeId`, `symbolId`, and `role` associate encoded regions without fabricating source positions. `parseByteMapping()` validates serialized input and `stringifyByteMapping()` emits canonical key-sorted JSON with one LF.
 
-Text artifact provenance embeds the validated rich mapping and Source Map v3 projection. Binary artifact provenance must embed a matching byte map whose path and byte length equal its artifact. Manifest, support, loader, and other source-free text/resources may instead carry an explicit artifact-level synthetic reason and related source origins. Artifact-set construction detaches and deeply freezes every such related origin, including its location and start/end points.
+Text artifact provenance embeds the validated rich mapping and Source Map v3 projection. Its optional `sourceMapFilename` may be omitted, but when present must be a non-empty single-line string; malformed values are rejected as `INVALID_ARTIFACT_SET`. Binary artifact provenance must embed a matching byte map whose path and byte length equal its artifact. Manifest, support, loader, and other source-free text/resources may instead carry an explicit artifact-level synthetic reason and related source origins. Artifact-set construction detaches and deeply freezes every such related origin, including its location and start/end points.
 
 ## Source Map v3 and directives
 

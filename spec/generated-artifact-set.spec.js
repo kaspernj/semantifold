@@ -347,6 +347,30 @@ describe("generated artifact sets", () => {
     }
   })
 
+  it("rejects present malformed optional Source Map filename metadata", async () => {
+    const source = await readFile(new URL("fixtures/program.ts", import.meta.url), "utf8")
+    const module = parse({filename: "program.ts", language: "typescript", source})
+    const generated = generateArtifact({filename: "program.js", language: "javascript", module})
+    const valid = textArtifact(generated, generated.sourceMap)
+    const {sourceMapFilename: _sourceMapFilename, ...provenanceWithoutFilename} = valid.provenance
+
+    expect(createGeneratedArtifactSet({
+      artifacts: [{...valid, provenance: provenanceWithoutFilename}],
+      target: "javascript"
+    }).entry).toEqual("program.js")
+
+    for (const sourceMapFilename of ["", "map\nfile", null, {}, Symbol("map")]) {
+      assert.throws(
+        () => createGeneratedArtifactSet({
+          artifacts: [{...valid, provenance: {...valid.provenance, sourceMapFilename}}],
+          target: "javascript"
+        }),
+        (error) => error instanceof SemantifoldDiagnostic && error.code == "INVALID_ARTIFACT_SET" &&
+          error.detail == "Text artifact 'program.js' has invalid Source Map filename metadata."
+      )
+    }
+  })
+
   it("rejects unsafe paths, duplicates, malformed content, ownership, and entry declarations transactionally", () => {
     const valid = {
       content: "ok\n",

@@ -1,5 +1,16 @@
 // @ts-check
 
+const lineTerminatorPattern = /[\n\r\u2028\u2029]/u
+
+/**
+ * Validates filename metadata without imposing artifact-set path semantics.
+ * @param {unknown} value - Candidate filename.
+ * @returns {value is string} Whether the value is a non-empty single-line string.
+ */
+export function isValidFilenameMetadata(value) {
+  return typeof value == "string" && value.length > 0 && !lineTerminatorPattern.test(value)
+}
+
 /**
  * Validates a safe relative POSIX artifact path.
  * @param {unknown} value - Candidate path.

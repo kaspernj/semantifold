@@ -1,11 +1,11 @@
 // @ts-check
 
 import {unsupportedCapability, unsupportedRole} from "../diagnostic.js"
+import {isValidFilenameMetadata} from "../artifact-path.js"
 import {languageRegistry} from "../language-registry.js"
 import {validateBackendModule} from "./shared.js"
 import {SourceWriter} from "./writer.js"
 import {finalizeMapping, toSourceMapV3} from "../mapping.js"
-const lineTerminatorPattern = /[\n\r\u2028\u2029]/u
 const syntheticArtifactBase = Object.freeze(["__semantifold_artifacts__"])
 
 /**
@@ -35,14 +35,14 @@ export function generateArtifactSource({language, filename, mapDirective = "none
   const record = languageRegistry.record(language)
 
   if (record.artifactMultiplicity != "single") unsupportedRole(language, "single-text backend", module?.location)
-  filename ??= record.defaultFilename
-  sourceMapFilename ??= `${filename}.map`
+  if (filename === undefined) filename = record.defaultFilename
+  if (sourceMapFilename === undefined) sourceMapFilename = `${filename}.map`
   validateBackendModule(module, language)
 
-  if (typeof filename != "string" || filename.length == 0 || lineTerminatorPattern.test(filename)) {
+  if (!isValidFilenameMetadata(filename)) {
     throw new TypeError("Generated filename must be a non-empty single-line string.")
   }
-  if (typeof sourceMapFilename != "string" || sourceMapFilename.length == 0 || lineTerminatorPattern.test(sourceMapFilename)) {
+  if (!isValidFilenameMetadata(sourceMapFilename)) {
     throw new TypeError("Source map filename must be a non-empty single-line string.")
   }
   if (language == "java" && filename.split(/[\\/]/u).at(-1) != "Main.java") {
