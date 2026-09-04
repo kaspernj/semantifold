@@ -2,7 +2,7 @@
 
 - Status: `todo`
 - Phase/priority: Phase 1 / P1
-- Dependencies: [001-portable-scalar-values-and-types.md](001-portable-scalar-values-and-types.md), [003-typed-operators-and-expressions.md](003-typed-operators-and-expressions.md), [004-statement-sequencing-and-conditionals.md](004-statement-sequencing-and-conditionals.md)
+- Dependencies: [001-portable-scalar-values-and-types.md](001-portable-scalar-values-and-types.md), [003-typed-operators-and-expressions.md](003-typed-operators-and-expressions.md), [004-statement-sequencing-and-conditionals.md](004-statement-sequencing-and-conditionals.md), [025-core-language-baseline-acceptance.md](025-core-language-baseline-acceptance.md)
 
 ## Objective
 
@@ -13,6 +13,8 @@ Model explicit `Optional<T>` presence/absence, construction, presence tests, and
 There is no null literal, recursive optional type, union, flow narrowing, or presence operation in the current IR. TypeScript/PHP/RBS can write optional/union types, Java reference types are implicitly nullable, Java `Optional<T>` is explicit, and JavaScript has two absence values. Mapping all source nullish behavior to one unchecked literal would lose declaration intent and target safety.
 
 ## Language matrix
+
+This matrix records the original-five mappings researched for this task. Task 025 is the expansion prerequisite, but this task must name its required language cohort rather than implicitly blocking on every registered role. Other roles retain explicit documented and tested capability rejections until their optional-value mapping is designed. Task 013 remains intentionally original-five-only.
 
 | Language | Representative accepted source | Required constraint/rejection |
 | --- | --- | --- |
@@ -53,10 +55,10 @@ There is no null literal, recursive optional type, union, flow narrowing, or pre
 
 ## Tests and acceptance
 
-- Equivalent fixtures return optional strings, branch on presence, unwrap safely, and produce the same present/absent output in all five languages.
+- Equivalent fixtures return optional strings, branch on presence, unwrap safely, and produce the same present/absent output in every required registered language role.
 - Negative specs cover JS/TS `undefined`, omitted/optional parameters, non-null assertions, safe/optional/nullsafe chaining, PHP/Ruby loose/truthy checks, Java bare null/unchecked `get`, nested optional policy, and arbitrary unions.
 - Flow tests cover both branches, reassignment invalidation, shadowing, return completeness, and externally constructed malformed IR.
-- Generate/reparse and execute present and absent cases through all five real toolchains with exact output.
+- Generate/reparse and execute present and absent cases through every required real toolchain with exact output.
 
 ## Documentation and changelog
 
@@ -71,4 +73,4 @@ Arbitrary unions/intersections, `undefined`, optional/default parameters or prop
 - Presence/absence has one parser-neutral variant meaning with explicit recursive typing.
 - All unwrapping is statically guarded, and every language mapping round-trips without relying on implicit nullability.
 - Arbitrary unions and nullish shortcuts fail loudly rather than erase meaning.
-- Focused flow/diagnostic specs and real present/absent five-runtime execution pass with docs/changelog updates.
+- Focused flow/diagnostic specs and real present/absent registered-runtime execution pass with docs/changelog updates.

@@ -14,6 +14,8 @@ The semantic module contains only functions and an entry point. Calls have no re
 
 ## Language matrix
 
+This matrix records the original-five mappings researched for this conditional task. Its implementation names a required cohort; every other registered role retains an explicit tested rejection until a focused task makes its value/layout/ownership decision. Registration alone does not block record semantics. Task 013 remains intentionally original-five-only.
+
 | Language | Representative accepted source | Required constraint/rejection |
 | --- | --- | --- |
 | Ruby | `class User`; typed `attr_reader :name`; typed `initialize(name)` assigning `@name`; `User.new("Ada").name` | Require exact generated/profile structure and field annotations. Reject open-class reopening, writers, extra instance variables, singleton methods, inheritance/mixins, dynamic send, and reflective access. |
@@ -53,10 +55,10 @@ The semantic module contains only functions and an entry point. Calls have no re
 
 ## Tests and acceptance
 
-- Five-language equivalence fixtures declare two records, construct nested/optional/container fields, read members, pass records through functions, and print scalar projections.
+- Registered-language equivalence fixtures declare two records, construct nested/optional/container fields, read members, pass records through functions, and print scalar projections.
 - Negative specs cover all extra class members/modifiers, object/map structural substitutes, mutation, unknown/duplicate fields, wrong constructor signatures, inheritance, methods, reflection/dynamic access, Java record syntax under the pinned grammar, and recursive cycles.
 - Backend tests validate complete record shape and target names before emission.
-- Generate/reparse and compile/run all five targets with exact output proving nominal construction and field reads.
+- Generate/reparse and compile/run every required registered target with exact output proving nominal construction and field reads.
 
 ## Documentation and changelog
 
@@ -71,4 +73,4 @@ General classes, inheritance/interfaces/traits/mixins, methods, mutable/static/p
 - Record declarations/construction/reads resolve nominally and remain parser-neutral.
 - Every frontend accepts exactly one auditable canonical form and rejects all extra class behavior.
 - Every backend emits a closed immutable profile or fails before output; no map/object erasure occurs.
-- Focused shape/resolution specs and real five-runtime semantic round trips pass with docs/changelog updates.
+- Focused shape/resolution specs and real registered-runtime semantic round trips pass with docs/changelog updates.

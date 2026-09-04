@@ -14,6 +14,8 @@ The semantic schema has no compound values or type arguments. Every frontend rej
 
 ## Language matrix
 
+This matrix records the original-five mappings researched for this task. Its implementation names the required cohort and tests explicit capability rejection for other registered roles; language or platform registration alone does not make collection support a prerequisite. Task 013 remains intentionally original-five-only.
+
 | Language | Representative accepted source | Required constraint/rejection |
 | --- | --- | --- |
 | Ruby | `[1, 2]` with `[Array[Integer]]`; `{"a" => 1}` with `[Hash[String, Integer]]`; `items[index]`, `values.fetch(key)` | Require homogeneous explicit container type. Use `fetch` for total map lookup; reject default procs, symbols as keys initially, splats, mutation, ranges, and missing-key `[]` ambiguity. |
@@ -55,10 +57,10 @@ The semantic schema has no compound values or type arguments. Every frontend rej
 
 ## Tests and acceptance
 
-- Equivalent five-language fixtures cover empty/nonempty lists/maps, duplicates in lists, string-key lookup, list indexing, size, nesting one supported container level, and passage through functions.
+- Equivalent registered-language fixtures cover empty/nonempty lists/maps, duplicates in lists, string-key lookup, list indexing, size, nesting one supported container level, and passage through functions.
 - Negative specs cover sparse/spread/mixed containers, numeric-string PHP keys, duplicate keys, raw/missing types, mutable operations, object-as-map, Java arrays/raw types/null factory elements, and unchecked missing reads.
 - Backend tests cover recursive capability validation and factory limits before emission.
-- Generate/reparse and run all five real targets with exact output proving list order, indexing, map lookup, size, and nested type preservation.
+- Generate/reparse and run every required registered target with its real toolchain and exact output proving list order, indexing, map lookup, size, and nested type preservation.
 
 ## Documentation and changelog
 
@@ -73,4 +75,4 @@ Map iteration or observable map order (deferred to [014-ordered-map-iteration.md
 - Lists and maps are distinct recursive semantic types/values with exhaustive validation and no parser-specific leakage; map construction, lookup, and size expose no iteration-order promise.
 - Five frontends reject shape/coercion ambiguities and five backends emit equivalent reads without silently changing container kind.
 - Recursive type/entry locations drive stable diagnostics.
-- Focused specs and real five-runtime round-trip behavior pass with docs/changelog updates.
+- Focused specs and real registered-runtime round-trip behavior pass with docs/changelog updates.

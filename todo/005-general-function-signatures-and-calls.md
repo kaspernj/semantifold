@@ -1,8 +1,8 @@
 # 005 — General required function signatures and calls
 
 - Status: `todo`
-- Phase/priority: Phase 0 / P0
-- Dependencies: [001-portable-scalar-values-and-types.md](001-portable-scalar-values-and-types.md), [004-statement-sequencing-and-conditionals.md](004-statement-sequencing-and-conditionals.md)
+- Phase/priority: Phase 1 / P1
+- Dependencies: [001-portable-scalar-values-and-types.md](001-portable-scalar-values-and-types.md), [004-statement-sequencing-and-conditionals.md](004-statement-sequencing-and-conditionals.md), [025-core-language-baseline-acceptance.md](025-core-language-baseline-acceptance.md)
 
 ## Objective
 
@@ -13,6 +13,8 @@ Support named synchronous top-level functions with zero or more required positio
 [`../src/semantic/validate.js`](../src/semantic/validate.js) and [`../src/backends/shared.js`](../src/backends/shared.js) hard-code two parameters and two call arguments. `CallExpression.callee` in [`../src/semantic/types.js`](../src/semantic/types.js) is a string with no declaration link or signature checking. The frontends already collect multiple top-level functions, but do not reject duplicate names or unresolved/mistyped calls. JS/TS async/generators and Ruby non-required parameters are explicitly rejected by current specs.
 
 ## Language matrix
+
+This matrix records the original-five mappings researched for this task. Task 025 first proves the expanded cohort on Tasks 001–004, but registration alone does not force every new language or platform to implement general calls in this task. The implementation must name its required cohort and keep every other registered role as a truthful, documented, tested capability rejection until a focused adoption task adds it. Task 013 remains the original-five aggregate regression gate.
 
 | Language | Representative accepted source | Required constraint/rejection |
 | --- | --- | --- |
@@ -58,7 +60,7 @@ Support named synchronous top-level functions with zero or more required positio
 - Add equivalence cases for zero-, one-, and three-parameter functions, nested direct calls, recursion with a terminating condition, void helper calls, and multiple functions.
 - Negative specs cover duplicate/unresolved names, wrong arity/type, void misuse, missing return values, every excluded parameter form, spread/named arguments, receivers, overloads, and higher-order calls.
 - Backend malformed-IR specs prove signature validation occurs before emission.
-- Generate/reparse and execute one multi-function fixture on all five real toolchains, asserting exact output and equivalent resolved signatures/calls.
+- Generate/reparse and execute one multi-function fixture through every required registered role with its real toolchain, asserting exact output and equivalent resolved signatures/calls.
 
 ## Documentation and changelog
 
@@ -73,4 +75,4 @@ Optional/default/rest/keyword/named/variadic parameters or arguments, overloads,
 - Function and call arity is no longer hard-coded, and every call resolves to one typed semantic declaration.
 - Void is enforced as non-value return semantics across source, IR, and targets.
 - Every excluded call/parameter form fails loudly at a useful location.
-- Focused signature/diagnostic specs and real five-runtime round-trip execution pass with docs/changelog updates.
+- Focused signature/diagnostic specs and real registered-runtime round-trip execution pass with docs/changelog updates.

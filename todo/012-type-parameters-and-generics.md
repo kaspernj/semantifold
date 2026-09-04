@@ -14,6 +14,8 @@ Task 006 introduces concrete recursive type applications but not declaration-sco
 
 ## Language matrix
 
+This matrix records the original-five mappings researched for this conditional task. Its implementation names a required cohort and keeps explicit tested rejection elsewhere; no registered role may silently erase generic meaning to appear supported. Task 013 remains intentionally original-five-only.
+
 | Language | Representative accepted source | Required constraint/rejection |
 | --- | --- | --- |
 | Ruby | adjacent `# @template T`, parameter `[T]`, return `[T]`; record `[Box[T]]` profile | Treat comments as the Semantifold carrier for bounded RBS type expressions. Reject runtime type reflection, variance, bounds, overloads, higher-kinded types, and untyped variables. |
@@ -53,10 +55,10 @@ Task 006 introduces concrete recursive type applications but not declaration-sco
 
 ## Tests and acceptance
 
-- Equivalent fixtures cover identity, `Box<T>`, nested `List<T>`, two independent type parameters, and inference from multiple consistent arguments across all five languages.
+- Equivalent fixtures cover identity, `Box<T>`, nested `List<T>`, two independent type parameters, and inference from multiple consistent arguments across every required registered language role.
 - Negative specs cover PHP/Ruby/JS missing template docs, raw Java types, free/duplicate variables, wrong arity, conflicts, expected-return-only inference, bounds/defaults/wildcards/variance, higher-kinded/conditional/mapped types, and runtime reflection.
 - Backend tests prove no type-documentation erasure in dynamic targets and no raw/Object/mixed fallback.
-- Generate/reparse and execute concrete string/integer instantiations through all five real toolchains with exact output and equivalent generic semantic structure.
+- Generate/reparse and execute concrete string/integer instantiations through every required real toolchain with exact output and equivalent generic semantic structure.
 
 ## Documentation and changelog
 
@@ -71,4 +73,4 @@ Bounds/constraints/defaults, variance/wildcards/capture, higher-kinded types, as
 - Scoped semantic type variables and applications validate without parser-specific or target-specific representations.
 - First-order inference is deterministic, complete for the accepted profile, and fails loudly on ambiguity/conflict.
 - Every dynamic target preserves the full contract in reparsable documentation; PHP is not marked supported until that proof passes.
-- Focused generic/inference diagnostics and real five-runtime round trips pass with docs/changelog updates.
+- Focused generic/inference diagnostics and real registered-runtime round trips pass with docs/changelog updates.

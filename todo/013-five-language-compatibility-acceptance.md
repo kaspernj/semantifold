@@ -1,16 +1,18 @@
 # 013 — Five-language compatibility acceptance
 
-- Status: `todo`
-- Phase/priority: Phase 1 / P1 terminal acceptance
+- Status: `todo` (legacy original-five acceptance)
+- Phase/priority: Phase 1 / P1 legacy terminal acceptance
 - Dependencies: [001-portable-scalar-values-and-types.md](001-portable-scalar-values-and-types.md), [002-local-declarations-and-assignment.md](002-local-declarations-and-assignment.md), [003-typed-operators-and-expressions.md](003-typed-operators-and-expressions.md), [004-statement-sequencing-and-conditionals.md](004-statement-sequencing-and-conditionals.md), [005-general-function-signatures-and-calls.md](005-general-function-signatures-and-calls.md), [006-immutable-lists-and-maps.md](006-immutable-lists-and-maps.md), [007-optional-values-and-presence-narrowing.md](007-optional-values-and-presence-narrowing.md), [008-collection-iteration.md](008-collection-iteration.md)
 
 ## Objective
 
-Prove the selected near-term roadmap slice (Tasks 001–008) as one coherent public compatibility contract across every source and target language. Consolidate fixtures, capability validation, diagnostics, semantic round trips, and real execution without adding Phase 2/3 features.
+Prove the selected near-term roadmap slice (Tasks 001–008) as one coherent compatibility contract across the original five source and target languages: PHP, Ruby, JavaScript with JSDoc, TypeScript, and Java. Consolidate their fixtures, capability validation, diagnostics, semantic round trips, and real execution without adding Phase 2/3 features.
 
 ## Current evidence and gap
 
 [`../spec/frontend-equivalence.spec.js`](../spec/frontend-equivalence.spec.js) and [`../spec/backend-execution.spec.js`](../spec/backend-execution.spec.js) already prove the original two-integer difference fixture across all five languages and real runtimes. Focused correction specs cover unsafe integers, function flags, parser-child dropping, annotations, strict types, target identifiers, Java range, and branch shape. After eight independent expansions, a terminal fixture is needed to catch interactions that focused task specs cannot prove.
+
+Task 025 and its core language dependencies are completed transitively before this task through Tasks 005 and 007, but they do not expand this task's acceptance matrix. Python, C#, C, C++, Rust, Swift, Kotlin/JVM, and Go baseline acceptance belongs to Task 025 and later per-capability updates. Browser Wasm and application/later-language lanes are non-blocking and retain their own acceptance. Keeping this file original-five-only preserves its historical contract instead of falsely converting a legacy five-language milestone into an ever-growing matrix.
 
 ## Language matrix
 
@@ -65,7 +67,7 @@ Reconcile root README, `docs/goals.md`, `docs/architecture.md`, `docs/language-s
 
 ## Non-goals
 
-Any new feature or syntax beyond Tasks 001–008, including ordered map iteration from Task 014, floating point, arbitrary unions, records/classes, multi-file modules, exceptions, generics, async/concurrency, dynamic features, parser/tool upgrades, source formatting preservation, performance benchmarks, and loosening a rejection merely to simplify the acceptance fixture.
+Acceptance claims for the Task 025 core cohort, browser Wasm, Apple/mobile artifacts, Objective-C interop, Dart/Flutter, or Zig; any new feature or syntax beyond Tasks 001–008, including ordered map iteration from Task 014, floating point, arbitrary unions, records/classes, multi-file modules, exceptions, generics, async/concurrency, dynamic features, parser/tool upgrades, source formatting preservation, performance benchmarks, and loosening a rejection merely to simplify the acceptance fixture.
 
 ## Completion criteria
 

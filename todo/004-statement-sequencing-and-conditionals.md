@@ -1,6 +1,6 @@
 # 004 — Statement sequencing and general conditionals
 
-- Status: `todo`
+- Status: `delivered` on `master`
 - Phase/priority: Phase 0 / P0
 - Dependencies: [002-local-declarations-and-assignment.md](002-local-declarations-and-assignment.md), [003-typed-operators-and-expressions.md](003-typed-operators-and-expressions.md)
 
