@@ -106,21 +106,40 @@ export function generateArtifactSet(input) {
       sources
     })
 
-    return constructArtifactSet({
-      artifacts: [{
-        content: artifact.code,
+    /** @type {import("./src/semantic/types.js").GeneratedSetArtifact[]} */
+    const artifacts = [{
+      content: artifact.code,
+      contentKind: "text",
+      mediaType: /** @type {string} */ (record.mediaType),
+      ownership: "generated",
+      path: artifact.filename,
+      provenance: {
+        kind: "text",
+        mapping: artifact.mapping,
+        sourceMap: artifact.sourceMap,
+        sourceMapFilename: artifact.sourceMapFilename
+      },
+      role: "entry"
+    }]
+
+    if (mapDirective == "external") {
+      artifacts.push({
+        content: `${JSON.stringify(artifact.sourceMap)}\n`,
         contentKind: "text",
-        mediaType: record.mediaType,
+        mediaType: "application/json",
         ownership: "generated",
-        path: artifact.filename,
+        path: artifact.sourceMapFilename,
         provenance: {
-          kind: "text",
-          mapping: artifact.mapping,
-          sourceMap: artifact.sourceMap,
-          sourceMapFilename: artifact.sourceMapFilename
+          kind: "synthetic",
+          reason: "Serialized Source Map v3 projection for the generated entry artifact.",
+          relatedOrigins: []
         },
-        role: "entry"
-      }],
+        role: "mapping"
+      })
+    }
+
+    return constructArtifactSet({
+      artifacts,
       target: language
     })
   }

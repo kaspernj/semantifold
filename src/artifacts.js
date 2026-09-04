@@ -25,6 +25,7 @@ export function createGeneratedArtifactSet(candidate) {
     const target = candidate.target
 
     const paths = new Set()
+    const directoryPaths = new Set()
     /** @type {string[]} */
     const entryPaths = []
     const artifacts = candidate.artifacts.map((artifact, index) => {
@@ -36,7 +37,18 @@ export function createGeneratedArtifactSet(candidate) {
 
       if (!isSafeArtifactPath(artifactPath)) invalidArtifactSet(`Artifact ${index} has an unsafe path.`, target)
       if (paths.has(artifactPath)) invalidArtifactSet(`Duplicate artifact path '${artifactPath}'.`, target)
+      if (directoryPaths.has(artifactPath)) {
+        invalidArtifactSet(`Artifact path '${artifactPath}' collides with a required directory.`, target)
+      }
+      const parentPaths = artifactDirectoryPaths(artifactPath)
+
+      for (const parentPath of parentPaths) {
+        if (paths.has(parentPath)) {
+          invalidArtifactSet(`Artifact path '${artifactPath}' descends from artifact file '${parentPath}'.`, target)
+        }
+      }
       paths.add(artifactPath)
+      for (const parentPath of parentPaths) directoryPaths.add(parentPath)
       if (typeof mediaType != "string" || !mediaTypePattern.test(mediaType) || /[\r\n]/u.test(mediaType)) {
         invalidArtifactSet(`Artifact '${artifactPath}' has an invalid media type.`, target)
       }
@@ -155,7 +167,34 @@ function validateArtifactProvenance(value, contentKind, artifactPath, content, t
  * @returns {Readonly<Record<string, unknown>>} Frozen record.
  */
 function freezeArtifact(artifact) {
+  if (artifact.contentKind == "binary" && artifact.content instanceof Uint8Array) {
+    const content = artifact.content
+
+    Object.defineProperty(artifact, "content", {
+      configurable: false,
+      enumerable: true,
+      get() {
+        return new Uint8Array(content)
+      }
+    })
+  }
+
   return Object.freeze(artifact)
+}
+
+/**
+ * Lists every directory a safe relative POSIX artifact path requires.
+ * @param {string} artifactPath - Validated artifact path.
+ * @returns {string[]} Ordered parent directory paths.
+ */
+function artifactDirectoryPaths(artifactPath) {
+  const parts = artifactPath.split("/")
+  /** @type {string[]} */
+  const directories = []
+
+  for (let index = 1; index < parts.length; index += 1) directories.push(parts.slice(0, index).join("/"))
+
+  return directories
 }
 
 /**
