@@ -1,6 +1,7 @@
 // @ts-check
 
 import assert from "node:assert/strict"
+import {watch} from "node:fs"
 import fsPromises from "node:fs/promises"
 import {access, chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile} from "node:fs/promises"
 import {syncBuiltinESMExports} from "node:module"
@@ -18,6 +19,7 @@ import {
 } from "../index.js"
 
 const synthetic = (reason = "acceptance fixture") => ({kind: "synthetic", reason, relatedOrigins: []})
+const escapedProcessGroupFixture = fileURLToPath(new URL("fixtures/escape-process-group.js", import.meta.url))
 const ignoreSigtermFixture = fileURLToPath(new URL("fixtures/ignore-sigterm.js", import.meta.url))
 const ignoreSigtermTreeFixture = fileURLToPath(new URL("fixtures/ignore-sigterm-tree.js", import.meta.url))
 
@@ -809,6 +811,90 @@ kill -TERM $$
     })
   })
 
+  it("settles after closing pipes retained by a TERM-resistant escaped descendant", async () => {
+    expect(process.platform).toEqual("linux")
+    await withTemporaryDirectory("semantifold-escaped-descendant-", async (directory) => {
+      const artifacts = createGeneratedArtifactSet({artifacts: [{
+        content: "input\n",
+        contentKind: "text",
+        mediaType: "text/plain",
+        ownership: "generated",
+        path: "input.txt",
+        provenance: synthetic(),
+        role: "entry"
+      }], target: "demo"})
+      const operations = [
+        {
+          code: "TOOL_VERSION_TIMEOUT",
+          run: (stateDirectory) => discoverToolchain({
+            canonicalCommand: "node",
+            id: "escaped-version",
+            override: process.execPath,
+            timeoutMs: 500,
+            versionArguments: [escapedProcessGroupFixture, "parent", stateDirectory]
+          })
+        },
+        {
+          code: "ACCEPTANCE_TIMEOUT",
+          run: (stateDirectory) => runAcceptanceStages({
+            artifacts,
+            stages: [{
+              arguments: [escapedProcessGroupFixture, "parent", stateDirectory],
+              stage: "execute",
+              tool: Object.freeze({
+                executable: process.execPath,
+                id: "escaped-acceptance",
+                source: /** @type {const} */ ("override"),
+                version: process.version,
+                versionArguments: Object.freeze([])
+              })
+            }],
+            target: "demo",
+            timeoutMs: 500
+          })
+        }
+      ]
+
+      for (const [index, operation] of operations.entries()) {
+        const stateDirectory = path.join(directory, `operation-${index}`)
+        /** @type {SemantifoldDiagnostic | undefined} */
+        let failure
+        /** @type {Awaited<ReturnType<typeof escapedLifecycleObservation>> | undefined} */
+        let observation
+        /** @type {Awaited<ReturnType<typeof terminateEscapedFixture>> | undefined} */
+        let cleanup
+        const startedAt = Date.now()
+
+        await mkdir(stateDirectory)
+        try {
+          try {
+            await operation.run(stateDirectory)
+          } catch (error) {
+            if (error instanceof SemantifoldDiagnostic) failure = error
+          }
+          observation = await escapedLifecycleObservation(stateDirectory, Date.now() - startedAt)
+        } finally {
+          cleanup = await terminateEscapedFixture(stateDirectory)
+        }
+
+        assert.ok(failure)
+        expect(failure.code).toEqual(operation.code)
+        expect(failure.signal).toEqual("SIGTERM")
+        assert.ok(observation)
+        expect(observation).toEqual({
+          apiSettledWithinBound: true,
+          escapedHelperAliveAtSettlement: true,
+          escapedHelperRetainedPipeUntilClosed: true,
+          escapedIntoDistinctGroup: true,
+          originalGroupGone: true,
+          parentReceivedTerm: true,
+          safetyExitAbsent: true
+        })
+        expect(cleanup).toEqual({helperReceivedTerm: true, noLiveHelperResidue: true})
+      }
+    })
+  })
+
   it("defaults acceptance environment and timeout only when they are undefined", async () => {
     await withTemporaryDirectory("semantifold-acceptance-null-boundaries-", async (directory) => {
       const executable = await fakeExecutable(directory, "acceptance-null-tool", "#!/bin/sh\nprintf 'launched\\n' > \"$1\"\n")
@@ -1162,10 +1248,10 @@ async function recordedPid(fixture, name, required = true) {
   }
 }
 
-/** @param {number} pid Process or negative process-group identity. */
-function killIfAlive(pid) {
+/** @param {number} pid Process or negative process-group identity. @param {"SIGKILL" | "SIGTERM"} [signal] Signal to send. */
+function killIfAlive(pid, signal = "SIGKILL") {
   try {
-    process.kill(pid, "SIGKILL")
+    process.kill(pid, signal)
   } catch (error) {
     if (!(error instanceof Error && "code" in error && error.code == "ESRCH")) throw error
   }
@@ -1184,4 +1270,179 @@ async function assertProcessNotAlive(pid) {
   const fields = (await readFile(`/proc/${pid}/stat`, "utf8")).split(" ")
 
   expect(fields[2]).toEqual("Z")
+}
+
+/**
+ * Captures independently observable lifecycle states after API settlement.
+ * @param {string} stateDirectory - Fixture evidence directory.
+ * @param {number} elapsedMs - Invocation-to-settlement duration.
+ * @returns {Promise<{
+ *   apiSettledWithinBound: boolean,
+ *   escapedHelperAliveAtSettlement: boolean,
+ *   escapedHelperRetainedPipeUntilClosed: boolean,
+ *   escapedIntoDistinctGroup: boolean,
+ *   originalGroupGone: boolean,
+ *   parentReceivedTerm: boolean,
+ *   safetyExitAbsent: boolean
+ * }>} Lifecycle evidence.
+ */
+async function escapedLifecycleObservation(stateDirectory, elapsedMs) {
+  const parent = await processIdentity(stateDirectory, "parent")
+  const helper = await processIdentity(stateDirectory, "helper")
+  const pipeClosed = await evidenceAppears(path.join(stateDirectory, "pipe.closed"), 500)
+  const helperState = (await linuxProcessIdentity(helper.pid))?.state
+
+  return {
+    apiSettledWithinBound: elapsedMs < 2_000,
+    escapedHelperAliveAtSettlement: helperState != undefined && helperState != "Z",
+    escapedHelperRetainedPipeUntilClosed: pipeClosed,
+    escapedIntoDistinctGroup: helper.processGroupId != parent.processGroupId && helper.sessionId != parent.sessionId,
+    originalGroupGone: !processGroupExists(parent.processGroupId),
+    parentReceivedTerm: await evidenceAppears(path.join(stateDirectory, "parent.term"), 0),
+    safetyExitAbsent: !await evidenceAppears(path.join(stateDirectory, "helper.safety"), 0)
+  }
+}
+
+/**
+ * Terminates the exact recorded escaped helper and proves no executable process remains.
+ * @param {string} stateDirectory - Fixture evidence directory.
+ * @returns {Promise<{helperReceivedTerm: boolean, noLiveHelperResidue: boolean}>} Cleanup evidence.
+ */
+async function terminateEscapedFixture(stateDirectory) {
+  const helper = await processIdentity(stateDirectory, "helper", false)
+
+  if (helper == undefined) return {helperReceivedTerm: false, noLiveHelperResidue: true}
+  if (await signalRecordedProcess(helper, "SIGTERM")) {
+    await evidenceAppears(path.join(stateDirectory, "helper.term"), 500)
+    await signalRecordedProcess(helper, "SIGKILL")
+  }
+  const noLiveHelperResidue = await waitForNoLiveLinuxProcess(helper, 500)
+
+  return {
+    helperReceivedTerm: await evidenceAppears(path.join(stateDirectory, "helper.term"), 0),
+    noLiveHelperResidue
+  }
+}
+
+/**
+ * Observes termination of one exact PID after cleanup has sent its final signal.
+ * @param {{pid: number, startTime: string}} identity - Exact recorded helper identity.
+ * @param {number} timeoutMs - Maximum cleanup observation duration.
+ * @returns {Promise<boolean>} Whether no live process retains the recorded identity.
+ */
+async function waitForNoLiveLinuxProcess(identity, timeoutMs) {
+  const deadline = Date.now() + timeoutMs
+  let current = await linuxProcessIdentity(identity.pid)
+
+  while (sameProcess(identity, current) && current.state != "Z" && Date.now() < deadline) {
+    await new Promise((resolve) => setImmediate(resolve))
+    current = await linuxProcessIdentity(identity.pid)
+  }
+
+  return !sameProcess(identity, current) || current.state == "Z"
+}
+
+/**
+ * Reads one recorded Linux process identity.
+ * @param {string} stateDirectory - Fixture evidence directory.
+ * @param {"helper" | "parent"} name - Fixture process name.
+ * @param {boolean} [required] - Whether absent evidence fails.
+ * @returns {Promise<{pid: number, processGroupId: number, sessionId: number, startTime: string} | undefined>} Recorded identity.
+ */
+async function processIdentity(stateDirectory, name, required = true) {
+  try {
+    return JSON.parse(await readFile(path.join(stateDirectory, `${name}.identity`), "utf8"))
+  } catch (error) {
+    if (!required && error instanceof Error && "code" in error && error.code == "ENOENT") return undefined
+    throw error
+  }
+}
+
+/** @param {number} pid Exact Linux process identity. */
+async function linuxProcessIdentity(pid) {
+  try {
+    const stat = await readFile(`/proc/${pid}/stat`, "utf8")
+    const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ")
+
+    return {processGroupId: Number(fields[2]), sessionId: Number(fields[3]), startTime: fields[19], state: fields[0]}
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code == "ENOENT") return undefined
+    throw error
+  }
+}
+
+/**
+ * Signals a PID only while its Linux start-time identity still matches the fixture record.
+ * @param {{pid: number, startTime: string}} identity - Recorded process identity.
+ * @param {"SIGKILL" | "SIGTERM"} signal - Cleanup signal.
+ * @returns {Promise<boolean>} Whether the exact live identity was signaled.
+ */
+async function signalRecordedProcess(identity, signal) {
+  const current = await linuxProcessIdentity(identity.pid)
+
+  if (!sameProcess(identity, current) || current.state == "Z") return false
+  process.kill(identity.pid, signal)
+
+  return true
+}
+
+/**
+ * Checks a PID plus Linux start-time identity without relying on PID uniqueness.
+ * @param {{startTime: string}} expected - Recorded identity.
+ * @param {{startTime: string} | undefined} current - Current `/proc` identity.
+ */
+function sameProcess(expected, current) {
+  return current != undefined && current.startTime == expected.startTime
+}
+
+/** @param {number} processGroupId Exact recorded process-group identity. */
+function processGroupExists(processGroupId) {
+  try {
+    process.kill(-processGroupId, 0)
+    return true
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code == "ESRCH") return false
+    throw error
+  }
+}
+
+/**
+ * Waits for one exact evidence-file creation without polling.
+ * @param {string} filename - Exact evidence path.
+ * @param {number} timeoutMs - Bounded event wait; zero checks current state only.
+ * @returns {Promise<boolean>} Whether evidence exists.
+ */
+async function evidenceAppears(filename, timeoutMs) {
+  try {
+    await access(filename)
+    return true
+  } catch (error) {
+    if (!(error instanceof Error && "code" in error && error.code == "ENOENT")) throw error
+  }
+  if (timeoutMs == 0) return false
+
+  return await new Promise((resolve, reject) => {
+    const basename = path.basename(filename)
+    let settled = false
+    const watcher = watch(path.dirname(filename), (_, changed) => {
+      if (changed == basename) finish(true)
+    })
+    const timer = setTimeout(() => finish(false), timeoutMs)
+
+    watcher.once("error", (error) => finish(false, error))
+
+    /** @param {boolean} found @param {Error} [error] */
+    function finish(found, error) {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      watcher.close()
+      if (error) reject(error)
+      else resolve(found)
+    }
+
+    void access(filename).then(() => finish(true), (error) => {
+      if (!(error instanceof Error && "code" in error && error.code == "ENOENT")) finish(false, error)
+    })
+  })
 }

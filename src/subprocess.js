@@ -4,6 +4,7 @@ import {spawn} from "node:child_process"
 import {StringDecoder} from "node:string_decoder"
 
 const forcedTerminationGraceMs = 250
+const retainedPipeGraceMs = 250
 const deadlineFailures = new WeakSet()
 
 /**
@@ -31,6 +32,8 @@ export function executeFileWithDeadline({arguments: processArguments, cwd, envir
     let deadlineTimer
     /** @type {ReturnType<typeof setTimeout> | undefined} */
     let forceTimer
+    /** @type {ReturnType<typeof setTimeout> | undefined} */
+    let pipeTimer
     /** @type {Error | undefined} */
     let launchError
     let deadlineExceeded = false
@@ -68,6 +71,7 @@ export function executeFileWithDeadline({arguments: processArguments, cwd, envir
       settled = true
       if (deadlineTimer != undefined) clearTimeout(deadlineTimer)
       if (forceTimer != undefined) clearTimeout(forceTimer)
+      if (pipeTimer != undefined) clearTimeout(pipeTimer)
       const capturedStderr = stderr.finish()
       const capturedStdout = stdout.finish()
 
@@ -115,7 +119,13 @@ export function executeFileWithDeadline({arguments: processArguments, cwd, envir
       signalOwnedProcessGroup(ownedGroupId, "SIGTERM")
       if (!settled && forceTimer == undefined) {
         forceTimer = setTimeout(() => {
-          if (!settled) signalOwnedProcessGroup(ownedGroupId, "SIGKILL")
+          if (settled) return
+          signalOwnedProcessGroup(ownedGroupId, "SIGKILL")
+          pipeTimer = setTimeout(() => {
+            if (settled) return
+            child.stdout.destroy()
+            child.stderr.destroy()
+          }, retainedPipeGraceMs)
         }, forcedTerminationGraceMs)
       }
     }
