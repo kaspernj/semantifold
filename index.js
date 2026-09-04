@@ -91,10 +91,17 @@ export function generateArtifactSet(input) {
   }
   const {filename, language, mapDirective, module, role = "text", sourceMapFilename, sources} = input
 
+  if (typeof language != "string" || language.length == 0) {
+    throw new SemantifoldDiagnostic({
+      code: "INVALID_ARTIFACT_SET",
+      language: "artifact",
+      message: "Artifact-set generation requires a non-empty string language or target ID."
+    })
+  }
   if (typeof role != "string" || !artifactBackendRoles.has(role)) {
     throw new SemantifoldDiagnostic({
       code: "INVALID_ARTIFACT_SET",
-      language: typeof language == "string" && language.length > 0 ? language : "artifact",
+      language,
       message: "Artifact backend role must be 'text', 'binary', or 'application'."
     })
   }

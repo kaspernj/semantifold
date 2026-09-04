@@ -300,6 +300,7 @@ describe("generated artifact sets", () => {
       } catch (error) {
         assert.ok(error instanceof SemantifoldDiagnostic)
         expect(error.code).toEqual("INVALID_ARTIFACT_SET")
+        if (index >= 2) expect(error.detail).toEqual("Text artifact 'program.js' has malformed Source Map v3 provenance.")
       }
     }
 
@@ -408,6 +409,25 @@ describe("generated artifact sets", () => {
           error.detail == "Artifact backend role must be 'text', 'binary', or 'application'."
       )
     }
+  })
+
+  it("normalizes malformed artifact target IDs without coercing caller values", async () => {
+    const source = await readFile(new URL("fixtures/program.ts", import.meta.url), "utf8")
+    const module = parse({filename: "program.ts", language: "typescript", source})
+    const malformedLanguages = [Symbol("typescript"), "", null, 1, {}, [], new String("typescript")]
+
+    for (const language of malformedLanguages) {
+      assert.throws(
+        // @ts-expect-error Deliberately malformed public artifact target ID.
+        () => generateArtifactSet({language, module}),
+        (error) => error instanceof SemantifoldDiagnostic && error.code == "INVALID_ARTIFACT_SET" &&
+          error.language == "artifact" && error.detail == "Artifact-set generation requires a non-empty string language or target ID."
+      )
+    }
+    assert.throws(
+      () => generateArtifactSet({language: "unknown", module}),
+      (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_LANGUAGE" && error.language == "unknown"
+    )
   })
 
   it("requires the artifact-set API for unavailable binary and application roles", async () => {
