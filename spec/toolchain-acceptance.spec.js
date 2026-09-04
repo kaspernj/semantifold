@@ -1,7 +1,9 @@
 // @ts-check
 
 import assert from "node:assert/strict"
+import fsPromises from "node:fs/promises"
 import {access, chmod, mkdir, mkdtemp, rm, symlink, writeFile} from "node:fs/promises"
+import {syncBuiltinESMExports} from "node:module"
 import os from "node:os"
 import path from "node:path"
 import {describe, expect, it} from "@velocious/testing"
@@ -442,6 +444,14 @@ kill -TERM $$
       await expectDiagnostic(
         () => runAcceptanceStages({
           artifacts: empty,
+          stages: [{arguments: [], stage: "execute", tool: {...failing, executable: `${failing.executable}\0suffix`}}],
+          target: "demo"
+        }),
+        "INVALID_ACCEPTANCE_RUNNER"
+      )
+      await expectDiagnostic(
+        () => runAcceptanceStages({
+          artifacts: empty,
           stages: [{arguments: [], stage: "execute", tool: {...failing, executable: path.join(directory, "gone")}}],
           target: "demo"
         }),
@@ -485,6 +495,87 @@ kill -TERM $$
         () => runAcceptanceStages({artifacts: unmaterializable, stages: [{arguments: [], stage: "execute", tool: failing}], target: "demo"}),
         "ACCEPTANCE_MATERIALIZATION_FAILURE"
       )
+    })
+  })
+
+  it("preserves a primary stage failure when isolated-directory cleanup also fails", async () => {
+    await withTemporaryDirectory("semantifold-runner-cleanup-", async (directory) => {
+      const failingExecutable = await fakeExecutable(directory, "cleanup-fail-tool", "#!/bin/sh\nprintf 'primary output\\n'\nprintf 'primary error\\n' >&2\nexit 23\n")
+      const successfulExecutable = await fakeExecutable(directory, "cleanup-success-tool", "#!/bin/sh\nprintf 'success\\n'\n")
+      const artifacts = createGeneratedArtifactSet({artifacts: [{
+        content: "input\n",
+        contentKind: "text",
+        mediaType: "text/plain",
+        ownership: "generated",
+        path: "cleanup-review-fixture.txt",
+        provenance: synthetic(),
+        role: "entry"
+      }], target: "demo"})
+      const originalRemove = fsPromises.rm
+      /** @type {string[]} */
+      const acceptanceDirectories = []
+      /** @type {typeof fsPromises.rm} */
+      const failingRemove = async (candidate, options) => {
+        const ownsCleanupFixture = typeof candidate == "string" && path.basename(candidate).startsWith("semantifold-acceptance-") &&
+          await fsPromises.access(path.join(candidate, "cleanup-review-fixture.txt")).then(() => true, () => false)
+
+        if (ownsCleanupFixture) {
+          acceptanceDirectories.push(candidate)
+          throw new Error("deterministic cleanup failure")
+        }
+
+        await originalRemove(candidate, options)
+      }
+
+      Object.defineProperty(fsPromises, "rm", {configurable: true, value: failingRemove, writable: true})
+      syncBuiltinESMExports()
+
+      try {
+        const failingTool = Object.freeze({
+          executable: failingExecutable,
+          id: "cleanup-fail",
+          source: /** @type {const} */ ("override"),
+          version: "cleanup 1",
+          versionArguments: Object.freeze([])
+        })
+        const successfulTool = Object.freeze({
+          executable: successfulExecutable,
+          id: "cleanup-success",
+          source: /** @type {const} */ ("override"),
+          version: "cleanup 1",
+          versionArguments: Object.freeze([])
+        })
+
+        await assert.rejects(
+          () => runAcceptanceStages({artifacts, stages: [{arguments: [], stage: "execute", tool: failingTool}], target: "demo"}),
+          (error) => {
+            assert.ok(error instanceof SemantifoldDiagnostic)
+            expect(error.code).toEqual("ACCEPTANCE_NONZERO_EXIT")
+            expect(error.stage).toEqual("execute")
+            expect(error.exitCode).toEqual(23)
+            expect(error.stdout).toEqual("primary output\n")
+            expect(error.stderr).toEqual("primary error\n")
+            assert.ok(error.cause instanceof AggregateError)
+            expect(error.cause.message).toEqual("Acceptance failed and isolated-directory cleanup also failed.")
+            expect(error.cause.errors.length).toEqual(2)
+            assert.ok(error.cause.errors[0] instanceof Error)
+            assert.ok(error.cause.errors[1] instanceof SemantifoldDiagnostic)
+            expect(error.cause.errors[1].code).toEqual("ACCEPTANCE_CLEANUP_FAILURE")
+            expect(error.cause.errors[1].cause).toEqual(undefined)
+            assert.ok(error.cause.errors[1].detail.length < 256)
+
+            return true
+          }
+        )
+        await expectDiagnostic(
+          () => runAcceptanceStages({artifacts, stages: [{arguments: [], stage: "execute", tool: successfulTool}], target: "demo"}),
+          "ACCEPTANCE_CLEANUP_FAILURE"
+        )
+      } finally {
+        Object.defineProperty(fsPromises, "rm", {configurable: true, value: originalRemove, writable: true})
+        syncBuiltinESMExports()
+        await Promise.all(acceptanceDirectories.map(async (acceptanceDirectory) => await originalRemove(acceptanceDirectory, {force: true, recursive: true})))
+      }
     })
   })
 

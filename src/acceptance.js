@@ -36,6 +36,11 @@ export async function runAcceptanceStages(input) {
   const timeoutMs = /** @type {number} */ (input.timeoutMs ?? 10_000)
   const request = validateRequest({artifacts, environment, stages, target, timeoutMs})
   const directory = await createAcceptanceDirectory(request.target)
+  /** @type {unknown} */
+  let primaryFailure
+  /** @type {import("./semantic/types.js").AcceptanceResult | undefined} */
+  let result
+  let primaryFailed = false
 
   try {
     await materializeArtifacts(request.artifacts, directory, request.target)
@@ -66,10 +71,30 @@ export async function runAcceptanceStages(input) {
       }
     }
 
-    return Object.freeze({directory, stages: Object.freeze(results), target: request.target})
-  } finally {
-    await removeAcceptanceDirectory(directory, request.target)
+    result = Object.freeze({directory, stages: Object.freeze(results), target: request.target})
+  } catch (error) {
+    primaryFailed = true
+    primaryFailure = error
   }
+
+  /** @type {unknown} */
+  let cleanupFailure
+  let cleanupFailed = false
+
+  try {
+    await removeAcceptanceDirectory(directory, request.target)
+  } catch (error) {
+    cleanupFailed = true
+    cleanupFailure = error
+  }
+
+  if (primaryFailed && cleanupFailed && primaryFailure instanceof Error) {
+    throw preservePrimaryFailure(primaryFailure, cleanupFailure, request.target)
+  }
+  if (primaryFailed) throw primaryFailure
+  if (cleanupFailed) throw cleanupFailure
+
+  return /** @type {import("./semantic/types.js").AcceptanceResult} */ (result)
 }
 
 /**
@@ -198,7 +223,32 @@ function processErrorFields(error) {
  */
 function isTool(value) {
   return isPlainObject(value) && typeof value.id == "string" && typeof value.executable == "string" && path.isAbsolute(value.executable) &&
-    typeof value.version == "string" && value.version.length > 0 && (value.source == "canonical" || value.source == "override")
+    !value.executable.includes("\0") && typeof value.version == "string" && value.version.length > 0 &&
+    (value.source == "canonical" || value.source == "override")
+}
+
+/**
+ * Keeps the primary acceptance error while recording bounded cleanup evidence in its cause chain.
+ * @param {Error} primaryFailure - Original materialization or stage failure.
+ * @param {unknown} cleanupFailure - Cleanup rejection.
+ * @param {string} target - Acceptance target.
+ * @returns {Error} The original primary error with structured cleanup evidence.
+ */
+function preservePrimaryFailure(primaryFailure, cleanupFailure, target) {
+  const cleanupEvidence = new SemantifoldDiagnostic({
+    code: "ACCEPTANCE_CLEANUP_FAILURE",
+    language: cleanupFailure instanceof SemantifoldDiagnostic ? cleanupFailure.language : target,
+    message: "Isolated acceptance-directory cleanup failed after the primary acceptance failure."
+  })
+  const causes = primaryFailure.cause instanceof Error ? [primaryFailure.cause, cleanupEvidence] : [cleanupEvidence]
+
+  Object.defineProperty(primaryFailure, "cause", {
+    configurable: true,
+    value: new AggregateError(causes, "Acceptance failed and isolated-directory cleanup also failed."),
+    writable: true
+  })
+
+  return primaryFailure
 }
 
 /**
