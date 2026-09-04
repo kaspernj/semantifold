@@ -182,6 +182,36 @@ printf 'null-tool 1\n'
     })
   })
 
+  it("validates canonical toolchain IDs before lookup and diagnostic formatting", async () => {
+    /** @type {any[]} */
+    const malformedIds = [Symbol("node"), "", null, 1, {}, [], new String("node")]
+    /** @type {{code: string, detail?: string, language?: string}[]} */
+    const outcomes = []
+
+    for (const id of malformedIds) {
+      try {
+        await discoverCanonicalToolchain(id, {override: path.join(os.tmpdir(), "missing-canonical-id-tool")})
+        outcomes.push({code: "accepted"})
+      } catch (error) {
+        outcomes.push(error instanceof SemantifoldDiagnostic
+          ? {code: error.code, detail: error.detail, language: error.language}
+          : {code: error instanceof Error ? error.name : "non-error"})
+      }
+    }
+
+    expect(outcomes).toEqual(malformedIds.map(() => ({
+      code: "INVALID_TOOLCHAIN",
+      detail: "Canonical toolchain ID must be a non-empty primitive string.",
+      language: "toolchain"
+    })))
+    await assert.rejects(
+      // @ts-expect-error Deliberately unknown canonical toolchain identity.
+      () => discoverCanonicalToolchain("toString"),
+      (error) => error instanceof SemantifoldDiagnostic && error.code == "INVALID_TOOLCHAIN" &&
+        error.language == "toString" && error.detail == "Unknown canonical toolchain 'toString'."
+    )
+  })
+
   it("requires detached plain data environment records for discovery and acceptance", async () => {
     await withTemporaryDirectory("semantifold-environment-records-", async (directory) => {
       const marker = path.join(directory, "invalid-environment-launched")

@@ -25,13 +25,18 @@ export const canonicalToolchains = deepFreeze({
  * @returns {Promise<import("./semantic/types.js").DiscoveredToolchain>} Exact executable and version.
  */
 export async function discoverCanonicalToolchain(id, options = {}) {
-  if (!isPlainObject(options)) invalidToolchain("Canonical toolchain options must be an object.", String(id))
-  const definition = canonicalToolchains[id]
+  if (typeof id != "string" || id.length == 0) {
+    invalidToolchain("Canonical toolchain ID must be a non-empty primitive string.", "toolchain")
+  }
+  if (!isPlainObject(options)) invalidToolchain("Canonical toolchain options must be an object.", id)
+  const definition = Object.hasOwn(canonicalToolchains, id)
+    ? canonicalToolchains[/** @type {keyof typeof canonicalToolchains} */ (id)]
+    : undefined
 
-  if (!definition) invalidToolchain(`Unknown canonical toolchain '${id}'.`, String(id))
+  if (!definition) invalidToolchain(`Unknown canonical toolchain '${id}'.`, id)
   const configurationEnvironment = options.environment === undefined
     ? undefined
-    : snapshotEnvironment(options.environment, String(id))
+    : snapshotEnvironment(options.environment, id)
   const environment = configurationEnvironment ?? defaultEnvironment()
   const configured = options.override === undefined
     ? configurationEnvironment === undefined
