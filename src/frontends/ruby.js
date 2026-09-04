@@ -140,12 +140,17 @@ function convertExpression(node, filename, source) {
     return /** @type {import("../semantic/types.js").Expression} */ (/** @type {unknown} */ (semantic))
   }
 
-  if (node instanceof CallNode && node.receiver && node.name == "-@" && !node.arguments_) {
+  if (node instanceof CallNode && node.receiver && node.name == "-@") {
+    const operatorLocation = prismLocation(node.messageLoc ?? node.location, filename, source)
+
+    if (node.callOperatorLoc) return unsupportedSyntax("ruby", "qualified integer negation", operatorLocation)
+    if (node.arguments_) return unsupportedSyntax("ruby", "integer negation argument list", operatorLocation)
+
     const semantic = withAdaptedOperation(withParserRanges({
       kind: "UnaryExpression",
       location,
       operand: convertExpression(node.receiver, filename, source)
-    }, {operator: prismLocation(node.messageLoc ?? node.location, filename, source)}), "Negate")
+    }, {operator: operatorLocation}), "Negate")
 
     return /** @type {import("../semantic/types.js").Expression} */ (/** @type {unknown} */ (semantic))
   }
@@ -166,6 +171,15 @@ function convertExpression(node, filename, source) {
     }, {operator: operatorLocation}), node instanceof AndNode ? "And" : "Or")
 
     return /** @type {import("../semantic/types.js").Expression} */ (/** @type {unknown} */ (semantic))
+  }
+
+  if (node instanceof CallNode && node.receiver && rubyBinaryOperations.has(node.name) && node.callOperatorLoc &&
+    node.arguments_?.arguments_.length == 1) {
+    return unsupportedSyntax(
+      "ruby",
+      `qualified binary operator ${node.name}`,
+      prismLocation(node.messageLoc ?? node.location, filename, source)
+    )
   }
 
   if (node instanceof CallNode && node.receiver && rubyBinaryOperations.has(node.name) && node.arguments_?.arguments_.length == 1) {

@@ -98,6 +98,22 @@ puts invalid(1, 2)
 `
 }
 
+/** @param {string} expression - Returned integer expression. @returns {string} Ruby program. */
+function rubyIntegerExpression(expression) {
+  return `# @param left [Integer]
+# @param right [Integer]
+# @return [Integer]
+def calculate(left, right)
+  if true
+    return ${expression}
+  else
+    return right
+  end
+end
+puts calculate(1, 2)
+`
+}
+
 /** @param {string} expression - Returned Boolean expression. @returns {string} Ruby program. */
 function rubyBooleanExpression(expression) {
   return `# @param flag [bool]
@@ -283,6 +299,48 @@ describe("typed operator validation", () => {
         language: "ruby",
         line: 6,
         source: rubyBooleanExpression(sourceExpression)
+      })
+    }
+  })
+
+  it("rejects qualified Ruby unary negation calls", () => {
+    const module = parse({filename: "ordinary-negation.rb", language: "ruby", source: rubyIntegerExpression("-left")})
+    const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (module.functions[0].body[0])
+    const expression = /** @type {import("../src/semantic/types.js").UnaryExpression} */ (branch.consequent[0].expression)
+
+    expect({operation: expression.operation, type: expression.type}).toEqual({operation: "IntegerNegate", type: "integer"})
+
+    for (const sourceExpression of ["left.-@", "left.-@()"]) {
+      assertDiagnostic({
+        code: "UNSUPPORTED_SYNTAX",
+        column: 17,
+        detail: "qualified integer negation",
+        filename: "qualified-negation.rb",
+        language: "ruby",
+        line: 6,
+        source: rubyIntegerExpression(sourceExpression)
+      })
+    }
+  })
+
+  it("rejects qualified Ruby binary operator calls", () => {
+    const module = parse({filename: "ordinary-multiply.rb", language: "ruby", source: rubyIntegerExpression("left * right")})
+    const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (module.functions[0].body[0])
+    const expression = /** @type {import("../src/semantic/types.js").BinaryExpression} */ (branch.consequent[0].expression)
+
+    expect({operation: expression.operation, type: expression.type}).toEqual({operation: "IntegerMultiply", type: "integer"})
+
+    for (const operator of ["+", "-", "*", "==", "!=", "<", "<=", ">", ">="]) {
+      const integerResult = ["+", "-", "*"].includes(operator)
+
+      assertDiagnostic({
+        code: "UNSUPPORTED_SYNTAX",
+        column: 17,
+        detail: `qualified binary operator ${operator}`,
+        filename: `qualified-${operator.replaceAll("=", "equal")}.rb`,
+        language: "ruby",
+        line: 6,
+        source: integerResult ? rubyIntegerExpression(`left.${operator}(right)`) : rubyExpression(`left.${operator}(right)`)
       })
     }
   })
