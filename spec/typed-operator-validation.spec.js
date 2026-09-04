@@ -197,6 +197,27 @@ describe("typed operator validation", () => {
     assertDiagnostic({code: "UNSUPPORTED_SYNTAX", detail: "assignment .=", filename: "concat-assignment.php", language: "php", line: 6, source: compound})
   })
 
+  for (const [filename, language, program, line] of [
+    ["qualified-print.js", "javascript", javascriptExpression("left < right"), 10],
+    ["qualified-print.ts", "typescript", typescriptExpression("left < right"), 5]
+  ]) {
+    it(`rejects user-authored ${language} entry-point toString calls`, () => {
+      for (const [argument, column] of [["invalid(1, 2).toString()", 27], ["(invalid(1, 2)).toString()", 29]]) {
+        const source = program.replace("console.log(invalid(1, 2))", `console.log(${argument})`)
+
+        assertDiagnostic({
+          code: "UNSUPPORTED_SYNTAX",
+          column,
+          detail: "entry-point qualified call",
+          filename,
+          language,
+          line,
+          source
+        })
+      }
+    })
+  }
+
   it("rejects truthiness, mixed equality, object equality, and casts or assertions", () => {
     assertDiagnostic({
       code: "NON_BOOLEAN_CONDITION",
