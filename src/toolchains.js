@@ -1,14 +1,12 @@
 // @ts-check
 
-import {execFile} from "node:child_process"
 import {constants as fsConstants} from "node:fs"
 import {access, realpath, stat} from "node:fs/promises"
 import path from "node:path"
-import {promisify} from "node:util"
 import {isDenseArray} from "./array.js"
 import {SemantifoldDiagnostic} from "./diagnostic.js"
+import {exceededOwnedDeadline, executeFileWithDeadline} from "./subprocess.js"
 
-const execFileAsync = promisify(execFile)
 const defaultTimeoutMs = 10_000
 
 export const canonicalToolchains = deepFreeze({
@@ -88,15 +86,16 @@ export async function discoverToolchain(input) {
   let result
 
   try {
-    result = await execFileAsync(executable, versionArguments, {
-      encoding: "utf8",
-      env: normalizedEnvironment,
+    result = await executeFileWithDeadline({
+      arguments: versionArguments,
+      environment: normalizedEnvironment,
+      executable,
       maxBuffer: 1024 * 1024,
-      timeout: timeoutMs
+      timeoutMs
     })
   } catch (error) {
     const processError = processErrorFields(error)
-    const timedOut = processError.killed
+    const timedOut = exceededOwnedDeadline(error)
 
     throw new SemantifoldDiagnostic({
       ...processError,
@@ -314,15 +313,14 @@ function defaultEnvironment() {
 /**
  * Narrows stable fields from a version subprocess rejection.
  * @param {unknown} error - Process rejection.
- * @returns {{exitCode: number | undefined, killed: boolean, signal: string | undefined, stderr: string, stdout: string}} Stable fields.
+ * @returns {{exitCode: number | undefined, signal: string | undefined, stderr: string, stdout: string}} Stable fields.
  */
 function processErrorFields(error) {
-  if (!error || typeof error != "object") return {exitCode: undefined, killed: false, signal: undefined, stderr: "", stdout: ""}
+  if (!error || typeof error != "object") return {exitCode: undefined, signal: undefined, stderr: "", stdout: ""}
   const value = /** @type {Record<string, unknown>} */ (error)
 
   return {
     exitCode: typeof value.code == "number" ? value.code : undefined,
-    killed: value.killed === true,
     signal: typeof value.signal == "string" ? value.signal : undefined,
     stderr: typeof value.stderr == "string" ? value.stderr : "",
     stdout: typeof value.stdout == "string" ? value.stdout : ""

@@ -2,10 +2,11 @@
 
 import assert from "node:assert/strict"
 import fsPromises from "node:fs/promises"
-import {access, chmod, mkdir, mkdtemp, rm, symlink, writeFile} from "node:fs/promises"
+import {access, chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile} from "node:fs/promises"
 import {syncBuiltinESMExports} from "node:module"
 import os from "node:os"
 import path from "node:path"
+import {fileURLToPath} from "node:url"
 import {describe, expect, it} from "@velocious/testing"
 import {
   canonicalToolchains,
@@ -17,6 +18,7 @@ import {
 } from "../index.js"
 
 const synthetic = (reason = "acceptance fixture") => ({kind: "synthetic", reason, relatedOrigins: []})
+const ignoreSigtermFixture = fileURLToPath(new URL("fixtures/ignore-sigterm.js", import.meta.url))
 
 describe("toolchain discovery and staged acceptance", () => {
   it("discovers configured and canonical exact executables with captured versions", async () => {
@@ -199,6 +201,25 @@ exit 11
         timeoutMs: 50,
         versionArguments: []
       }), (error) => error instanceof SemantifoldDiagnostic && error.code == "TOOL_VERSION_TIMEOUT" && error.signal == "SIGTERM")
+    })
+  })
+
+  it("forcibly closes a version probe that ignores the owned deadline signal", async () => {
+    await withTemporaryDirectory("semantifold-version-hard-timeout-", async (directory) => {
+      const fixture = processFixture(directory, "version")
+
+      try {
+        await assert.rejects(() => discoverToolchain({
+          canonicalCommand: "node",
+          id: "ignoring-version",
+          override: process.execPath,
+          timeoutMs: 500,
+          versionArguments: [ignoreSigtermFixture, fixture.readyPath, fixture.termPath, fixture.safetyPath]
+        }), (error) => error instanceof SemantifoldDiagnostic && error.code == "TOOL_VERSION_TIMEOUT" && error.signal == "SIGKILL")
+        await assertForcedFixtureClosure(fixture)
+      } finally {
+        await terminateFixtureIfAlive(fixture.readyPath)
+      }
     })
   })
 
@@ -498,6 +519,45 @@ kill -TERM $$
     })
   })
 
+  it("forcibly closes an acceptance child that ignores the owned stage deadline", async () => {
+    await withTemporaryDirectory("semantifold-runner-hard-timeout-", async (directory) => {
+      const fixture = processFixture(directory, "acceptance")
+      const tool = Object.freeze({
+        executable: process.execPath,
+        id: "ignoring-acceptance",
+        source: /** @type {const} */ ("override"),
+        version: process.version,
+        versionArguments: Object.freeze([])
+      })
+      const artifacts = createGeneratedArtifactSet({artifacts: [{
+        content: "input\n",
+        contentKind: "text",
+        mediaType: "text/plain",
+        ownership: "generated",
+        path: "input.txt",
+        provenance: synthetic(),
+        role: "entry"
+      }], target: "demo"})
+
+      try {
+        await assert.rejects(() => runAcceptanceStages({
+          artifacts,
+          stages: [{
+            arguments: [ignoreSigtermFixture, fixture.readyPath, fixture.termPath, fixture.safetyPath],
+            stage: "execute",
+            tool
+          }],
+          target: "demo",
+          timeoutMs: 500
+        }), (error) => error instanceof SemantifoldDiagnostic && error.code == "ACCEPTANCE_TIMEOUT" &&
+          error.stage == "execute" && error.signal == "SIGKILL")
+        await assertForcedFixtureClosure(fixture)
+      } finally {
+        await terminateFixtureIfAlive(fixture.readyPath)
+      }
+    })
+  })
+
   it("rejects sparse discovery and acceptance arrays before asynchronous work", async () => {
     await withTemporaryDirectory("semantifold-sparse-runner-", async (directory) => {
       const executable = await fakeExecutable(directory, "sparse-tool", "#!/bin/sh\nprintf 'sparse 1\\n'\n")
@@ -696,4 +756,53 @@ async function fakeExecutable(directory, name, source) {
 async function expectDiagnostic(callback, code, stage) {
   await assert.rejects(callback, (error) => error instanceof SemantifoldDiagnostic && error.code == code &&
     (stage == undefined || error.stage == stage))
+}
+
+/**
+ * Creates deterministic evidence paths for one signal-handling child.
+ * @param {string} directory - Fixture-owned temporary directory.
+ * @param {string} name - Evidence basename.
+ * @returns {{readyPath: string, safetyPath: string, termPath: string}} Evidence paths.
+ */
+function processFixture(directory, name) {
+  return {
+    readyPath: path.join(directory, `${name}.ready`),
+    safetyPath: path.join(directory, `${name}.safety`),
+    termPath: path.join(directory, `${name}.term`)
+  }
+}
+
+/**
+ * Proves the fixture installed its handler, ignored TERM, and closed before its safety exit.
+ * @param {{readyPath: string, safetyPath: string, termPath: string}} fixture - Evidence paths.
+ * @returns {Promise<void>}
+ */
+async function assertForcedFixtureClosure(fixture) {
+  const pid = Number.parseInt(await readFile(fixture.readyPath, "utf8"), 10)
+
+  expect(await readFile(fixture.termPath, "utf8")).toEqual("SIGTERM\n")
+  await assert.rejects(access(fixture.safetyPath), (error) => error instanceof Error && "code" in error && error.code == "ENOENT")
+  assert.throws(() => process.kill(pid, 0), (error) => error instanceof Error && "code" in error && error.code == "ESRCH")
+}
+
+/**
+ * Removes a fixture child if an assertion aborts before the owned runner closes it.
+ * @param {string} readyPath - PID evidence path.
+ * @returns {Promise<void>}
+ */
+async function terminateFixtureIfAlive(readyPath) {
+  let pid
+
+  try {
+    pid = Number.parseInt(await readFile(readyPath, "utf8"), 10)
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code == "ENOENT") return
+    throw error
+  }
+
+  try {
+    process.kill(pid, "SIGKILL")
+  } catch (error) {
+    if (!(error instanceof Error && "code" in error && error.code == "ESRCH")) throw error
+  }
 }

@@ -1,16 +1,14 @@
 // @ts-check
 
-import {execFile} from "node:child_process"
 import {mkdir, mkdtemp, rm, writeFile} from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
-import {promisify} from "node:util"
 import {isDenseArray} from "./array.js"
 import {createGeneratedArtifactSet} from "./artifacts.js"
 import {SemantifoldDiagnostic} from "./diagnostic.js"
+import {exceededOwnedDeadline, executeFileWithDeadline} from "./subprocess.js"
 import {deterministicEnvironment} from "./toolchains.js"
 
-const execFileAsync = promisify(execFile)
 const acceptanceMaxBuffer = 16 * 1024 * 1024
 const launchErrorCodes = new Set([
   "E2BIG", "EACCES", "EAGAIN", "ELOOP", "EMFILE", "ENAMETOOLONG", "ENFILE", "ENOENT", "ENOEXEC", "ENOMEM", "ENOTDIR", "EPERM", "ETXTBSY"
@@ -51,12 +49,13 @@ export async function runAcceptanceStages(input) {
 
     for (const stage of request.stages) {
       try {
-        const result = await execFileAsync(stage.tool.executable, stage.arguments, {
+        const result = await executeFileWithDeadline({
+          arguments: stage.arguments,
           cwd: directory,
-          encoding: "utf8",
-          env: request.environment,
+          environment: request.environment,
+          executable: stage.tool.executable,
           maxBuffer: acceptanceMaxBuffer,
-          timeout: request.timeoutMs
+          timeoutMs: request.timeoutMs
         })
 
         results.push(Object.freeze({
@@ -168,7 +167,7 @@ function validateRequest(input) {
 function processDiagnostic(error, stage, target, timeoutMs) {
   const fields = processErrorFields(error)
   const outputLimited = fields.nativeCode == "ERR_CHILD_PROCESS_STDIO_MAXBUFFER"
-  const timedOut = !outputLimited && fields.killed
+  const timedOut = !outputLimited && exceededOwnedDeadline(error)
   const launchFailure = fields.nativeCode != undefined && launchErrorCodes.has(fields.nativeCode)
   const signaled = !outputLimited && !timedOut && fields.signal != undefined
   const code = outputLimited ? "ACCEPTANCE_OUTPUT_LIMIT" : timedOut ? "ACCEPTANCE_TIMEOUT" : launchFailure ? "ACCEPTANCE_LAUNCH_FAILURE" : signaled
@@ -199,17 +198,16 @@ function processDiagnostic(error, stage, target, timeoutMs) {
 /**
  * Narrows the stable fields of an opaque child-process failure.
  * @param {unknown} error - Process rejection.
- * @returns {{exitCode: number | undefined, killed: boolean, nativeCode: string | undefined, signal: string | undefined, stderr: string, stdout: string}} Stable fields.
+ * @returns {{exitCode: number | undefined, nativeCode: string | undefined, signal: string | undefined, stderr: string, stdout: string}} Stable fields.
  */
 function processErrorFields(error) {
-  if (!error || typeof error != "object") return {exitCode: undefined, killed: false, nativeCode: undefined, signal: undefined, stderr: "", stdout: ""}
+  if (!error || typeof error != "object") return {exitCode: undefined, nativeCode: undefined, signal: undefined, stderr: "", stdout: ""}
   const value = /** @type {Record<string, unknown>} */ (error)
   const nativeCode = typeof value.code == "string" ? value.code : undefined
   const outputLimited = nativeCode == "ERR_CHILD_PROCESS_STDIO_MAXBUFFER"
 
   return {
     exitCode: typeof value.code == "number" ? value.code : undefined,
-    killed: value.killed === true,
     nativeCode,
     signal: typeof value.signal == "string" ? value.signal : undefined,
     stderr: !outputLimited && typeof value.stderr == "string" ? value.stderr : "",
