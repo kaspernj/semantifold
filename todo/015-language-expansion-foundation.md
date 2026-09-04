@@ -54,13 +54,13 @@ Qualification failure blocks the owning language task. It does not authorize a s
 
 ## Diagnostics and rejections
 
-- Keep `UNSUPPORTED_LANGUAGE` for unknown IDs; add a stable role/capability diagnostic when a known ID lacks the requested frontend/backend/artifact operation.
+- Keep `UNSUPPORTED_LANGUAGE` exclusively for unknown or misspelled IDs. Add `UNSUPPORTED_ROLE` for a known ID that lacks the requested `frontend`, text/binary/application `backend`, artifact, or interoperability role; reserve `UNSUPPORTED_CAPABILITY` for a role that exists but cannot represent the requested semantic feature/module.
 - Registry shape, artifact path/content, tool discovery, and runner configuration failures must be normalized rather than leaking a native `TypeError` or subprocess exception.
 - Backend capability validation completes before the first artifact is exposed. Artifact-set construction is transactional: a late unsupported node returns no partial files.
 
 ## Deterministic tests
 
-- Registry specs prove each role independently, duplicate/unknown/missing-role rejection, stable ordering, feature-level support/rejection, and public discovery agreement.
+- Registry specs prove each role independently, duplicate rejection, `UNSUPPORTED_LANGUAGE` for unknown IDs, `UNSUPPORTED_ROLE` for known-ID/missing-role requests, stable ordering, feature-level `UNSUPPORTED_CAPABILITY`, and public discovery agreement.
 - Compatibility specs prove all original `parse`, `generate`, `generateArtifact`, `supportedLanguages`, diagnostics, and mappings remain unchanged.
 - Artifact specs cover one-file text, multi-file text, binary, mixed loader/binary, invalid paths, deterministic generation, and transactionality.
 - Runner specs use small real programs with the already-required toolchains, plus controlled fake executables only for discovery/error-path tests. Real acceptance is never replaced with snapshots.

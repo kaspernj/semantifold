@@ -12,7 +12,7 @@ The immediate priority is a bounded language-baseline expansion against this sma
 
 1. Model meaning once. Semantic nodes describe values, types, evaluation order, bindings, control flow, and program structure without parser nodes, target spelling, UI lifecycle, ABI, or signing data.
 2. Register roles separately. A language/platform may provide a source frontend, textual backend, binary backend, application-artifact backend, or interoperability bridge; one support list must not imply every role.
-3. Fail loudly. Frontends raise located `UNSUPPORTED_SYNTAX`, `MISSING_TYPE`, or `PARSE_ERROR`; backends raise located `UNSUPPORTED_CAPABILITY` before returning any partial artifact.
+3. Fail loudly. Unknown IDs use `UNSUPPORTED_LANGUAGE`; known IDs missing a requested role use `UNSUPPORTED_ROLE`; frontends raise located `UNSUPPORTED_SYNTAX`, `MISSING_TYPE`, or `PARSE_ERROR`; existing backends raise located `UNSUPPORTED_CAPABILITY` before returning any partial artifact.
 4. Never recover meaning from source text after a parser rejects a node. Parser integrations traverse typed trees and reject recovery/error nodes and every unmodeled child.
 5. Prefer a precise portable profile. Overflow, truthiness, strings/ownership, nullability, exceptions, concurrency, UI lifecycles, host APIs, and signing require explicit contracts.
 6. Keep source rules in frontends and target/platform rules in backends. Project manifests, runtime helpers, loaders, UI shells, assets, entitlements, and ABI conventions do not enter the semantic IR.

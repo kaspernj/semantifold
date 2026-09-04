@@ -24,7 +24,7 @@ Prove that Python, C#, C, C++, Rust, Swift, Kotlin/JVM, and Go all implement the
 
 ## Diagnostics and fail-loud coverage
 
-- Maintain a shared rejection corpus for parse recovery, missing types, truthiness, numeric/Boolean coercion, overflow, unsupported dynamic/reflection/concurrency/exception forms, illegal target names, and malformed caller-owned IR. Assert located `UNSUPPORTED_CAPABILITY` whenever a registered target lacks the requested role or feature.
+- Maintain a shared rejection corpus for parse recovery, missing types, truthiness, numeric/Boolean coercion, overflow, unsupported dynamic/reflection/concurrency/exception forms, illegal target names, and malformed caller-owned IR. Assert `UNSUPPORTED_ROLE` when a known registered ID lacks the requested role and located `UNSUPPORTED_CAPABILITY` when an existing role lacks the requested semantic feature.
 - Assert stable diagnostic code, responsible source filename/range, and source-language context. Backends must validate complete capability before returning an artifact set; no target may obtain passing output through a hidden approximation.
 - Query the public registry/capability API and assert that every language advertises exactly the frontend/backend/artifact features it passed. Unimplemented Task 005+ capabilities and platform roles remain explicit rejections.
 
