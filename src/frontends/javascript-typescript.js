@@ -564,10 +564,17 @@ function convertPrint(node, language, filename, source) {
     return unsupportedSyntax(language, "entry-point expression", location)
   }
 
-  const argument = call.arguments[0]
+  let argument = call.arguments[0]
 
   if (argument.type == "SpreadElement" || argument.type == "ArgumentPlaceholder") {
     return unsupportedSyntax(language, argument.type, nodeLocation(argument, filename, source))
+  }
+
+  if (argument.type == "CallExpression" && argument.callee.type == "MemberExpression" && !argument.callee.computed &&
+    !argument.callee.optional && argument.callee.object.type != "Super" && argument.callee.property.type == "Identifier" &&
+    argument.callee.property.name == "toString" && !argument.optional && !argument.typeArguments &&
+    !argument.typeParameters && argument.arguments.length == 0) {
+    argument = argument.callee.object
   }
 
   return {expression: convertExpression(argument, language, filename, source), kind: "PrintStatement", location}

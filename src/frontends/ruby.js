@@ -122,12 +122,30 @@ function convertExpression(node, filename, source) {
 
   if (node instanceof InterpolatedStringNode) return unsupportedSyntax("ruby", "interpolated string", location)
 
-  if (node instanceof CallNode && node.receiver && ["-@", "!"].includes(node.name) && !node.arguments_) {
+  if (node instanceof CallNode && node.receiver && node.name == "!") {
+    const operatorLocation = prismLocation(node.messageLoc ?? node.location, filename, source)
+
+    if (node.callOperatorLoc) return unsupportedSyntax("ruby", "qualified boolean not", operatorLocation)
+    if (node.messageLoc?.length != 1) {
+      return unsupportedSyntax("ruby", "precedence-sensitive boolean not", operatorLocation)
+    }
+    if (node.arguments_) return unsupportedSyntax("ruby", "boolean not argument list", operatorLocation)
+
     const semantic = withAdaptedOperation(withParserRanges({
       kind: "UnaryExpression",
       location,
       operand: convertExpression(node.receiver, filename, source)
-    }, {operator: prismLocation(node.messageLoc ?? node.location, filename, source)}), node.name == "!" ? "Not" : "Negate")
+    }, {operator: operatorLocation}), "Not")
+
+    return /** @type {import("../semantic/types.js").Expression} */ (/** @type {unknown} */ (semantic))
+  }
+
+  if (node instanceof CallNode && node.receiver && node.name == "-@" && !node.arguments_) {
+    const semantic = withAdaptedOperation(withParserRanges({
+      kind: "UnaryExpression",
+      location,
+      operand: convertExpression(node.receiver, filename, source)
+    }, {operator: prismLocation(node.messageLoc ?? node.location, filename, source)}), "Negate")
 
     return /** @type {import("../semantic/types.js").Expression} */ (/** @type {unknown} */ (semantic))
   }

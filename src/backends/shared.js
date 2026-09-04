@@ -366,6 +366,58 @@ export function emitExpression(writer, expression, path, language, emitIdentifie
 }
 
 /**
+ * Reports whether JavaScript-family execution can create IEEE-754 signed zero.
+ * Semantifold integers have one mathematical zero, so those targets canonicalize
+ * their observable scalar output without changing the operation tree.
+ * @param {import("../semantic/types.js").SemanticModule} module - Validated semantic module.
+ * @returns {boolean} Whether canonical output rendering is required.
+ */
+export function requiresCanonicalZeroRendering(module) {
+  return module.functions.some((declaration) => statementsContainSignProducingOperation(declaration.body)) ||
+    statementsContainSignProducingOperation(module.entryPoint.body)
+}
+
+/**
+ * Checks one statement sequence for sign-producing integer operations.
+ * @param {(import("../semantic/types.js").FunctionStatement | import("../semantic/types.js").LocalStatement | import("../semantic/types.js").PrintStatement)[]} statements - Semantic statements.
+ * @returns {boolean} Whether a nested expression can produce signed zero in JavaScript.
+ */
+function statementsContainSignProducingOperation(statements) {
+  return statements.some((statement) => {
+    if (statement.kind == "IfStatement") {
+      return expressionContainsSignProducingOperation(statement.condition) ||
+        statementsContainSignProducingOperation(statement.consequent) || statementsContainSignProducingOperation(statement.alternate)
+    }
+    if (statement.kind == "LocalDeclaration") return expressionContainsSignProducingOperation(statement.initializer)
+    if (statement.kind == "AssignmentStatement" || statement.kind == "ReturnStatement" || statement.kind == "PrintStatement") {
+      return expressionContainsSignProducingOperation(statement.expression)
+    }
+
+    return false
+  })
+}
+
+/**
+ * Checks one expression tree for sign-producing integer operations.
+ * @param {import("../semantic/types.js").Expression} expression - Semantic expression.
+ * @returns {boolean} Whether this tree contains integer negation or multiplication.
+ */
+function expressionContainsSignProducingOperation(expression) {
+  if (expression.kind == "UnaryExpression") {
+    return expression.operation == "IntegerNegate" || expressionContainsSignProducingOperation(expression.operand)
+  }
+  if (expression.kind == "BinaryExpression") {
+    return expression.operation == "IntegerMultiply" || expressionContainsSignProducingOperation(expression.left) ||
+      expressionContainsSignProducingOperation(expression.right)
+  }
+  if (expression.kind == "CallExpression") {
+    return expression.arguments.some((argument) => expressionContainsSignProducingOperation(argument))
+  }
+
+  return false
+}
+
+/**
  * Maps one already validated semantic operation to target syntax.
  * @param {import("../semantic/types.js").SemanticBinaryOperation} operation - Closed semantic operation.
  * @param {import("../semantic/types.js").SemanticLanguage} language - Target language.

@@ -102,6 +102,36 @@ async function executeGenerated(language, source) {
   }
 }
 
+/**
+ * Builds one JavaScript-family integer-operation program.
+ * @param {"javascript" | "typescript"} language - Source language.
+ * @param {string} expression - Returned operation.
+ * @param {string} arguments_ - Entry-point arguments.
+ * @returns {string} Complete source.
+ */
+function integerOperationSource(language, expression, arguments_) {
+  if (language == "typescript") {
+    return `function calculate(left: number, right: number): number {
+  if (true) return ${expression}
+  else return right
+}
+console.log(calculate(${arguments_}))
+`
+  }
+
+  return `/**
+ * @param {number} left - Left integer.
+ * @param {number} right - Right integer.
+ * @returns {number} Result.
+ */
+function calculate(left, right) {
+  if (true) return ${expression}
+  else return right
+}
+console.log(calculate(${arguments_}))
+`
+}
+
 describe("typed operators and richer expressions", () => {
   it("normalizes nested TypeScript operators to closed typed operations", () => {
     const module = parse({
@@ -262,6 +292,39 @@ console.log(guarded(true, false))
 
     for (const language of targets) {
       expect({language, output: await executeGenerated(language, generate({language, module}))}).toEqual({language, output: "short\n"})
+    }
+  })
+
+  it("keeps integer zero unsigned across JavaScript-family parsing and every native target", async () => {
+    const cases = [
+      {expression: "-left", nonzeroArguments: "3, 7", nonzeroOutput: "-3\n", operation: "IntegerNegate", zeroArguments: "0, 7"},
+      {expression: "-left * right", nonzeroArguments: "2, 3", nonzeroOutput: "-6\n", operation: "IntegerMultiply", zeroArguments: "2, 0"}
+    ]
+
+    for (const sourceLanguage of ["javascript", "typescript"]) {
+      for (const testCase of cases) {
+        for (const [arguments_, output] of [[testCase.zeroArguments, "0\n"], [testCase.nonzeroArguments, testCase.nonzeroOutput]]) {
+          const source = integerOperationSource(sourceLanguage, testCase.expression, arguments_)
+          const filename = sourceLanguage == "javascript" ? "signed-zero.js" : "signed-zero.ts"
+          const module = parse({filename, language: sourceLanguage, source})
+          const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (module.functions[0].body[0])
+          const returned = /** @type {import("../src/semantic/types.js").UnaryExpression | import("../src/semantic/types.js").BinaryExpression} */ (
+            branch.consequent[0].expression)
+
+          expect({operation: returned.operation, type: returned.type}).toEqual({operation: testCase.operation, type: "integer"})
+
+          for (const target of targets) {
+            const generated = generate({language: target, module})
+            const reparsed = parse({filename: filenames.get(target), language: target, source: generated})
+
+            expect({language: target, module: withoutSourceMetadata(reparsed)}).toEqual({
+              language: target,
+              module: withoutSourceMetadata(module)
+            })
+            expect({language: target, output: await executeGenerated(target, generated)}).toEqual({language: target, output})
+          }
+        }
+      }
     }
   })
 })

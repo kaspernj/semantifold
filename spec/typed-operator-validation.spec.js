@@ -98,6 +98,22 @@ puts invalid(1, 2)
 `
 }
 
+/** @param {string} expression - Returned Boolean expression. @returns {string} Ruby program. */
+function rubyBooleanExpression(expression) {
+  return `# @param flag [bool]
+# @param fallback [bool]
+# @return [bool]
+def choose(flag, fallback)
+  if true
+    return ${expression}
+  else
+    return fallback
+  end
+end
+puts choose(true, false)
+`
+}
+
 /** @param {string} expression - Returned expression. @returns {string} Java program. */
 function javaExpression(expression) {
   return `public final class Main {
@@ -242,6 +258,32 @@ describe("typed operator validation", () => {
     }
     for (const expression of ["left.equals()", "left.equals(right, left)"]) {
       assertDiagnostic({code: "UNSUPPORTED_SYNTAX", detail: "string equals invocation", filename: "Main.java", language: "java", line: 4, source: source(expression)})
+    }
+  })
+
+  it("accepts only prefix bang for Ruby Boolean not", () => {
+    const accepted = parse({filename: "bang.rb", language: "ruby", source: rubyBooleanExpression("!flag")})
+    const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (accepted.functions[0].body[0])
+    const expression = /** @type {import("../src/semantic/types.js").UnaryExpression} */ (branch.consequent[0].expression)
+
+    expect({operation: expression.operation, type: expression.type}).toEqual({operation: "BooleanNot", type: "boolean"})
+
+    for (const [filename, sourceExpression, detail, column] of [
+      ["not.rb", "not flag", "precedence-sensitive boolean not", 12],
+      ["not-parenthesized.rb", "not(flag)", "precedence-sensitive boolean not", 12],
+      ["qualified-not.rb", "flag.!", "qualified boolean not", 17],
+      ["qualified-not-call.rb", "flag.!()", "qualified boolean not", 17],
+      ["qualified-not-argument.rb", "flag.!(fallback)", "qualified boolean not", 17]
+    ]) {
+      assertDiagnostic({
+        code: "UNSUPPORTED_SYNTAX",
+        column,
+        detail,
+        filename,
+        language: "ruby",
+        line: 6,
+        source: rubyBooleanExpression(sourceExpression)
+      })
     }
   })
 
