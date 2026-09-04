@@ -13,7 +13,7 @@ Task 015 has separate focused specs for immutable registry-derived discovery, ro
 | `javac` | `javac` | `SEMANTIFOLD_JAVAC` | JDK 17–29 |
 | `java` | `java` | `SEMANTIFOLD_JAVA` | JRE 17–29 |
 
-Discovery records the complete version output and first version line. An override must be an executable absolute path. Canonical lookup examines the explicit PATH, resolves symlinks to exact paths, deduplicates aliases of the same executable, and rejects zero or multiple distinct matches. The runner inherits no ambient variables other than PATH unless the caller explicitly supplies them; locale and timezone are always normalized.
+Discovery records the complete version output and first version line. An override must be an executable absolute path. Canonical lookup examines the explicit PATH, resolves symlinks to exact paths, deduplicates aliases of the same executable, and rejects zero or multiple distinct matches. TensorBuzz installs its pinned Node archive at `/usr/local/bin/node` and binds that exact executable through `SEMANTIFOLD_NODE`; a distinct host `/usr/bin/node` therefore cannot make the real-runtime lane ambiguous. This does not weaken canonical ambiguity detection when no override is configured. The runner inherits no ambient variables other than PATH unless the caller explicitly supplies them; locale and timezone are always normalized.
 
 Backend tests start from one parsed semantic module, generate every target, parse each generated program back to equivalent modeled meaning, and work in isolated `mkdtemp` directories. They invoke real commands and assert exact `5\n` output:
 

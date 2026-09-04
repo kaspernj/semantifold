@@ -13,6 +13,7 @@ before_script:
   - npm ci
 environment:
   NODE_ENV: test
+  SEMANTIFOLD_NODE: /usr/local/bin/node
 builds:
   quality:
     name: Quality and package

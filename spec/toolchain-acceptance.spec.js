@@ -48,6 +48,30 @@ printf '%s|%s|%s|%s\\n' "$1" "$LC_ALL" "$TZ" "$PWD"
     })
   })
 
+  it("uses the configured Node executable while the same canonical PATH remains ambiguous", async () => {
+    await withTemporaryDirectory("semantifold-node-override-", async (root) => {
+      const [firstDirectory, secondDirectory] = await Promise.all([
+        mkdtemp(path.join(root, "first-")),
+        mkdtemp(path.join(root, "second-"))
+      ])
+      const source = "#!/bin/sh\nprintf 'v24.18.1\\n'\n"
+      const selected = await fakeExecutable(firstDirectory, "node", source)
+
+      await fakeExecutable(secondDirectory, "node", source)
+      const ambiguousPath = `${firstDirectory}${path.delimiter}${secondDirectory}`
+      const configured = await discoverCanonicalToolchain("node", {
+        environment: {PATH: ambiguousPath, SEMANTIFOLD_NODE: selected}
+      })
+
+      expect(configured.executable).toEqual(selected)
+      expect(configured.source).toEqual("override")
+      await expectDiagnostic(
+        () => discoverCanonicalToolchain("node", {environment: {PATH: ambiguousPath}}),
+        "TOOL_AMBIGUOUS"
+      )
+    })
+  })
+
   it("reports missing, ambiguous, unsupported-version, and version-command failures distinctly", async () => {
     await expectDiagnostic(
       // @ts-expect-error Deliberately malformed canonical discovery options.
