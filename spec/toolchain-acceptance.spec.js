@@ -97,6 +97,35 @@ exit 11
     })
   })
 
+  it("detaches the supported version policy before asynchronous executable lookup", async () => {
+    await withTemporaryDirectory("semantifold-version-policy-", async (directory) => {
+      const executable = await fakeExecutable(directory, "policy-tool", "#!/bin/sh\nprintf 'unexpected 1\\n'\n")
+      const policy = /^expected 1$/iu
+      const pendingDiscovery = discoverToolchain({
+        canonicalCommand: "policy-tool",
+        environment: {PATH: directory},
+        id: "policy-tool",
+        override: executable,
+        supportedVersion: policy,
+        versionArguments: []
+      })
+
+      policy.test = () => true
+      await expectDiagnostic(() => pendingDiscovery, "TOOL_UNSUPPORTED_VERSION")
+
+      const flagsExecutable = await fakeExecutable(directory, "flags-tool", "#!/bin/sh\nprintf 'EXPECTED 1\\n'\n")
+      const supported = await discoverToolchain({
+        canonicalCommand: "flags-tool",
+        id: "flags-tool",
+        override: flagsExecutable,
+        supportedVersion: /^expected 1$/iu,
+        versionArguments: []
+      })
+
+      expect(supported.version).toEqual("EXPECTED 1")
+    })
+  })
+
   it("accepts only regular executable files without polluting canonical ambiguity", async () => {
     await withTemporaryDirectory("semantifold-regular-tools-", async (root) => {
       const directoryCandidateRoot = await mkdtemp(path.join(root, "directory-"))

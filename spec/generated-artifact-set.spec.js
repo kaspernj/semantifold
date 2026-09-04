@@ -2,6 +2,7 @@
 
 import assert from "node:assert/strict"
 import {readFile} from "node:fs/promises"
+import {decodedMappings, encodedMappings, presortedDecodedMap, TraceMap} from "@jridgewell/trace-mapping"
 import {describe, expect, it} from "@velocious/testing"
 import {
   createGeneratedArtifactSet,
@@ -248,6 +249,46 @@ describe("generated artifact sets", () => {
     }
   })
 
+  it("requires Source Map v3 provenance to match the rich projection including an unmapped directive suffix", async () => {
+    const source = await readFile(new URL("fixtures/program.ts", import.meta.url), "utf8")
+    const module = parse({filename: "program.ts", language: "typescript", source})
+    const generated = generateArtifact({
+      filename: "program.js",
+      language: "javascript",
+      mapDirective: "external",
+      module
+    })
+    const valid = textArtifact(generated, generated.sourceMap)
+
+    expect(createGeneratedArtifactSet({artifacts: [valid], target: "javascript"}).entry).toEqual("program.js")
+
+    const generatedPosition = mutateSourceMap(generated.sourceMap, (lines) => {
+      firstMappedSegment(lines)[0] -= 1
+    })
+    const originalPosition = mutateSourceMap(generated.sourceMap, (lines) => {
+      firstMappedSegment(lines)[3] -= 1
+    })
+    const alternateSource = {
+      ...generated.sourceMap,
+      sources: [...generated.sourceMap.sources, "alternate.ts"],
+      sourcesContent: [...generated.sourceMap.sourcesContent, source]
+    }
+    const sourceIndex = mutateSourceMap(alternateSource, (lines) => {
+      firstMappedSegment(lines)[1] = 1
+    })
+    const alternateName = {...generated.sourceMap, names: [...generated.sourceMap.names, "alternate"]}
+    const nameIndex = mutateSourceMap(alternateName, (lines) => {
+      firstNamedSegment(lines)[4] = alternateName.names.length - 1
+    })
+
+    for (const sourceMap of [generatedPosition, originalPosition, sourceIndex, nameIndex]) {
+      expectInvalid(() => createGeneratedArtifactSet({
+        artifacts: [textArtifact(generated, sourceMap)],
+        target: "javascript"
+      }))
+    }
+  })
+
   it("rejects unsafe paths, duplicates, malformed content, ownership, and entry declarations transactionally", () => {
     const valid = {
       content: "ok\n",
@@ -316,4 +357,71 @@ describe("generated artifact sets", () => {
  */
 function expectInvalid(callback) {
   assert.throws(callback, (error) => error instanceof SemantifoldDiagnostic && error.code == "INVALID_ARTIFACT_SET")
+}
+
+/**
+ * Builds one generated text artifact around a selected Source Map.
+ * @param {ReturnType<typeof generateArtifact>} generated - Generated source and rich mapping.
+ * @param {import("@jridgewell/gen-mapping").EncodedSourceMap} sourceMap - Selected interoperable mapping.
+ * @returns {object} Artifact-set input record.
+ */
+function textArtifact(generated, sourceMap) {
+  return {
+    content: generated.code,
+    contentKind: "text",
+    mediaType: "text/javascript",
+    ownership: "generated",
+    path: generated.filename,
+    provenance: {
+      kind: "text",
+      mapping: generated.mapping,
+      sourceMap,
+      sourceMapFilename: generated.sourceMapFilename
+    },
+    role: "entry"
+  }
+}
+
+/**
+ * Applies one controlled decoded-segment mutation and canonically re-encodes it.
+ * @param {import("@jridgewell/gen-mapping").EncodedSourceMap} sourceMap - Valid base map.
+ * @param {(lines: import("@jridgewell/trace-mapping").SourceMapSegment[][]) => void} mutation - Segment mutation.
+ * @returns {import("@jridgewell/gen-mapping").EncodedSourceMap} Canonically encoded contradictory map.
+ */
+function mutateSourceMap(sourceMap, mutation) {
+  const lines = /** @type {import("@jridgewell/trace-mapping").SourceMapSegment[][]} */ (
+    structuredClone(decodedMappings(new TraceMap(sourceMap))))
+
+  mutation(lines)
+
+  return {
+    ...sourceMap,
+    mappings: encodedMappings(presortedDecodedMap({...sourceMap, mappings: lines}))
+  }
+}
+
+/**
+ * Selects a mapped segment with space to alter its generated column safely.
+ * @param {import("@jridgewell/trace-mapping").SourceMapSegment[][]} lines - Decoded lines.
+ * @returns {import("@jridgewell/trace-mapping").SourceMapSegment} Mutable mapped segment.
+ */
+function firstMappedSegment(lines) {
+  const segment = lines.flat().find((candidate) => candidate.length >= 4 && candidate[0] > 0 && candidate[3] > 0)
+
+  assert.ok(segment)
+
+  return segment
+}
+
+/**
+ * Selects the first mapped segment carrying a name index.
+ * @param {import("@jridgewell/trace-mapping").SourceMapSegment[][]} lines - Decoded lines.
+ * @returns {import("@jridgewell/trace-mapping").SourceMapSegment} Mutable named segment.
+ */
+function firstNamedSegment(lines) {
+  const segment = lines.flat().find((candidate) => candidate.length == 5)
+
+  assert.ok(segment)
+
+  return segment
 }

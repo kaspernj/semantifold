@@ -118,7 +118,7 @@ Text artifact provenance embeds the validated rich mapping and Source Map v3 pro
 
 ## Source Map v3 and directives
 
-`artifact.sourceMap` exists for all five targets and is generated with `@jridgewell/gen-mapping`; lookup, import, and artifact-set validation use `@jridgewell/trace-mapping`. Semantifold does not hand-code VLQ or tracing. Artifact-set validation decodes and canonically re-encodes the mapping payload, requires standard one-, four-, or five-field segments, and rejects source or name indices outside their declared arrays. The v3 map contains deterministic `file`, `sources`, `sourcesContent`, `names`, and `mappings` fields.
+`artifact.sourceMap` exists for all five targets and is generated with `@jridgewell/gen-mapping`; lookup, import, and artifact-set validation use `@jridgewell/trace-mapping`. Semantifold does not hand-code VLQ or tracing. Artifact-set validation decodes and canonically re-encodes the mapping payload, requires standard one-, four-, or five-field segments, rejects source or name indices outside their declared arrays, and requires the complete v3 value to equal the existing `toSourceMapV3()` projection of the accepted rich mapping. That projection comparison covers generated and original positions, source and name indexes, content, and the documented trailing unmapped directive span without a second encoder. The v3 map contains deterministic `file`, `sources`, `sourcesContent`, `names`, and `mappings` fields.
 
 Directives are opt-in and only valid for JavaScript and TypeScript:
 

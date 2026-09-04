@@ -74,7 +74,9 @@ export async function discoverToolchain(input) {
   const environment = /** @type {Readonly<Record<string, string | undefined>>} */ (candidate.environment)
   const id = /** @type {string} */ (candidate.id)
   const override = /** @type {string | undefined} */ (candidate.override)
-  const supportedVersion = /** @type {RegExp | undefined} */ (candidate.supportedVersion)
+  const supportedVersion = candidate.supportedVersion instanceof RegExp
+    ? new RegExp(candidate.supportedVersion.source, candidate.supportedVersion.flags)
+    : undefined
   const timeoutMs = /** @type {number} */ (candidate.timeoutMs)
   const versionArguments = [.../** @type {string[]} */ (candidate.versionArguments)]
   const normalizedEnvironment = deterministicEnvironment(environment)

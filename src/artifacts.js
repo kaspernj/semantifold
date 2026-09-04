@@ -4,7 +4,7 @@ import {decodedMappings, encodedMappings, presortedDecodedMap, TraceMap} from "@
 import {isSafeArtifactPath} from "./artifact-path.js"
 import {finalizeByteMapping} from "./binary-mapping.js"
 import {SemantifoldDiagnostic} from "./diagnostic.js"
-import {finalizeMapping} from "./mapping.js"
+import {finalizeMapping, toSourceMapV3} from "./mapping.js"
 
 const artifactRoles = new Set(["entry", "source", "manifest", "support", "mapping", "resource", "loader"])
 const mediaTypePattern = /^[A-Za-z0-9!#$&^_.+-]+\/[A-Za-z0-9!#$&^_.+-]+(?:;[\u0020-\u007e]+)?$/u
@@ -139,6 +139,11 @@ function validateArtifactProvenance(value, contentKind, artifactPath, content, t
     }
     const mapping = finalizeMapping(mappingCandidate)
     const sourceMap = validateSourceMap(value.sourceMap, artifactPath, target)
+    const projectedSourceMap = toSourceMapV3(mapping)
+
+    if (!sameJsonValue(sourceMap, projectedSourceMap)) {
+      invalidArtifactSet(`Text artifact '${artifactPath}' has Source Map provenance that contradicts its rich mapping.`, target)
+    }
 
     return Object.freeze({
       kind: /** @type {const} */ ("text"),
@@ -362,6 +367,26 @@ function validDecodedSourceMapMappings(lines, sourceCount, nameCount) {
 
     return segment.length == 4 || segment[4] < nameCount
   }))
+}
+
+/**
+ * Compares detached JSON values without depending on caller object-key order.
+ * @param {unknown} left - First JSON value.
+ * @param {unknown} right - Second JSON value.
+ * @returns {boolean} Whether both values are structurally identical.
+ */
+function sameJsonValue(left, right) {
+  if (left === right) return true
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left) && Array.isArray(right) && left.length == right.length &&
+      left.every((entry, index) => sameJsonValue(entry, right[index]))
+  }
+  if (!isPlainObject(left) || !isPlainObject(right)) return false
+  const leftKeys = Object.keys(left)
+  const rightKeys = Object.keys(right)
+
+  return leftKeys.length == rightKeys.length &&
+    leftKeys.every((key) => Object.hasOwn(right, key) && sameJsonValue(left[key], right[key]))
 }
 
 /**
