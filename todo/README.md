@@ -102,7 +102,7 @@ Legend: **implemented** describes the baseline, **core** gates Task 025, **later
 | TypeScript | implemented | implemented text | `.ts` | Babel | Tasks 001–004 |
 | PHP | implemented | implemented text | `.php` | `php-parser` | Tasks 001–004 |
 | Java | implemented | implemented text | `Main.java` | Lezer Java | Tasks 001–004 |
-| Python | core 016 | core text 016 | `program.py` | qualified Tree-sitter Python | Tasks 001–004 |
+| Python | implemented 016 | implemented text 016 | `program.py` | `tree-sitter@0.25.1` + official `tree-sitter-python@0.25.0` | Tasks 001–004 |
 | C# | core 017 | core managed project 017 | `.cs`, `.csproj` | qualified Tree-sitter C# | Tasks 001–004 |
 | C | core 018 | core native project 018 | `.c`, support header | qualified Tree-sitter C | Tasks 001–004 |
 | C++ | core 019 | core native text 019 | `.cpp` | qualified Tree-sitter C++ | Tasks 001–004 |

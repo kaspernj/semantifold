@@ -1104,7 +1104,8 @@ function validPoint(value) {
  * @returns {value is import("./semantic/types.js").SemanticLanguage} Whether supported.
  */
 function isLanguage(value) {
-  return value == "php" || value == "ruby" || value == "javascript" || value == "typescript" || value == "java"
+  return value == "php" || value == "ruby" || value == "javascript" || value == "typescript" || value == "java" ||
+    value == "python"
 }
 
 /**

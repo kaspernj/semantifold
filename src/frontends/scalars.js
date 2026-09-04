@@ -31,6 +31,11 @@ const sourceScalarTypes = Object.freeze({
     ["bool", "boolean"],
     ["string", "string"]
   ]),
+  python: sourceTypeMap([
+    ["int", "integer"],
+    ["bool", "boolean"],
+    ["str", "string"]
+  ]),
   ruby: sourceTypeMap([
     ["[Integer]", "integer"],
     ["[bool]", "boolean"],

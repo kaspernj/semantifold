@@ -5,11 +5,13 @@ import {SemantifoldDiagnostic, unsupportedRole} from "./diagnostic.js"
 import {generateJava} from "./backends/java.js"
 import {generateJavaScript} from "./backends/javascript.js"
 import {generatePhp} from "./backends/php.js"
+import {generatePython} from "./backends/python.js"
 import {generateRuby} from "./backends/ruby.js"
 import {generateTypeScript} from "./backends/typescript.js"
 import {parseJava} from "./frontends/java.js"
 import {parseJavaScriptTypeScript} from "./frontends/javascript-typescript.js"
 import {parsePhp} from "./frontends/php.js"
+import {parsePython} from "./frontends/python.js"
 import {parseRuby} from "./frontends/ruby.js"
 
 const registryRoles = Object.freeze(["frontend", "textBackend", "binaryBackend", "applicationBackend", "interoperability"])
@@ -256,6 +258,12 @@ const typeScriptFrontend = ({filename, source}) => parseJavaScriptTypeScript({fi
  */
 const javaFrontend = ({filename, source}) => parseJava({filename, source})
 
+/**
+ * Python registry frontend wrapper.
+ * @type {Frontend}
+ */
+const pythonFrontend = ({filename, source}) => parsePython({filename, source})
+
 const records = [
   language({
     acceptance: {stages: ["parse", "generate", "execute"], toolchains: ["php"]},
@@ -296,6 +304,14 @@ const records = [
     id: "java",
     mediaType: "text/x-java-source",
     textBackend: generateJava
+  }),
+  language({
+    acceptance: {stages: ["parse", "generate", "compile", "execute"], toolchains: ["python"]},
+    defaultFilename: "program.py",
+    frontend: pythonFrontend,
+    id: "python",
+    mediaType: "text/x-python",
+    textBackend: generatePython
   })
 ]
 

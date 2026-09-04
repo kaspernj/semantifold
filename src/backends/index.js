@@ -48,6 +48,9 @@ export function generateArtifactSource({language, filename, mapDirective = "none
   if (language == "java" && filename.split(/[\\/]/u).at(-1) != "Main.java") {
     unsupportedCapability(language, "artifact filename basename other than Main.java", module.location)
   }
+  if (language == "python" && filename.split(/[\\/]/u).at(-1) != "program.py") {
+    unsupportedCapability(language, "artifact filename basename other than program.py", module.location)
+  }
   if (!["none", "external", "inline"].includes(mapDirective)) throw new TypeError(`Unsupported map directive: ${mapDirective}`)
   if (mapDirective != "none" && language != "javascript" && language != "typescript") {
     throw new TypeError("Source map directives are supported only for JavaScript and TypeScript outputs.")
