@@ -8,7 +8,7 @@ import path from "node:path"
 import {promisify} from "node:util"
 import {describe, it} from "@velocious/testing"
 import {decodedMappings, originalPositionFor as traceOriginalPositionFor, TraceMap} from "@jridgewell/trace-mapping"
-import {generate, generateArtifact, parse} from "../index.js"
+import {discoverCanonicalToolchain, generate, generateArtifact, parse} from "../index.js"
 
 const execFileAsync = promisify(execFile)
 const fixtures = [
@@ -16,12 +16,13 @@ const fixtures = [
   ["ruby", "program.rb"],
   ["javascript", "program.js"],
   ["typescript", "program.ts"],
-  ["java", "Main.java"]
+  ["java", "Main.java"],
+  ["python", "program.py"]
 ]
-const targets = ["php", "ruby", "javascript", "typescript", "java"]
+const targets = ["php", "ruby", "javascript", "typescript", "java", "python"]
 
-describe("five-language mapping acceptance", () => {
-  it("maps all 25 input-output combinations at semantic-token granularity", async () => {
+describe("six-language mapping acceptance", () => {
+  it("maps all 36 input-output combinations at semantic-token granularity", async () => {
     for (const [inputLanguage, inputFilename] of fixtures) {
       const source = await readFile(new URL(`fixtures/locals/${inputFilename}`, import.meta.url), "utf8")
       const module = parse({filename: inputFilename, language: inputLanguage, source})
@@ -126,6 +127,15 @@ async function executeArtifact(language, source) {
       await writeFile(filename, source)
       await execFileAsync(compiler, [filename, "--target", "ES2024", "--module", "nodenext"], {cwd: directory})
       return (await execFileAsync(process.execPath, [path.join(directory, "program.js")])).stdout
+    }
+    if (language == "python") {
+      const filename = path.join(directory, "program.py")
+      const python = await discoverCanonicalToolchain("python")
+      const environment = {LANG: "C.UTF-8", LC_ALL: "C.UTF-8", PYTHONIOENCODING: "utf-8", PYTHONUTF8: "1", TZ: "UTC"}
+
+      await writeFile(filename, source)
+      await execFileAsync(python.executable, ["-m", "py_compile", filename], {cwd: directory, env: environment})
+      return (await execFileAsync(python.executable, [filename], {cwd: directory, env: environment})).stdout
     }
 
     const filename = path.join(directory, "Main.java")

@@ -7,12 +7,12 @@ import {emitStringLiteral} from "./scalars.js"
 
 /** @type {Readonly<Record<import("../semantic/types.js").SemanticUnaryOperation, string>>} */
 const unaryOperationSyntax = Object.freeze({BooleanNot: "!", IntegerNegate: "-"})
-/** @type {Readonly<Record<import("../semantic/types.js").SemanticBinaryOperation, Readonly<{default: string, php?: string, strict?: string}>>>} */
+/** @type {Readonly<Record<import("../semantic/types.js").SemanticBinaryOperation, Readonly<{default: string, php?: string, python?: string, strict?: string}>>>} */
 const binaryOperationSyntax = Object.freeze({
-  BooleanAnd: Object.freeze({default: "&&"}),
+  BooleanAnd: Object.freeze({default: "&&", python: "and"}),
   BooleanEqual: Object.freeze({default: "==", strict: "==="}),
   BooleanNotEqual: Object.freeze({default: "!=", strict: "!=="}),
-  BooleanOr: Object.freeze({default: "||"}),
+  BooleanOr: Object.freeze({default: "||", python: "or"}),
   IntegerAdd: Object.freeze({default: "+"}),
   IntegerEqual: Object.freeze({default: "==", strict: "==="}),
   IntegerGreaterThan: Object.freeze({default: ">"}),
@@ -325,7 +325,9 @@ export function emitExpression(writer, expression, path, language, emitIdentifie
     return
   }
   if (expression.kind == "BooleanLiteral") {
-    writer.mapped(expression.value ? "true" : "false", {mappingKind: "exact", node: expression, path, role: "literal"})
+    const spelling = language == "python" ? expression.value ? "True" : "False" : expression.value ? "true" : "false"
+
+    writer.mapped(spelling, {mappingKind: "exact", node: expression, path, role: "literal"})
     return
   }
   if (expression.kind == "StringLiteral") {
@@ -345,7 +347,7 @@ export function emitExpression(writer, expression, path, language, emitIdentifie
 
   if (expression.kind == "UnaryExpression") {
     writer.mapped("(", {mappingKind: "anchor", node: expression, path})
-    writer.mapped(unaryOperationSyntax[expression.operation], {
+    writer.mapped(language == "python" && expression.operation == "BooleanNot" ? "not " : unaryOperationSyntax[expression.operation], {
       mappingKind: "exact", node: expression, path, role: "operator"
     })
     emitExpression(writer, expression.operand, `${path}/operand`, language, emitIdentifier)
@@ -450,6 +452,7 @@ function binaryOperationSpelling(operation, language) {
   const syntax = binaryOperationSyntax[operation]
 
   if (language == "php" && syntax.php) return syntax.php
+  if (language == "python" && syntax.python) return syntax.python
   if ((language == "php" || language == "javascript" || language == "typescript") && syntax.strict) return syntax.strict
 
   return syntax.default

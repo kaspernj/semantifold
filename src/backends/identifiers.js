@@ -7,6 +7,7 @@ const identifierPatterns = {
   java: /^[A-Za-z_$][A-Za-z0-9_$]*$/u,
   javascript: /^[A-Za-z_$][A-Za-z0-9_$]*$/u,
   php: /^[A-Za-z_][A-Za-z0-9_]*$/u,
+  python: /^(?:_|\p{XID_Start})(?:_|\p{XID_Continue})*$/u,
   ruby: /^[a-z_][A-Za-z0-9_]*$/u,
   typescript: /^[A-Za-z_$][A-Za-z0-9_$]*$/u
 }
@@ -37,6 +38,12 @@ const reservedWords = {
     "never", "new", "null", "object", "or", "parent", "print", "private", "protected", "public", "readonly", "require",
     "require_once", "return", "self", "static", "switch", "throw", "trait", "true", "try", "unset", "use", "var",
     "void", "while", "xor", "yield"
+  ]),
+  python: new Set([
+    "False", "None", "True", "and", "as", "assert", "async", "await", "bool", "break", "case", "class",
+    "continue", "def", "del", "elif", "else", "except", "exec", "finally", "for", "from", "global", "if",
+    "import", "in", "int", "is", "lambda", "match", "nonlocal", "not", "object", "or", "pass", "print",
+    "raise", "return", "str", "try", "type", "while", "with", "yield", "_"
   ]),
   ruby: new Set([
     "BEGIN", "END", "__ENCODING__", "__END__", "__FILE__", "__LINE__", "alias", "and", "begin", "break", "case",
@@ -73,7 +80,8 @@ export function validateTargetIdentifier(language, name, role, location) {
 
   const reservedName = language == "php" ? name.toLowerCase() : name
 
-  if (!identifierPatterns[language].test(name) || reservedWords[language].has(reservedName)) {
+  if (!identifierPatterns[language].test(name) || reservedWords[language].has(reservedName) ||
+    language == "python" && name.normalize("NFKC") != name) {
     unsupportedCapability(language, `${role} identifier '${name}'`, location)
   }
 }

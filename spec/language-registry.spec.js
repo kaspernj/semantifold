@@ -12,11 +12,12 @@ import {
 import {createLanguageRegistry} from "../src/language-registry.js"
 
 const originalFive = ["php", "ruby", "javascript", "typescript", "java"]
+const allLanguages = [...originalFive, "python"]
 
 describe("language role registry", () => {
   it("derives stable immutable public discovery from the dispatch registry", () => {
-    expect(supportedLanguages).toEqual(originalFive)
-    expect(languageCapabilities.map(({id}) => id)).toEqual(originalFive)
+    expect(supportedLanguages).toEqual(allLanguages)
+    expect(languageCapabilities.map(({id}) => id)).toEqual(allLanguages)
     expect(Object.isFrozen(languageCapabilities)).toBeTrue()
 
     for (const descriptor of languageCapabilities) {

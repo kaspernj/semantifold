@@ -1,6 +1,6 @@
 # 016 — Python source and target support
 
-- Status: `todo`
+- Status: `delivered`
 - Phase/priority: Phase L1 / P0
 - Dependencies: [015-language-expansion-foundation.md](015-language-expansion-foundation.md)
 
@@ -53,6 +53,10 @@ Update root README, architecture, language support, testing/toolchain documentat
 - Its explicit annotation profile normalizes the complete Tasks 001–004 subset without admitting Python truthiness or dynamic behavior.
 - Generated Python reparses equivalently, compiles, and runs with exact behavior on the real configured interpreter.
 - Cross-source/target, rejection, diagnostic-location, provenance, docs/changelog, and repository gates pass.
+
+## Delivery record
+
+Delivered by `feature/python-source-target` on 2026-09-04. The implementation pins the qualified official Tree-sitter Node/Python registry pair, adds the exact annotation-backed Tasks 001–004 frontend and deterministic `program.py` backend, registers configured Python 3 discovery and staged compile/execute acceptance, and preserves the original-five `generate()` bytes. Focused coverage exercises parser recovery and coordinates, dynamic-form rejection, annotations, mutability, operators/flow, artifact provenance, Python native execution, and both directions of the original-five/Python matrix. Review, TensorBuzz CI, merge, and publication remain coordinator-owned.
 
 ## Non-goals
 

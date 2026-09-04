@@ -1357,15 +1357,16 @@ printf 'executed\n'
     })
   })
 
-  it("executes small programs through every declared original-five real toolchain", async () => {
+  it("executes small programs through every declared six-language real toolchain", async () => {
     const php = await discoverCanonicalToolchain("php")
     const ruby = await discoverCanonicalToolchain("ruby")
     const node = await discoverCanonicalToolchain("node")
     const tsc = await discoverCanonicalToolchain("tsc")
     const javac = await discoverCanonicalToolchain("javac")
     const java = await discoverCanonicalToolchain("java")
+    const python = await discoverCanonicalToolchain("python")
 
-    expect(Object.keys(canonicalToolchains)).toEqual(["php", "ruby", "node", "tsc", "javac", "java"])
+    expect(Object.keys(canonicalToolchains)).toEqual(["php", "ruby", "node", "tsc", "javac", "java", "python"])
     await runProgram("php", "program.php", "<?php\necho \"ok\\n\";\n", [{arguments: ["program.php"], stage: "execute", tool: php}])
     await runProgram("ruby", "program.rb", "puts \"ok\"\n", [{arguments: ["program.rb"], stage: "execute", tool: ruby}])
     await runProgram("javascript", "program.js", "console.log(\"ok\")\n", [{arguments: ["program.js"], stage: "execute", tool: node}])
@@ -1377,11 +1378,15 @@ printf 'executed\n'
       {arguments: ["Main.java"], stage: "compile", tool: javac},
       {arguments: ["-cp", ".", "Main"], stage: "execute", tool: java}
     ])
+    await runProgram("python", "program.py", "print(\"ok\")\n", [
+      {arguments: ["-m", "py_compile", "program.py"], stage: "compile", tool: python},
+      {arguments: ["program.py"], stage: "execute", tool: python}
+    ], {PATH: process.env.PATH, PYTHONIOENCODING: "utf-8", PYTHONUTF8: "1"})
   })
 })
 
-/** @param {string} target @param {string} filePath @param {string} content @param {any[]} stages */
-async function runProgram(target, filePath, content, stages) {
+/** @param {string} target @param {string} filePath @param {string} content @param {any[]} stages @param {Record<string, string | undefined>} [environment] */
+async function runProgram(target, filePath, content, stages, environment) {
   const artifacts = createGeneratedArtifactSet({artifacts: [{
     content,
     contentKind: "text",
@@ -1391,7 +1396,7 @@ async function runProgram(target, filePath, content, stages) {
     provenance: synthetic(),
     role: "entry"
   }], target})
-  const result = await runAcceptanceStages({artifacts, stages, target, timeoutMs: 20_000})
+  const result = await runAcceptanceStages({artifacts, environment, stages, target, timeoutMs: 20_000})
 
   expect(result.stages.at(-1).stdout).toEqual("ok\n")
 }

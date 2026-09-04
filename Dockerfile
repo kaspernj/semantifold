@@ -20,6 +20,7 @@ RUN apt-get update \
     jq \
     openssh-client \
     php-cli \
+    python3 \
     ripgrep \
     ruby \
   && install -d -m 0755 /etc/apt/keyrings \
@@ -33,6 +34,7 @@ RUN apt-get update \
   && apt-get install --yes --no-install-recommends "nodejs=${NODEJS_VERSION}" \
   && test "$(node --version)" = "v${NODEJS_VERSION%-1nodesource1}" \
   && php --version \
+  && python3 --version \
   && ruby --version \
   && javac -version \
   && java -version \

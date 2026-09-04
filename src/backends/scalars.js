@@ -5,6 +5,7 @@ const targetScalarTypes = Object.freeze({
   java: Object.freeze({boolean: "boolean", integer: "int", string: "String"}),
   javascript: Object.freeze({boolean: "boolean", integer: "number", string: "string"}),
   php: Object.freeze({boolean: "bool", integer: "int", string: "string"}),
+  python: Object.freeze({boolean: "bool", integer: "int", string: "str"}),
   ruby: Object.freeze({boolean: "bool", integer: "Integer", string: "String"}),
   typescript: Object.freeze({boolean: "boolean", integer: "number", string: "string"})
 })
