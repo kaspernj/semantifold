@@ -1,7 +1,7 @@
 // @ts-check
 
 import assert from "node:assert/strict"
-import {access, chmod, mkdtemp, rm, writeFile} from "node:fs/promises"
+import {access, chmod, mkdir, mkdtemp, rm, symlink, writeFile} from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import {describe, expect, it} from "@velocious/testing"
@@ -94,6 +94,80 @@ exit 11
       expect(tool.version).toEqual("argument-tool 1")
       expect(tool.versionArguments).toEqual(["--expected"])
       expect(Object.isFrozen(tool.versionArguments)).toBeTrue()
+    })
+  })
+
+  it("accepts only regular executable files without polluting canonical ambiguity", async () => {
+    await withTemporaryDirectory("semantifold-regular-tools-", async (root) => {
+      const directoryCandidateRoot = await mkdtemp(path.join(root, "directory-"))
+      const directoryAliasRoot = await mkdtemp(path.join(root, "directory-alias-"))
+      const executableRoot = await mkdtemp(path.join(root, "executable-"))
+      const firstExecutableAliasRoot = await mkdtemp(path.join(root, "executable-alias-first-"))
+      const secondExecutableAliasRoot = await mkdtemp(path.join(root, "executable-alias-second-"))
+      const directoryCandidate = path.join(directoryCandidateRoot, "demo-tool")
+      const directoryAlias = path.join(directoryAliasRoot, "demo-tool")
+
+      await mkdir(directoryCandidate, {mode: 0o755})
+      await symlink(directoryCandidate, directoryAlias)
+      const executable = await fakeExecutable(executableRoot, "demo-tool", "#!/bin/sh\nprintf 'demo 1\\n'\n")
+      const invalidPath = [directoryCandidateRoot, directoryAliasRoot].join(path.delimiter)
+      const canonical = await discoverToolchain({
+        canonicalCommand: "demo-tool",
+        environment: {PATH: `${invalidPath}${path.delimiter}${executableRoot}`},
+        id: "regular-canonical",
+        versionArguments: []
+      })
+
+      expect(canonical.executable).toEqual(executable)
+      await expectDiagnostic(() => discoverToolchain({
+        canonicalCommand: "demo-tool",
+        environment: {PATH: invalidPath},
+        id: "invalid-canonical",
+        versionArguments: []
+      }), "TOOL_NOT_FOUND")
+      for (const override of [directoryCandidate, directoryAlias]) {
+        await expectDiagnostic(() => discoverToolchain({
+          canonicalCommand: "demo-tool",
+          id: "invalid-override",
+          override,
+          versionArguments: []
+        }), "TOOL_NOT_FOUND")
+      }
+
+      await Promise.all([
+        symlink(executable, path.join(firstExecutableAliasRoot, "demo-tool")),
+        symlink(executable, path.join(secondExecutableAliasRoot, "demo-tool"))
+      ])
+      const aliased = await discoverToolchain({
+        canonicalCommand: "demo-tool",
+        environment: {PATH: `${firstExecutableAliasRoot}${path.delimiter}${secondExecutableAliasRoot}`},
+        id: "aliased-canonical",
+        versionArguments: []
+      })
+
+      expect(aliased.executable).toEqual(executable)
+    })
+  })
+
+  it("distinguishes spontaneous version signals from configured timer kills", async () => {
+    await withTemporaryDirectory("semantifold-version-signals-", async (directory) => {
+      const signalExecutable = await fakeExecutable(directory, "signal-tool", "#!/bin/sh\nkill -TERM $$\n")
+      const timeoutExecutable = await fakeExecutable(directory, "timeout-tool", "#!/bin/sh\nwhile :; do :; done\n")
+
+      await assert.rejects(() => discoverToolchain({
+        canonicalCommand: "signal-tool",
+        id: "signal-version",
+        override: signalExecutable,
+        timeoutMs: 2_000,
+        versionArguments: []
+      }), (error) => error instanceof SemantifoldDiagnostic && error.code == "TOOL_VERSION_FAILURE" && error.signal == "SIGTERM")
+      await assert.rejects(() => discoverToolchain({
+        canonicalCommand: "timeout-tool",
+        id: "timeout-version",
+        override: timeoutExecutable,
+        timeoutMs: 50,
+        versionArguments: []
+      }), (error) => error instanceof SemantifoldDiagnostic && error.code == "TOOL_VERSION_TIMEOUT" && error.signal == "SIGTERM")
     })
   })
 

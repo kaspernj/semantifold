@@ -2,7 +2,7 @@
 
 import {execFile} from "node:child_process"
 import {constants as fsConstants} from "node:fs"
-import {access, realpath} from "node:fs/promises"
+import {access, realpath, stat} from "node:fs/promises"
 import path from "node:path"
 import {promisify} from "node:util"
 import {SemantifoldDiagnostic} from "./diagnostic.js"
@@ -93,7 +93,7 @@ export async function discoverToolchain(input) {
     })
   } catch (error) {
     const processError = processErrorFields(error)
-    const timedOut = processError.signal == "SIGTERM" || processError.killed
+    const timedOut = processError.killed
 
     throw new SemantifoldDiagnostic({
       ...processError,
@@ -204,10 +204,9 @@ async function resolveCanonical(id, command, pathValue) {
     const candidate = path.join(directory, command)
 
     try {
-      await access(candidate, fsConstants.X_OK)
-      const exact = await realpath(candidate)
+      const exact = await resolveExecutableFile(candidate)
 
-      matches.set(exact, exact)
+      if (exact != undefined) matches.set(exact, exact)
     } catch {
       // A PATH candidate is absent or non-executable; discovery continues deterministically.
     }
@@ -241,20 +240,40 @@ async function resolveCanonical(id, command, pathValue) {
  * @returns {Promise<string>} Exact executable path.
  */
 async function resolveOverride(id, override, command) {
-  try {
-    await access(override, fsConstants.X_OK)
+  /** @type {Error | undefined} */
+  let cause
 
-    return await realpath(override)
+  try {
+    const exact = await resolveExecutableFile(override)
+
+    if (exact != undefined) return exact
   } catch (error) {
-    throw new SemantifoldDiagnostic({
-      cause: error instanceof Error ? error : undefined,
-      code: "TOOL_NOT_FOUND",
-      command,
-      executable: override,
-      language: id,
-      message: `Configured executable '${override}' is missing or not executable.`
-    })
+    cause = error instanceof Error ? error : undefined
   }
+
+  throw new SemantifoldDiagnostic({
+    cause,
+    code: "TOOL_NOT_FOUND",
+    command,
+    executable: override,
+    language: id,
+    message: `Configured executable '${override}' is missing or not executable.`
+  })
+}
+
+/**
+ * Resolves one candidate to an executable regular file.
+ * @param {string} candidate - Candidate path.
+ * @returns {Promise<string | undefined>} Exact regular executable, if the file type is valid.
+ */
+async function resolveExecutableFile(candidate) {
+  const exact = await realpath(candidate)
+  const status = await stat(exact)
+
+  if (!status.isFile()) return undefined
+  await access(exact, fsConstants.X_OK)
+
+  return exact
 }
 
 /**
