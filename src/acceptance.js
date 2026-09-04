@@ -29,10 +29,11 @@ const stageIndexes = new Map(orderedStages.map((stage, index) => [stage, index])
 export async function runAcceptanceStages(input) {
   if (!isPlainObject(input)) invalidRunner("Acceptance requires a request object.", "acceptance")
   const artifacts = /** @type {import("./semantic/types.js").GeneratedArtifactSet} */ (input.artifacts)
-  const environment = /** @type {Readonly<Record<string, string | undefined>>} */ (input.environment ?? {PATH: process.env.PATH})
+  const environment = /** @type {Readonly<Record<string, string | undefined>>} */ (
+    input.environment === undefined ? {PATH: process.env.PATH} : input.environment)
   const stages = /** @type {{arguments: string[], stage: import("./semantic/types.js").AcceptanceStage, tool: import("./semantic/types.js").DiscoveredToolchain}[]} */ (input.stages)
   const target = /** @type {string} */ (input.target)
-  const timeoutMs = /** @type {number} */ (input.timeoutMs ?? 10_000)
+  const timeoutMs = /** @type {number} */ (input.timeoutMs === undefined ? 10_000 : input.timeoutMs)
   const request = validateRequest({artifacts, environment, stages, target, timeoutMs})
   const directory = await createAcceptanceDirectory(request.target)
   /** @type {unknown} */

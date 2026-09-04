@@ -130,6 +130,57 @@ exit 11
     })
   })
 
+  it("defaults discovery configuration only when optional fields are undefined", async () => {
+    await withTemporaryDirectory("semantifold-discovery-null-boundaries-", async (directory) => {
+      const marker = path.join(directory, "launched")
+      const executable = await fakeExecutable(directory, "null-tool", `#!/bin/sh
+printf 'launched\n' > "$1"
+printf 'null-tool 1\n'
+`)
+      const base = {
+        canonicalCommand: "null-tool",
+        environment: {PATH: directory},
+        id: "null-tool",
+        override: executable,
+        supportedVersion: /^null-tool 1$/u,
+        timeoutMs: 2_000,
+        versionArguments: [marker]
+      }
+      /** @type {any[]} */
+      const candidates = [
+        {...base, environment: null},
+        {...base, environment: {PATH: null}},
+        {...base, override: null},
+        {...base, supportedVersion: null},
+        {...base, timeoutMs: null}
+      ]
+      /** @type {string[]} */
+      const outcomes = []
+
+      for (const candidate of candidates) {
+        try {
+          await discoverToolchain(candidate)
+          outcomes.push("accepted")
+        } catch (error) {
+          outcomes.push(error instanceof SemantifoldDiagnostic ? error.code : "native")
+        }
+      }
+
+      expect(outcomes).toEqual(candidates.map(() => "INVALID_TOOLCHAIN"))
+      await assert.rejects(access(marker), (error) => error instanceof Error && "code" in error && error.code == "ENOENT")
+      /** @type {any[]} */
+      const canonicalOptions = [
+        {environment: null},
+        {environment: {PATH: "", SEMANTIFOLD_NODE: null}},
+        {environment: {PATH: ""}, override: null}
+      ]
+
+      for (const options of canonicalOptions) {
+        await expectDiagnostic(() => discoverCanonicalToolchain("node", options), "INVALID_TOOLCHAIN")
+      }
+    })
+  })
+
   it("accepts only regular executable files without polluting canonical ambiguity", async () => {
     await withTemporaryDirectory("semantifold-regular-tools-", async (root) => {
       const directoryCandidateRoot = await mkdtemp(path.join(root, "directory-"))
@@ -554,6 +605,45 @@ kill -TERM $$
         await assertForcedFixtureClosure(fixture)
       } finally {
         await terminateFixtureIfAlive(fixture.readyPath)
+      }
+    })
+  })
+
+  it("defaults acceptance environment and timeout only when they are undefined", async () => {
+    await withTemporaryDirectory("semantifold-acceptance-null-boundaries-", async (directory) => {
+      const executable = await fakeExecutable(directory, "acceptance-null-tool", "#!/bin/sh\nprintf 'launched\\n' > \"$1\"\n")
+      const tool = Object.freeze({
+        executable,
+        id: "acceptance-null-tool",
+        source: /** @type {const} */ ("override"),
+        version: "acceptance-null-tool 1",
+        versionArguments: Object.freeze([])
+      })
+      const artifacts = createGeneratedArtifactSet({artifacts: [{
+        content: "input\n",
+        contentKind: "text",
+        mediaType: "text/plain",
+        ownership: "generated",
+        path: "input.txt",
+        provenance: synthetic(),
+        role: "entry"
+      }], target: "demo"})
+      const markers = ["environment-null", "environment-entry-null", "timeout-null"].map((name) => path.join(directory, name))
+      /** @type {any[]} */
+      const configurations = [
+        {environment: null},
+        {environment: {PATH: null}},
+        {timeoutMs: null}
+      ]
+
+      for (const [index, configuration] of configurations.entries()) {
+        await expectDiagnostic(() => runAcceptanceStages({
+          artifacts,
+          stages: [{arguments: [markers[index]], stage: "execute", tool}],
+          target: "demo",
+          ...configuration
+        }), "INVALID_ACCEPTANCE_RUNNER")
+        await assert.rejects(access(markers[index]), (error) => error instanceof Error && "code" in error && error.code == "ENOENT")
       }
     })
   })

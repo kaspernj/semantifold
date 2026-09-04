@@ -371,6 +371,53 @@ describe("generated artifact sets", () => {
     }
   })
 
+  it("validates optional Source Map metadata before projection comparison", async () => {
+    const source = await readFile(new URL("fixtures/program.ts", import.meta.url), "utf8")
+    const module = parse({filename: "program.ts", language: "typescript", source})
+    const generated = generateArtifact({filename: "program.js", language: "javascript", module})
+
+    assert.throws(
+      () => createGeneratedArtifactSet({
+        artifacts: [textArtifact(generated, {...generated.sourceMap, sourcesContent: null})],
+        target: "javascript"
+      }),
+      (error) => error instanceof SemantifoldDiagnostic && error.code == "INVALID_ARTIFACT_SET" &&
+        error.detail == "Text artifact 'program.js' has malformed Source Map v3 provenance."
+    )
+  })
+
+  it("treats only undefined artifact related-origin identities as omitted", () => {
+    const location = {
+      end: {column: 2, line: 1, offset: 1},
+      filename: "source.ts",
+      start: {column: 1, line: 1, offset: 0}
+    }
+    const valid = {
+      content: "support\n",
+      contentKind: "text",
+      mediaType: "text/plain",
+      ownership: "generated",
+      path: "support.txt",
+      role: "entry"
+    }
+
+    for (const property of ["nodeId", "symbolId", "role"]) {
+      for (const value of [null, {}, Symbol(property)]) {
+        expectInvalid(() => createGeneratedArtifactSet({
+          artifacts: [{
+            ...valid,
+            provenance: {
+              kind: "synthetic",
+              reason: "support",
+              relatedOrigins: [{location, sourceId: "source:0", [property]: value}]
+            }
+          }],
+          target: "demo"
+        }))
+      }
+    }
+  })
+
   it("rejects unsafe paths, duplicates, malformed content, ownership, and entry declarations transactionally", () => {
     const valid = {
       content: "ok\n",

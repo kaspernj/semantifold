@@ -85,7 +85,10 @@ console.log(choose(true, "no"))
       [{...record, mapping: {binaryRanges: false, richText: true, sourceMapV3: false}}],
       [{...record, mapping: {binaryRanges: false, richText: false, sourceMapV3: true}}],
       [{...record, roundTrip: true}],
-      [{...record, acceptance: {stages: ["parse", "generate"], toolchains: []}}]
+      [{...record, acceptance: {stages: ["parse", "generate"], toolchains: []}}],
+      [{...record, frontend: null}],
+      [{...record, frontend: null, defaultFilename: null}],
+      [{...record, frontend: null, mediaType: null}]
     ]) {
       assert.throws(
         () => createLanguageRegistry(records),
@@ -126,6 +129,25 @@ console.log(choose(true, "no"))
     }
 
     expect(accepted).toEqual([])
+  })
+
+  it("treats only undefined optional registry fields as omitted", () => {
+    const record = {
+      acceptance: {stages: [], toolchains: []},
+      artifactMultiplicity: "single",
+      id: "optional",
+      mapping: {binaryRanges: false, richText: false, sourceMapV3: false},
+      roundTrip: false
+    }
+
+    for (const property of [
+      "frontend", "textBackend", "binaryBackend", "applicationBackend", "interoperability", "defaultFilename", "mediaType"
+    ]) {
+      assert.throws(
+        () => createLanguageRegistry([{...record, [property]: null}]),
+        (error) => error instanceof SemantifoldDiagnostic && error.code == "INVALID_REGISTRY"
+      )
+    }
   })
 
   it("distinguishes an unknown language from a known language missing a requested role", () => {

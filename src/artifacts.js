@@ -280,7 +280,7 @@ function validateRelatedOrigin(value, artifactPath, index, target) {
  * @returns {Record<string, string>} Present validated property or an empty record.
  */
 function optionalString(value, property, artifactPath, index, target) {
-  if (value == undefined) return {}
+  if (value === undefined) return {}
   if (typeof value != "string" || value.length == 0) {
     invalidArtifactSet(`Artifact '${artifactPath}' has invalid ${property} in related origin ${index}.`, target)
   }
@@ -310,7 +310,7 @@ function validateSourceMap(value, artifactPath, target) {
   if (!isPlainObject(value) || value.version != 3 || value.file != artifactPath || typeof value.mappings != "string" ||
     !isDenseArray(value.names) || !value.names.every((name) => typeof name == "string") ||
     !isDenseArray(value.sources) || !value.sources.every((source) => typeof source == "string") ||
-    (value.sourcesContent != undefined && (!isDenseArray(value.sourcesContent) ||
+    (value.sourcesContent !== undefined && (!isDenseArray(value.sourcesContent) ||
       !value.sourcesContent.every((source) => source == null || typeof source == "string")))) {
     invalidArtifactSet(`Text artifact '${artifactPath}' has malformed Source Map v3 provenance.`, target)
   }

@@ -29,9 +29,13 @@ export async function discoverCanonicalToolchain(id, options = {}) {
   const definition = canonicalToolchains[id]
 
   if (!definition) invalidToolchain(`Unknown canonical toolchain '${id}'.`, String(id))
-  const configurationEnvironment = options.environment ?? process.env
-  const environment = options.environment ?? defaultEnvironment()
-  const configured = options.override ?? configurationEnvironment[definition.overrideEnvironmentVariable]
+  const configurationEnvironment = options.environment === undefined ? process.env : options.environment
+
+  if (!isEnvironment(configurationEnvironment)) {
+    invalidToolchain("Canonical toolchain environment must contain only string or undefined values.", String(id))
+  }
+  const environment = options.environment === undefined ? defaultEnvironment() : options.environment
+  const configured = options.override === undefined ? configurationEnvironment[definition.overrideEnvironmentVariable] : options.override
 
   return discoverToolchain({
     canonicalCommand: definition.canonicalCommand,
@@ -60,11 +64,11 @@ export async function discoverToolchain(input) {
   if (!isPlainObject(input)) invalidToolchain("Toolchain discovery requires a request object.", "toolchain")
   const candidate = {
     canonicalCommand: input.canonicalCommand,
-    environment: input.environment ?? defaultEnvironment(),
+    environment: input.environment === undefined ? defaultEnvironment() : input.environment,
     id: input.id,
     override: input.override,
     supportedVersion: input.supportedVersion,
-    timeoutMs: input.timeoutMs ?? defaultTimeoutMs,
+    timeoutMs: input.timeoutMs === undefined ? defaultTimeoutMs : input.timeoutMs,
     versionArguments: input.versionArguments
   }
 
@@ -79,7 +83,7 @@ export async function discoverToolchain(input) {
   const timeoutMs = /** @type {number} */ (candidate.timeoutMs)
   const versionArguments = [.../** @type {string[]} */ (candidate.versionArguments)]
   const normalizedEnvironment = deterministicEnvironment(environment)
-  const {executable, source} = override == undefined
+  const {executable, source} = override === undefined
     ? await resolveCanonical(id, canonicalCommand, normalizedEnvironment.PATH ?? "")
     : {executable: await resolveOverride(id, override, canonicalCommand), source: /** @type {const} */ ("override")}
   /** @type {{stdout: string, stderr: string}} */
@@ -184,8 +188,8 @@ function validateDiscovery(input) {
     input.canonicalCommand.includes("/") || input.canonicalCommand.includes("\\") || input.canonicalCommand.includes("\0") ||
     !isDenseArray(input.versionArguments) || !input.versionArguments.every(validArgument) ||
     !isEnvironment(input.environment) || !Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 ||
-    (input.override != undefined && (typeof input.override != "string" || !path.isAbsolute(input.override) || input.override.includes("\0"))) ||
-    (input.supportedVersion != undefined && (!(input.supportedVersion instanceof RegExp) || input.supportedVersion.global || input.supportedVersion.sticky))) {
+    (input.override !== undefined && (typeof input.override != "string" || !path.isAbsolute(input.override) || input.override.includes("\0"))) ||
+    (input.supportedVersion !== undefined && (!(input.supportedVersion instanceof RegExp) || input.supportedVersion.global || input.supportedVersion.sticky))) {
     invalidToolchain("Toolchain discovery requires a canonical basename, absolute override, argument array, environment, and positive timeout.",
       typeof input.id == "string" ? input.id : "toolchain")
   }
@@ -289,10 +293,10 @@ export function deterministicEnvironment(environment = defaultEnvironment()) {
   const normalized = {}
 
   for (const [key, value] of Object.entries(environment)) {
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(key) || key.includes("\0") || (value != undefined && value.includes("\0"))) {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(key) || key.includes("\0") || (value !== undefined && value.includes("\0"))) {
       invalidToolchain("Process environment contains an invalid key or value.", "environment")
     }
-    if (value != undefined) normalized[key] = value
+    if (value !== undefined) normalized[key] = value
   }
   normalized.LANG = "C.UTF-8"
   normalized.LC_ALL = "C.UTF-8"
@@ -343,7 +347,7 @@ function validArgument(value) {
  */
 function isEnvironment(value) {
   return typeof value == "object" && value != null && !Array.isArray(value) &&
-    Object.entries(value).every(([key, entry]) => typeof key == "string" && (entry == undefined || typeof entry == "string"))
+    Object.entries(value).every(([key, entry]) => typeof key == "string" && (entry === undefined || typeof entry == "string"))
 }
 
 /**

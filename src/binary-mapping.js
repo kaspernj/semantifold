@@ -202,7 +202,7 @@ function validPoint(value) {
  * @returns {Record<string, string>} Present identity or an empty record.
  */
 function optionalIdentity(value, property, index) {
-  if (value == undefined) return {}
+  if (value === undefined) return {}
   if (typeof value != "string" || value.length == 0) invalidByteMapping(`Byte range ${index} has an invalid ${property}.`)
 
   return {[property]: value}
@@ -216,7 +216,7 @@ function optionalIdentity(value, property, index) {
  * @returns {Record<string, string>} Present identity or an empty record.
  */
 function optionalRelated(value, property, label) {
-  if (value == undefined) return {}
+  if (value === undefined) return {}
   if (typeof value != "string" || value.length == 0) invalidByteMapping(`${label} has an invalid ${property}.`)
 
   return {[property]: value}

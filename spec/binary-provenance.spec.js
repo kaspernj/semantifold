@@ -121,6 +121,47 @@ describe("binary and resource provenance", () => {
 
     expect(accepted).toEqual([])
   })
+
+  it("treats only undefined byte-range and related-origin identities as omitted", () => {
+    const location = {
+      end: {column: 2, line: 1, offset: 1},
+      filename: "source.ts",
+      start: {column: 1, line: 1, offset: 0}
+    }
+    const baseRange = {generated: {end: 1, start: 0}, origin: synthetic("byte")}
+    const relatedOrigin = {location, sourceId: "source:0"}
+    /** @type {object[]} */
+    const candidates = []
+
+    for (const property of ["nodeId", "symbolId", "role"]) {
+      for (const value of [null, {}, Symbol(property)]) {
+        candidates.push({
+          byteLength: 1,
+          path: "range.bin",
+          ranges: [{...baseRange, [property]: value}]
+        })
+        candidates.push({
+          byteLength: 1,
+          path: "related.bin",
+          ranges: [{
+            ...baseRange,
+            origin: {kind: "synthetic", reason: "byte", relatedOrigins: [{...relatedOrigin, [property]: value}]}
+          }]
+        })
+      }
+    }
+
+    for (const candidate of candidates) expectInvalid(() => createByteMapping(candidate))
+    for (const property of ["nodeId", "symbolId", "role"]) {
+      expectInvalid(() => parseByteMapping(JSON.stringify({
+        coordinateSystem: "bytes",
+        generated: {byteLength: 1, path: "parsed.bin"},
+        ranges: [{...baseRange, [property]: null}],
+        schema: "SemantifoldByteMapping",
+        version: 1
+      })))
+    }
+  })
 })
 
 /**

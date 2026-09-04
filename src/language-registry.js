@@ -72,7 +72,7 @@ export function createLanguageRegistry(candidateRecords) {
     if (Object.keys(candidate).some((key) => !registryKeys.has(key))) invalidRegistry(`Registry record '${id}' has unknown fields.`, id)
 
     for (const role of registryRoles) {
-      if (candidate[role] != undefined && typeof candidate[role] != "function") {
+      if (candidate[role] !== undefined && typeof candidate[role] != "function") {
         invalidRegistry(`Registry role '${role}' for '${id}' must be a function when present.`, id)
       }
     }
@@ -125,10 +125,12 @@ export function createLanguageRegistry(candidateRecords) {
       invalidRegistry(`Registry record '${id}' declares an acceptance stage without its required role.`, id)
     }
 
-    if (hasBackend && (typeof candidate.defaultFilename != "string" || candidate.defaultFilename.length == 0)) {
+    if ((hasBackend || candidate.defaultFilename !== undefined) &&
+      (typeof candidate.defaultFilename != "string" || candidate.defaultFilename.length == 0)) {
       invalidRegistry(`Registry backend '${id}' requires a default filename.`, id)
     }
-    if (hasBackend && (typeof candidate.mediaType != "string" || candidate.mediaType.length == 0)) {
+    if ((hasBackend || candidate.mediaType !== undefined) &&
+      (typeof candidate.mediaType != "string" || candidate.mediaType.length == 0)) {
       invalidRegistry(`Registry backend '${id}' requires a media type.`, id)
     }
 
