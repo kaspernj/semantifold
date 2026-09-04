@@ -137,11 +137,14 @@ function validateRequest(input) {
       if (index < previousIndex) invalidRunner("Acceptance stages must follow parse-to-execute order.", input.target)
       previousIndex = index
       seen.add(stage.stage)
-      if (!isDenseArray(stage.arguments) || !stage.arguments.every((argument) => typeof argument == "string" && !argument.includes("\0")) ||
+      const argumentCandidate = stage.arguments
+      const stageArguments = isDenseArray(argumentCandidate) ? [...argumentCandidate] : undefined
+
+      if (stageArguments == undefined || !stageArguments.every((argument) => typeof argument == "string" && !argument.includes("\0")) ||
         !isTool(stage.tool)) invalidRunner(`Acceptance stage '${stage.stage}' has an invalid tool or argument array.`, input.target)
       const tool = Object.freeze({executable: stage.tool.executable, version: stage.tool.version})
 
-      return Object.freeze({arguments: [...stage.arguments], stage: stage.stage, tool})
+      return Object.freeze({arguments: stageArguments, stage: stage.stage, tool})
     })
 
     return {artifacts, environment, stages, target: input.target, timeoutMs: input.timeoutMs}

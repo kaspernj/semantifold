@@ -572,6 +572,29 @@ describe("generated artifact sets", () => {
     expectInvalid(() => generateArtifactSet(undefined))
   })
 
+  it("rejects lone path surrogates while preserving complete Unicode scalar pairs", () => {
+    const artifact = {
+      content: "ok\n",
+      contentKind: "text",
+      mediaType: "text/plain",
+      ownership: "generated",
+      provenance: synthetic(),
+      role: "entry"
+    }
+
+    for (const artifactPath of ["high-\uD800.txt", "low-\uDC00.txt"]) {
+      expectInvalid(() => createGeneratedArtifactSet({
+        artifacts: [{...artifact, path: artifactPath}],
+        target: "demo"
+      }))
+    }
+
+    const validPath = "rocket-\uD83D\uDE80.txt"
+    const set = createGeneratedArtifactSet({artifacts: [{...artifact, path: validPath}], target: "demo"})
+
+    expect(set.entry).toEqual(validPath)
+  })
+
   it("normalizes malformed artifact backend roles without coercing caller values", async () => {
     const source = await readFile(new URL("fixtures/program.ts", import.meta.url), "utf8")
     const module = parse({filename: "program.ts", language: "typescript", source})

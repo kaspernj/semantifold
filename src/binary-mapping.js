@@ -63,7 +63,12 @@ export function finalizeByteMapping(candidate) {
     if (candidate.schema != "SemantifoldByteMapping" || candidate.version !== 1 || candidate.coordinateSystem != "bytes") {
       invalidByteMapping("Byte mapping requires SemantifoldByteMapping version 1 with byte coordinates.")
     }
-    if (!isPlainObject(candidate.generated) || !isSafeArtifactPath(candidate.generated.path)) {
+    if (!isPlainObject(candidate.generated)) {
+      invalidByteMapping("Byte mapping requires a safe generated artifact path.")
+    }
+    const generatedPath = candidate.generated.path
+
+    if (!isSafeArtifactPath(generatedPath)) {
       invalidByteMapping("Byte mapping requires a safe generated artifact path.")
     }
     if (typeof candidate.generated.byteLength != "number" || !Number.isSafeInteger(candidate.generated.byteLength) ||
@@ -72,8 +77,6 @@ export function finalizeByteMapping(candidate) {
     }
     if (!isDenseArray(candidate.ranges)) invalidByteMapping("Byte mapping ranges must be an ordered dense array.")
     const byteLength = /** @type {number} */ (candidate.generated.byteLength)
-    const generatedPath = candidate.generated.path
-
     let previousEnd = 0
     const ranges = candidate.ranges.map((range, index) => {
       if (!isPlainObject(range) || !isPlainObject(range.generated)) invalidByteMapping(`Byte range ${index} is malformed.`)

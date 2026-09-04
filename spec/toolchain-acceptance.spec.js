@@ -104,6 +104,37 @@ exit 11
     })
   })
 
+  it("reads each version argument once before validation and execution", async () => {
+    await withTemporaryDirectory("semantifold-version-argument-accessor-", async (directory) => {
+      const marker = path.join(directory, "executed-argument")
+      const executable = await fakeExecutable(directory, "argument-accessor-tool", `#!/bin/sh
+printf '%s\n' "$1" > "$2"
+printf 'argument-accessor-tool 1\n'
+`)
+      const versionArguments = ["placeholder", marker]
+      let reads = 0
+
+      Object.defineProperty(versionArguments, "0", {
+        enumerable: true,
+        get() {
+          reads += 1
+          return reads == 1 ? "--validated" : "--unvalidated"
+        }
+      })
+
+      const tool = await discoverToolchain({
+        canonicalCommand: "argument-accessor-tool",
+        id: "argument-accessor-tool",
+        override: executable,
+        versionArguments
+      })
+
+      expect(reads).toEqual(1)
+      expect(await readFile(marker, "utf8")).toEqual("--validated\n")
+      expect(tool.versionArguments).toEqual(["--validated", marker])
+    })
+  })
+
   it("detaches the supported version policy before asynchronous executable lookup", async () => {
     await withTemporaryDirectory("semantifold-version-policy-", async (directory) => {
       const executable = await fakeExecutable(directory, "policy-tool", "#!/bin/sh\nprintf 'unexpected 1\\n'\n")
@@ -649,6 +680,53 @@ printf 'expected\n'
       expect(result.stages[0].stdout).toEqual("expected\n")
       expect(result.stages[0].executable).toEqual(expectedExecutable)
       expect(result.stages[0].version).toEqual("expected 1")
+    })
+  })
+
+  it("reads each acceptance-stage argument once before validation and execution", async () => {
+    await withTemporaryDirectory("semantifold-stage-argument-accessor-", async (directory) => {
+      const marker = path.join(directory, "executed-argument")
+      const executable = await fakeExecutable(directory, "stage-argument-accessor-tool", `#!/bin/sh
+printf '%s\n' "$1" > "$2"
+printf '%s\n' "$1"
+`)
+      const tool = Object.freeze({
+        executable,
+        id: "stage-argument-accessor-tool",
+        source: /** @type {const} */ ("override"),
+        version: "stage-argument-accessor-tool 1",
+        versionArguments: Object.freeze([])
+      })
+      const artifacts = createGeneratedArtifactSet({artifacts: [{
+        content: "input\n",
+        contentKind: "text",
+        mediaType: "text/plain",
+        ownership: "generated",
+        path: "input.txt",
+        provenance: synthetic(),
+        role: "entry"
+      }], target: "demo"})
+      const stageArguments = ["placeholder", marker]
+      let reads = 0
+
+      Object.defineProperty(stageArguments, "0", {
+        enumerable: true,
+        get() {
+          reads += 1
+          return reads == 1 ? "validated" : "unvalidated"
+        }
+      })
+
+      const result = await runAcceptanceStages({
+        artifacts,
+        stages: [{arguments: stageArguments, stage: "execute", tool}],
+        target: "demo"
+      })
+
+      expect(reads).toEqual(1)
+      expect(await readFile(marker, "utf8")).toEqual("validated\n")
+      expect(result.stages[0].arguments).toEqual(["validated", marker])
+      expect(result.stages[0].stdout).toEqual("validated\n")
     })
   })
 

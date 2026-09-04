@@ -90,6 +90,30 @@ describe("binary and resource provenance", () => {
     }
   })
 
+  it("retains exactly the generated path read during byte-map validation", () => {
+    const generated = {byteLength: 0}
+    let reads = 0
+
+    Object.defineProperty(generated, "path", {
+      enumerable: true,
+      get() {
+        reads += 1
+        return reads == 1 ? "validated.bin" : 7
+      }
+    })
+    const mapping = {
+      coordinateSystem: "bytes",
+      generated,
+      ranges: [],
+      schema: "SemantifoldByteMapping",
+      version: 1
+    }
+    const serialized = stringifyByteMapping(/** @type {any} */ (mapping))
+
+    expect(reads).toEqual(1)
+    expect(JSON.parse(serialized).generated.path).toEqual("validated.bin")
+  })
+
   it("rejects sparse byte-range and provenance-origin arrays", () => {
     const location = {
       end: {column: 2, line: 1, offset: 1},

@@ -70,6 +70,8 @@ export async function discoverCanonicalToolchain(id, options = {}) {
  */
 export async function discoverToolchain(input) {
   if (!isPlainObject(input)) invalidToolchain("Toolchain discovery requires a request object.", "toolchain")
+  const versionArgumentCandidate = input.versionArguments
+  const versionArguments = isDenseArray(versionArgumentCandidate) ? [...versionArgumentCandidate] : undefined
   const candidate = {
     canonicalCommand: input.canonicalCommand,
     environment: input.environment === undefined ? defaultEnvironment() : input.environment,
@@ -77,7 +79,7 @@ export async function discoverToolchain(input) {
     override: input.override,
     supportedVersion: input.supportedVersion,
     timeoutMs: input.timeoutMs === undefined ? defaultTimeoutMs : input.timeoutMs,
-    versionArguments: input.versionArguments
+    versionArguments
   }
 
   validateDiscovery(candidate)
@@ -89,7 +91,7 @@ export async function discoverToolchain(input) {
     ? new RegExp(candidate.supportedVersion.source, candidate.supportedVersion.flags)
     : undefined
   const timeoutMs = /** @type {number} */ (candidate.timeoutMs)
-  const versionArguments = [.../** @type {string[]} */ (candidate.versionArguments)]
+  const validatedVersionArguments = /** @type {string[]} */ (candidate.versionArguments)
   const normalizedEnvironment = deterministicEnvironment(environment)
   const {executable, source} = override === undefined
     ? await resolveCanonical(id, canonicalCommand, normalizedEnvironment.PATH ?? "")
@@ -99,7 +101,7 @@ export async function discoverToolchain(input) {
 
   try {
     result = await executeFileWithDeadline({
-      arguments: versionArguments,
+      arguments: validatedVersionArguments,
       environment: normalizedEnvironment,
       executable,
       maxBuffer: 1024 * 1024,
@@ -158,7 +160,7 @@ export async function discoverToolchain(input) {
     id,
     source,
     version,
-    versionArguments: [...versionArguments],
+    versionArguments: validatedVersionArguments,
     versionOutput
   })
 }

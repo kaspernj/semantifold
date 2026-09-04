@@ -1,5 +1,7 @@
 // @ts-check
 
+import {hasOnlyUnicodeScalars} from "./semantic/scalars.js"
+
 const lineTerminatorPattern = /[\n\r\u2028\u2029]/u
 
 /**
@@ -17,7 +19,8 @@ export function isValidFilenameMetadata(value) {
  * @returns {value is string} Whether the value is safe.
  */
 export function isSafeArtifactPath(value) {
-  if (typeof value != "string" || value.length == 0 || value.includes("\\") || value.includes("\0")) return false
+  if (typeof value != "string" || value.length == 0 || value.includes("\\") || value.includes("\0") ||
+    !hasOnlyUnicodeScalars(value)) return false
   if (value.startsWith("/") || /^[A-Za-z]:/u.test(value)) return false
 
   const parts = value.split("/")
