@@ -1,12 +1,8 @@
 // @ts-check
 
-import {SemantifoldDiagnostic} from "../diagnostic.js"
+import {languageRegistry} from "../language-registry.js"
 import {annotateParsedModule} from "../semantic/provenance.js"
 import {validateParsedModule} from "../semantic/validate.js"
-import {parseJava} from "./java.js"
-import {parseJavaScriptTypeScript} from "./javascript-typescript.js"
-import {parsePhp} from "./php.js"
-import {parseRuby} from "./ruby.js"
 
 /**
  * Parses supported source into a shared semantic module.
@@ -17,20 +13,9 @@ import {parseRuby} from "./ruby.js"
  * @returns {import("../semantic/types.js").SemanticModule} Semantic module.
  */
 export function parseSource({filename, language, source}) {
-  let module
+  const frontend = /** @type {(input: {filename: string, source: string}) => import("../semantic/types.js").SemanticModule} */ (
+    languageRegistry.resolve(language, "frontend"))
+  const module = validateParsedModule(frontend({filename, source}), language)
 
-  if (language == "php") module = validateParsedModule(parsePhp({filename, source}), language)
-  else if (language == "ruby") module = validateParsedModule(parseRuby({filename, source}), language)
-  if (language == "javascript" || language == "typescript") {
-    module = validateParsedModule(parseJavaScriptTypeScript({filename, language, source}), language)
-  }
-  else if (language == "java") module = validateParsedModule(parseJava({filename, source}), language)
-
-  if (module) return annotateParsedModule(module, {filename, language, source})
-
-  throw new SemantifoldDiagnostic({
-    code: "UNSUPPORTED_LANGUAGE",
-    language,
-    message: "No frontend adapter is registered for this language."
-  })
+  return annotateParsedModule(module, {filename, language, source})
 }

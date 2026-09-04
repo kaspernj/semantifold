@@ -10,6 +10,7 @@
     "target": "ES2024",
     "moduleResolution": "nodenext",
     "module": "nodenext",
+    "types": ["node"],
     "strict": true
   },
   "include": ["index.js", "src/**/*"]

@@ -66,7 +66,7 @@ artifact.sourceMap     // encoded Source Map v3 object
 artifact.sourceMapFilename
 ```
 
-Default filenames are `program.php`, `program.rb`, `program.js`, `program.ts`, and `Main.java`. Java artifacts may include directories but must retain the basename `Main.java`, matching the generated public class and making the returned filename directly compilable; any other basename is a located `UNSUPPORTED_CAPABILITY` diagnostic for the Java backend. `sources` may supply exact content for legacy or caller-assembled multi-source IR:
+Default filenames are `program.php`, `program.rb`, `program.js`, `program.ts`, and `Main.java`. Defaults apply only when `filename` or `sourceMapFilename` is omitted (`undefined`); an explicitly supplied `null` remains invalid. Java artifacts may include directories but must retain the basename `Main.java`, matching the generated public class and making the returned filename directly compilable; any other basename is a located `UNSUPPORTED_CAPABILITY` diagnostic for the Java backend. `sources` may supply exact content for legacy or caller-assembled multi-source IR:
 
 ```js
 generateArtifact({
@@ -79,7 +79,7 @@ generateArtifact({
 })
 ```
 
-This single-artifact envelope is intentionally reusable as an element in task 010's future ordered artifact set. Generation never writes files.
+`generateArtifactSet()` wraps this exact result for original-five single-text targets and supplies one generated entry artifact, plus the referenced serialized mapping artifact when an external JavaScript-family directive is requested. `createGeneratedArtifactSet()` validates other single-module target shapes without introducing Task 010's source-project semantics. Its dense artifact array preserves caller/backend order and requires unique safe relative POSIX paths without file/directory prefix collisions, non-empty text or bytes, media types, one of `entry`/`source`/`manifest`/`support`/`mapping`/`resource`/`loader`, generated ownership, provenance, and exactly one entry. Binary storage remains private and every `content` read returns a detached `Uint8Array`, so mutations cannot alter the validated artifact or drift from byte provenance. Backends return no iterable or partial files: the complete set is validated before it becomes observable. Generation and set construction never write files.
 
 All outputs have deterministic LF newlines. Returned rich mappings are detached from caller-owned semantic locations and provenance before they are deeply frozen and internally indexed after trust-boundary validation. Freezing an artifact mapping therefore never freezes the mutable semantic module used to generate it. The rich map's `generated.content` is the exact returned code and its ordered, non-empty spans cover every UTF-16 code unit without gaps or overlaps:
 
@@ -89,9 +89,36 @@ All outputs have deterministic LF newlines. Returned rich mappings are detached 
 
 Every span may carry a canonical `nodeId`, `symbolId`, semantic `role`, and Source Map `name`. Sources retain filenames, exact `sourcesContent` when available, and independent registry identity. Rich mappings are the serialization and interchange contract because v3 represents points rather than ranges and cannot retain semantic roles or the closed derived/synthetic model.
 
+## Binary and resource byte mappings
+
+`SemantifoldByteMapping` v1 is separate from the text mapping schema:
+
+```js
+const mapping = createByteMapping({
+  path: "program.wasm",
+  byteLength: bytes.byteLength,
+  ranges: [
+    {
+      generated: {start: 0, end: 8},
+      origin: {kind: "synthetic", reason: "WebAssembly header", relatedOrigins: []}
+    },
+    {
+      generated: {start: 8, end: bytes.byteLength},
+      nodeId: "node:4",
+      role: "encoded function body",
+      origin
+    }
+  ]
+})
+```
+
+The discriminator is `SemantifoldByteMapping`, version is `1`, and `coordinateSystem` is exactly `bytes`. The range array and every nested provenance-origin array are dense; ranges contain non-negative safe-integer half-open offsets, are non-empty, ordered, non-overlapping, and bounded by `generated.byteLength`. Source/derived origins retain ordinary UTF-16 original `SourceLocation` values; only the generated side is in bytes. Every source location has nondecreasing offsets and lexicographically ordered `(line, column)` endpoints; equal endpoints remain valid for zero-width origins. Synthetic regions require a non-empty reason. Optional `nodeId`, `symbolId`, and `role` fields are omitted only by `undefined`; any present value must be a non-empty string. These identities associate encoded regions without fabricating source positions. `parseByteMapping()` validates serialized input and `stringifyByteMapping()` emits canonical key-sorted JSON with one LF.
+
+Text artifact provenance embeds the validated rich mapping and Source Map v3 projection. Its optional `sourceMapFilename` may be omitted, but when present must be a non-empty single-line string; optional Source Map arrays must likewise be omitted rather than set to `null`. Malformed values are rejected as `INVALID_ARTIFACT_SET`. Binary artifact provenance must embed a matching byte map whose path and byte length equal its artifact. Manifest, support, loader, and other source-free text/resources may instead carry an explicit artifact-level synthetic reason and related source origins. Optional related-origin identities follow the same `undefined`-only omission rule. Artifact-set construction detaches and deeply freezes every such related origin, including its location and start/end points.
+
 ## Source Map v3 and directives
 
-`artifact.sourceMap` exists for all five targets and is generated with `@jridgewell/gen-mapping`; lookup and import use `@jridgewell/trace-mapping`. Semantifold does not hand-code VLQ or tracing. The v3 map contains deterministic `file`, `sources`, `sourcesContent`, `names`, and `mappings` fields.
+`artifact.sourceMap` exists for all five targets and is generated with `@jridgewell/gen-mapping`; lookup, import, and artifact-set validation use `@jridgewell/trace-mapping`. Semantifold does not hand-code VLQ or tracing. Artifact-set validation requires dense `sources`, `names`, and optional `sourcesContent` arrays, decodes and canonically re-encodes the mapping payload, requires standard one-, four-, or five-field segments, rejects source or name indices outside their declared arrays, and requires the complete v3 value to equal the existing `toSourceMapV3()` projection of the accepted rich mapping. That projection comparison covers generated and original positions, source and name indexes, content, and the documented trailing unmapped directive span without a second encoder. The v3 map contains deterministic `file`, `sources`, `sourcesContent`, `names`, and `mappings` fields.
 
 Directives are opt-in and only valid for JavaScript and TypeScript:
 
@@ -100,7 +127,7 @@ generateArtifact({language: "javascript", module, mapDirective: "external"})
 generateArtifact({language: "typescript", module, mapDirective: "inline"})
 ```
 
-`external` appends `//# sourceMappingURL=<relative-map-url>`. `artifact.sourceMapFilename` remains the map artifact's literal logical filename, while the directive is relative to `artifact.filename`'s directory and URL-encodes each filesystem path segment without encoding structural slashes. Both logical paths resolve against one synthetic artifact root before relativization, so mixed leading-parent depths do not become false common segments; for example, generated `../../dist/out.js` and map `../maps/out.js.map` emit `../maps/out.js.map`. `dist/program.js` still advertises `dist/program.js.map` and emits `sourceMappingURL=program.js.map`; a literal `#` or `?` in the sidecar filename is emitted as `%23` or `%3F`. Names containing any ECMAScript line terminator—LF, CR, U+2028, or U+2029—are rejected before emission. `inline` appends a UTF-8 base64 data URL. The default is `none`. PHP, Ruby, and Java still receive sidecar map objects but never receive non-native map comments. Native Java debugger mapping such as JSR-45 would require class-file/toolchain integration and is not part of v1.
+`external` appends `//# sourceMappingURL=<relative-map-url>`. `artifact.sourceMapFilename` remains the map artifact's literal logical filename, while the directive is relative to `artifact.filename`'s directory and URL-encodes each filesystem path segment without encoding structural slashes. Both logical paths resolve against one synthetic artifact root before relativization, so mixed leading-parent depths do not become false common segments; for example, generated `../../dist/out.js` and map `../maps/out.js.map` emit `../maps/out.js.map`. `dist/program.js` still advertises `dist/program.js.map` and emits `sourceMappingURL=program.js.map`; a literal `#` or `?` in the sidecar filename is emitted as `%23` or `%3F`. Names containing any ECMAScript line terminator—LF, CR, U+2028, or U+2029—are rejected before emission. `generateArtifactSet()` makes that reference materializable by adding the LF-terminated deterministic JSON serialization of `artifact.sourceMap` at the advertised safe path with role `mapping`; `generateArtifact()` retains its existing sidecar-object contract. `inline` appends a UTF-8 base64 data URL. The default is `none`. PHP, Ruby, and Java still receive sidecar map objects but never receive non-native map comments. Native Java debugger mapping such as JSR-45 would require class-file/toolchain integration and is not part of v1.
 
 The directive itself is an unmapped synthetic rich-map span. `artifact.sourceMap` is computed for the program before that self-referential comment is appended; this is required for a stable inline data URL and is the conventional v3 behavior. Use the rich mapping when the directive span itself matters. Rich registries may distinguish same-named sources by `sourceId`; Source Map v3 identifies sources by filename, so callers should use unique filenames when exporting such an assembled registry to v3.
 

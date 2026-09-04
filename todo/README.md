@@ -2,9 +2,9 @@
 
 ## Purpose and current baseline
 
-This folder is Semantifold's durable, dependency-ordered implementation backlog. It is planning, not a claim that todo work is implemented. The evidence baseline is merged `master` commit `de60a179ea5d3d320ad1323c36dbb0b31e0857d6`; repository and external evidence is recorded in [SOURCES.md](SOURCES.md).
+This folder is Semantifold's durable, dependency-ordered implementation backlog and delivered design record. The released baseline is `semantifold@0.1.1` / `v0.1.1` at merged `master` commit `61990ddffe31eb48ef36201eda1fc25549e8b87f`; repository and external evidence is recorded in [SOURCES.md](SOURCES.md).
 
-Tasks 001–004 are delivered. Semantifold currently models safe integer, Boolean, and Unicode string scalars; explicitly typed locals and assignment; typed unary/binary expressions; ordered lexical blocks; nested strict-Boolean conditionals; explicit returns; two-argument direct calls; and entry-point printing. PHP, Ruby, JavaScript with JSDoc, TypeScript, and Java are implemented as frontends and source backends with real-runtime and provenance/source-map coverage. Tasks 005–031 are roadmap work.
+Tasks 001–004 and 015 are delivered. Semantifold currently models safe integer, Boolean, and Unicode string scalars; explicitly typed locals and assignment; typed unary/binary expressions; ordered lexical blocks; nested strict-Boolean conditionals; explicit returns; two-argument direct calls; and entry-point printing. PHP, Ruby, JavaScript with JSDoc, TypeScript, and Java are implemented as frontends and source backends with real-runtime and provenance/source-map coverage. Task 015 adds the shared role registry, single-module generated artifact sets, byte provenance, parser qualification policy, and fail-loud staged toolchain acceptance without adding a language or semantic feature. Tasks 005–014 and 016–031 remain roadmap work.
 
 The immediate priority is a bounded language-baseline expansion against this small stable IR. That exposes registration, parser, artifact, toolchain, ownership, and diagnostic flaws before collections, optionals, records, modules, errors, and generics multiply the work. It does not mean every platform, legacy bridge, or later language must block semantic progress.
 
@@ -32,11 +32,11 @@ The immediate priority is a bounded language-baseline expansion against this sma
 
 These are durable design records for the implemented baseline.
 
-### Phase L0 — common language-expansion foundation (P0, next)
+### Delivered language-expansion foundation — Task 015
 
 - [015 — Shared language-expansion foundation](015-language-expansion-foundation.md)
 
-Task 015 remains first. It separates roles/capabilities, defines deterministic single-module project and binary artifact sets, qualifies parser distribution, standardizes toolchain discovery and native/platform acceptance, and extends provenance beyond one text file.
+Task 015 separates roles/capabilities, defines deterministic single-module project and binary artifact sets, records the parser-distribution qualification gate, standardizes toolchain discovery and native/platform acceptance, and extends provenance beyond one text file. The Phase L1 language tasks may now proceed subject to their own parser qualification and dependency records.
 
 ### Phase L1 — immediate stable-IR language cohort (P0)
 
@@ -174,7 +174,7 @@ Dependencies in task files are authoritative. Existing IDs remain stable; numeri
 | [002](002-local-declarations-and-assignment.md) | delivered | — | Typed locals/assignment | 001 |
 | [003](003-typed-operators-and-expressions.md) | delivered | — | Typed expressions | 001 |
 | [004](004-statement-sequencing-and-conditionals.md) | delivered | — | Blocks/conditionals | 002, 003 |
-| [015](015-language-expansion-foundation.md) | L0 | P0 | Roles, artifacts, parser/toolchain qualification, provenance | 001–004 |
+| [015](015-language-expansion-foundation.md) | delivered | — | Roles, artifacts, parser/toolchain qualification, provenance | 001–004 |
 | [016](016-python-source-and-target.md) | L1 | P0 | Python frontend/backend | 015 |
 | [017](017-csharp-source-and-target.md) | L1 | P0 | C# frontend/backend/project | 015 |
 | [018](018-c-source-and-target.md) | L1 | P0 | C frontend/backend/ownership | 015 |

@@ -1,0 +1,350 @@
+// @ts-check
+
+import assert from "node:assert/strict"
+import {describe, expect, it} from "@velocious/testing"
+import {createByteMapping, parseByteMapping, SemantifoldDiagnostic, stringifyByteMapping} from "../index.js"
+
+const synthetic = (reason) => ({kind: "synthetic", reason, relatedOrigins: []})
+
+describe("binary and resource provenance", () => {
+  it("retains ordered non-overlapping half-open byte ranges without text coordinates", () => {
+    const mapping = createByteMapping({
+      byteLength: 8,
+      path: "module.wasm",
+      ranges: [
+        {generated: {end: 4, start: 0}, origin: synthetic("binary magic and version")},
+        {generated: {end: 8, start: 4}, nodeId: "node:0", origin: synthetic("encoded entry body"), role: "body"}
+      ]
+    })
+
+    expect(mapping.schema).toEqual("SemantifoldByteMapping")
+    expect(mapping.version).toEqual(1)
+    expect(mapping.coordinateSystem).toEqual("bytes")
+    expect(mapping.generated).toEqual({byteLength: 8, path: "module.wasm"})
+    expect(Object.isFrozen(mapping)).toBeTrue()
+    expect(Object.isFrozen(mapping.ranges)).toBeTrue()
+    assert.equal("line" in mapping.ranges[0].generated, false)
+    assert.equal(stringifyByteMapping(parseByteMapping(stringifyByteMapping(mapping))), stringifyByteMapping(mapping))
+  })
+
+  it("accepts source-derived byte ranges while requiring explicit synthetic reasons", () => {
+    const location = {
+      end: {column: 5, line: 1, offset: 4},
+      filename: "input.ts",
+      start: {column: 1, line: 1, offset: 0}
+    }
+    const mapping = createByteMapping({
+      byteLength: 3,
+      path: "resource.bin",
+      ranges: [{
+        generated: {end: 3, start: 0},
+        origin: {kind: "source", location, sourceId: "source:0"},
+        symbolId: "symbol:0"
+      }]
+    })
+
+    expect(mapping.ranges[0].origin.kind).toEqual("source")
+    expect(mapping.ranges[0].generated).toEqual({end: 3, start: 0})
+
+    expectInvalid(() => createByteMapping({
+      byteLength: 1,
+      path: "bad.bin",
+      ranges: [{generated: {end: 1, start: 0}, origin: {kind: "synthetic", reason: "", relatedOrigins: []}}]
+    }))
+  })
+
+  it("copies only declared source-point fields into serializable byte provenance", () => {
+    const mapping = createByteMapping({
+      byteLength: 1,
+      path: "resource.bin",
+      ranges: [{
+        generated: {end: 1, start: 0},
+        origin: {
+          kind: "source",
+          location: {
+            end: {column: 2, extra: 1n, line: 1, offset: 1},
+            filename: "input.ts",
+            start: {column: 1, extra: 1n, line: 1, offset: 0}
+          },
+          sourceId: "source:0"
+        }
+      }]
+    })
+    const serialized = stringifyByteMapping(mapping)
+    const origin = mapping.ranges[0].origin
+
+    assert.equal(origin.kind, "source")
+    expect(origin.location.start).toEqual({column: 1, line: 1, offset: 0})
+    expect(origin.location.end).toEqual({column: 2, line: 1, offset: 1})
+    expect(JSON.parse(serialized).ranges[0].origin.location).toEqual(origin.location)
+  })
+
+  it("normalizes malformed, out-of-order, overlapping, and out-of-bounds mappings", () => {
+    const base = {byteLength: 4, path: "module.bin"}
+    const invalidRanges = [
+      [{generated: {end: 1.5, start: 0}, origin: synthetic("fractional")}],
+      [{generated: {end: 0, start: 0}, origin: synthetic("empty")}],
+      [{generated: {end: 5, start: 0}, origin: synthetic("outside")}],
+      [
+        {generated: {end: 3, start: 1}, origin: synthetic("first")},
+        {generated: {end: 2, start: 0}, origin: synthetic("out of order")}
+      ],
+      [
+        {generated: {end: 3, start: 0}, origin: synthetic("first")},
+        {generated: {end: 4, start: 2}, origin: synthetic("overlap")}
+      ]
+    ]
+
+    for (const ranges of invalidRanges) expectInvalid(() => createByteMapping({...base, ranges}))
+    expectInvalid(() => createByteMapping({...base, path: "../module.bin", ranges: []}))
+    expectInvalid(() => parseByteMapping("not json"))
+    expectInvalid(() => parseByteMapping('{"schema":"SemantifoldByteMapping","version":2}'))
+    // @ts-expect-error Deliberately malformed public input.
+    expectInvalid(() => createByteMapping(undefined))
+  })
+
+  it("rejects non-numeric serialized schema-version discriminators", () => {
+    const mapping = {
+      coordinateSystem: "bytes",
+      generated: {byteLength: 0, path: "module.bin"},
+      ranges: [],
+      schema: "SemantifoldByteMapping"
+    }
+
+    for (const version of ["1", true]) {
+      expectInvalid(() => parseByteMapping(JSON.stringify({...mapping, version})))
+    }
+  })
+
+  it("retains exactly the generated path read during byte-map validation", () => {
+    const generated = {byteLength: 0}
+    let reads = 0
+
+    Object.defineProperty(generated, "path", {
+      enumerable: true,
+      get() {
+        reads += 1
+        return reads == 1 ? "validated.bin" : 7
+      }
+    })
+    const mapping = {
+      coordinateSystem: "bytes",
+      generated,
+      ranges: [],
+      schema: "SemantifoldByteMapping",
+      version: 1
+    }
+    const serialized = stringifyByteMapping(/** @type {any} */ (mapping))
+
+    expect(reads).toEqual(1)
+    expect(JSON.parse(serialized).generated.path).toEqual("validated.bin")
+  })
+
+  it("retains exactly the generated byte length read during byte-map validation", () => {
+    const generated = {path: "module.bin"}
+    let reads = 0
+
+    Object.defineProperty(generated, "byteLength", {
+      enumerable: true,
+      get() {
+        reads += 1
+        return reads <= 3 ? 0 : "invalid"
+      }
+    })
+    const mapping = {
+      coordinateSystem: "bytes",
+      generated,
+      ranges: [],
+      schema: "SemantifoldByteMapping",
+      version: 1
+    }
+    const serialized = stringifyByteMapping(/** @type {any} */ (mapping))
+
+    expect(reads).toEqual(1)
+    expect(JSON.parse(serialized).generated.byteLength).toEqual(0)
+  })
+
+  it("rejects sparse byte-range and provenance-origin arrays", () => {
+    const location = {
+      end: {column: 2, line: 1, offset: 1},
+      filename: "source.ts",
+      start: {column: 1, line: 1, offset: 0}
+    }
+    const related = {location, sourceId: "source:0"}
+    const range = {generated: {end: 1, start: 0}, origin: synthetic("byte")}
+    const sparseRanges = [range]
+    const sparseRelatedOrigins = [related]
+    const sparseDerivedOrigins = [related]
+
+    Reflect.deleteProperty(sparseRanges, "0")
+    Reflect.deleteProperty(sparseRelatedOrigins, "0")
+    Reflect.deleteProperty(sparseDerivedOrigins, "0")
+
+    const candidates = [
+      {byteLength: 1, path: "ranges.bin", ranges: sparseRanges},
+      {
+        byteLength: 1,
+        path: "synthetic.bin",
+        ranges: [{generated: {end: 1, start: 0}, origin: {kind: "synthetic", reason: "byte", relatedOrigins: sparseRelatedOrigins}}]
+      },
+      {
+        byteLength: 1,
+        path: "derived.bin",
+        ranges: [{generated: {end: 1, start: 0}, origin: {kind: "derived", origins: sparseDerivedOrigins}}]
+      }
+    ]
+    /** @type {number[]} */
+    const accepted = []
+
+    for (const [index, candidate] of candidates.entries()) {
+      try {
+        createByteMapping(candidate)
+        accepted.push(index)
+      } catch (error) {
+        assert.ok(error instanceof SemantifoldDiagnostic)
+        expect(error.code).toEqual("INVALID_BYTE_MAPPING")
+      }
+    }
+
+    expect(accepted).toEqual([])
+  })
+
+  it("constructs byte-provenance snapshots without dispatching to caller-owned map methods", () => {
+    const location = {
+      end: {column: 2, line: 1, offset: 1},
+      filename: "source.ts",
+      start: {column: 1, line: 1, offset: 0}
+    }
+    const relatedOrigin = {location, sourceId: "source:0"}
+    const range = {generated: {end: 1, start: 0}, origin: synthetic("byte")}
+    const ranges = [range]
+    const syntheticOrigins = [relatedOrigin]
+    const derivedOrigins = [relatedOrigin]
+    const calls = {derived: false, ranges: false, synthetic: false}
+
+    Object.defineProperty(ranges, "map", {
+      value(callback) {
+        calls.ranges = true
+        callback(range, 0, ranges)
+        return [undefined]
+      }
+    })
+    Object.defineProperty(syntheticOrigins, "map", {
+      value(callback) {
+        calls.synthetic = true
+        callback(relatedOrigin, 0, syntheticOrigins)
+        return [undefined]
+      }
+    })
+    Object.defineProperty(derivedOrigins, "map", {
+      value(callback) {
+        calls.derived = true
+        callback(relatedOrigin, 0, derivedOrigins)
+        return [undefined]
+      }
+    })
+
+    const ranged = createByteMapping({byteLength: 1, path: "ranges.bin", ranges})
+    const related = createByteMapping({
+      byteLength: 1,
+      path: "synthetic.bin",
+      ranges: [{
+        generated: {end: 1, start: 0},
+        origin: {kind: "synthetic", reason: "byte", relatedOrigins: syntheticOrigins}
+      }]
+    })
+    const derived = createByteMapping({
+      byteLength: 1,
+      path: "derived.bin",
+      ranges: [{generated: {end: 1, start: 0}, origin: {kind: "derived", origins: derivedOrigins}}]
+    })
+
+    expect(calls).toEqual({derived: false, ranges: false, synthetic: false})
+    expect(ranged.ranges[0].generated).toEqual({end: 1, start: 0})
+    assert.equal(related.ranges[0].origin.kind, "synthetic")
+    expect(related.ranges[0].origin.relatedOrigins[0].sourceId).toEqual("source:0")
+    assert.equal(derived.ranges[0].origin.kind, "derived")
+    expect(derived.ranges[0].origin.origins[0].sourceId).toEqual("source:0")
+  })
+
+  it("treats only undefined byte-range and related-origin identities as omitted", () => {
+    const location = {
+      end: {column: 2, line: 1, offset: 1},
+      filename: "source.ts",
+      start: {column: 1, line: 1, offset: 0}
+    }
+    const baseRange = {generated: {end: 1, start: 0}, origin: synthetic("byte")}
+    const relatedOrigin = {location, sourceId: "source:0"}
+    /** @type {object[]} */
+    const candidates = []
+
+    for (const property of ["nodeId", "symbolId", "role"]) {
+      for (const value of [null, {}, Symbol(property)]) {
+        candidates.push({
+          byteLength: 1,
+          path: "range.bin",
+          ranges: [{...baseRange, [property]: value}]
+        })
+        candidates.push({
+          byteLength: 1,
+          path: "related.bin",
+          ranges: [{
+            ...baseRange,
+            origin: {kind: "synthetic", reason: "byte", relatedOrigins: [{...relatedOrigin, [property]: value}]}
+          }]
+        })
+      }
+    }
+
+    for (const candidate of candidates) expectInvalid(() => createByteMapping(candidate))
+    for (const property of ["nodeId", "symbolId", "role"]) {
+      expectInvalid(() => parseByteMapping(JSON.stringify({
+        coordinateSystem: "bytes",
+        generated: {byteLength: 1, path: "parsed.bin"},
+        ranges: [{...baseRange, [property]: null}],
+        schema: "SemantifoldByteMapping",
+        version: 1
+      })))
+    }
+  })
+
+  it("rejects backwards source coordinates while preserving equal zero-width locations", () => {
+    const base = {byteLength: 1, path: "coordinates.bin"}
+    const locations = [
+      {
+        end: {column: 1, line: 1, offset: 1},
+        filename: "source.ts",
+        start: {column: 1, line: 2, offset: 0}
+      },
+      {
+        end: {column: 2, line: 1, offset: 1},
+        filename: "source.ts",
+        start: {column: 3, line: 1, offset: 0}
+      }
+    ]
+
+    for (const location of locations) {
+      expectInvalid(() => createByteMapping({...base, ranges: [{
+        generated: {end: 1, start: 0},
+        origin: {kind: "source", location, sourceId: "source:0"}
+      }]}))
+    }
+
+    const point = {column: 2, line: 1, offset: 0}
+    const valid = createByteMapping({...base, ranges: [{
+      generated: {end: 1, start: 0},
+      origin: {kind: "source", location: {end: point, filename: "source.ts", start: point}, sourceId: "source:0"}
+    }]})
+
+    expect(valid.ranges.length).toEqual(1)
+  })
+})
+
+/**
+ * Requires a normalized binary-mapping diagnostic.
+ * @param {() => unknown} callback - Invalid operation.
+ * @returns {void}
+ */
+function expectInvalid(callback) {
+  assert.throws(callback, (error) => error instanceof SemantifoldDiagnostic && error.code == "INVALID_BYTE_MAPPING")
+}

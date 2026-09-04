@@ -1,24 +1,11 @@
 // @ts-check
 
-import {SemantifoldDiagnostic, unsupportedCapability} from "../diagnostic.js"
-import {generateJava} from "./java.js"
-import {generateJavaScript} from "./javascript.js"
-import {generatePhp} from "./php.js"
-import {generateRuby} from "./ruby.js"
+import {unsupportedCapability, unsupportedRole} from "../diagnostic.js"
+import {isValidFilenameMetadata} from "../artifact-path.js"
+import {languageRegistry} from "../language-registry.js"
 import {validateBackendModule} from "./shared.js"
-import {generateTypeScript} from "./typescript.js"
 import {SourceWriter} from "./writer.js"
 import {finalizeMapping, toSourceMapV3} from "../mapping.js"
-
-/** @type {Readonly<Record<import("../semantic/types.js").SemanticLanguage, string>>} */
-const defaultFilenames = Object.freeze({
-  java: "Main.java",
-  javascript: "program.js",
-  php: "program.php",
-  ruby: "program.rb",
-  typescript: "program.ts"
-})
-const lineTerminatorPattern = /[\n\r\u2028\u2029]/u
 const syntheticArtifactBase = Object.freeze(["__semantifold_artifacts__"])
 
 /**
@@ -43,13 +30,19 @@ export function generateSource({language, module}) {
  * @param {{filename: string, content: string, language?: import("../semantic/types.js").SemanticLanguage}[]} [input.sources] - Source content for legacy or assembled modules.
  * @returns {import("../semantic/types.js").GeneratedArtifact} Generated artifact.
  */
-export function generateArtifactSource({language, filename = defaultFilenames[language], mapDirective = "none", module, sourceMapFilename = `${filename}.map`, sources}) {
+export function generateArtifactSource({language, filename, mapDirective = "none", module, sourceMapFilename, sources}) {
+  const backend = languageRegistry.resolve(language, "textBackend", module?.location)
+  const record = languageRegistry.record(language)
+
+  if (record.artifactMultiplicity != "single") unsupportedRole(language, "single-text backend", module?.location)
+  if (filename === undefined) filename = record.defaultFilename
+  if (sourceMapFilename === undefined) sourceMapFilename = `${filename}.map`
   validateBackendModule(module, language)
 
-  if (typeof filename != "string" || filename.length == 0 || lineTerminatorPattern.test(filename)) {
+  if (!isValidFilenameMetadata(filename)) {
     throw new TypeError("Generated filename must be a non-empty single-line string.")
   }
-  if (typeof sourceMapFilename != "string" || sourceMapFilename.length == 0 || lineTerminatorPattern.test(sourceMapFilename)) {
+  if (!isValidFilenameMetadata(sourceMapFilename)) {
     throw new TypeError("Source map filename must be a non-empty single-line string.")
   }
   if (language == "java" && filename.split(/[\\/]/u).at(-1) != "Main.java") {
@@ -62,19 +55,7 @@ export function generateArtifactSource({language, filename = defaultFilenames[la
 
   const writer = new SourceWriter({filename, language, module, sources})
 
-  if (language == "php") generatePhp(module, writer)
-  else if (language == "ruby") generateRuby(module, writer)
-  else if (language == "javascript") generateJavaScript(module, writer)
-  else if (language == "typescript") generateTypeScript(module, writer)
-  else if (language == "java") generateJava(module, writer)
-  else {
-    throw new SemantifoldDiagnostic({
-      code: "UNSUPPORTED_LANGUAGE",
-      language,
-      location: module.location,
-      message: "No source backend is registered for this language."
-    })
-  }
+  backend(module, writer)
 
   const sourceMap = toSourceMapV3(writer.finish())
 

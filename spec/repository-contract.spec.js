@@ -42,7 +42,9 @@ describe("repository delivery contracts", () => {
     const buildCommands = Object.values(config.builds).flatMap((build) => build.script)
 
     assert.deepEqual(config.before_script, ["npm ci"])
+    expect(config.environment.SEMANTIFOLD_NODE).toEqual("/usr/local/bin/node")
     assert.match(beforeInstall, /php-cli ruby default-jdk-headless/u)
+    assert.match(beforeInstall, /tar .* -C \/usr\/local/u)
     assert.match(beforeInstall, /node --version/u)
     assert.match(beforeInstall, /php --version/u)
     assert.match(beforeInstall, /ruby --version/u)

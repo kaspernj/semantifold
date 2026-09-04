@@ -87,6 +87,25 @@ describe("generated source mappings", () => {
     }), /single-line/u)
   })
 
+  it("defaults artifact filenames only when their properties are omitted", async () => {
+    const source = await readFile(new URL("fixtures/program.ts", import.meta.url), "utf8")
+    const module = parse({filename: "program.ts", language: "typescript", source})
+    const omitted = generateArtifact({language: "javascript", module})
+
+    assert.equal(omitted.filename, "program.js")
+    assert.equal(omitted.sourceMapFilename, "program.js.map")
+    // @ts-expect-error Explicit null is deliberately outside the public filename contract.
+    assert.throws(() => generateArtifact({filename: null, language: "javascript", module}), {
+      message: "Generated filename must be a non-empty single-line string.",
+      name: "TypeError"
+    })
+    // @ts-expect-error Explicit null is deliberately outside the public filename contract.
+    assert.throws(() => generateArtifact({language: "javascript", module, sourceMapFilename: null}), {
+      message: "Source map filename must be a non-empty single-line string.",
+      name: "TypeError"
+    })
+  })
+
   it("rebuilds malformed caller metadata and maps legacy and multi-source semantic modules", async () => {
     const source = await readFile(new URL("fixtures/program.ts", import.meta.url), "utf8")
     const parsed = parse({filename: "first.ts", language: "typescript", source})

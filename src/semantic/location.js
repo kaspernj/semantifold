@@ -144,6 +144,16 @@ export function locationFromOffsets(filename, source, startOffset, endOffset) {
 }
 
 /**
+ * Checks the one-based lexicographic order of a source range's endpoints.
+ * @param {import("./types.js").SourcePoint} start - Inclusive range start.
+ * @param {import("./types.js").SourcePoint} end - Exclusive range end.
+ * @returns {boolean} Whether end is at or after start.
+ */
+export function isSourceRangeOrdered(start, end) {
+  return end.line > start.line || end.line == start.line && end.column >= start.column
+}
+
+/**
  * Builds a location spanning a complete source file.
  * @param {string} filename - Originating filename.
  * @param {string} source - Complete source.
