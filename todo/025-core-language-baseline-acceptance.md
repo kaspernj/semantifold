@@ -20,6 +20,7 @@ Prove that Python, C#, C, C++, Rust, Swift, Kotlin/JVM, and Go all implement the
 - Exercise the exact artifact envelope and toolchain manifest from Task 015 for every language: single text for Python/Swift, managed projects or JARs for C#/Kotlin, native project/artifact sets for C/C++/Rust/Go.
 - Compile and run with every real interpreter/compiler/runtime mandated by Tasks 016–020 and 022–024. Missing configured tools fail; tests never download compilers, SDKs, parser binaries, or dependencies.
 - Compare runtime output, exit status, semantic evaluation order, and documented overflow behavior. Generate every selected artifact set twice and compare ordered filenames, bytes, rich mappings, Source Map v3 where applicable, and semantic/synthetic provenance.
+- Include functions whose bodies print distinct `left`/`right` markers before returning scalar values, then use their calls as nested operands/arguments across every new backend. C and C++ must use their exact versioned ordered-expression scaffolds, reparse/collapse to the original expression, and produce left-before-right output in every required unoptimized and optimized Clang run; ordinary unspecified-order source forms and malformed scaffolds remain rejected by their owning tasks.
 - Reparse generated sources with their registered frontend. Generated helpers and entry shells must be identified as synthetic rather than assigned false input spans.
 
 ## Diagnostics and fail-loud coverage
