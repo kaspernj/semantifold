@@ -2,6 +2,19 @@
 
 Specs use the released `@velocious/testing@0.0.0` framework and standalone `velocious-test` runner with one top-level `describe` per file. Direct value checks use the framework's `expect` API where it improves clarity; predicate-rich diagnostic assertions retain `node:assert/strict`. Frontend tests load real fixtures through Babel, php-parser, Prism, and Lezer and compare modeled meaning after removing source locations and the separately tested provenance index. They separately assert normalized JSDoc and TypeScript types and verify locations exist.
 
+Task 015 has separate focused specs for immutable registry-derived discovery, role-specific diagnostics, safe transactional artifact sets, byte-coordinate provenance, exact tool discovery, and staged acceptance. Error-path discovery uses controlled local fake executables. Positive runner coverage discovers and invokes real `php`, `ruby`, `node`, the lockfile-installed `tsc`, `javac`, and `java`; a missing or unsupported tool is a failure, never a skip. Runner assertions cover isolated directory cleanup, fixed `C.UTF-8` locale and UTC timezone, absence of undeclared ambient variables, exact argument arrays, and distinct invalid-input, missing, ambiguous, version, setup/materialization, launch, nonzero-stage, and timeout diagnostics.
+
+| Tool ID | Canonical command | Absolute-path override | Accepted canonical version |
+| --- | --- | --- | --- |
+| `php` | `php` | `SEMANTIFOLD_PHP` | PHP 8.x |
+| `ruby` | `ruby` | `SEMANTIFOLD_RUBY` | Ruby 3.x |
+| `node` | `node` | `SEMANTIFOLD_NODE` | Node 24.x |
+| `tsc` | `tsc` | `SEMANTIFOLD_TSC` | TypeScript 7.x |
+| `javac` | `javac` | `SEMANTIFOLD_JAVAC` | JDK 17–29 |
+| `java` | `java` | `SEMANTIFOLD_JAVA` | JRE 17–29 |
+
+Discovery records the complete version output and first version line. An override must be an executable absolute path. Canonical lookup examines the explicit PATH, resolves symlinks to exact paths, deduplicates aliases of the same executable, and rejects zero or multiple distinct matches. The runner inherits no ambient variables other than PATH unless the caller explicitly supplies them; locale and timezone are always normalized.
+
 Backend tests start from one parsed semantic module, generate every target, parse each generated program back to equivalent modeled meaning, and work in isolated `mkdtemp` directories. They invoke real commands and assert exact `5\n` output:
 
 - `php program.php`

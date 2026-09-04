@@ -1,6 +1,6 @@
 # 015 — Shared language-expansion foundation
 
-- Status: `todo`
+- Status: `delivered`
 - Phase/priority: Phase L0 / P0
 - Dependencies: [001-portable-scalar-values-and-types.md](001-portable-scalar-values-and-types.md), [002-local-declarations-and-assignment.md](002-local-declarations-and-assignment.md), [003-typed-operators-and-expressions.md](003-typed-operators-and-expressions.md), [004-statement-sequencing-and-conditionals.md](004-statement-sequencing-and-conditionals.md)
 
@@ -77,6 +77,10 @@ Document language roles, capability inspection, artifact-set schema, tool overri
 - Parser qualification is recorded per owning language; each official/community route passes its stated gate before that adapter may merge, without forcing later platform candidates into this foundation task.
 - Tool discovery and real staged acceptance fail loudly and deterministically.
 - Text and binary provenance contracts are tested, the original five APIs remain compatible, docs/changelog are updated, and every repository gate passes.
+
+## Delivery record
+
+Delivered on 2026-09-04 by the `feature/language-expansion-foundation` implementation. The implementation adds no language, parser dependency, backend, or semantic feature. Focused RED/GREEN coverage establishes registry dispatch/discovery, role diagnostics, transactional artifact sets, byte provenance, and fail-loud discovery/staged execution; compatibility coverage preserves original-five generation bytes, parsing/generation, real native execution, diagnostics, and rich mappings. The parser routes remain qualification-gated in [`../docs/parser-qualification.md`](../docs/parser-qualification.md), with exact dependency selection owned by each language task.
 
 ## Non-goals
 

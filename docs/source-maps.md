@@ -79,7 +79,7 @@ generateArtifact({
 })
 ```
 
-This single-artifact envelope is intentionally reusable as an element in task 010's future ordered artifact set. Generation never writes files.
+`generateArtifactSet()` wraps this exact result for original-five single-text targets and supplies one generated entry artifact. `createGeneratedArtifactSet()` validates other single-module target shapes without introducing Task 010's source-project semantics. Its artifact array preserves caller/backend order and requires unique safe relative POSIX paths, non-empty text or bytes, media types, one of `entry`/`source`/`manifest`/`support`/`mapping`/`resource`/`loader`, generated ownership, provenance, and exactly one entry. Backends return no iterable or partial files: the complete set is validated before it becomes observable. Generation and set construction never write files.
 
 All outputs have deterministic LF newlines. Returned rich mappings are detached from caller-owned semantic locations and provenance before they are deeply frozen and internally indexed after trust-boundary validation. Freezing an artifact mapping therefore never freezes the mutable semantic module used to generate it. The rich map's `generated.content` is the exact returned code and its ordered, non-empty spans cover every UTF-16 code unit without gaps or overlaps:
 
@@ -88,6 +88,33 @@ All outputs have deterministic LF newlines. Returned rich mappings are detached 
 - `synthetic` marks formatting, comments, entry wrappers, and target scaffolding, optionally with related origins. Writer context expands every direct, derived, or synthetic-related range from its semantic nodes and removes only deterministic duplicates.
 
 Every span may carry a canonical `nodeId`, `symbolId`, semantic `role`, and Source Map `name`. Sources retain filenames, exact `sourcesContent` when available, and independent registry identity. Rich mappings are the serialization and interchange contract because v3 represents points rather than ranges and cannot retain semantic roles or the closed derived/synthetic model.
+
+## Binary and resource byte mappings
+
+`SemantifoldByteMapping` v1 is separate from the text mapping schema:
+
+```js
+const mapping = createByteMapping({
+  path: "program.wasm",
+  byteLength: bytes.byteLength,
+  ranges: [
+    {
+      generated: {start: 0, end: 8},
+      origin: {kind: "synthetic", reason: "WebAssembly header", relatedOrigins: []}
+    },
+    {
+      generated: {start: 8, end: bytes.byteLength},
+      nodeId: "node:4",
+      role: "encoded function body",
+      origin
+    }
+  ]
+})
+```
+
+The discriminator is `SemantifoldByteMapping`, version is `1`, and `coordinateSystem` is exactly `bytes`. Ranges contain non-negative safe-integer half-open offsets, are non-empty, ordered, non-overlapping, and bounded by `generated.byteLength`. Source/derived origins retain ordinary UTF-16 original `SourceLocation` values; only the generated side is in bytes. Synthetic regions require a non-empty reason. `nodeId`, `symbolId`, and `role` associate encoded regions without fabricating source positions. `parseByteMapping()` validates serialized input and `stringifyByteMapping()` emits canonical key-sorted JSON with one LF.
+
+Text artifact provenance embeds the validated rich mapping and Source Map v3 projection. Binary artifact provenance must embed a matching byte map whose path and byte length equal its artifact. Manifest, support, loader, and other source-free text/resources may instead carry an explicit artifact-level synthetic reason and related source origins.
 
 ## Source Map v3 and directives
 
