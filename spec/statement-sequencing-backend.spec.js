@@ -98,6 +98,26 @@ console.log(choose(true, "safe"))
       error.code == "UNSUPPORTED_CAPABILITY" && error.location?.start.line == 2)
   })
 
+  it("rejects function parameters that capture generated print receivers", () => {
+    const source = `function choose(flag: boolean, fallback: string): string {
+  console.log(fallback)
+  return fallback
+}
+console.log(choose(true, "safe"))
+`
+
+    for (const [language, name] of [["javascript", "console"], ["typescript", "console"], ["java", "System"]]) {
+      const module = parse({filename: "parameter-capture.ts", language: "typescript", source})
+
+      module.functions[0].parameters[0].name = name
+
+      assert.throws(() => generate({language, module}), (error) => error instanceof SemantifoldDiagnostic &&
+        error.code == "UNSUPPORTED_CAPABILITY" && error.language == language &&
+        error.location?.filename == "parameter-capture.ts" && error.location.start.line == 1 &&
+        error.message.includes(`function parameter '${name}' captures backend scaffolding`), language)
+    }
+  })
+
   it("round-trips an empty entry block in every target", () => {
     const module = parse({
       filename: "empty-entry.ts",

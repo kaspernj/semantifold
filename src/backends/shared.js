@@ -79,6 +79,11 @@ function validateScaffoldingNames(module, language) {
     if (ownedCallableNames.has(declaration.name)) {
       unsupportedCapability(language, `function '${declaration.name}' captures backend scaffolding`, declaration.location)
     }
+    for (const parameter of declaration.parameters) {
+      if (ownedPrintReceiverNames.has(parameter.name)) {
+        unsupportedCapability(language, `function parameter '${parameter.name}' captures backend scaffolding`, parameter.location)
+      }
+    }
     for (const statement of allStatements(declaration.body)) {
       if (statement.kind == "LocalDeclaration" && ownedPrintReceiverNames.has(statement.name)) {
         unsupportedCapability(language, `function local '${statement.name}' captures backend scaffolding`, statement.location)
