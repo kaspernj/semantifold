@@ -14,7 +14,7 @@ The semantic IR models only return as abrupt completion. There is no error value
 
 ## Language matrix
 
-This matrix records the original-five mappings researched for this conditional task. Its implementation must extend the error model to Python, C#, C, C++, and Rust frontends/backends and state an exact browser Wasm lowering or documented tested rejection; C's lack of exceptions and Rust's `Result`/panic split must not be approximated. Task 013 remains intentionally original-five-only.
+This matrix records the original-five mappings researched for this conditional task. Its implementation names a required cohort and retains explicit tested rejection elsewhere; C's lack of exceptions, Rust's `Result`/panic split, and Wasm traps must never be approximated merely because those roles are registered. Task 013 remains intentionally original-five-only.
 
 | Language | Representative accepted source | Required constraint/rejection |
 | --- | --- | --- |

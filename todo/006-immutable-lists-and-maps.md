@@ -14,7 +14,7 @@ The semantic schema has no compound values or type arguments. Every frontend rej
 
 ## Language matrix
 
-This matrix records the original-five mappings researched for this task. Tasks 015–021 complete first; implementation must add Python, C#, C, C++, and Rust frontend/backend mappings and the browser Wasm backend mapping or an explicit documented and tested target capability rejection. Task 013 remains intentionally original-five-only.
+This matrix records the original-five mappings researched for this task. Its implementation names the required cohort and tests explicit capability rejection for other registered roles; language or platform registration alone does not make collection support a prerequisite. Task 013 remains intentionally original-five-only.
 
 | Language | Representative accepted source | Required constraint/rejection |
 | --- | --- | --- |

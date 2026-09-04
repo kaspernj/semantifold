@@ -1,8 +1,8 @@
 # 018 — C source and target support
 
 - Status: `todo`
-- Phase/priority: Phase L2 / P0
-- Dependencies: [017-csharp-source-and-target.md](017-csharp-source-and-target.md)
+- Phase/priority: Phase L1 / P0
+- Dependencies: [015-language-expansion-foundation.md](015-language-expansion-foundation.md)
 
 ## Purpose
 
@@ -43,7 +43,7 @@ Add C as a first-class frontend and native textual/project backend for the exact
 - Add rejection corpora for every pointer/preprocessor/declarator/ownership boundary, unspecified-order expression, recovered tree, extra child, name collision, arithmetic boundary, allocation-size boundary, and malformed IR.
 - Discover real `clang`; record its version; compile and link with explicit C profile flags in a fresh temporary directory; run the native executable; assert exact bytes/stdout/status. Missing compile, linker, or runtime execution capability fails.
 - Run an available sanitizer-enabled focused ownership lane where the canonical platform supports it, while retaining ordinary real execution as mandatory. Sanitizers supplement rather than replace deterministic assertions.
-- Generate/reparse C across every implemented frontend and textual backend combination permitted by the capability registry.
+- Generate/reparse C in both directions and cover representative original-five source/target crossings. Task 025 owns the expanded-cohort spanning matrix.
 
 ## Documentation
 

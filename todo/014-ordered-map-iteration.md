@@ -14,7 +14,7 @@ Task 006 deliberately gives ordinary maps no observable iteration order, and Tas
 
 ## Language matrix
 
-This matrix records the original-five mappings researched for this conditional task. Its implementation must add deterministic ordered-map representations for Python, C#, C, C++, and Rust frontends/backends and the browser Wasm backend or explicitly document and test a target rejection. Native runtime iteration order must be guaranteed, not observed accidentally. Task 013 remains intentionally original-five-only.
+This matrix records the original-five mappings researched for this conditional task. Its implementation names a required cohort and keeps explicit tested rejection elsewhere. Any selected runtime's iteration order must be guaranteed, not observed accidentally; registration alone does not block this task. Task 013 remains intentionally original-five-only.
 
 | Language | Representative accepted source | Required constraint/rejection |
 | --- | --- | --- |

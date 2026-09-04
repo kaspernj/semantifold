@@ -14,7 +14,7 @@ Task 006 introduces concrete recursive type applications but not declaration-sco
 
 ## Language matrix
 
-This matrix records the original-five mappings researched for this conditional task. Its implementation must extend the design to Python, C#, C, C++, and Rust frontends/backends and state an exact browser Wasm monomorphization/erasure rejection policy; no role may silently erase generic meaning. Task 013 remains intentionally original-five-only.
+This matrix records the original-five mappings researched for this conditional task. Its implementation names a required cohort and keeps explicit tested rejection elsewhere; no registered role may silently erase generic meaning to appear supported. Task 013 remains intentionally original-five-only.
 
 | Language | Representative accepted source | Required constraint/rejection |
 | --- | --- | --- |

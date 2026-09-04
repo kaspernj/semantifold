@@ -1,8 +1,8 @@
 # 021 — Browser-oriented WebAssembly target
 
 - Status: `todo`
-- Phase/priority: Phase L3 / P0
-- Dependencies: [020-rust-source-and-target.md](020-rust-source-and-target.md)
+- Phase/priority: Phase P / P1 (non-blocking)
+- Dependencies: [015-language-expansion-foundation.md](015-language-expansion-foundation.md)
 
 ## Purpose
 

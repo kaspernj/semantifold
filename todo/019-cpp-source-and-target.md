@@ -1,8 +1,8 @@
 # 019 — C++ source and target support
 
 - Status: `todo`
-- Phase/priority: Phase L2 / P0
-- Dependencies: [018-c-source-and-target.md](018-c-source-and-target.md)
+- Phase/priority: Phase L1 / P0
+- Dependencies: [015-language-expansion-foundation.md](015-language-expansion-foundation.md), [018-c-source-and-target.md](018-c-source-and-target.md)
 
 ## Purpose
 
@@ -41,7 +41,7 @@ Add C++ as a separate first-class frontend and native textual backend for the ex
 - Add negative coverage for C syntax accidentally accepted as C++, templates, overloads, implicit conversions, references/pointers, moves exposed by source, exceptions, preprocessor forms, recovered nodes, ambiguous declarators, undefined-overflow boundaries, and malformed IR.
 - Discover and record real `clang++`; compile/link with the exact standard and warning/error flags in a fresh directory; execute and assert exact output/status. Missing compiler/linker/runtime fails.
 - Run a supported sanitizer-focused value-lifetime lane in addition to mandatory ordinary execution. Compare debug/optimized observable output to prove build mode does not change the selected contract.
-- Generate/reparse C++ from every registered frontend and generate all applicable targets from C++-derived IR.
+- Generate/reparse C++ in both directions and cover representative original-five source/target crossings. Task 025 owns the expanded-cohort spanning matrix.
 
 ## Documentation
 

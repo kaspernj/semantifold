@@ -14,7 +14,7 @@ The semantic module contains only functions and an entry point. Calls have no re
 
 ## Language matrix
 
-This matrix records the original-five mappings researched for this conditional task. Its implementation must first extend the design to Python, C#, C, C++, and Rust frontends/backends and the browser Wasm backend, including explicit value/layout/ownership decisions or a documented and tested target capability rejection. Task 013 remains intentionally original-five-only.
+This matrix records the original-five mappings researched for this conditional task. Its implementation names a required cohort; every other registered role retains an explicit tested rejection until a focused task makes its value/layout/ownership decision. Registration alone does not block record semantics. Task 013 remains intentionally original-five-only.
 
 | Language | Representative accepted source | Required constraint/rejection |
 | --- | --- | --- |

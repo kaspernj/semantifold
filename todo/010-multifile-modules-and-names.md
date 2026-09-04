@@ -14,7 +14,7 @@ The public `parse` API accepts one filename/source and returns one `SemanticModu
 
 ## Language matrix
 
-This matrix records the original-five mappings researched for this conditional task. Its implementation must extend semantic module/artifact layout to Python, C#, C, C++, and Rust and decide explicitly whether the browser Wasm backend links modules, emits one combined module, or rejects the capability. Generated project/helper files from Task 015 are not semantic modules. Task 013 remains intentionally original-five-only.
+This matrix records the original-five mappings researched for this conditional task. Its implementation names a required cohort and retains explicit tested rejection elsewhere. Generated project/helper files from Task 015 are not semantic modules. Application targets 026, 028, and 030 depend on this shared project model without forcing every registered language/backend into Task 010. Task 013 remains intentionally original-five-only.
 
 | Language | Representative accepted source | Required constraint/rejection |
 | --- | --- | --- |

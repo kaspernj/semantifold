@@ -2,11 +2,11 @@
 
 - Status: `todo`
 - Phase/priority: Phase L1 / P0
-- Dependencies: [016-python-source-and-target.md](016-python-source-and-target.md)
+- Dependencies: [015-language-expansion-foundation.md](015-language-expansion-foundation.md)
 
 ## Purpose
 
-Add C# as a first-class frontend and managed textual/project backend for the exact Tasks 001–004 subset. This task follows Python so the registry is already proven by one new language and can focus on compiler, project, nullable, and value/reference contracts.
+Add C# as a first-class frontend and managed textual/project backend for the exact Tasks 001–004 subset. It may proceed alongside other Task 015 language adopters and focuses on compiler, project, nullable, and value/reference contracts.
 
 ## Semantic and source profile
 
@@ -40,7 +40,7 @@ Add C# as a first-class frontend and managed textual/project backend for the exa
 ## Deterministic tests with the real toolchain
 
 - Add C# fixtures equivalent to every Tasks 001–004 fixture and negative coverage for nullable/value distinctions, `bool` versus `long`, `var`, overloads, instance calls, directives, interpolation, compiler recovery, ignored members, and malformed external IR.
-- Generate/reparse C# from every implemented source and generate every implemented textual target from C#-derived IR.
+- Generate/reparse C# in both directions and cover representative original-five source/target crossings. Task 025 owns the expanded-cohort spanning matrix.
 - In a fresh temporary artifact directory run real offline `dotnet restore` and `dotnet build`, then execute the compiled program with exact invariant environment/stdout assertions. Missing `dotnet`, warnings, restore network demand, or nondeterministic outputs fail.
 - Build the same artifact set twice and compare text, ordered paths, mappings, and reproducibility-relevant compiler outputs.
 

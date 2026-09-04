@@ -14,7 +14,7 @@ No loop or abrupt loop-control statement exists in [`../src/semantic/types.js`](
 
 ## Language matrix
 
-This matrix records the original-five mappings researched for this task. Tasks 015–021 complete transitively first; implementation must add Python, C#, C, C++, and Rust frontend/backend loop mappings and the browser Wasm structured-control lowering or an explicit documented and tested target capability rejection. Task 013 remains intentionally original-five-only.
+This matrix records the original-five mappings researched for this task. Its implementation names the required cohort and retains explicit tested rejection in roles whose collection/loop lowering is not yet designed; registration alone does not block iteration work. Task 013 remains intentionally original-five-only.
 
 | Language | Representative accepted source | Required constraint/rejection |
 | --- | --- | --- |

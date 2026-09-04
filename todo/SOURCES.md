@@ -17,7 +17,7 @@ Evidence note: the original schema had only `integer` and the minimal fixture sh
 
 ## Selected parser-distribution route for expansion
 
-Tasks 016–020 select the official Tree-sitter Node binding and the language grammar maintained in the official `tree-sitter` GitHub organization: [Node binding documentation](https://tree-sitter.github.io/node-tree-sitter/), [parser-use overview](https://tree-sitter.github.io/tree-sitter/using-parsers/), [Python grammar](https://github.com/tree-sitter/tree-sitter-python), [C# grammar](https://github.com/tree-sitter/tree-sitter-c-sharp), [C grammar](https://github.com/tree-sitter/tree-sitter-c), [C++ grammar](https://github.com/tree-sitter/tree-sitter-cpp), and [Rust grammar](https://github.com/tree-sitter/tree-sitter-rust).
+Tasks 016–020 and 024 select the official Tree-sitter Node binding and the language grammar maintained in the official `tree-sitter` GitHub organization: [Node binding documentation](https://tree-sitter.github.io/node-tree-sitter/), [parser-use overview](https://tree-sitter.github.io/tree-sitter/using-parsers/), [Python grammar](https://github.com/tree-sitter/tree-sitter-python), [C# grammar](https://github.com/tree-sitter/tree-sitter-c-sharp), [C grammar](https://github.com/tree-sitter/tree-sitter-c), [C++ grammar](https://github.com/tree-sitter/tree-sitter-cpp), [Rust grammar](https://github.com/tree-sitter/tree-sitter-rust), and [Go grammar](https://github.com/tree-sitter/tree-sitter-go).
 
 This is a selected integration route, not approval of unpinned future dependencies. Task 015 must qualify exact npm releases and lockfile integrity before any manifest edit: compatible Tree-sitter language ABI, Node 24 install/load behavior on the canonical lane, typed APIs, licenses, UTF-8 byte locations converted to Semantifold UTF-16 locations, comments/error/recovery nodes, complete Tasks 001–004 syntax coverage, and absence of postinstall downloads or bundled/generated archives. Dependencies must be ordinary npm registry packages; GitHub tarball/archive dependencies and vendored parser binaries are forbidden. A failed qualification blocks the task and requires an explicit roadmap/source amendment rather than a parser or source-text fallback.
 
@@ -31,6 +31,18 @@ Registry metadata observed on 2026-09-04 identifies the following candidates. Th
 | [`tree-sitter-c`](https://registry.npmjs.org/tree-sitter-c/0.24.1) | `0.24.1` | official `tree-sitter/tree-sitter-c`, MIT |
 | [`tree-sitter-cpp`](https://registry.npmjs.org/tree-sitter-cpp/0.23.4) | `0.23.4` | official `tree-sitter/tree-sitter-cpp`, MIT |
 | [`tree-sitter-rust`](https://registry.npmjs.org/tree-sitter-rust/0.24.0) | `0.24.0` | official `tree-sitter/tree-sitter-rust`, MIT |
+| [`tree-sitter-go`](https://registry.npmjs.org/tree-sitter-go/0.25.0) | `0.25.0` | official `tree-sitter/tree-sitter-go`, MIT |
+
+Swift, Kotlin, Dart, and Zig do not currently have grammars in the official `tree-sitter` organization. Registry metadata observed on 2026-09-04 supplies candidates, not selections:
+
+| Candidate package | Observed latest | Qualification concern |
+| --- | --- | --- |
+| [`tree-sitter-swift`](https://registry.npmjs.org/tree-sitter-swift/0.7.1) | `0.7.1` | community `alex-pinkus/tree-sitter-swift`, MIT; verify shipped generated parser, current Swift syntax, and maintenance |
+| [`tree-sitter-kotlin`](https://registry.npmjs.org/tree-sitter-kotlin/0.3.8) | `0.3.8` | community `fwcd/tree-sitter-kotlin`, MIT; verify current Kotlin grammar and compiler differential coverage |
+| [`tree-sitter-dart`](https://registry.npmjs.org/tree-sitter-dart/1.0.0) | `1.0.0` | registry metadata does not by itself establish suitable upstream provenance, maintenance, or current Dart coverage |
+| [`@tree-sitter-grammars/tree-sitter-zig`](https://registry.npmjs.org/%40tree-sitter-grammars%2Ftree-sitter-zig/1.1.2) | `1.1.2` | community grammar package, MIT; verify supported Zig release and maintenance |
+
+Tasks 022, 023, 029, and 031 must apply the same ABI, Node 24, integrity/license, typed-tree, location, recovery, coverage, and no-download/no-archive tests, plus differential fixtures against the selected official compiler. If a candidate fails, its language task is blocked pending an explicit parser-route/source amendment; compiler diagnostics and source scanning are not fallback parsers.
 
 ## Pinned parser and tool versions
 
@@ -154,6 +166,61 @@ Evidence note: C++ parsing and semantics include overload resolution, templates,
 - [Tree-sitter Rust grammar](https://github.com/tree-sitter/tree-sitter-rust) — selected parser grammar, subject to Task 015 qualification.
 
 Evidence note: Rust ownership can move a `String`, source references introduce lifetime/borrow meaning, debug/release overflow defaults can differ, and `Result`/panic are distinct failure mechanisms. Task 020 uses owned strings with explicit generated clones/borrows, fixed Cargo profiles, no dependencies, and rejects source ownership/failure constructs beyond the initial IR.
+
+## Swift, Apple platforms, and Objective-C interoperability
+
+- [Swift language reference](https://docs.swift.org/swift-book/documentation/the-swift-programming-language/) and [Swift compiler documentation](https://www.swift.org/documentation/swift-compiler/) — official language semantics plus `swiftc` parsing, compilation, and toolchain behavior for Task 022.
+- [SwiftSyntax](https://github.com/swiftlang/swift-syntax) — official Swift project source-accurate syntax library evidence. It is not selected as a Node parser or permission to add an unplanned helper process; it is a comparison route when qualifying the community Tree-sitter candidate.
+- [Swift C interoperability](https://developer.apple.com/documentation/swift/c-interoperability) and [importing Swift into Objective-C](https://developer.apple.com/documentation/swift/importing-swift-into-objective-c) — official boundary for generated Swift interfaces, Objective-C representation, and Xcode-produced compatibility headers.
+- [Xcode build settings reference](https://developer.apple.com/documentation/xcode/build-settings-reference), [building and running an app](https://developer.apple.com/documentation/xcode/building-and-running-an-app), and [preparing an app for distribution](https://developer.apple.com/documentation/xcode/preparing-your-app-for-distribution) — project/toolchain, destination, signing, archive, and distribution boundaries.
+- [Managing an app's information property list](https://developer.apple.com/documentation/bundleresources/managing-your-app-s-information-property-list) and [placing content in a bundle](https://developer.apple.com/documentation/bundleresources/placing-content-in-a-bundle) — official `Info.plist`, bundle/resource layout, and generated ownership inputs.
+- [XCTest](https://developer.apple.com/documentation/xctest), [adding tests to an Xcode project](https://developer.apple.com/documentation/xcode/adding-tests-to-your-xcode-project), and [Simulator help](https://developer.apple.com/documentation/xcode/running-your-app-in-simulator-or-on-a-device) — official simulator/UI acceptance surface for Task 026.
+
+Evidence note: Swift is the first-class general language and generated application implementation language. Task 026 translates supported semantic projects—including a narrow Ruby-originating project—to Swift sources and Xcode-compatible iOS artifacts; it does not run Ruby on iOS. Simulator build/test is separate from physical-device provisioning and App Store distribution. Task 027 is only a generated Swift-to-Objective-C legacy-host bridge using the official interoperability mechanism, not an Objective-C frontend/backend and not Objective-C++, Metal, or arbitrary Apple API support.
+
+## Kotlin/JVM and Android
+
+- [Kotlin language specification](https://kotlinlang.org/spec/kotlin-spec.html), [basic types](https://kotlinlang.org/docs/basic-types.html), [null safety](https://kotlinlang.org/docs/null-safety.html), and [coroutines guide](https://kotlinlang.org/docs/coroutines-guide.html) — official language/type/runtime evidence for the strict Task 023 subset and its exclusions.
+- [Kotlin compiler options](https://kotlinlang.org/docs/compiler-reference.html) and [command-line compiler](https://kotlinlang.org/docs/command-line.html) — official `kotlinc`, language/API/JVM target, and runnable artifact controls.
+- [Android build overview](https://developer.android.com/build), [configure the app module](https://developer.android.com/build/configure-app-module), and [app manifest overview](https://developer.android.com/guide/topics/manifest/manifest-intro) — official Gradle/Android plugin, application identity/SDK, manifest, component, and packaging constraints.
+- [Android Emulator](https://developer.android.com/studio/run/emulator), [`adb`](https://developer.android.com/tools/adb), and [test apps on Android](https://developer.android.com/training/testing) — official emulator installation/launch and instrumentation acceptance routes.
+- [Sign your app](https://developer.android.com/studio/publish/app-signing) — official debug/release signing and Play App Signing evidence supporting the local-emulator versus release/store boundary.
+
+Evidence note: Kotlin/JVM is an immediate general language, while Android is a later application-artifact role. Task 028 uses pinned installed/cached official build components offline, adds no permissions by default, and requires real emulator acceptance. Debug/emulator signing is not authority to discover or automate release keys, devices, accounts, or Play Store submission.
+
+## Go
+
+- [Go language specification](https://go.dev/ref/spec) — official types, declarations, expressions, statements, functions, packages, and concurrency syntax.
+- [`go/parser`](https://pkg.go.dev/go/parser) — official parser behavior used only for differential evidence, not a Node adapter fallback.
+- [Go toolchains](https://go.dev/doc/toolchain), [module reference](https://go.dev/ref/mod), and [compile and install tutorial](https://go.dev/doc/tutorial/compile-install) — official local toolchain selection, module files, package builds, and executable behavior.
+- [Tree-sitter Go grammar](https://github.com/tree-sitter/tree-sitter-go) — selected official grammar, subject to Task 015 qualification.
+
+Evidence note: Go has explicit `int64`, `bool`, and immutable strings but no immutable local declaration. Task 024 therefore retains mutability as semantic metadata, rejects inferred/architecture-sized forms and concurrency/panic/unsafe behavior, and generates a dependency-free module under `GOTOOLCHAIN=local`, offline, cgo-disabled acceptance.
+
+## Dart and Flutter
+
+- [Dart language specification](https://spec.dart.dev/DartLangSpecDraft.pdf), [type system](https://dart.dev/language/type-system), [variables](https://dart.dev/language/variables), and [concurrency](https://dart.dev/language/concurrency) — official types, inference/null safety, declarations, async, and isolate evidence.
+- [Dart command-line tool](https://dart.dev/tools/dart-tool) and [`dart compile`](https://dart.dev/tools/dart-compile) — official analyzer, VM, and native executable acceptance surfaces.
+- [Flutter application creation](https://docs.flutter.dev/reference/create-new-app), [testing overview](https://docs.flutter.dev/testing/overview), and [integration testing](https://docs.flutter.dev/testing/integration-tests) — official project/platform generation concepts and widget/device test routes.
+- [Flutter supported deployment platforms](https://docs.flutter.dev/reference/supported-platforms) and [build and release an iOS app](https://docs.flutter.dev/deployment/ios) — official SDK/platform/Xcode and signing constraints.
+
+Evidence note: Dart is a later strict VM/native source+target lane because Flutter supplies its main requested platform value and Dart browser integers would introduce a second numeric contract. The observed Tree-sitter package remains unqualified. Flutter is a separate application backend requiring both real Android emulator and iOS Simulator jobs before claiming those platforms; it introduces no plugin/platform-channel semantics and no store-signing automation.
+
+## Zig
+
+- [Zig language reference](https://ziglang.org/documentation/master/) and [Zig language overview](https://ziglang.org/learn/) — official language/types, build modes, errors, compile-time execution, pointers/slices, and tool documentation. Implementation must replace the moving `master` reference with the exact supported release documentation when pinning the toolchain.
+- [Zig build system](https://ziglang.org/learn/build-system/) and [package manager](https://ziglang.org/learn/build-system/#package-management) — official project/build/dependency evidence.
+- [Zig download/release index](https://ziglang.org/download/) — official release/toolchain provenance; tests use an installed pinned tool and do not download from this page.
+
+Evidence note: Zig overlaps the low-level contract pressure already covered first by C and Rust, so Task 031 is concrete but non-blocking after Task 005. Its community grammar must be qualified against the selected Zig release. The initial profile uses fixed integers and borrowed immutable UTF-8 slices behind generated lifetime/allocator scaffolding, and rejects `comptime`, error unions, pointers, user allocation, C import, and undefined behavior.
+
+## Deferred modern-language and shader candidates
+
+- [Scala 3 reference](https://docs.scala-lang.org/scala3/reference/), [Elixir language documentation](https://hexdocs.pm/elixir/), [Gleam language tour](https://tour.gleam.run/), [Haskell 2010 report](https://www.haskell.org/onlinereport/haskell2010/), and [OCaml reference manual](https://ocaml.org/manual/) — evidence for advanced type, pattern, higher-order, effect, or BEAM concurrency models deferred by the roadmap.
+- [Lua reference manual](https://www.lua.org/manual/5.4/), [Julia manual](https://docs.julialang.org/en/v1/manual/getting-started/), and [R language definition](https://cran.r-project.org/doc/manuals/r-release/R-lang.html) — evidence for dynamic typing or numerical/vector/missing/broadcasting semantics not supplied by the current IR.
+- [Metal Shading Language specification](https://developer.apple.com/metal/Metal-Shading-Language-Specification.pdf), [WGSL specification](https://www.w3.org/TR/WGSL/), [Khronos GLSL specification sources](https://github.com/KhronosGroup/GLSL), and [Microsoft HLSL specification](https://microsoft.github.io/hlsl-specs/specs/index.html) — official evidence that shader languages require GPU stage, resource-binding, address-space, vector/matrix, and host/device execution contracts distinct from Apple application languages.
+
+Evidence note: these sources justify the bounded deferred-candidate section in the roadmap. Java/Kotlin cover Scala's main platform value for now; Python/Ruby/JavaScript cover Lua's dynamic-platform value; BEAM, functional/effect, scientific-array, and GPU execution models require focused semantics before a language task would be honest.
 
 ## WebAssembly and browser interoperability
 

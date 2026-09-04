@@ -2,7 +2,7 @@
 
 - Status: `todo`
 - Phase/priority: Phase 1 / P1
-- Dependencies: [001-portable-scalar-values-and-types.md](001-portable-scalar-values-and-types.md), [003-typed-operators-and-expressions.md](003-typed-operators-and-expressions.md), [004-statement-sequencing-and-conditionals.md](004-statement-sequencing-and-conditionals.md), [021-browser-webassembly-target.md](021-browser-webassembly-target.md)
+- Dependencies: [001-portable-scalar-values-and-types.md](001-portable-scalar-values-and-types.md), [003-typed-operators-and-expressions.md](003-typed-operators-and-expressions.md), [004-statement-sequencing-and-conditionals.md](004-statement-sequencing-and-conditionals.md), [025-core-language-baseline-acceptance.md](025-core-language-baseline-acceptance.md)
 
 ## Objective
 
@@ -14,7 +14,7 @@ There is no null literal, recursive optional type, union, flow narrowing, or pre
 
 ## Language matrix
 
-This matrix records the original-five mappings researched for this task. Because Task 021 is a direct prerequisite, implementation must extend it to Python, C#, C, C++, and Rust frontends/backends and the browser Wasm backend, with exact presence representations or an explicit documented and tested target capability rejection. Task 013 remains intentionally original-five-only.
+This matrix records the original-five mappings researched for this task. Task 025 is the expansion prerequisite, but this task must name its required language cohort rather than implicitly blocking on every registered role. Other roles retain explicit documented and tested capability rejections until their optional-value mapping is designed. Task 013 remains intentionally original-five-only.
 
 | Language | Representative accepted source | Required constraint/rejection |
 | --- | --- | --- |

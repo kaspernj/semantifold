@@ -2,7 +2,7 @@
 
 - Status: `todo`
 - Phase/priority: Phase 1 / P1
-- Dependencies: [001-portable-scalar-values-and-types.md](001-portable-scalar-values-and-types.md), [004-statement-sequencing-and-conditionals.md](004-statement-sequencing-and-conditionals.md), [021-browser-webassembly-target.md](021-browser-webassembly-target.md)
+- Dependencies: [001-portable-scalar-values-and-types.md](001-portable-scalar-values-and-types.md), [004-statement-sequencing-and-conditionals.md](004-statement-sequencing-and-conditionals.md), [025-core-language-baseline-acceptance.md](025-core-language-baseline-acceptance.md)
 
 ## Objective
 
@@ -14,7 +14,7 @@ Support named synchronous top-level functions with zero or more required positio
 
 ## Language matrix
 
-This matrix records the original-five mappings researched for this task. Because Tasks 015–021 are prerequisites, implementation must extend the matrix and focused acceptance to Python, C#, C, C++, and Rust frontends/backends plus the browser Wasm backend. A registered role is either implemented for this capability or has an explicit documented and tested capability rejection; Task 013 remains the original-five aggregate regression gate.
+This matrix records the original-five mappings researched for this task. Task 025 first proves the expanded cohort on Tasks 001–004, but registration alone does not force every new language or platform to implement general calls in this task. The implementation must name its required cohort and keep every other registered role as a truthful, documented, tested capability rejection until a focused adoption task adds it. Task 013 remains the original-five aggregate regression gate.
 
 | Language | Representative accepted source | Required constraint/rejection |
 | --- | --- | --- |

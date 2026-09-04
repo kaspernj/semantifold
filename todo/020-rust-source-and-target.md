@@ -1,8 +1,8 @@
 # 020 — Rust source and target support
 
 - Status: `todo`
-- Phase/priority: Phase L2 / P0
-- Dependencies: [019-cpp-source-and-target.md](019-cpp-source-and-target.md)
+- Phase/priority: Phase L1 / P0
+- Dependencies: [015-language-expansion-foundation.md](015-language-expansion-foundation.md)
 
 ## Purpose
 
@@ -40,7 +40,7 @@ Add Rust as a first-class frontend and native Cargo-project backend for the exac
 - Add Rust fixtures equivalent to Tasks 001–004 with Unicode/embedded-NUL strings, repeated reads requiring clones, mutation, concatenation, every operator, and nested/fallthrough branches.
 - Add negative coverage for moves/borrows/lifetimes, patterns, inference, macro lookalikes, tail expressions, `Result`/panic, unsafe/extern, modules, attributes, parser recovery, build-mode arithmetic boundaries, and malformed IR.
 - Discover real `rustc` and `cargo`, record both versions, generate a fresh crate, then run `cargo check --offline --locked` and debug/release `cargo run --offline --locked --quiet`; assert identical exact output/status. Missing tools or network demand fails.
-- Generate/reparse Rust from all registered frontends and emit every applicable target from Rust-derived IR. Generate twice and compare all crate artifacts/mappings.
+- Generate/reparse Rust in both directions and cover representative original-five source/target crossings. Task 025 owns the expanded-cohort spanning matrix. Generate twice and compare all crate artifacts/mappings.
 
 ## Documentation
 
