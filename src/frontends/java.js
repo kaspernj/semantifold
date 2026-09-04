@@ -3,6 +3,7 @@
 import {parser} from "@lezer/java"
 import {SemantifoldDiagnostic, missingType, unsupportedSyntax} from "../diagnostic.js"
 import {locationFromOffsets, moduleLocation} from "../semantic/location.js"
+import {withAdaptedOperation} from "../semantic/operators.js"
 import {withParserRanges} from "../semantic/provenance.js"
 import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
 import {sourceScalarType} from "./scalars.js"
@@ -19,6 +20,19 @@ const simpleStringEscapes = Object.freeze({
   s: " ",
   t: "\t"
 })
+const javaBinaryOperations = new Map([
+  ["+", "Add"],
+  ["-", "Subtract"],
+  ["*", "Multiply"],
+  ["&&", "And"],
+  ["||", "Or"],
+  ["==", "JavaEqual"],
+  ["!=", "JavaNotEqual"],
+  ["<", "LessThan"],
+  ["<=", "LessThanOrEqual"],
+  [">", "GreaterThan"],
+  [">=", "GreaterThanOrEqual"]
+])
 
 /**
  * Returns all direct child syntax nodes.
@@ -136,27 +150,61 @@ function convertExpression(node, filename, source) {
     return withParserRanges({kind: /** @type {const} */ ("StringLiteral"), location, value: decodeStringLiteral(node, filename, source)}, {literal: location})
   }
 
-  if (node.name == "BinaryExpression") {
-    const operands = structuralChildren(node).filter(isSupportedExpressionNode)
-    const operatorNode = node.getChild("CompareOp") ?? node.getChild("ArithOp")
-    const named = structuralChildren(node)
+  if (node.name == "UnaryExpression") {
+    const children = structuralChildren(node)
+    const operatorNode = node.getChild("LogicOp") ?? node.getChild("ArithOp")
+    const operand = children.find((child) => child.name != "LogicOp" && child.name != "ArithOp")
+    const operator = operatorNode ? nodeText(operatorNode, source) : undefined
 
-    if (operands.length != 2 || !operatorNode || named.length != 3) return unsupportedSyntax("java", "binary expression", location)
+    if (!operatorNode || !operand || children.length != 2 || (operator != "!" && operator != "-")) {
+      return unsupportedSyntax("java", "unary expression", location)
+    }
+
+    if (operator == "!" && operand.name == "MethodInvocation" && isEqualsInvocation(operand, source)) {
+      return convertStringEquality(operand, true, location, nodeLocation(operatorNode, filename, source), filename, source)
+    }
+
+    const semantic = withAdaptedOperation(withParserRanges({
+      kind: "UnaryExpression",
+      location,
+      operand: convertExpression(operand, filename, source)
+    }, {operator: nodeLocation(operatorNode, filename, source)}), operator == "!" ? "Not" : "Negate")
+
+    return /** @type {import("../semantic/types.js").Expression} */ (/** @type {unknown} */ (semantic))
+  }
+
+  if (node.name == "BinaryExpression") {
+    const named = structuralChildren(node)
+    const operatorNode = node.getChild("CompareOp") ?? node.getChild("ArithOp") ?? node.getChild("LogicOp") ?? node.getChild("BitOp")
+
+    if (!operatorNode || named.length != 3) return unsupportedSyntax("java", "binary expression", location)
+
+    const operands = [named[0], named[2]]
+    const unsupportedOperand = operands.find((operand) => !isSupportedExpressionNode(operand))
+
+    if (unsupportedOperand) return unsupportedSyntax("java", unsupportedOperand.name, nodeLocation(unsupportedOperand, filename, source))
 
     const operator = nodeText(operatorNode, source)
 
-    if (![">", "-", "+"].includes(operator)) return unsupportedSyntax("java", `binary ${operator}`, location)
+    if (!javaBinaryOperations.has(operator)) return unsupportedSyntax("java", `binary ${operator}`, location)
 
-    return withParserRanges({
+    const semantic = withAdaptedOperation(withParserRanges({
       kind: "BinaryExpression",
       left: convertExpression(operands[0], filename, source),
       location,
-      operator: /** @type {">" | "-" | "+"} */ (operator),
       right: convertExpression(operands[1], filename, source)
-    }, {operator: nodeLocation(operatorNode, filename, source)})
+    }, {operator: nodeLocation(operatorNode, filename, source)}), /** @type {import("../semantic/operators.js").AdaptedOperation} */ (javaBinaryOperations.get(operator)))
+
+    return /** @type {import("../semantic/types.js").Expression} */ (/** @type {unknown} */ (semantic))
   }
 
   if (node.name == "MethodInvocation") {
+    if (isEqualsInvocation(node, source)) {
+      const methodName = requiredChild(node, "MethodName", filename, source)
+
+      return convertStringEquality(node, false, location, nodeLocation(methodName, filename, source), filename, source)
+    }
+
     const unsupportedReceiver = structuralChildren(node).find((child) => child.name != "MethodName" && child.name != "ArgumentList")
 
     if (unsupportedReceiver) return unsupportedSyntax("java", "method invocation receiver", nodeLocation(unsupportedReceiver, filename, source))
@@ -179,6 +227,56 @@ function convertExpression(node, filename, source) {
 }
 
 /**
+ * Checks the one parser-native Java string equality invocation form.
+ * @param {import("@lezer/common").SyntaxNode} node - Method invocation node.
+ * @param {string} source - Complete source.
+ * @returns {boolean} Whether the invocation spells `.equals` with a receiver.
+ */
+function isEqualsInvocation(node, source) {
+  const methodName = node.getChild("MethodName")
+  const receivers = structuralChildren(node).filter((child) => child.name != "MethodName" && child.name != "ArgumentList")
+
+  return methodName != null && nodeText(methodName, source) == "equals" && receivers.length == 1
+}
+
+/**
+ * Converts Java `.equals` or its directly negated form without source-text inference.
+ * @param {import("@lezer/common").SyntaxNode} node - Parser method invocation.
+ * @param {boolean} negated - Whether a parser-owned unary not wraps the invocation.
+ * @param {import("../semantic/types.js").SourceLocation} location - Whole equality expression location.
+ * @param {import("../semantic/types.js").SourceLocation} operatorLocation - Parser-owned operator/method location.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @returns {import("../semantic/types.js").Expression} Adapted equality expression.
+ */
+function convertStringEquality(node, negated, location, operatorLocation, filename, source) {
+  const argumentList = requiredChild(node, "ArgumentList", filename, source)
+  const arguments_ = structuralChildren(argumentList)
+  const receivers = structuralChildren(node).filter((child) => child.name != "MethodName" && child.name != "ArgumentList")
+  const unsupportedArgument = arguments_.find((child) => !isSupportedExpressionNode(child))
+
+  if (receivers.length != 1 || arguments_.length != 1 || unsupportedArgument) {
+    return unsupportedSyntax("java", "string equals invocation", nodeLocation(node, filename, source))
+  }
+
+  /** @type {Record<string, import("../semantic/types.js").SourceLocation>} */
+  const ranges = {operator: operatorLocation}
+
+  if (negated) {
+    ranges.equalityOperator = nodeLocation(requiredChild(node, "MethodName", filename, source), filename, source)
+  }
+
+  const semantic = withAdaptedOperation(withParserRanges({
+    kind: "BinaryExpression",
+    left: convertExpression(receivers[0], filename, source),
+    location,
+    right: convertExpression(arguments_[0], filename, source)
+  }, ranges), negated ? "StringNotEqual" : "StringEqual")
+
+  return /** @type {import("../semantic/types.js").Expression} */ (/** @type {unknown} */ (semantic))
+}
+
+/**
  * Checks whether a Lezer node is in the expression subset.
  * @param {import("@lezer/common").SyntaxNode} node - Java syntax node.
  * @returns {boolean} Whether the node is supported.
@@ -189,6 +287,7 @@ function isSupportedExpressionNode(node) {
     "IntegerLiteral",
     "BooleanLiteral",
     "StringLiteral",
+    "UnaryExpression",
     "BinaryExpression",
     "MethodInvocation",
     "ParenthesizedExpression"

@@ -5,6 +5,28 @@ import {validateBackendTypes} from "../semantic/validate.js"
 import {validateTargetBindingIdentifier, validateTargetIdentifier} from "./identifiers.js"
 import {emitStringLiteral} from "./scalars.js"
 
+/** @type {Readonly<Record<import("../semantic/types.js").SemanticUnaryOperation, string>>} */
+const unaryOperationSyntax = Object.freeze({BooleanNot: "!", IntegerNegate: "-"})
+/** @type {Readonly<Record<import("../semantic/types.js").SemanticBinaryOperation, Readonly<{default: string, php?: string, strict?: string}>>>} */
+const binaryOperationSyntax = Object.freeze({
+  BooleanAnd: Object.freeze({default: "&&"}),
+  BooleanEqual: Object.freeze({default: "==", strict: "==="}),
+  BooleanNotEqual: Object.freeze({default: "!=", strict: "!=="}),
+  BooleanOr: Object.freeze({default: "||"}),
+  IntegerAdd: Object.freeze({default: "+"}),
+  IntegerEqual: Object.freeze({default: "==", strict: "==="}),
+  IntegerGreaterThan: Object.freeze({default: ">"}),
+  IntegerGreaterThanOrEqual: Object.freeze({default: ">="}),
+  IntegerLessThan: Object.freeze({default: "<"}),
+  IntegerLessThanOrEqual: Object.freeze({default: "<="}),
+  IntegerMultiply: Object.freeze({default: "*"}),
+  IntegerNotEqual: Object.freeze({default: "!=", strict: "!=="}),
+  IntegerSubtract: Object.freeze({default: "-"}),
+  StringConcat: Object.freeze({default: "+", php: "."}),
+  StringEqual: Object.freeze({default: "==", strict: "==="}),
+  StringNotEqual: Object.freeze({default: "!=", strict: "!=="})
+})
+
 /**
  * Checks the intentionally narrow backend contract.
  * @param {import("../semantic/types.js").SemanticModule} module - Semantic module.
@@ -167,9 +189,10 @@ function validateAssignmentTarget(target, language, ownerLocation) {
  * @param {unknown} expression - Candidate semantic expression.
  * @param {import("../semantic/types.js").SemanticLanguage} language - Backend language.
  * @param {import("../semantic/types.js").SourceLocation | undefined} ownerLocation - Nearest owning node location.
+ * @param {boolean} [allowJavaNegatedMinimumOperand] - Whether Java may use 2147483648 only beneath integer negation.
  * @returns {void}
  */
-function validateExpression(expression, language, ownerLocation) {
+function validateExpression(expression, language, ownerLocation, allowJavaNegatedMinimumOperand = false) {
   if (!expression || typeof expression != "object" || Array.isArray(expression)) {
     return unsupportedCapability(language, "missing or invalid expression", ownerLocation)
   }
@@ -188,7 +211,9 @@ function validateExpression(expression, language, ownerLocation) {
     if (!Number.isSafeInteger(candidate.value)) {
       unsupportedCapability(language, "non-safe integer literal", location)
     }
-    if (language == "java" && (candidate.value < -2147483648 || candidate.value > 2147483647)) {
+    const validNegatedMinimumOperand = allowJavaNegatedMinimumOperand && candidate.value == 2147483648
+
+    if (language == "java" && !validNegatedMinimumOperand && (candidate.value < -2147483648 || candidate.value > 2147483647)) {
       unsupportedCapability(language, "integer literal outside signed 32-bit int range", location)
     }
     return
@@ -205,16 +230,67 @@ function validateExpression(expression, language, ownerLocation) {
     for (const argument of candidate.arguments) validateExpression(argument, language, location)
     return
   }
+  if (candidate.kind == "UnaryExpression") {
+    if (!Object.hasOwn(unaryOperationSyntax, String(candidate.operation))) {
+      unsupportedCapability(language, `unary operation ${String(candidate.operation)}`, location)
+    }
+    validateExpression(candidate.operand, language, location, candidate.operation == "IntegerNegate")
+    validateKnownJavaInteger(candidate, language, location)
+    return
+  }
   if (candidate.kind == "BinaryExpression") {
-    if (![">", "-", "+"].includes(candidate.operator)) {
-      unsupportedCapability(language, `binary operator ${candidate.operator}`, location)
+    if (!Object.hasOwn(binaryOperationSyntax, String(candidate.operation))) {
+      unsupportedCapability(language, `binary operation ${String(candidate.operation)}`, location)
     }
     validateExpression(candidate.left, language, location)
     validateExpression(candidate.right, language, location)
+    validateKnownJavaInteger(candidate, language, location)
     return
   }
 
   unsupportedCapability(language, String(Reflect.get(expression, "kind")), location)
+}
+
+/**
+ * Rejects compile-time-known Java integer operation results outside primitive int.
+ * @param {import("../semantic/types.js").UnaryExpression | import("../semantic/types.js").BinaryExpression} expression - Validated operation shape.
+ * @param {import("../semantic/types.js").SemanticLanguage} language - Backend language.
+ * @param {import("../semantic/types.js").SourceLocation | undefined} location - Operation location.
+ * @returns {void}
+ */
+function validateKnownJavaInteger(expression, language, location) {
+  if (language != "java") return
+
+  const value = knownIntegerValue(expression)
+
+  if (value !== undefined && (value < -2147483648n || value > 2147483647n)) {
+    unsupportedCapability(language, "compile-time-known integer operation outside signed 32-bit int range", location)
+  }
+}
+
+/**
+ * Evaluates only literal integer-operation trees for bounds validation, never IR folding.
+ * @param {import("../semantic/types.js").Expression} expression - Semantic expression.
+ * @returns {bigint | undefined} Known mathematical integer.
+ */
+function knownIntegerValue(expression) {
+  if (expression.kind == "IntegerLiteral" && Number.isSafeInteger(expression.value)) return BigInt(expression.value)
+  if (expression.kind == "UnaryExpression" && expression.operation == "IntegerNegate") {
+    const operand = knownIntegerValue(expression.operand)
+
+    return operand === undefined ? undefined : -operand
+  }
+  if (expression.kind != "BinaryExpression") return undefined
+
+  const left = knownIntegerValue(expression.left)
+  const right = knownIntegerValue(expression.right)
+
+  if (left === undefined || right === undefined) return undefined
+  if (expression.operation == "IntegerAdd") return left + right
+  if (expression.operation == "IntegerSubtract") return left - right
+  if (expression.operation == "IntegerMultiply") return left * right
+
+  return undefined
 }
 
 /**
@@ -254,11 +330,113 @@ export function emitExpression(writer, expression, path, language, emitIdentifie
     return
   }
 
+  if (expression.kind == "UnaryExpression") {
+    writer.mapped("(", {mappingKind: "anchor", node: expression, path})
+    writer.mapped(unaryOperationSyntax[expression.operation], {
+      mappingKind: "exact", node: expression, path, role: "operator"
+    })
+    emitExpression(writer, expression.operand, `${path}/operand`, language, emitIdentifier)
+    writer.mapped(")", {mappingKind: "anchor", node: expression, path})
+    return
+  }
+
+  if (language == "java" && (expression.operation == "StringEqual" || expression.operation == "StringNotEqual")) {
+    const compositeOperator = expression.operation == "StringNotEqual" && writer.hasRange(expression, path, "equalityOperator")
+
+    writer.mapped("(", {mappingKind: "anchor", node: expression, path})
+    if (expression.operation == "StringNotEqual") {
+      writer.mapped("!", {mappingKind: "exact", node: expression, path, role: "operator"})
+    }
+    writer.mapped("(", {mappingKind: "anchor", node: expression, path})
+    emitExpression(writer, expression.left, `${path}/left`, language, emitIdentifier)
+    writer.mapped(")", {mappingKind: "anchor", node: expression, path})
+    writer.mapped(".equals", {
+      mappingKind: "exact", node: expression, path, role: compositeOperator ? "equalityOperator" : "operator"
+    })
+    writer.mapped("(", {mappingKind: "anchor", node: expression, path})
+    emitExpression(writer, expression.right, `${path}/right`, language, emitIdentifier)
+    writer.mapped(")", {mappingKind: "anchor", node: expression, path})
+    writer.mapped(")", {mappingKind: "anchor", node: expression, path})
+    return
+  }
+
   writer.mapped("(", {mappingKind: "anchor", node: expression, path})
   emitExpression(writer, expression.left, `${path}/left`, language, emitIdentifier)
   writer.synthetic(" ", "operator spacing", [expression], [path])
-  writer.mapped(expression.operator, {mappingKind: "exact", node: expression, path, role: "operator"})
+  const spelling = binaryOperationSpelling(expression.operation, language)
+
+  if (expression.operation == "StringNotEqual" && writer.hasRange(expression, path, "equalityOperator")) {
+    writer.mapped(spelling.slice(0, 1), {mappingKind: "exact", node: expression, path, role: "operator"})
+    writer.mapped(spelling.slice(1), {mappingKind: "exact", node: expression, path, role: "equalityOperator"})
+  } else writer.mapped(spelling, {mappingKind: "exact", node: expression, path, role: "operator"})
   writer.synthetic(" ", "operator spacing", [expression], [path])
   emitExpression(writer, expression.right, `${path}/right`, language, emitIdentifier)
   writer.mapped(")", {mappingKind: "anchor", node: expression, path})
+}
+
+/**
+ * Reports whether JavaScript-family execution can create IEEE-754 signed zero.
+ * Semantifold integers have one mathematical zero, so those targets canonicalize
+ * their observable scalar output without changing the operation tree.
+ * @param {import("../semantic/types.js").SemanticModule} module - Validated semantic module.
+ * @returns {boolean} Whether canonical output rendering is required.
+ */
+export function requiresCanonicalZeroRendering(module) {
+  return module.functions.some((declaration) => statementsContainSignProducingOperation(declaration.body)) ||
+    statementsContainSignProducingOperation(module.entryPoint.body)
+}
+
+/**
+ * Checks one statement sequence for sign-producing integer operations.
+ * @param {(import("../semantic/types.js").FunctionStatement | import("../semantic/types.js").LocalStatement | import("../semantic/types.js").PrintStatement)[]} statements - Semantic statements.
+ * @returns {boolean} Whether a nested expression can produce signed zero in JavaScript.
+ */
+function statementsContainSignProducingOperation(statements) {
+  return statements.some((statement) => {
+    if (statement.kind == "IfStatement") {
+      return expressionContainsSignProducingOperation(statement.condition) ||
+        statementsContainSignProducingOperation(statement.consequent) || statementsContainSignProducingOperation(statement.alternate)
+    }
+    if (statement.kind == "LocalDeclaration") return expressionContainsSignProducingOperation(statement.initializer)
+    if (statement.kind == "AssignmentStatement" || statement.kind == "ReturnStatement" || statement.kind == "PrintStatement") {
+      return expressionContainsSignProducingOperation(statement.expression)
+    }
+
+    return false
+  })
+}
+
+/**
+ * Checks one expression tree for sign-producing integer operations.
+ * @param {import("../semantic/types.js").Expression} expression - Semantic expression.
+ * @returns {boolean} Whether this tree contains integer negation or multiplication.
+ */
+function expressionContainsSignProducingOperation(expression) {
+  if (expression.kind == "UnaryExpression") {
+    return expression.operation == "IntegerNegate" || expressionContainsSignProducingOperation(expression.operand)
+  }
+  if (expression.kind == "BinaryExpression") {
+    return expression.operation == "IntegerMultiply" || expressionContainsSignProducingOperation(expression.left) ||
+      expressionContainsSignProducingOperation(expression.right)
+  }
+  if (expression.kind == "CallExpression") {
+    return expression.arguments.some((argument) => expressionContainsSignProducingOperation(argument))
+  }
+
+  return false
+}
+
+/**
+ * Maps one already validated semantic operation to target syntax.
+ * @param {import("../semantic/types.js").SemanticBinaryOperation} operation - Closed semantic operation.
+ * @param {import("../semantic/types.js").SemanticLanguage} language - Target language.
+ * @returns {string} Target operator spelling.
+ */
+function binaryOperationSpelling(operation, language) {
+  const syntax = binaryOperationSyntax[operation]
+
+  if (language == "php" && syntax.php) return syntax.php
+  if ((language == "php" || language == "javascript" || language == "typescript") && syntax.strict) return syntax.strict
+
+  return syntax.default
 }

@@ -1,6 +1,6 @@
 // @ts-check
 
-import {emitExpression} from "./shared.js"
+import {emitExpression, requiresCanonicalZeroRendering} from "./shared.js"
 import {emitScalarType} from "./scalars.js"
 
 /**
@@ -93,7 +93,11 @@ export function generateTypeScript(module, writer) {
 
   writer.mapped("console.log", {mappingKind: "anchor", node: print, path: printPath})
   writer.mapped("(", {mappingKind: "anchor", node: print, path: printPath})
+  const canonicalizeZero = requiresCanonicalZeroRendering(module)
+
+  if (canonicalizeZero) writer.synthetic("(", "canonical integer output", [print], [printPath])
   emitExpression(writer, print.expression, `${printPath}/expression`, "typescript", identity)
+  if (canonicalizeZero) writer.synthetic(").toString()", "canonical integer output", [print], [printPath])
   writer.mapped(")", {mappingKind: "anchor", node: print, path: printPath})
   writer.synthetic("\n", "final line break", [module.entryPoint])
 }

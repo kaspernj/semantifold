@@ -2,6 +2,7 @@
 
 import {semanticFailure, unsupportedCapability, unsupportedSyntax} from "../diagnostic.js"
 import {hasOnlyUnicodeScalars, isScalarTypeName} from "./scalars.js"
+import {adaptedOperationFor} from "./operators.js"
 
 /**
  * @typedef Binding
@@ -30,7 +31,7 @@ import {hasOnlyUnicodeScalars, isScalarTypeName} from "./scalars.js"
  */
 export function validateParsedModule(module, language) {
   validateModuleShape(module, (detail, location) => unsupportedSyntax(language, detail, location))
-  validateModuleTypes(module, (code, detail, location) => semanticFailure(language, code, detail, location))
+  validateModuleTypes(module, (code, detail, location) => semanticFailure(language, code, detail, location), true)
 
   return module
 }
@@ -42,7 +43,7 @@ export function validateParsedModule(module, language) {
  * @returns {void}
  */
 export function validateBackendTypes(module, language) {
-  validateModuleTypes(module, (_code, detail, location) => unsupportedCapability(language, detail, location))
+  validateModuleTypes(module, (_code, detail, location) => unsupportedCapability(language, detail, location), false)
 }
 
 /**
@@ -93,9 +94,10 @@ function validateTerminalSequence(statements, terminalKind, detail, fail) {
  * Validates declarations and expression types within lexical scopes.
  * @param {import("./types.js").SemanticModule} module - Semantic module.
  * @param {SemanticFail} fail - Diagnostic callback.
+ * @param {boolean} normalizeOperations - Whether to replace transient frontend operation intent.
  * @returns {void}
  */
-function validateModuleTypes(module, fail) {
+function validateModuleTypes(module, fail, normalizeOperations) {
   /** @type {Map<string, import("./types.js").FunctionDeclaration>} */
   const functions = new Map()
 
@@ -106,15 +108,15 @@ function validateModuleTypes(module, fail) {
     functions.set(functionDeclaration.name, functionDeclaration)
   }
 
-  for (const functionDeclaration of module.functions) validateFunction(functionDeclaration, functions, fail)
+  for (const functionDeclaration of module.functions) validateFunction(functionDeclaration, functions, fail, normalizeOperations)
 
   const callableNames = new Set(functions.keys())
 
   const entryScope = createScope(undefined, module.entryPoint.body, callableNames)
-  const terminal = validateLocalPrefix(module.entryPoint.body, entryScope, functions, fail)
+  const terminal = validateLocalPrefix(module.entryPoint.body, entryScope, functions, fail, normalizeOperations)
 
   if (terminal.kind != "PrintStatement") fail("UNSUPPORTED_STATEMENT", terminal.kind, terminal.location)
-  inferExpressionType(terminal.expression, entryScope, functions, fail)
+  inferExpressionType(terminal.expression, entryScope, functions, fail, normalizeOperations)
 }
 
 /**
@@ -122,9 +124,10 @@ function validateModuleTypes(module, fail) {
  * @param {import("./types.js").FunctionDeclaration} declaration - Function declaration.
  * @param {Map<string, import("./types.js").FunctionDeclaration>} functions - Function signatures.
  * @param {SemanticFail} fail - Diagnostic callback.
+ * @param {boolean} normalizeOperations - Whether to replace transient frontend operation intent.
  * @returns {void}
  */
-function validateFunction(declaration, functions, fail) {
+function validateFunction(declaration, functions, fail, normalizeOperations) {
   const scope = createScope(undefined, declaration.body, new Set(functions.keys()))
 
   for (const parameter of declaration.parameters) {
@@ -134,18 +137,18 @@ function validateFunction(declaration, functions, fail) {
   }
 
   const returnType = validateTypeReference(declaration.returnType, declaration.location, fail)
-  const terminal = validateLocalPrefix(declaration.body, scope, functions, fail)
+  const terminal = validateLocalPrefix(declaration.body, scope, functions, fail, normalizeOperations)
 
   if (terminal.kind != "IfStatement") fail("UNSUPPORTED_STATEMENT", terminal.kind, terminal.location)
 
-  const conditionType = inferExpressionType(terminal.condition, scope, functions, fail)
+  const conditionType = inferExpressionType(terminal.condition, scope, functions, fail, normalizeOperations)
 
   if (conditionType != "boolean") {
-    fail("TYPE_MISMATCH", `If condition type ${conditionType}; expected boolean.`, terminal.condition.location)
+    fail("NON_BOOLEAN_CONDITION", `If condition type ${conditionType}; expected boolean.`, terminal.condition.location)
   }
 
-  validateReturnBranch(terminal.consequent, scope, returnType, functions, fail)
-  validateReturnBranch(terminal.alternate, scope, returnType, functions, fail)
+  validateReturnBranch(terminal.consequent, scope, returnType, functions, fail, normalizeOperations)
+  validateReturnBranch(terminal.alternate, scope, returnType, functions, fail, normalizeOperations)
 }
 
 /**
@@ -155,15 +158,16 @@ function validateFunction(declaration, functions, fail) {
  * @param {import("./types.js").SemanticTypeName} returnType - Function return type.
  * @param {Map<string, import("./types.js").FunctionDeclaration>} functions - Function signatures.
  * @param {SemanticFail} fail - Diagnostic callback.
+ * @param {boolean} normalizeOperations - Whether to replace transient frontend operation intent.
  * @returns {void}
  */
-function validateReturnBranch(statements, parent, returnType, functions, fail) {
+function validateReturnBranch(statements, parent, returnType, functions, fail, normalizeOperations) {
   const scope = createScope(parent, statements)
-  const terminal = validateLocalPrefix(statements, scope, functions, fail)
+  const terminal = validateLocalPrefix(statements, scope, functions, fail, normalizeOperations)
 
   if (terminal.kind != "ReturnStatement") fail("UNSUPPORTED_STATEMENT", terminal.kind, terminal.location)
 
-  const actualType = inferExpressionType(terminal.expression, scope, functions, fail)
+  const actualType = inferExpressionType(terminal.expression, scope, functions, fail, normalizeOperations)
 
   if (actualType != returnType) {
     fail("TYPE_MISMATCH", `Return type ${actualType}; expected ${returnType}.`, terminal.expression.location)
@@ -191,14 +195,15 @@ function createScope(parent, statements, reservedNames = new Set()) {
  * @param {Scope} scope - Current scope.
  * @param {Map<string, import("./types.js").FunctionDeclaration>} functions - Function signatures.
  * @param {SemanticFail} fail - Diagnostic callback.
+ * @param {boolean} normalizeOperations - Whether to replace transient frontend operation intent.
  * @returns {Statement} Terminal statement.
  */
-function validateLocalPrefix(statements, scope, functions, fail) {
+function validateLocalPrefix(statements, scope, functions, fail, normalizeOperations) {
   for (const statement of statements.slice(0, -1)) {
     if (statement.kind == "LocalDeclaration") {
       const declaration = /** @type {import("./types.js").LocalDeclaration} */ (/** @type {unknown} */ (statement))
       const declaredType = validateTypeReference(declaration.type, declaration.location, fail)
-      const initializerType = inferExpressionType(declaration.initializer, scope, functions, fail)
+      const initializerType = inferExpressionType(declaration.initializer, scope, functions, fail, normalizeOperations)
 
       scope.pending.delete(declaration.name)
       if (initializerType != declaredType) {
@@ -209,7 +214,7 @@ function validateLocalPrefix(statements, scope, functions, fail) {
     }
 
     const assignment = /** @type {import("./types.js").AssignmentStatement} */ (/** @type {unknown} */ (statement))
-    const expressionType = inferExpressionType(assignment.expression, scope, functions, fail)
+    const expressionType = inferExpressionType(assignment.expression, scope, functions, fail, normalizeOperations)
     const binding = resolveBinding(assignment.target.name, assignment.target.location, scope, fail)
 
     if (!binding.mutable) {
@@ -287,9 +292,10 @@ function validateTypeReference(type, location, fail) {
  * @param {Scope} scope - Visible lexical scope.
  * @param {Map<string, import("./types.js").FunctionDeclaration>} functions - Module function signatures.
  * @param {SemanticFail} fail - Diagnostic callback.
+ * @param {boolean} normalizeOperations - Whether to replace transient frontend operation intent.
  * @returns {import("./types.js").SemanticTypeName} Expression type.
  */
-function inferExpressionType(expression, scope, functions, fail) {
+function inferExpressionType(expression, scope, functions, fail, normalizeOperations) {
   if (expression.kind == "IdentifierExpression") return resolveBinding(expression.name, expression.location, scope, fail).type
 
   if (expression.kind == "IntegerLiteral") {
@@ -319,7 +325,7 @@ function inferExpressionType(expression, scope, functions, fail) {
     }
     for (let index = 0; index < expression.arguments.length; index++) {
       const argument = expression.arguments[index]
-      const actualType = inferExpressionType(argument, scope, functions, fail)
+      const actualType = inferExpressionType(argument, scope, functions, fail, normalizeOperations)
       const expectedType = validateTypeReference(functionDeclaration.parameters[index].type, functionDeclaration.parameters[index].location, fail)
 
       if (actualType != expectedType) {
@@ -328,20 +334,193 @@ function inferExpressionType(expression, scope, functions, fail) {
     }
     return validateTypeReference(functionDeclaration.returnType, functionDeclaration.location, fail)
   }
-  if (expression.kind == "BinaryExpression") {
-    const leftType = inferExpressionType(expression.left, scope, functions, fail)
-    const rightType = inferExpressionType(expression.right, scope, functions, fail)
+  if (expression.kind == "UnaryExpression") {
+    const operandType = inferExpressionType(expression.operand, scope, functions, fail, normalizeOperations)
+    const operation = normalizeOperations
+      ? normalizeUnaryOperation(adaptedOperationFor(expression), operandType, expression.operand.location, fail)
+      : expression.operation
 
-    if (![">", "-", "+"].includes(expression.operator)) {
-      return fail("TYPE_MISMATCH", `Binary operator ${expression.operator}.`, expression.location)
+    if (normalizeOperations) setNormalizedOperation(expression, operation, unaryOperationSignatures[operation].result)
+
+    const signature = unaryOperationSignatures[operation]
+
+    if (!signature) return fail("TYPE_MISMATCH", `Unknown unary operation ${String(operation)}.`, expression.location)
+    if (operandType != signature.operand) {
+      return fail("INVALID_OPERAND_TYPE", `${operation} requires ${signature.operand}; received ${operandType}.`, expression.operand.location)
     }
-    if (leftType != "integer" || rightType != "integer") {
-      return fail("TYPE_MISMATCH", `Binary ${expression.operator} requires integer operands.`, expression.location)
+    if (expression.type != signature.result) {
+      return fail("TYPE_MISMATCH", `${operation} result type ${String(expression.type)}; expected ${signature.result}.`, expression.location)
     }
-    return expression.operator == ">" ? "boolean" : "integer"
+    return signature.result
+  }
+  if (expression.kind == "BinaryExpression") {
+    const leftType = inferExpressionType(expression.left, scope, functions, fail, normalizeOperations)
+    const rightType = inferExpressionType(expression.right, scope, functions, fail, normalizeOperations)
+    const operation = normalizeOperations
+      ? normalizeBinaryOperation(adaptedOperationFor(expression), leftType, rightType, expression.left.location, expression.right.location, expression.location, fail)
+      : expression.operation
+
+    if (normalizeOperations) setNormalizedOperation(expression, operation, binaryOperationSignatures[operation].result)
+
+    const signature = binaryOperationSignatures[operation]
+
+    if (!signature) return fail("TYPE_MISMATCH", `Unknown binary operation ${String(operation)}.`, expression.location)
+    if (leftType != signature.left) {
+      return fail("INVALID_OPERAND_TYPE", `${operation} requires ${signature.left} left operand; received ${leftType}.`, expression.left.location)
+    }
+    if (rightType != signature.right) {
+      return fail("INVALID_OPERAND_TYPE", `${operation} requires ${signature.right} right operand; received ${rightType}.`, expression.right.location)
+    }
+    if (expression.type != signature.result) {
+      return fail("TYPE_MISMATCH", `${operation} result type ${String(expression.type)}; expected ${signature.result}.`, expression.location)
+    }
+    return signature.result
   }
 
   const unexpected = /** @type {{kind: string, location: import("./types.js").SourceLocation}} */ (expression)
 
   return fail("TYPE_MISMATCH", unexpected.kind, unexpected.location)
+}
+
+/** @type {Readonly<Record<import("./types.js").SemanticUnaryOperation, {operand: import("./types.js").SemanticTypeName, result: import("./types.js").SemanticTypeName}>>} */
+const unaryOperationSignatures = Object.freeze({
+  BooleanNot: Object.freeze({operand: "boolean", result: "boolean"}),
+  IntegerNegate: Object.freeze({operand: "integer", result: "integer"})
+})
+
+/** @type {Readonly<Record<import("./types.js").SemanticBinaryOperation, {left: import("./types.js").SemanticTypeName, right: import("./types.js").SemanticTypeName, result: import("./types.js").SemanticTypeName}>>} */
+const binaryOperationSignatures = Object.freeze({
+  BooleanAnd: Object.freeze({left: "boolean", result: "boolean", right: "boolean"}),
+  BooleanEqual: Object.freeze({left: "boolean", result: "boolean", right: "boolean"}),
+  BooleanNotEqual: Object.freeze({left: "boolean", result: "boolean", right: "boolean"}),
+  BooleanOr: Object.freeze({left: "boolean", result: "boolean", right: "boolean"}),
+  IntegerAdd: Object.freeze({left: "integer", result: "integer", right: "integer"}),
+  IntegerEqual: Object.freeze({left: "integer", result: "boolean", right: "integer"}),
+  IntegerGreaterThan: Object.freeze({left: "integer", result: "boolean", right: "integer"}),
+  IntegerGreaterThanOrEqual: Object.freeze({left: "integer", result: "boolean", right: "integer"}),
+  IntegerLessThan: Object.freeze({left: "integer", result: "boolean", right: "integer"}),
+  IntegerLessThanOrEqual: Object.freeze({left: "integer", result: "boolean", right: "integer"}),
+  IntegerMultiply: Object.freeze({left: "integer", result: "integer", right: "integer"}),
+  IntegerNotEqual: Object.freeze({left: "integer", result: "boolean", right: "integer"}),
+  IntegerSubtract: Object.freeze({left: "integer", result: "integer", right: "integer"}),
+  StringConcat: Object.freeze({left: "string", result: "string", right: "string"}),
+  StringEqual: Object.freeze({left: "string", result: "boolean", right: "string"}),
+  StringNotEqual: Object.freeze({left: "string", result: "boolean", right: "string"})
+})
+
+/**
+ * Selects one typed unary meaning from parser-normalized source intent.
+ * @param {unknown} sourceOperation - Transient frontend operation.
+ * @param {import("./types.js").SemanticTypeName} operandType - Resolved operand type.
+ * @param {import("./types.js").SourceLocation} location - Operand location.
+ * @param {SemanticFail} fail - Diagnostic callback.
+ * @returns {import("./types.js").SemanticUnaryOperation} Semantic operation.
+ */
+function normalizeUnaryOperation(sourceOperation, operandType, location, fail) {
+  if (sourceOperation == "Negate") {
+    if (operandType != "integer") fail("INVALID_OPERAND_TYPE", `Integer negation requires integer; received ${operandType}.`, location)
+    return "IntegerNegate"
+  }
+  if (sourceOperation == "Not") {
+    if (operandType != "boolean") fail("INVALID_OPERAND_TYPE", `Boolean not requires boolean; received ${operandType}.`, location)
+    return "BooleanNot"
+  }
+
+  return fail("TYPE_MISMATCH", `Unknown unary source operation ${String(sourceOperation)}.`, location)
+}
+
+/**
+ * Selects one typed binary meaning from parser-normalized source intent.
+ * @param {unknown} sourceOperation - Transient frontend operation.
+ * @param {import("./types.js").SemanticTypeName} leftType - Resolved left type.
+ * @param {import("./types.js").SemanticTypeName} rightType - Resolved right type.
+ * @param {import("./types.js").SourceLocation} leftLocation - Left operand location.
+ * @param {import("./types.js").SourceLocation} rightLocation - Right operand location.
+ * @param {import("./types.js").SourceLocation} expressionLocation - Whole operation location.
+ * @param {SemanticFail} fail - Diagnostic callback.
+ * @returns {import("./types.js").SemanticBinaryOperation} Semantic operation.
+ */
+function normalizeBinaryOperation(sourceOperation, leftType, rightType, leftLocation, rightLocation, expressionLocation, fail) {
+  if (sourceOperation == "PhpAdd") {
+    if (leftType == "string" && rightType == "string") {
+      return fail("UNSUPPORTED_SYNTAX", "PHP binary + does not concatenate strings; use . instead.", expressionLocation)
+    }
+
+    sourceOperation = "Add"
+  }
+
+  if (sourceOperation == "StringConcat") {
+    if (leftType != "string") fail("INVALID_OPERAND_TYPE", `String concatenation requires string; received ${leftType}.`, leftLocation)
+    if (rightType != "string") fail("INVALID_OPERAND_TYPE", `String concatenation requires string; received ${rightType}.`, rightLocation)
+    return "StringConcat"
+  }
+
+  if (sourceOperation == "Add") {
+    if (leftType == "integer" && rightType == "integer") return "IntegerAdd"
+    if (leftType == "string" && rightType == "string") return "StringConcat"
+
+    const location = leftType == "integer" || leftType == "string" ? rightLocation : leftLocation
+
+    return fail("INVALID_OPERAND_TYPE", `Addition requires two integers or two strings; received ${leftType} and ${rightType}.`, location)
+  }
+
+  const fixedOperations = /** @type {const} */ ({
+    And: ["boolean", "BooleanAnd"],
+    GreaterThan: ["integer", "IntegerGreaterThan"],
+    GreaterThanOrEqual: ["integer", "IntegerGreaterThanOrEqual"],
+    LessThan: ["integer", "IntegerLessThan"],
+    LessThanOrEqual: ["integer", "IntegerLessThanOrEqual"],
+    Multiply: ["integer", "IntegerMultiply"],
+    Or: ["boolean", "BooleanOr"],
+    Subtract: ["integer", "IntegerSubtract"]
+  })
+  const fixed = Reflect.get(fixedOperations, String(sourceOperation))
+
+  if (fixed) {
+    const [requiredType, operation] = fixed
+
+    if (leftType != requiredType) fail("INVALID_OPERAND_TYPE", `${String(sourceOperation)} requires ${requiredType}; received ${leftType}.`, leftLocation)
+    if (rightType != requiredType) fail("INVALID_OPERAND_TYPE", `${String(sourceOperation)} requires ${requiredType}; received ${rightType}.`, rightLocation)
+
+    return /** @type {import("./types.js").SemanticBinaryOperation} */ (operation)
+  }
+
+  if (sourceOperation == "JavaEqual" || sourceOperation == "JavaNotEqual") {
+    if (leftType == "string" || rightType == "string") {
+      return fail("UNSUPPORTED_SYNTAX", "Java reference equality is outside the implemented semantic subset.", expressionLocation)
+    }
+
+    sourceOperation = sourceOperation == "JavaEqual" ? "Equal" : "NotEqual"
+  }
+
+  if (sourceOperation == "StringEqual" || sourceOperation == "StringNotEqual") {
+    if (leftType != "string") fail("INVALID_OPERAND_TYPE", `String equality requires string; received ${leftType}.`, leftLocation)
+    if (rightType != "string") fail("INVALID_OPERAND_TYPE", `String equality requires string; received ${rightType}.`, rightLocation)
+
+    return /** @type {"StringEqual" | "StringNotEqual"} */ (sourceOperation)
+  }
+
+  if (sourceOperation == "Equal" || sourceOperation == "NotEqual") {
+    if (leftType != rightType) {
+      return fail("MISMATCHED_EQUALITY_TYPES", `Equality requires matching scalar types; received ${leftType} and ${rightType}.`, rightLocation)
+    }
+
+    const prefix = leftType == "integer" ? "Integer" : leftType == "boolean" ? "Boolean" : "String"
+
+    return /** @type {import("./types.js").SemanticBinaryOperation} */ (`${prefix}${sourceOperation}`)
+  }
+
+  return fail("TYPE_MISMATCH", `Unknown binary source operation ${String(sourceOperation)}.`, leftLocation)
+}
+
+/**
+ * Replaces transient frontend intent with the public typed operation fields.
+ * @param {object} expression - Mutable adapted expression.
+ * @param {import("./types.js").SemanticUnaryOperation | import("./types.js").SemanticBinaryOperation} operation - Typed operation.
+ * @param {import("./types.js").SemanticTypeName} type - Explicit result type.
+ * @returns {void}
+ */
+function setNormalizedOperation(expression, operation, type) {
+  Reflect.set(expression, "operation", operation)
+  Reflect.set(expression, "type", type)
 }

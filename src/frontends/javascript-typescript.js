@@ -4,6 +4,7 @@ import {parse as parseBabel} from "@babel/parser"
 import {parse as parseComment} from "comment-parser"
 import {missingType, parseFailure, unsupportedSyntax} from "../diagnostic.js"
 import {locationFromOffsets, moduleLocation} from "../semantic/location.js"
+import {withAdaptedOperation} from "../semantic/operators.js"
 import {withParserRanges} from "../semantic/provenance.js"
 import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
 import {requireSourceScalarType} from "./scalars.js"
@@ -13,6 +14,17 @@ import {requireSourceScalarType} from "./scalars.js"
 
 /** @type {WeakMap<object, BabelTokenIndex>} */
 const nodeTokens = new WeakMap()
+const babelBinaryOperations = new Map([
+  ["+", "Add"],
+  ["-", "Subtract"],
+  ["*", "Multiply"],
+  ["===", "Equal"],
+  ["!==", "NotEqual"],
+  ["<", "LessThan"],
+  ["<=", "LessThanOrEqual"],
+  [">", "GreaterThan"],
+  [">=", "GreaterThanOrEqual"]
+])
 
 /**
  * Returns a source location for a Babel node.
@@ -162,21 +174,52 @@ function convertExpression(node, language, filename, source) {
     return withParserRanges({kind: /** @type {const} */ ("StringLiteral"), location, value: quasi.value.cooked}, {literal: location})
   }
 
-  if (node.type == "BinaryExpression" && [">", "-", "+"].includes(node.operator)) {
+  if (node.type == "UnaryExpression" && ["!", "-"].includes(node.operator)) {
+    const operand = convertExpression(node.argument, language, filename, source)
+    const semantic = withAdaptedOperation(withParserRanges({
+      kind: "UnaryExpression",
+      location,
+      operand
+    }, {
+      operator: tokenLocation(node, node.operator, node.start ?? 0, node.argument.start ?? node.end ?? source.length, filename, source)
+    }), node.operator == "!" ? "Not" : "Negate")
+
+    return /** @type {import("../semantic/types.js").Expression} */ (/** @type {unknown} */ (semantic))
+  }
+
+  if (node.type == "LogicalExpression" && ["&&", "||"].includes(node.operator)) {
+    const semantic = withAdaptedOperation(withParserRanges({
+      kind: "BinaryExpression",
+      left: convertExpression(node.left, language, filename, source),
+      location,
+      right: convertExpression(node.right, language, filename, source)
+    }, {
+      operator: tokenLocation(node, node.operator, node.left.end ?? node.start ?? 0, node.right.start ?? node.end ?? source.length, filename, source)
+    }), node.operator == "&&" ? "And" : "Or")
+
+    return /** @type {import("../semantic/types.js").Expression} */ (/** @type {unknown} */ (semantic))
+  }
+
+  if (node.type == "BinaryExpression" && babelBinaryOperations.has(node.operator)) {
     if (node.left.type == "PrivateName") unsupportedSyntax(language, node.left.type, location)
 
     const left = convertExpression(node.left, language, filename, source)
     const right = convertExpression(node.right, language, filename, source)
 
-    return withParserRanges({
+    const semantic = withAdaptedOperation(withParserRanges({
       kind: "BinaryExpression",
       left,
       location,
-      operator: /** @type {">" | "-" | "+"} */ (node.operator),
       right
     }, {
       operator: tokenLocation(node, node.operator, node.left.end ?? node.start ?? 0, node.right.start ?? node.end ?? source.length, filename, source)
-    })
+    }), /** @type {import("../semantic/operators.js").AdaptedOperation} */ (babelBinaryOperations.get(node.operator)))
+
+    return /** @type {import("../semantic/types.js").Expression} */ (/** @type {unknown} */ (semantic))
+  }
+
+  if (node.type == "BinaryExpression" && ["==", "!="].includes(node.operator)) {
+    return unsupportedSyntax(language, `coercive equality ${node.operator}`, location)
   }
 
   if (node.type == "CallExpression" && node.callee.type == "Identifier") {
@@ -498,14 +541,56 @@ function convertIf(node, language, filename, source) {
 }
 
 /**
+ * Reports whether Babel parsed an operation that makes generated JavaScript-family scalar output require zero canonicalization.
+ * @param {unknown} value - Babel parser subtree.
+ * @param {WeakSet<object>} [visited] - Cycle protection.
+ * @returns {boolean} Whether the subtree contains integer negation or multiplication syntax.
+ */
+function parserTreeRequiresCanonicalZero(value, visited = new WeakSet()) {
+  if (!value || typeof value != "object") return false
+  if (visited.has(value)) return false
+
+  visited.add(value)
+  if (Reflect.get(value, "type") == "UnaryExpression" && Reflect.get(value, "operator") == "-") return true
+  if (Reflect.get(value, "type") == "BinaryExpression" && Reflect.get(value, "operator") == "*") return true
+
+  return Object.entries(value).some(([key, child]) =>
+    !["extra", "innerComments", "leadingComments", "loc", "trailingComments"].includes(key) &&
+    (Array.isArray(child)
+      ? child.some((item) => parserTreeRequiresCanonicalZero(item, visited))
+      : parserTreeRequiresCanonicalZero(child, visited)))
+}
+
+/**
+ * Recognizes the parser-owned receiver parentheses emitted only for canonical integer output.
+ * @param {import("@babel/types").Expression | import("@babel/types").Super} receiver - Qualified-call receiver.
+ * @param {import("@babel/types").CallExpression} call - Outer `toString` call.
+ * @returns {boolean} Whether the receiver has the generated wrapper shape.
+ */
+function hasCanonicalZeroReceiverWrapper(receiver, call) {
+  const extra = Reflect.get(receiver, "extra")
+  const expressionParentheses = ["BinaryExpression", "LogicalExpression", "UnaryExpression"].includes(receiver.type) ? 1 : 0
+  const wrapperParentheses = expressionParentheses + 1
+  const property = call.callee.type == "MemberExpression" ? call.callee.property : undefined
+
+  return Boolean(extra) && typeof extra == "object" && Reflect.get(extra, "parenthesized") === true &&
+    Reflect.get(extra, "parenStart") === call.start && typeof call.start == "number" && typeof call.end == "number" &&
+    typeof receiver.start == "number" && typeof receiver.end == "number" && property?.type == "Identifier" &&
+    typeof property.start == "number" && typeof property.end == "number" && call.callee.start === call.start &&
+    receiver.start == call.start + wrapperParentheses && property.start == receiver.end + wrapperParentheses + 1 &&
+    property.end == property.start + "toString".length && call.end == property.end + 2
+}
+
+/**
  * Converts a console.log entry-point call.
  * @param {import("@babel/types").Statement} node - Babel statement.
  * @param {"javascript" | "typescript"} language - Frontend language.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
+ * @param {boolean} canonicalZeroRequired - Whether this parsed module contains a sign-producing integer operation.
  * @returns {import("../semantic/types.js").PrintStatement} Print statement.
  */
-function convertPrint(node, language, filename, source) {
+function convertPrint(node, language, filename, source, canonicalZeroRequired) {
   const location = nodeLocation(node, filename, source)
 
   if (node.type != "ExpressionStatement" || node.expression.type != "CallExpression") {
@@ -521,10 +606,20 @@ function convertPrint(node, language, filename, source) {
     return unsupportedSyntax(language, "entry-point expression", location)
   }
 
-  const argument = call.arguments[0]
+  let argument = call.arguments[0]
 
   if (argument.type == "SpreadElement" || argument.type == "ArgumentPlaceholder") {
     return unsupportedSyntax(language, argument.type, nodeLocation(argument, filename, source))
+  }
+
+  if (argument.type == "CallExpression" && argument.callee.type == "MemberExpression" && !argument.callee.computed &&
+    !argument.callee.optional && argument.callee.object.type != "Super" && argument.callee.property.type == "Identifier" &&
+    argument.callee.property.name == "toString" && !argument.optional && !argument.typeArguments &&
+    !argument.typeParameters && argument.arguments.length == 0) {
+    if (!canonicalZeroRequired || !hasCanonicalZeroReceiverWrapper(argument.callee.object, argument)) {
+      return unsupportedSyntax(language, "entry-point qualified call", nodeLocation(argument.callee.property, filename, source))
+    }
+    argument = argument.callee.object
   }
 
   return {expression: convertExpression(argument, language, filename, source), kind: "PrintStatement", location}
@@ -542,6 +637,7 @@ export function parseJavaScriptTypeScript({filename, language, source}) {
   const file = parseBabelSource({filename, language, source})
   const tokens = file.tokens ?? []
   const tokenIndex = {byStart: new Map(tokens.map((token) => [token.start, token])), tokens}
+  const canonicalZeroRequired = parserTreeRequiresCanonicalZero(file.program)
 
   rememberTokens(file, tokenIndex)
   const functions = file.program.body.filter((node) => node.type == "FunctionDeclaration")
@@ -555,7 +651,7 @@ export function parseJavaScriptTypeScript({filename, language, source}) {
   const entryStatements = convertRestrictedSequence(
     entryNodes,
     "ExpressionStatement",
-    (statement) => convertPrint(statement, language, filename, source),
+    (statement) => convertPrint(statement, language, filename, source, canonicalZeroRequired),
     language,
     filename,
     source

@@ -1,6 +1,7 @@
 // @ts-check
 
 import {
+  AndNode,
   CallNode,
   DefNode,
   ElseNode,
@@ -10,6 +11,7 @@ import {
   InterpolatedStringNode,
   LocalVariableReadNode,
   LocalVariableWriteNode,
+  OrNode,
   ParenthesesNode,
   ProgramNode,
   RequiredParameterNode,
@@ -21,10 +23,22 @@ import {
 } from "@ruby/prism"
 import {missingType, SemantifoldDiagnostic, unsupportedSyntax} from "../diagnostic.js"
 import {locationFromOffsets, moduleLocation, utf8ByteOffsetToUtf16Offset} from "../semantic/location.js"
+import {withAdaptedOperation} from "../semantic/operators.js"
 import {withParserRanges} from "../semantic/provenance.js"
 import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
 import {requireSourceScalarType} from "./scalars.js"
 const parsePrism = await loadPrism()
+const rubyBinaryOperations = new Map([
+  ["+", "Add"],
+  ["-", "Subtract"],
+  ["*", "Multiply"],
+  ["==", "Equal"],
+  ["!=", "NotEqual"],
+  ["<", "LessThan"],
+  ["<=", "LessThanOrEqual"],
+  [">", "GreaterThan"],
+  [">=", "GreaterThanOrEqual"]
+])
 
 /**
  * Returns a normalized Prism node location.
@@ -108,14 +122,75 @@ function convertExpression(node, filename, source) {
 
   if (node instanceof InterpolatedStringNode) return unsupportedSyntax("ruby", "interpolated string", location)
 
-  if (node instanceof CallNode && node.receiver && [">", "-", "+"].includes(node.name) && node.arguments_?.arguments_.length == 1) {
-    return withParserRanges({
+  if (node instanceof CallNode && node.receiver && node.name == "!") {
+    const operatorLocation = prismLocation(node.messageLoc ?? node.location, filename, source)
+
+    if (node.callOperatorLoc) return unsupportedSyntax("ruby", "qualified boolean not", operatorLocation)
+    if (node.messageLoc?.length != 1) {
+      return unsupportedSyntax("ruby", "precedence-sensitive boolean not", operatorLocation)
+    }
+    if (node.arguments_) return unsupportedSyntax("ruby", "boolean not argument list", operatorLocation)
+
+    const semantic = withAdaptedOperation(withParserRanges({
+      kind: "UnaryExpression",
+      location,
+      operand: convertExpression(node.receiver, filename, source)
+    }, {operator: operatorLocation}), "Not")
+
+    return /** @type {import("../semantic/types.js").Expression} */ (/** @type {unknown} */ (semantic))
+  }
+
+  if (node instanceof CallNode && node.receiver && node.name == "-@") {
+    const operatorLocation = prismLocation(node.messageLoc ?? node.location, filename, source)
+
+    if (node.callOperatorLoc) return unsupportedSyntax("ruby", "qualified integer negation", operatorLocation)
+    if (node.arguments_) return unsupportedSyntax("ruby", "integer negation argument list", operatorLocation)
+
+    const semantic = withAdaptedOperation(withParserRanges({
+      kind: "UnaryExpression",
+      location,
+      operand: convertExpression(node.receiver, filename, source)
+    }, {operator: operatorLocation}), "Negate")
+
+    return /** @type {import("../semantic/types.js").Expression} */ (/** @type {unknown} */ (semantic))
+  }
+
+  if (node instanceof AndNode || node instanceof OrNode) {
+    const operatorLocation = prismLocation(node.operatorLoc, filename, source)
+    const sourceOperator = source.slice(operatorLocation.start.offset, operatorLocation.end.offset)
+
+    if (sourceOperator != "&&" && sourceOperator != "||") {
+      return unsupportedSyntax("ruby", `precedence-sensitive boolean ${sourceOperator}`, location)
+    }
+
+    const semantic = withAdaptedOperation(withParserRanges({
+      kind: "BinaryExpression",
+      left: convertExpression(node.left, filename, source),
+      location,
+      right: convertExpression(node.right, filename, source)
+    }, {operator: operatorLocation}), node instanceof AndNode ? "And" : "Or")
+
+    return /** @type {import("../semantic/types.js").Expression} */ (/** @type {unknown} */ (semantic))
+  }
+
+  if (node instanceof CallNode && node.receiver && rubyBinaryOperations.has(node.name) && node.callOperatorLoc &&
+    node.arguments_?.arguments_.length == 1) {
+    return unsupportedSyntax(
+      "ruby",
+      `qualified binary operator ${node.name}`,
+      prismLocation(node.messageLoc ?? node.location, filename, source)
+    )
+  }
+
+  if (node instanceof CallNode && node.receiver && rubyBinaryOperations.has(node.name) && node.arguments_?.arguments_.length == 1) {
+    const semantic = withAdaptedOperation(withParserRanges({
       kind: "BinaryExpression",
       left: convertExpression(node.receiver, filename, source),
       location,
-      operator: /** @type {">" | "-" | "+"} */ (node.name),
       right: convertExpression(node.arguments_.arguments_[0], filename, source)
-    }, {operator: prismLocation(node.messageLoc ?? node.location, filename, source)})
+    }, {operator: prismLocation(node.messageLoc ?? node.location, filename, source)}), /** @type {import("../semantic/operators.js").AdaptedOperation} */ (rubyBinaryOperations.get(node.name)))
+
+    return /** @type {import("../semantic/types.js").Expression} */ (/** @type {unknown} */ (semantic))
   }
 
   if (node instanceof CallNode && !node.receiver) {

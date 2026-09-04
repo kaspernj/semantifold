@@ -7,6 +7,7 @@ import {
   generate,
   generateArtifact,
   generatedPositionFor,
+  getNodeProvenance,
   originalPositionFor,
   parse,
   parseMapping,
@@ -144,6 +145,64 @@ describe("generated source mappings", () => {
     assert.deepEqual(multi.mapping.sources.map((registered) => registered.filename), ["first.ts", "second.ts"])
     assert.ok(multi.mapping.spans.some((span) => span.origin.kind == "source" && span.origin.location.filename == "first.ts"))
     assert.ok(multi.mapping.spans.some((span) => span.origin.kind == "source" && span.origin.location.filename == "second.ts"))
+  })
+
+  it("maps both Java negated string-equality operators from their parser-owned ranges", () => {
+    const source = `public final class Main {
+  private static boolean differs(String left, String right) {
+    if (true) {
+      return !left.equals(right);
+    } else {
+      return false;
+    }
+  }
+  public static void main(String[] args) {
+    System.out.println(differs("left", "right"));
+  }
+}
+`
+    const module = parse({filename: "Main.java", language: "java", source})
+    const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (module.functions[0].body[0])
+    const equality = /** @type {import("../src/semantic/types.js").BinaryExpression} */ (branch.consequent[0].expression)
+    const record = getNodeProvenance(module, equality)
+    const equalityOperator = record.ranges.equalityOperator
+
+    assert.deepEqual({
+      bang: source.slice(record.ranges.operator.start.offset, record.ranges.operator.end.offset),
+      equals: equalityOperator && source.slice(equalityOperator.start.offset, equalityOperator.end.offset),
+      filename: equalityOperator?.filename,
+      start: equalityOperator?.start
+    }, {
+      bang: "!",
+      equals: "equals",
+      filename: "Main.java",
+      start: {column: 20, line: 4, offset: source.indexOf("equals")}
+    })
+
+    const equalityChunks = new Map([
+      ["php", "=="],
+      ["ruby", "="],
+      ["javascript", "=="],
+      ["typescript", "=="],
+      ["java", ".equals"]
+    ])
+
+    for (const [language, equalityChunk] of equalityChunks) {
+      const artifact = generateArtifact({language, module})
+      const bang = artifact.mapping.spans.find((span) => span.nodeId == record.id && span.role == "operator")
+      const generatedEquality = artifact.mapping.spans.find((span) => span.nodeId == record.id && span.role == "equalityOperator")
+
+      assert.equal(artifact.code.slice(bang.generated.start.offset, bang.generated.end.offset), "!")
+      assert.equal(artifact.code.slice(generatedEquality.generated.start.offset, generatedEquality.generated.end.offset), equalityChunk)
+      assert.equal(bang.mappingKind, "exact")
+      assert.equal(generatedEquality.mappingKind, "exact")
+      assert.equal(bang.origin.kind, "source")
+      assert.equal(generatedEquality.origin.kind, "source")
+      assert.equal(source.slice(bang.origin.location.start.offset, bang.origin.location.end.offset), "!")
+      assert.equal(source.slice(generatedEquality.origin.location.start.offset, generatedEquality.origin.location.end.offset), "equals")
+      assert.equal(originalPositionFor(artifact.mapping, {offset: generatedEquality.generated.start.offset}).location.start.offset,
+        equalityOperator.start.offset)
+    }
   })
 
   it("queries generated ranges by canonical node and symbol identity", async () => {

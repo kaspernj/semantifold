@@ -4,6 +4,7 @@ import PhpParser from "php-parser"
 import {parse as parseComment} from "comment-parser"
 import {missingType, parseFailure, unsupportedSyntax} from "../diagnostic.js"
 import {locationFromOffsets, moduleLocation} from "../semantic/location.js"
+import {withAdaptedOperation} from "../semantic/operators.js"
 import {withParserRanges} from "../semantic/provenance.js"
 import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
 import {requireSourceScalarType} from "./scalars.js"
@@ -15,6 +16,20 @@ const parser = new PhpParser.Engine({
 let cachedTokenSource
 /** @type {{end: number, start: number, text: string}[]} */
 let cachedTokenRanges = []
+const phpBinaryOperations = new Map([
+  ["+", "PhpAdd"],
+  ["-", "Subtract"],
+  ["*", "Multiply"],
+  ["&&", "And"],
+  ["||", "Or"],
+  ["===", "Equal"],
+  ["!==", "NotEqual"],
+  ["<", "LessThan"],
+  ["<=", "LessThanOrEqual"],
+  [">", "GreaterThan"],
+  [">=", "GreaterThanOrEqual"],
+  [".", "StringConcat"]
+])
 
 /**
  * Returns a normalized PHP node location.
@@ -154,22 +169,38 @@ function convertExpression(node, filename, source) {
 
   if (node.kind == "nowdoc") return unsupportedSyntax("php", "nowdoc string", location)
 
+  if (node.kind == "unary") {
+    const unary = /** @type {import("php-parser").Unary} */ (node)
+
+    if (!["!", "-"].includes(unary.type)) return unsupportedSyntax("php", `unary ${unary.type}`, location)
+
+    const semantic = withAdaptedOperation(withParserRanges({
+      kind: "UnaryExpression",
+      location,
+      operand: convertExpression(unary.what, filename, source)
+    }, {
+      operator: tokenLocation(unary.type, unary.loc?.start.offset ?? 0, unary.what.loc?.start.offset ?? unary.loc?.end.offset ?? source.length, filename, source)
+    }), unary.type == "!" ? "Not" : "Negate")
+
+    return /** @type {import("../semantic/types.js").Expression} */ (/** @type {unknown} */ (semantic))
+  }
+
   if (node.kind == "bin") {
     const binary = /** @type {import("php-parser").Bin} */ (node)
+    if (["==", "!="].includes(binary.type)) return unsupportedSyntax("php", `coercive equality ${binary.type}`, location)
+    if (["and", "or"].includes(binary.type)) return unsupportedSyntax("php", `precedence-sensitive boolean ${binary.type}`, location)
+    if (!phpBinaryOperations.has(binary.type)) return unsupportedSyntax("php", `binary ${binary.type}`, location)
 
-    if (![">", "-", "+"].includes(binary.type)) return unsupportedSyntax("php", `binary ${binary.type}`, location)
-
-    const semantic = {
+    const semantic = withAdaptedOperation({
       kind: /** @type {const} */ ("BinaryExpression"),
       left: convertExpression(binary.left, filename, source),
       location,
-      operator: /** @type {">" | "-" | "+"} */ (binary.type),
       right: convertExpression(binary.right, filename, source)
-    }
+    }, /** @type {import("../semantic/operators.js").AdaptedOperation} */ (phpBinaryOperations.get(binary.type)))
 
-    return withParserRanges(semantic, {
+    return /** @type {import("../semantic/types.js").Expression} */ (/** @type {unknown} */ (withParserRanges(semantic, {
       operator: tokenLocation(binary.type, binary.left.loc?.end.offset ?? 0, binary.right.loc?.start.offset ?? source.length, filename, source)
-    })
+    })))
   }
 
   if (node.kind == "call") {

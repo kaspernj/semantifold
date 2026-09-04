@@ -2,6 +2,8 @@
 
 /** @typedef {"php" | "ruby" | "javascript" | "typescript" | "java"} SemanticLanguage */
 /** @typedef {"integer" | "boolean" | "string"} SemanticTypeName */
+/** @typedef {"IntegerNegate" | "BooleanNot"} SemanticUnaryOperation */
+/** @typedef {"IntegerAdd" | "IntegerSubtract" | "IntegerMultiply" | "BooleanAnd" | "BooleanOr" | "IntegerEqual" | "IntegerNotEqual" | "BooleanEqual" | "BooleanNotEqual" | "StringEqual" | "StringNotEqual" | "IntegerLessThan" | "IntegerLessThanOrEqual" | "IntegerGreaterThan" | "IntegerGreaterThanOrEqual" | "StringConcat"} SemanticBinaryOperation */
 /** @typedef {"function" | "parameter" | "local"} SemanticSymbolKind */
 /** @typedef {"declaration" | "read" | "write" | "call"} SemanticSymbolRole */
 
@@ -194,11 +196,22 @@
  */
 
 /**
+ * @typedef UnaryExpression
+ * @property {"UnaryExpression"} kind - Node discriminator.
+ * @property {SemanticUnaryOperation} operation - Closed semantic operation.
+ * @property {Expression} operand - Operand evaluated exactly once.
+ * @property {SemanticTypeName} type - Explicit operation result type.
+ * @property {SourceLocation} location - Source location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
+ */
+
+/**
  * @typedef BinaryExpression
  * @property {"BinaryExpression"} kind - Node discriminator.
- * @property {">" | "-" | "+"} operator - Supported binary operator.
+ * @property {SemanticBinaryOperation} operation - Closed semantic operation.
  * @property {Expression} left - Left operand.
  * @property {Expression} right - Right operand.
+ * @property {SemanticTypeName} type - Explicit operation result type.
  * @property {SourceLocation} location - Source location.
  * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
  */
@@ -212,7 +225,7 @@
  * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
  */
 
-/** @typedef {IdentifierExpression | IntegerLiteral | BooleanLiteral | StringLiteral | BinaryExpression | CallExpression} Expression */
+/** @typedef {IdentifierExpression | IntegerLiteral | BooleanLiteral | StringLiteral | UnaryExpression | BinaryExpression | CallExpression} Expression */
 
 /**
  * @typedef LocalDeclaration
