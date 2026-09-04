@@ -66,8 +66,8 @@ describe("local declarations and assignment", () => {
   it("models typed TypeScript locals and simple assignment", async () => {
     const source = await readFile(new URL("fixtures/locals/program.ts", import.meta.url), "utf8")
     const module = parse({filename: "program.ts", language: "typescript", source})
-    const [preferred, result, branch] = module.functions[0].body
-    const assignment = /** @type {import("../src/semantic/types.js").IfStatement} */ (branch).consequent[0]
+    const [preferred, result, branch] = module.functions[0].body.statements
+    const assignment = /** @type {import("../src/semantic/types.js").IfStatement} */ (branch).consequent.statements[0]
 
     assert.deepEqual(
       JSON.parse(JSON.stringify([preferred, result, assignment], (key, value) =>

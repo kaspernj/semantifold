@@ -393,28 +393,39 @@ function convertLocalStatement(node, comments, visible, filename, source) {
 }
 
 /**
- * Converts a declaration/assignment prefix followed by one Ruby terminal node.
- * @template {import("../semantic/types.js").IfStatement | import("../semantic/types.js").ReturnStatement | import("../semantic/types.js").PrintStatement} Terminal
- * @param {import("@ruby/prism").Node[]} statements - Prism statements.
- * @param {typeof IfNode | typeof ReturnNode | typeof CallNode} terminalClass - Required terminal class.
- * @param {(node: import("@ruby/prism").Node) => Terminal} convertTerminal - Terminal converter.
+ * Converts one exhaustive Prism statement.
+ * @param {import("@ruby/prism").Node} node - Prism statement.
  * @param {import("@ruby/prism/src/deserialize.js").Comment[]} comments - Prism comments.
- * @param {Set<string>} visible - Visible names.
+ * @param {Set<string>} visible - Names visible during adaptation.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
- * @returns {(import("../semantic/types.js").LocalStatement | Terminal)[]} Semantic statements.
+ * @returns {import("../semantic/types.js").Statement} Semantic statement.
  */
-function convertRestrictedSequence(statements, terminalClass, convertTerminal, comments, visible, filename, source) {
-  const terminal = statements.at(-1)
+function convertStatement(node, comments, visible, filename, source) {
+  if (node instanceof ReturnNode) return convertReturn(node, filename, source)
+  if (node instanceof IfNode) return convertIf(node, comments, visible, filename, source)
+  if (node instanceof LocalVariableWriteNode) return convertLocalStatement(node, comments, visible, filename, source)
+  if (node instanceof CallNode) return convertPrint(node, filename, source)
 
-  if (!terminal || !(terminal instanceof terminalClass)) {
-    return unsupportedSyntax("ruby", `statement sequence without ${terminalClass.name}`, terminal ? nodeLocation(terminal, filename, source) : moduleLocation(filename, source))
+  return unsupportedSyntax("ruby", node.constructor.name, nodeLocation(node, filename, source))
+}
+
+/**
+ * Converts one ordered Prism statement list.
+ * @param {StatementsNode | null} node - Prism statements, or an empty source block.
+ * @param {import("@ruby/prism/src/deserialize.js").Comment[]} comments - Prism comments.
+ * @param {Set<string>} visible - Names visible on block entry.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @param {import("../semantic/types.js").SourceLocation} fallbackLocation - Empty block location.
+ * @returns {import("../semantic/types.js").Block} Semantic block.
+ */
+function convertBlock(node, comments, visible, filename, source, fallbackLocation) {
+  return {
+    kind: "Block",
+    location: node ? nodeLocation(node, filename, source) : fallbackLocation,
+    statements: node ? node.body.map((statement) => convertStatement(statement, comments, visible, filename, source)) : []
   }
-
-  return [
-    ...statements.slice(0, -1).map((statement) => convertLocalStatement(statement, comments, visible, filename, source)),
-    convertTerminal(terminal)
-  ]
 }
 
 /**
@@ -459,10 +470,6 @@ function convertType(sourceType, subject, location, typeLocation = location) {
 function convertFunction(node, comments, filename, source) {
   const location = nodeLocation(node, filename, source)
 
-  if (!(node.body instanceof StatementsNode)) {
-    return unsupportedSyntax("ruby", "function body", location)
-  }
-
   if (!node.parameters || node.parameters.optionals.length > 0 || node.parameters.rest || node.parameters.posts.length > 0 ||
     node.parameters.keywords.length > 0 || node.parameters.keywordRest || node.parameters.block ||
     node.parameters.requireds.some((parameter) => !(parameter instanceof RequiredParameterNode))) {
@@ -485,18 +492,10 @@ function convertFunction(node, comments, filename, source) {
     }, {name: parameterLocation})
   })
   const visible = new Set(parameters.map((parameter) => parameter.name))
-  const body = convertRestrictedSequence(
-    node.body.body,
-    IfNode,
-    (statement) => convertIf(/** @type {IfNode} */ (statement), comments, visible, filename, source),
-    comments,
-    visible,
-    filename,
-    source
-  )
+  const body = convertBlock(node.body instanceof StatementsNode ? node.body : null, comments, visible, filename, source, location)
 
   return withParserRanges({
-    body: /** @type {import("../semantic/types.js").FunctionStatement[]} */ (body),
+    body,
     kind: "FunctionDeclaration",
     location,
     name: node.name,
@@ -517,21 +516,34 @@ function convertFunction(node, comments, filename, source) {
 function convertIf(node, comments, visible, filename, source) {
   const location = nodeLocation(node, filename, source)
 
-  if (!node.statements || !(node.subsequent instanceof ElseNode) || !node.subsequent.statements) {
-    return unsupportedSyntax("ruby", "if without else", location)
+  if (!node.ifKeywordLoc || node.ifKeywordLoc.startOffset != node.location.startOffset) {
+    return unsupportedSyntax("ruby", "modifier conditional", node.ifKeywordLoc
+      ? prismLocation(node.ifKeywordLoc, filename, source)
+      : location)
   }
 
   const consequentVisible = new Set(visible)
-  const alternateVisible = new Set(visible)
+  let alternate
+
+  if (node.subsequent) {
+    const alternateVisible = new Set(visible)
+
+    if (node.subsequent instanceof ElseNode) {
+      alternate = convertBlock(node.subsequent.statements, comments, alternateVisible, filename, source,
+        nodeLocation(node.subsequent, filename, source))
+    } else if (node.subsequent instanceof IfNode) {
+      alternate = {
+        kind: /** @type {const} */ ("Block"),
+        location: nodeLocation(node.subsequent, filename, source),
+        statements: [convertIf(node.subsequent, comments, alternateVisible, filename, source)]
+      }
+    } else return unsupportedSyntax("ruby", node.subsequent.constructor.name, nodeLocation(node.subsequent, filename, source))
+  }
 
   return {
-    alternate: /** @type {(import("../semantic/types.js").LocalStatement | import("../semantic/types.js").ReturnStatement)[]} */ (
-      convertRestrictedSequence(node.subsequent.statements.body, ReturnNode, (statement) => convertReturn(statement, filename, source), comments, alternateVisible, filename, source)
-    ),
+    ...(alternate ? {alternate} : {}),
     condition: convertExpression(node.predicate, filename, source),
-    consequent: /** @type {(import("../semantic/types.js").LocalStatement | import("../semantic/types.js").ReturnStatement)[]} */ (
-      convertRestrictedSequence(node.statements.body, ReturnNode, (statement) => convertReturn(statement, filename, source), comments, consequentVisible, filename, source)
-    ),
+    consequent: convertBlock(node.statements, comments, consequentVisible, filename, source, location),
     kind: "IfStatement",
     location
   }
@@ -580,23 +592,28 @@ export function parseRuby({filename, source}) {
   const location = moduleLocation(filename, source)
 
   if (functions.length == 0) return unsupportedSyntax("ruby", "module without a function", location)
-  if (entryNodes.length == 0) return unsupportedSyntax("ruby", "module without an entry point", location)
-
-  const entryStatements = convertRestrictedSequence(
-    entryNodes,
-    CallNode,
-    (statement) => convertPrint(statement, filename, source),
-    result.comments,
-    new Set(),
+  const firstEntry = entryNodes[0]
+  const entryLocation = firstEntry ? locationFromOffsets(
     filename,
-    source
-  )
+    source,
+    utf8ByteOffsetToUtf16Offset(source, firstEntry.location.startOffset),
+    utf8ByteOffsetToUtf16Offset(
+      source,
+      (entryNodes.at(-1)?.location.startOffset ?? 0) + (entryNodes.at(-1)?.location.length ?? 0)
+    )
+  ) : location
+  const entryVisible = new Set()
+  const entryBlock = {
+    kind: /** @type {const} */ ("Block"),
+    location: entryLocation,
+    statements: entryNodes.map((statement) => convertStatement(statement, result.comments, entryVisible, filename, source))
+  }
 
   return {
     entryPoint: {
-      body: /** @type {(import("../semantic/types.js").LocalStatement | import("../semantic/types.js").PrintStatement)[]} */ (entryStatements),
+      body: entryBlock,
       kind: "EntryPoint",
-      location: entryStatements[0].location
+      location: entryLocation
     },
     functions,
     kind: "Module",

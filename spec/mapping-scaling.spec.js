@@ -69,7 +69,7 @@ function moduleWithFunctions(template, count) {
     declaration.name = `function${index}`
     module.functions.push(declaration)
   }
-  const print = /** @type {import("../src/semantic/types.js").PrintStatement} */ (module.entryPoint.body[0])
+  const print = /** @type {import("../src/semantic/types.js").PrintStatement} */ (module.entryPoint.body.statements[0])
   const call = /** @type {import("../src/semantic/types.js").CallExpression} */ (print.expression)
 
   call.callee = "function0"

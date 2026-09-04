@@ -47,7 +47,7 @@ export function validateBackendTypes(module, language) {
 }
 
 /**
- * Checks the deliberately restricted task-002 statement layouts.
+ * Checks parser-authored block and statement layouts before semantic validation.
  * @param {import("./types.js").SemanticModule} module - Semantic module.
  * @param {(detail: string, location: import("./types.js").SourceLocation) => never} fail - Shape failure.
  * @returns {void}
@@ -58,34 +58,31 @@ function validateModuleShape(module, fail) {
       fail("function parameter count other than two", functionDeclaration.location)
     }
 
-    validateTerminalSequence(functionDeclaration.body, "IfStatement", "function body", fail)
-    const branch = /** @type {import("./types.js").IfStatement} */ (functionDeclaration.body.at(-1))
-
-    validateTerminalSequence(branch.consequent, "ReturnStatement", "if consequent", fail)
-    validateTerminalSequence(branch.alternate, "ReturnStatement", "if alternate", fail)
+    validateBlockShape(functionDeclaration.body, "function body", fail)
   }
 
-  validateTerminalSequence(module.entryPoint.body, "PrintStatement", "entry point", fail)
+  validateBlockShape(module.entryPoint.body, "entry point", fail)
 }
 
 /**
- * Requires a declaration/assignment prefix followed by one exact terminal statement.
- * @param {import("./types.js").FunctionStatement[] | (import("./types.js").LocalStatement | import("./types.js").PrintStatement)[]} statements - Statements.
- * @param {"IfStatement" | "ReturnStatement" | "PrintStatement"} terminalKind - Required terminal kind.
+ * Checks one recursively nested semantic block produced by a frontend.
+ * @param {import("./types.js").Block} block - Semantic block.
  * @param {string} detail - Diagnostic detail.
  * @param {(detail: string, location: import("./types.js").SourceLocation) => never} fail - Shape failure.
  * @returns {void}
  */
-function validateTerminalSequence(statements, terminalKind, detail, fail) {
-  const terminal = statements.at(-1)
-
-  if (!terminal || terminal.kind != terminalKind) {
-    fail(`${detail} without terminal ${terminalKind}`, terminal?.location ?? /** @type {never} */ (undefined))
+function validateBlockShape(block, detail, fail) {
+  if (!block || block.kind != "Block" || !Array.isArray(block.statements)) {
+    fail(`${detail} without Block`, block?.location ?? /** @type {never} */ (undefined))
   }
 
-  for (const statement of statements.slice(0, -1)) {
-    if (statement.kind != "LocalDeclaration" && statement.kind != "AssignmentStatement") {
+  for (const statement of block.statements) {
+    if (!["AssignmentStatement", "IfStatement", "LocalDeclaration", "PrintStatement", "ReturnStatement"].includes(statement.kind)) {
       fail(`${detail} statement ${statement.kind}`, statement.location)
+    }
+    if (statement.kind == "IfStatement") {
+      validateBlockShape(statement.consequent, "if consequent", fail)
+      if (statement.alternate) validateBlockShape(statement.alternate, "if alternate", fail)
     }
   }
 }
@@ -112,15 +109,13 @@ function validateModuleTypes(module, fail, normalizeOperations) {
 
   const callableNames = new Set(functions.keys())
 
-  const entryScope = createScope(undefined, module.entryPoint.body, callableNames)
-  const terminal = validateLocalPrefix(module.entryPoint.body, entryScope, functions, fail, normalizeOperations)
+  const entryScope = createScope(undefined, module.entryPoint.body.statements, callableNames)
 
-  if (terminal.kind != "PrintStatement") fail("UNSUPPORTED_STATEMENT", terminal.kind, terminal.location)
-  inferExpressionType(terminal.expression, entryScope, functions, fail, normalizeOperations)
+  validateBlock(module.entryPoint.body, entryScope, undefined, functions, fail, normalizeOperations)
 }
 
 /**
- * Validates one function and its two existing return branches.
+ * Validates one non-void function and its complete control flow.
  * @param {import("./types.js").FunctionDeclaration} declaration - Function declaration.
  * @param {Map<string, import("./types.js").FunctionDeclaration>} functions - Function signatures.
  * @param {SemanticFail} fail - Diagnostic callback.
@@ -128,7 +123,7 @@ function validateModuleTypes(module, fail, normalizeOperations) {
  * @returns {void}
  */
 function validateFunction(declaration, functions, fail, normalizeOperations) {
-  const scope = createScope(undefined, declaration.body, new Set(functions.keys()))
+  const scope = createScope(undefined, declaration.body.statements, new Set(functions.keys()))
 
   for (const parameter of declaration.parameters) {
     const type = validateTypeReference(parameter.type, parameter.location, fail)
@@ -137,41 +132,89 @@ function validateFunction(declaration, functions, fail, normalizeOperations) {
   }
 
   const returnType = validateTypeReference(declaration.returnType, declaration.location, fail)
-  const terminal = validateLocalPrefix(declaration.body, scope, functions, fail, normalizeOperations)
+  const returns = validateBlock(declaration.body, scope, returnType, functions, fail, normalizeOperations)
 
-  if (terminal.kind != "IfStatement") fail("UNSUPPORTED_STATEMENT", terminal.kind, terminal.location)
-
-  const conditionType = inferExpressionType(terminal.condition, scope, functions, fail, normalizeOperations)
-
-  if (conditionType != "boolean") {
-    fail("NON_BOOLEAN_CONDITION", `If condition type ${conditionType}; expected boolean.`, terminal.condition.location)
-  }
-
-  validateReturnBranch(terminal.consequent, scope, returnType, functions, fail, normalizeOperations)
-  validateReturnBranch(terminal.alternate, scope, returnType, functions, fail, normalizeOperations)
+  if (!returns) fail("MISSING_RETURN", `Function '${declaration.name}' does not return on every reachable path.`, declaration.location)
 }
 
 /**
- * Validates one restricted branch prefix and terminal return.
- * @param {(import("./types.js").LocalStatement | import("./types.js").ReturnStatement)[]} statements - Branch statements.
- * @param {Scope} parent - Enclosing scope.
- * @param {import("./types.js").SemanticTypeName} returnType - Function return type.
+ * Validates one ordered block and reports whether every path returns.
+ * @param {import("./types.js").Block} block - Semantic block.
+ * @param {Scope} scope - Scope belonging to this block.
+ * @param {import("./types.js").SemanticTypeName | undefined} returnType - Function return type, absent for entry points.
  * @param {Map<string, import("./types.js").FunctionDeclaration>} functions - Function signatures.
  * @param {SemanticFail} fail - Diagnostic callback.
  * @param {boolean} normalizeOperations - Whether to replace transient frontend operation intent.
- * @returns {void}
+ * @returns {boolean} Whether every path through the block returns.
  */
-function validateReturnBranch(statements, parent, returnType, functions, fail, normalizeOperations) {
-  const scope = createScope(parent, statements)
-  const terminal = validateLocalPrefix(statements, scope, functions, fail, normalizeOperations)
+function validateBlock(block, scope, returnType, functions, fail, normalizeOperations) {
+  let alwaysReturns = false
 
-  if (terminal.kind != "ReturnStatement") fail("UNSUPPORTED_STATEMENT", terminal.kind, terminal.location)
+  for (const statement of block.statements) {
+    if (alwaysReturns) fail("UNREACHABLE_STATEMENT", "Statement is unreachable.", statement.location)
 
-  const actualType = inferExpressionType(terminal.expression, scope, functions, fail, normalizeOperations)
+    if (statement.kind == "LocalDeclaration") {
+      const declaredType = validateTypeReference(statement.type, statement.location, fail)
+      const initializerType = inferExpressionType(statement.initializer, scope, functions, fail, normalizeOperations)
 
-  if (actualType != returnType) {
-    fail("TYPE_MISMATCH", `Return type ${actualType}; expected ${returnType}.`, terminal.expression.location)
+      scope.pending.delete(statement.name)
+      if (initializerType != declaredType) {
+        fail("TYPE_MISMATCH", `Initializer type ${initializerType}; expected ${declaredType}.`, statement.initializer.location)
+      }
+      declareBinding(statement.name, {mutable: statement.mutable, type: declaredType}, statement.location, scope, fail)
+      continue
+    }
+    if (statement.kind == "AssignmentStatement") {
+      const expressionType = inferExpressionType(statement.expression, scope, functions, fail, normalizeOperations)
+      const binding = resolveBinding(statement.target.name, statement.target.location, scope, fail)
+
+      if (!binding.mutable) {
+        fail("IMMUTABLE_ASSIGNMENT", `Cannot assign to immutable binding '${statement.target.name}'.`, statement.target.location)
+      }
+      if (expressionType != binding.type) {
+        fail("TYPE_MISMATCH", `Assignment type ${expressionType}; expected ${binding.type}.`, statement.expression.location)
+      }
+      continue
+    }
+    if (statement.kind == "PrintStatement") {
+      inferExpressionType(statement.expression, scope, functions, fail, normalizeOperations)
+      continue
+    }
+    if (statement.kind == "ReturnStatement") {
+      if (!returnType) fail("ILLEGAL_RETURN_CONTEXT", "Return statement outside a function.", statement.location)
+      const actualType = inferExpressionType(statement.expression, scope, functions, fail, normalizeOperations)
+
+      if (actualType != returnType) {
+        fail("TYPE_MISMATCH", `Return type ${actualType}; expected ${returnType}.`, statement.expression.location)
+      }
+      alwaysReturns = true
+      continue
+    }
+    if (statement.kind == "IfStatement") {
+      const conditionType = inferExpressionType(statement.condition, scope, functions, fail, normalizeOperations)
+
+      if (conditionType != "boolean") {
+        fail("NON_BOOLEAN_CONDITION", `If condition type ${conditionType}; expected boolean.`, statement.condition.location)
+      }
+      const consequentScope = createScope(scope, statement.consequent.statements)
+      const consequentReturns = validateBlock(statement.consequent, consequentScope, returnType, functions, fail, normalizeOperations)
+      let alternateReturns = false
+
+      if (statement.alternate) {
+        const alternateScope = createScope(scope, statement.alternate.statements)
+
+        alternateReturns = validateBlock(statement.alternate, alternateScope, returnType, functions, fail, normalizeOperations)
+      }
+      alwaysReturns = consequentReturns && alternateReturns
+      continue
+    }
+
+    const unexpected = /** @type {{kind: string, location: import("./types.js").SourceLocation}} */ (statement)
+
+    fail("UNSUPPORTED_STATEMENT", unexpected.kind, unexpected.location)
   }
+
+  return alwaysReturns
 }
 
 /**
@@ -186,46 +229,6 @@ function createScope(parent, statements, reservedNames = new Set()) {
     .map((statement) => /** @type {{name: string}} */ (statement).name))
 
   return {bindings: new Map(), parent, pending, usedNames: parent?.usedNames ?? new Set(reservedNames)}
-}
-
-/**
- * Validates local declarations and assignments, returning the terminal statement.
- * @template {{kind: string, location: import("./types.js").SourceLocation}} Statement
- * @param {Statement[]} statements - Restricted statement sequence.
- * @param {Scope} scope - Current scope.
- * @param {Map<string, import("./types.js").FunctionDeclaration>} functions - Function signatures.
- * @param {SemanticFail} fail - Diagnostic callback.
- * @param {boolean} normalizeOperations - Whether to replace transient frontend operation intent.
- * @returns {Statement} Terminal statement.
- */
-function validateLocalPrefix(statements, scope, functions, fail, normalizeOperations) {
-  for (const statement of statements.slice(0, -1)) {
-    if (statement.kind == "LocalDeclaration") {
-      const declaration = /** @type {import("./types.js").LocalDeclaration} */ (/** @type {unknown} */ (statement))
-      const declaredType = validateTypeReference(declaration.type, declaration.location, fail)
-      const initializerType = inferExpressionType(declaration.initializer, scope, functions, fail, normalizeOperations)
-
-      scope.pending.delete(declaration.name)
-      if (initializerType != declaredType) {
-        fail("TYPE_MISMATCH", `Initializer type ${initializerType}; expected ${declaredType}.`, declaration.initializer.location)
-      }
-      declareBinding(declaration.name, {mutable: declaration.mutable, type: declaredType}, declaration.location, scope, fail)
-      continue
-    }
-
-    const assignment = /** @type {import("./types.js").AssignmentStatement} */ (/** @type {unknown} */ (statement))
-    const expressionType = inferExpressionType(assignment.expression, scope, functions, fail, normalizeOperations)
-    const binding = resolveBinding(assignment.target.name, assignment.target.location, scope, fail)
-
-    if (!binding.mutable) {
-      fail("IMMUTABLE_ASSIGNMENT", `Cannot assign to immutable binding '${assignment.target.name}'.`, assignment.target.location)
-    }
-    if (expressionType != binding.type) {
-      fail("TYPE_MISMATCH", `Assignment type ${expressionType}; expected ${binding.type}.`, assignment.expression.location)
-    }
-  }
-
-  return statements.at(-1) ?? fail("UNSUPPORTED_STATEMENT", "Empty statement sequence.", /** @type {never} */ (undefined))
 }
 
 /**

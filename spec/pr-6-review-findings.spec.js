@@ -67,12 +67,12 @@ describe("PR 6 automatic review findings", () => {
 
   it("maps a shared call-argument expression by its distinct occurrence paths in every backend", () => {
     const module = parse({filename: "program.ts", language: "typescript", source})
-    const print = /** @type {import("../src/semantic/types.js").PrintStatement} */ (module.entryPoint.body[0])
+    const print = /** @type {import("../src/semantic/types.js").PrintStatement} */ (module.entryPoint.body.statements[0])
     const call = /** @type {import("../src/semantic/types.js").CallExpression} */ (print.expression)
     const sharedLiteral = call.arguments[0]
     const expectedPaths = [
-      "/entryPoint/body/0/expression/arguments/0",
-      "/entryPoint/body/0/expression/arguments/1"
+      "/entryPoint/body/statements/0/expression/arguments/0",
+      "/entryPoint/body/statements/0/expression/arguments/1"
     ]
 
     call.arguments[1] = sharedLiteral

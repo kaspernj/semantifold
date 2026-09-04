@@ -48,11 +48,11 @@ describe("semantic source provenance", () => {
       assert.equal(declarationSymbol.declarationNodeId, declarationProvenance.id)
       assert.equal(declarationSymbol.kind, "function")
 
-      const entryAssignment = /** @type {import("../src/semantic/types.js").AssignmentStatement} */ (first.entryPoint.body[1])
+      const entryAssignment = /** @type {import("../src/semantic/types.js").AssignmentStatement} */ (first.entryPoint.body.statements[1])
       const call = /** @type {import("../src/semantic/types.js").CallExpression} */ (entryAssignment.expression)
       const callProvenance = getNodeProvenance(first, call)
       const parameter = declaration.parameters[0]
-      const condition = /** @type {import("../src/semantic/types.js").IfStatement} */ (declaration.body.at(-1)).condition
+      const condition = /** @type {import("../src/semantic/types.js").IfStatement} */ (declaration.body.statements.at(-1)).condition
 
       assert.equal(callProvenance.symbolId, declarationProvenance.symbolId)
       assert.equal(getNodeProvenance(first, condition).symbolId, getNodeProvenance(first, parameter).symbolId)
@@ -78,10 +78,10 @@ describe("semantic source provenance", () => {
       const source = await readFile(new URL(`fixtures/locals/${filename}`, import.meta.url), "utf8")
       const module = parse({filename, language, source})
       const declaration = module.functions[0]
-      const local = /** @type {import("../src/semantic/types.js").LocalDeclaration} */ (declaration.body[0])
-      const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (declaration.body.at(-1))
-      const assignment = /** @type {import("../src/semantic/types.js").AssignmentStatement} */ (branch.consequent[0])
-      const entryAssignment = /** @type {import("../src/semantic/types.js").AssignmentStatement} */ (module.entryPoint.body[1])
+      const local = /** @type {import("../src/semantic/types.js").LocalDeclaration} */ (declaration.body.statements[0])
+      const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (declaration.body.statements.at(-1))
+      const assignment = /** @type {import("../src/semantic/types.js").AssignmentStatement} */ (branch.consequent.statements[0])
+      const entryAssignment = /** @type {import("../src/semantic/types.js").AssignmentStatement} */ (module.entryPoint.body.statements[1])
       const call = /** @type {import("../src/semantic/types.js").CallExpression} */ (entryAssignment.expression)
 
       assert.equal(sourceText(source, getNodeProvenance(module, declaration).ranges.name), declaration.name)
@@ -96,7 +96,7 @@ describe("semantic source provenance", () => {
     for (const [language, filename] of fixtures) {
       const source = await readFile(new URL(`fixtures/${filename}`, import.meta.url), "utf8")
       const module = parse({filename, language, source})
-      const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (module.functions[0].body.at(-1))
+      const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (module.functions[0].body.statements.at(-1))
       const binary = /** @type {import("../src/semantic/types.js").BinaryExpression} */ (branch.condition)
 
       assert.equal(sourceText(source, getNodeProvenance(module, binary).ranges.operator), ">")

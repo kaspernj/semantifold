@@ -10,6 +10,8 @@ import {emitScalarType} from "./scalars.js"
  * @returns {void}
  */
 export function generateTypeScript(module, writer) {
+  const canonicalizeZero = requiresCanonicalZeroRendering(module)
+
   module.functions.forEach((declaration, functionIndex) => {
     if (functionIndex > 0) writer.synthetic("\n\n", "declaration separator", [declaration])
 
@@ -42,93 +44,82 @@ export function generateTypeScript(module, writer) {
     writer.mapped("{", {mappingKind: "anchor", node: declaration})
     writer.synthetic("\n", "line break", [declaration])
 
-    const branch = /** @type {import("../semantic/types.js").IfStatement} */ (declaration.body.at(-1))
-    const branchPath = `/functions/${functionIndex}/body/${declaration.body.length - 1}`
-
-    for (const [statementIndex, statement] of /** @type {import("../semantic/types.js").LocalStatement[]} */ (
-      declaration.body.slice(0, -1)).entries()) {
-      const statementPath = `/functions/${functionIndex}/body/${statementIndex}`
-
-      emitLocal(writer, statement, "  ", statementPath)
-      writer.synthetic("\n", "line break", [statement], [statementPath])
-    }
-
-    writer.synthetic("  ", "indentation", [branch], [branchPath])
-    writer.mapped("if", {mappingKind: "anchor", node: branch, path: branchPath})
-    writer.synthetic(" ", "conditional spacing", [branch], [branchPath])
-    writer.mapped("(", {mappingKind: "anchor", node: branch, path: branchPath})
-    emitExpression(writer, branch.condition, `${branchPath}/condition`, "typescript", identity)
-    writer.mapped(")", {mappingKind: "anchor", node: branch, path: branchPath})
-    writer.synthetic(" ", "conditional spacing", [branch], [branchPath])
-    writer.mapped("{", {mappingKind: "anchor", node: branch, path: branchPath})
-    writer.synthetic("\n", "line break", [branch], [branchPath])
-    emitBranch(writer, branch.consequent, branch, "    ", branchPath, `${branchPath}/consequent`)
-    writer.synthetic("  ", "indentation", [branch], [branchPath])
-    writer.mapped("}", {mappingKind: "anchor", node: branch, path: branchPath})
-    writer.synthetic(" ", "conditional spacing", [branch], [branchPath])
-    writer.mapped("else", {mappingKind: "anchor", node: branch, path: branchPath})
-    writer.synthetic(" ", "conditional spacing", [branch], [branchPath])
-    writer.mapped("{", {mappingKind: "anchor", node: branch, path: branchPath})
-    writer.synthetic("\n", "line break", [branch], [branchPath])
-    emitBranch(writer, branch.alternate, branch, "    ", branchPath, `${branchPath}/alternate`)
-    writer.synthetic("  ", "indentation", [branch], [branchPath])
-    writer.mapped("}", {mappingKind: "anchor", node: branch, path: branchPath})
-    writer.synthetic("\n", "line break", [branch], [branchPath])
+    emitBlock(writer, declaration.body, "  ", `/functions/${functionIndex}/body`, canonicalizeZero)
     writer.mapped("}", {mappingKind: "anchor", node: declaration})
   })
 
   writer.synthetic("\n\n", "entry-point separator", [module.entryPoint])
-  const statements = module.entryPoint.body
-
-  for (const [statementIndex, statement] of /** @type {import("../semantic/types.js").LocalStatement[]} */ (
-    statements.slice(0, -1)).entries()) {
-    const statementPath = `/entryPoint/body/${statementIndex}`
-
-    emitLocal(writer, statement, "", statementPath)
-    writer.synthetic("\n", "line break", [statement], [statementPath])
-  }
-
-  const print = /** @type {import("../semantic/types.js").PrintStatement} */ (statements.at(-1))
-  const printPath = `/entryPoint/body/${statements.length - 1}`
-
-  writer.mapped("console.log", {mappingKind: "anchor", node: print, path: printPath})
-  writer.mapped("(", {mappingKind: "anchor", node: print, path: printPath})
-  const canonicalizeZero = requiresCanonicalZeroRendering(module)
-
-  if (canonicalizeZero) writer.synthetic("(", "canonical integer output", [print], [printPath])
-  emitExpression(writer, print.expression, `${printPath}/expression`, "typescript", identity)
-  if (canonicalizeZero) writer.synthetic(").toString()", "canonical integer output", [print], [printPath])
-  writer.mapped(")", {mappingKind: "anchor", node: print, path: printPath})
-  writer.synthetic("\n", "final line break", [module.entryPoint])
+  emitBlock(writer, module.entryPoint.body, "", "/entryPoint/body", canonicalizeZero)
 }
 
 /**
- * Emits one branch ending in a return.
+ * Emits one ordered TypeScript block body.
  * @param {import("./writer.js").SourceWriter} writer - Source-aware writer.
- * @param {(import("../semantic/types.js").LocalStatement | import("../semantic/types.js").ReturnStatement)[]} statements - Branch statements.
- * @param {import("../semantic/types.js").IfStatement} branch - Owning branch.
+ * @param {import("../semantic/types.js").Block} block - Semantic block.
  * @param {string} indent - Indentation.
- * @param {string} branchPath - Exact JSON Pointer for the owning branch occurrence.
- * @param {string} statementsPath - JSON Pointer for the branch statement sequence.
+ * @param {string} path - Exact block path.
+ * @param {boolean} canonicalizeZero - Whether printed integer zero must be canonicalized.
  * @returns {void}
  */
-function emitBranch(writer, statements, branch, indent, branchPath, statementsPath) {
-  for (const [statementIndex, statement] of /** @type {import("../semantic/types.js").LocalStatement[]} */ (
-    statements.slice(0, -1)).entries()) {
-    const statementPath = `${statementsPath}/${statementIndex}`
+function emitBlock(writer, block, indent, path, canonicalizeZero) {
+  block.statements.forEach((statement, index) => emitStatement(writer, statement, indent, `${path}/statements/${index}`, canonicalizeZero))
+}
 
-    emitLocal(writer, statement, indent, statementPath)
-    writer.synthetic("\n", "line break", [statement], [statementPath])
+/**
+ * Emits one TypeScript statement.
+ * @param {import("./writer.js").SourceWriter} writer - Source-aware writer.
+ * @param {import("../semantic/types.js").Statement} statement - Semantic statement.
+ * @param {string} indent - Indentation.
+ * @param {string} path - Exact statement path.
+ * @param {boolean} canonicalizeZero - Whether printed integer zero must be canonicalized.
+ * @returns {void}
+ */
+function emitStatement(writer, statement, indent, path, canonicalizeZero) {
+  if (statement.kind == "LocalDeclaration" || statement.kind == "AssignmentStatement") {
+    emitLocal(writer, statement, indent, path)
+    writer.synthetic("\n", "line break", [statement], [path])
+    return
   }
-
-  const returned = /** @type {import("../semantic/types.js").ReturnStatement} */ (statements.at(-1))
-  const returnedPath = `${statementsPath}/${statements.length - 1}`
-
-  writer.synthetic(indent, "indentation", [branch], [branchPath])
-  writer.mapped("return", {mappingKind: "anchor", node: returned, path: returnedPath})
-  writer.synthetic(" ", "return spacing", [returned], [returnedPath])
-  emitExpression(writer, returned.expression, `${returnedPath}/expression`, "typescript", identity)
-  writer.synthetic("\n", "line break", [returned], [returnedPath])
+  writer.synthetic(indent, "indentation", [statement], [path])
+  if (statement.kind == "ReturnStatement") {
+    writer.mapped("return", {mappingKind: "anchor", node: statement, path})
+    writer.synthetic(" ", "return spacing", [statement], [path])
+    emitExpression(writer, statement.expression, `${path}/expression`, "typescript", identity)
+    writer.synthetic("\n", "line break", [statement], [path])
+    return
+  }
+  if (statement.kind == "PrintStatement") {
+    writer.mapped("console.log", {mappingKind: "anchor", node: statement, path})
+    writer.mapped("(", {mappingKind: "anchor", node: statement, path})
+    if (canonicalizeZero) writer.synthetic("(", "canonical integer output", [statement], [path])
+    emitExpression(writer, statement.expression, `${path}/expression`, "typescript", identity)
+    if (canonicalizeZero) writer.synthetic(").toString()", "canonical integer output", [statement], [path])
+    writer.mapped(")", {mappingKind: "anchor", node: statement, path})
+    writer.synthetic("\n", "line break", [statement], [path])
+    return
+  }
+  writer.mapped("if", {mappingKind: "anchor", node: statement, path})
+  writer.synthetic(" ", "conditional spacing", [statement], [path])
+  writer.mapped("(", {mappingKind: "anchor", node: statement, path})
+  emitExpression(writer, statement.condition, `${path}/condition`, "typescript", identity)
+  writer.mapped(")", {mappingKind: "anchor", node: statement, path})
+  writer.synthetic(" ", "conditional spacing", [statement], [path])
+  writer.mapped("{", {mappingKind: "anchor", node: statement.consequent, path: `${path}/consequent`})
+  writer.synthetic("\n", "line break", [statement], [path])
+  emitBlock(writer, statement.consequent, `${indent}  `, `${path}/consequent`, canonicalizeZero)
+  writer.synthetic(indent, "indentation", [statement], [path])
+  writer.mapped("}", {mappingKind: "anchor", node: statement.consequent, path: `${path}/consequent`})
+  if (statement.alternate) {
+    writer.synthetic(" ", "conditional spacing", [statement], [path])
+    writer.mapped("else", {mappingKind: "anchor", node: statement, path})
+    writer.synthetic(" ", "conditional spacing", [statement], [path])
+    writer.mapped("{", {mappingKind: "anchor", node: statement.alternate, path: `${path}/alternate`})
+    writer.synthetic("\n", "line break", [statement], [path])
+    emitBlock(writer, statement.alternate, `${indent}  `, `${path}/alternate`, canonicalizeZero)
+    writer.synthetic(indent, "indentation", [statement], [path])
+    writer.mapped("}", {mappingKind: "anchor", node: statement.alternate, path: `${path}/alternate`})
+  }
+  writer.synthetic("\n", "line break", [statement], [path])
 }
 
 /**

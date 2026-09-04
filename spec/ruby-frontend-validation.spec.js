@@ -38,7 +38,7 @@ puts second(true, "no")
 `
     const module = parse({filename: "multibyte-metadata.rb", language: "ruby", source})
     const second = module.functions[1]
-    const preferred = /** @type {import("../src/semantic/types.js").LocalDeclaration} */ (second.body[0])
+    const preferred = /** @type {import("../src/semantic/types.js").LocalDeclaration} */ (second.body.statements[0])
 
     expect({
       functionLine: second.location.start.line,
