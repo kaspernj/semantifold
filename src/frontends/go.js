@@ -712,7 +712,7 @@ export function parseGo({filename, source}) {
 
   for (const comment of comments) {
     if (/^\/\/go:/u.test(comment.text) || /^\/\/ \+build(?:\s|$)/u.test(comment.text) ||
-      /^\/\/line(?:\s|$)/u.test(comment.text)) {
+      /^\/\/line(?:\s|$)/u.test(comment.text) || /^\/\*line(?:\s|$)/u.test(comment.text)) {
       return unsupportedSyntax("go", "source directive", nodeLocation(comment, filename, source))
     }
     if (comment.text.includes("@semantifold") && comment.text != immutableMarker) {

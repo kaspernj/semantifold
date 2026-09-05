@@ -135,6 +135,11 @@ func main() {
     expect(parseGo({filename: "main.go", source: operators}).functions.length).toEqual(5)
     expect(parseGo({filename: "main.go", source: statements}).entryPoint.body.statements.length).toEqual(5)
     const base = program("func value(left int64, right int64) int64 {\n\tvar result int64 = left\n\treturn result\n}")
+    const blockLineDirective = "/*line remapped.go:10*/\n" + base
+
+    assert.throws(() => parse({filename: "main.go", language: "go", source: blockLineDirective}), (error) =>
+      Boolean(error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_SYNTAX" &&
+        error.language == "go" && error.location))
 
     for (const source of [
       "//go:build linux\n" + base,
