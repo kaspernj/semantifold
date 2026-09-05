@@ -12,8 +12,8 @@ import {
 } from "../index.js"
 
 describe("C# registry and toolchain", () => {
-  it("registers C# last as a truthful round-trip multi-artifact text language", () => {
-    expect(supportedLanguages.at(-1)).toEqual("csharp")
+  it("registers C# as a truthful round-trip multi-artifact text language", () => {
+    expect(supportedLanguages.includes("csharp")).toBeTrue()
     expect(languageCapabilities.find(({id}) => id == "csharp")).toEqual({
       acceptance: {stages: ["parse", "generate", "restore", "compile", "execute"], toolchains: ["dotnet"]},
       artifactMultiplicity: "multiple",

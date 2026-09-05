@@ -134,11 +134,12 @@ describe("repository delivery contracts", () => {
     assert.ok(instructions.some((instruction) => instruction.getKeyword() == "WORKDIR" && instruction.getArgumentsContent() == "/home/dev/semantifold"))
   })
 
-  it("installs the four native provider CLIs globally before probing them as the development user", async () => {
-    const [source, packageJson, packageLock] = await Promise.all([
+  it("installs and documents the four native provider CLIs before probing them as the development user", async () => {
+    const [source, packageJson, packageLock, repositoryInstructions] = await Promise.all([
       readFile(new URL("../Dockerfile", import.meta.url), "utf8"),
       readFile(new URL("../package.json", import.meta.url), "utf8").then(JSON.parse),
-      readFile(new URL("../package-lock.json", import.meta.url), "utf8").then(JSON.parse)
+      readFile(new URL("../package-lock.json", import.meta.url), "utf8").then(JSON.parse),
+      readFile(new URL("../AGENTS.md", import.meta.url), "utf8")
     ])
     const instructions = DockerfileParser.parse(source).getInstructions()
     const runs = instructions.map((instruction, index) => ({
@@ -189,6 +190,11 @@ describe("repository delivery contracts", () => {
     assert.doesNotMatch(source, /@latest/u)
     assert.doesNotMatch(source, /^ARG\s+.*(?:OPENCODE|CODEX|CLAUDE|KIMI|PROVIDER).*VERSION/imu)
     assert.doesNotMatch(source, /NODE_AUTH_TOKEN|NPM_TOKEN|npm_config_(?:_auth|token)|npm (?:adduser|login)|_authToken/u)
+    assert.match(repositoryInstructions, /image remains source-independent: do not add project `COPY`, project dependency installation, or orchestration coupling/u)
+    assert.match(repositoryInstructions, /infrastructure tooling rather than project dependencies/u)
+    assert.match(repositoryInstructions, /four native provider CLI baselines globally from the bare npm package specs/u)
+    assert.match(repositoryInstructions, /Provider versions and authentication remain external/u)
+    assert.doesNotMatch(repositoryInstructions, /do not add[^.\n]*provider CLIs/iu)
     const projectDependencies = {
       ...packageJson.dependencies,
       ...packageJson.devDependencies,
@@ -197,6 +203,7 @@ describe("repository delivery contracts", () => {
     }
 
     for (const packageName of providerPackages) {
+      assert.ok(repositoryInstructions.includes(`\`${packageName}\``))
       assert.equal(Object.hasOwn(projectDependencies, packageName), false)
       assert.equal(Object.hasOwn(packageLock.packages, `node_modules/${packageName}`), false)
     }

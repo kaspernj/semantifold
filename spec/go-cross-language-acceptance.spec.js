@@ -211,11 +211,13 @@ async function validateGoFormat(set, directory, environment) {
   const before = await sourceHashes(directory)
   const go = await discoverCanonicalToolchain("go", {environment})
   const goRoot = (await executeFile(go.executable, ["env", "GOROOT"], {encoding: "utf8", env: environment})).stdout.trim()
+  const configuredGofmt = path.join(path.dirname(environment.SEMANTIFOLD_GO ?? go.executable), "gofmt")
   const gofmt = path.join(goRoot, "bin", "gofmt")
 
+  expect((await stat(configuredGofmt)).isFile()).toBeTrue()
   expect((await stat(gofmt)).isFile()).toBeTrue()
-  expect(await realpath(gofmt)).toEqual(await realpath("/usr/bin/gofmt"))
-  const formatted = await executeFile(gofmt, ["-d", "main.go"], {
+  expect(await realpath(configuredGofmt)).toEqual(await realpath(gofmt))
+  const formatted = await executeFile(configuredGofmt, ["-d", "main.go"], {
     cwd: directory, encoding: "utf8", env: environment, timeout: 30_000
   })
 
@@ -248,6 +250,7 @@ async function goEnvironment(root) {
     GOWORK: "off",
     LC_ALL: "C.UTF-8",
     PATH: process.env.PATH ?? "",
+    ...(process.env.SEMANTIFOLD_GO === undefined ? {} : {SEMANTIFOLD_GO: process.env.SEMANTIFOLD_GO}),
     TZ: "UTC"
   }
 }

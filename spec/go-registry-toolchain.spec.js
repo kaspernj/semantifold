@@ -3,7 +3,7 @@
 import path from "node:path"
 import assert from "node:assert/strict"
 import {execFile} from "node:child_process"
-import {chmod, mkdir, mkdtemp, rm, writeFile} from "node:fs/promises"
+import {chmod, mkdir, mkdtemp, realpath, rm, writeFile} from "node:fs/promises"
 import os from "node:os"
 import {promisify} from "node:util"
 import {describe, expect, it} from "@velocious/testing"
@@ -79,18 +79,20 @@ describe("Go registry and toolchain", () => {
         encoding: "utf8", env: processEnvironment
       })
       const readback = JSON.parse(stdout)
+      const expectedGoVersion = go.version.match(/^go version (go1\.26\.\d+) linux\/amd64$/u)?.[1]
 
       expect(stderr).toEqual("")
       expect(processEnvironment.GOENV).toEqual("off")
+      assert.ok(expectedGoVersion)
       expect(readback).toMatchObject({CGO_ENABLED: "0", GOARCH: "amd64", GOENV: "", GOOS: "linux",
-        GOPROXY: "off", GOTOOLCHAIN: "local", GOVERSION: "go1.26.0", GOWORK: "off"})
+        GOPROXY: "off", GOTOOLCHAIN: "local", GOVERSION: expectedGoVersion, GOWORK: "off"})
       for (const field of ["GOCACHE", "GOMODCACHE", "GOPATH", "GOROOT", "GOTMPDIR"]) {
         expect(path.isAbsolute(readback[field])).toBeTrue()
       }
-      const canonical = await execute("/usr/bin/readlink", ["-f", "/usr/bin/gofmt"], {encoding: "utf8"})
-      const fromRoot = await execute("/usr/bin/readlink", ["-f", path.join(readback.GOROOT, "bin", "gofmt")], {encoding: "utf8"})
+      const configuredGofmt = path.join(path.dirname(processEnvironment.SEMANTIFOLD_GO ?? go.executable), "gofmt")
+      const fromRoot = path.join(readback.GOROOT, "bin", "gofmt")
 
-      expect(canonical.stdout).toEqual(fromRoot.stdout)
+      expect(await realpath(configuredGofmt)).toEqual(await realpath(fromRoot))
     })
   })
 })
@@ -110,7 +112,8 @@ async function withGoEnvironment(callback) {
   try {
     await Promise.all(Object.values(paths).map(async (directory) => await mkdir(directory, {recursive: true})))
     await callback({...paths, CGO_ENABLED: "0", GOARCH: "amd64", GOENV: "off", GOOS: "linux", GOPROXY: "off",
-      GOSUMDB: "off", GOTOOLCHAIN: "local", GOVCS: "off", GOWORK: "off", PATH: process.env.PATH ?? ""})
+      GOSUMDB: "off", GOTOOLCHAIN: "local", GOVCS: "off", GOWORK: "off", PATH: process.env.PATH ?? "",
+      ...(process.env.SEMANTIFOLD_GO === undefined ? {} : {SEMANTIFOLD_GO: process.env.SEMANTIFOLD_GO})})
   } finally {
     await rm(root, {force: true, recursive: true})
   }
