@@ -16,7 +16,8 @@ const identifierPatterns = {
 /** @type {Record<import("../semantic/types.js").SemanticLanguage, Set<string>>} */
 const reservedWords = {
   csharp: new Set([
-    "abstract", "add", "alias", "allows", "and", "as", "ascending", "async", "await", "base", "bool", "break",
+    "__arglist", "__makeref", "__reftype", "__refvalue", "abstract", "add", "alias", "allows", "and", "as",
+    "ascending", "async", "await", "base", "bool", "break",
     "by", "byte", "case", "catch", "char", "checked", "class", "const", "continue", "decimal", "default",
     "delegate", "descending", "do", "double", "dynamic", "else", "enum", "equals", "event", "explicit", "extension", "extern",
     "false", "field", "file", "finally", "fixed", "float", "for", "foreach", "from", "get", "global", "goto",

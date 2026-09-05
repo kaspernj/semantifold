@@ -75,6 +75,75 @@ console.log(Difference(4, 9))
     assert.deepEqual(set, generateArtifactSet({language: "csharp", module}))
   })
 
+  it("escapes the C# NEL source line terminator in string literals", () => {
+    const source = `function Combine(left: string, right: string): string {
+  return left + right
+}
+
+console.log(Combine("\\u0085", ""))
+`
+    const module = parse({filename: "program.ts", language: "typescript", source})
+    const program = /** @type {string} */ (generateArtifactSet({language: "csharp", module}).artifacts[0].content)
+
+    expect(program).toContain("System.Console.WriteLine(Combine(\"\\u0085\", \"\"));")
+  })
+
+  it("rejects intrinsic C# keyword identifiers from cross-language semantic modules", () => {
+    const source = `function Difference(left: number, right: number): number {
+  return left - right
+}
+
+console.log(Difference(4, 9))
+`
+    const base = parse({filename: "program.ts", language: "typescript", source})
+
+    for (const name of ["__arglist", "__makeref", "__reftype", "__refvalue"]) {
+      const module = structuredClone(base)
+      const print = /** @type {import("../src/semantic/types.js").PrintStatement} */ (module.entryPoint.body.statements[0])
+      const call = /** @type {import("../src/semantic/types.js").CallExpression} */ (print.expression)
+
+      module.functions[0].name = name
+      call.callee = name
+      assert.throws(() => generateArtifactSet({language: "csharp", module}), (error) => Boolean(
+        error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" && error.language == "csharp"))
+    }
+  })
+
+  it("rejects inherited object member function names without reserving binding names", () => {
+    const source = `function Difference(left: number, right: number): number {
+  let result: number = left - right
+  return result
+}
+
+console.log(Difference(4, 9))
+`
+    const base = parse({filename: "program.ts", language: "typescript", source})
+
+    for (const name of ["Equals", "Finalize", "GetHashCode", "GetType", "MemberwiseClone", "ReferenceEquals", "ToString"]) {
+      const module = structuredClone(base)
+      const print = /** @type {import("../src/semantic/types.js").PrintStatement} */ (module.entryPoint.body.statements[0])
+      const call = /** @type {import("../src/semantic/types.js").CallExpression} */ (print.expression)
+
+      module.functions[0].name = name
+      call.callee = name
+      assert.throws(() => generateArtifactSet({language: "csharp", module}), (error) => Boolean(
+        error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" && error.language == "csharp"))
+    }
+
+    const bindings = structuredClone(base)
+
+    bindings.functions[0].parameters[0].name = "ToString"
+    bindings.functions[0].body.statements[0].name = "GetHashCode"
+    const declaration = /** @type {import("../src/semantic/types.js").LocalDeclaration} */ (bindings.functions[0].body.statements[0])
+    const returned = /** @type {import("../src/semantic/types.js").ReturnStatement} */ (bindings.functions[0].body.statements[1])
+    const subtraction = /** @type {import("../src/semantic/types.js").BinaryExpression} */ (declaration.initializer)
+    const returnedIdentifier = /** @type {import("../src/semantic/types.js").IdentifierExpression} */ (returned.expression)
+
+    subtraction.left.name = "ToString"
+    returnedIdentifier.name = "GetHashCode"
+    expect(generateArtifactSet({language: "csharp", module: bindings}).entry).toEqual("Program.cs")
+  })
+
   it("rejects legacy single-artifact generation for the multi-artifact target", async () => {
     const source = await readFile(new URL("fixtures/program.ts", import.meta.url), "utf8")
     const module = parse({filename: "program.ts", language: "typescript", source})

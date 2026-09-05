@@ -72,6 +72,34 @@ describe("C# cross-language native acceptance", () => {
     }
   })
 
+  it("compiles and executes escaped NEL literals and object-member binding names", async () => {
+    const cases = [
+      [`function Combine(left: string, right: string): string {
+  return left + right
+}
+
+console.log(Combine("\\u0085", ""))
+`, "\u0085\n"],
+      [`function Difference(ToString: number, right: number): number {
+  let GetHashCode: number = ToString - right
+  return GetHashCode
+}
+
+console.log(Difference(4, 9))
+`, "-5\n"]
+    ]
+
+    for (const [source, stdout] of cases) {
+      const module = parse({filename: "program.ts", language: "typescript", source})
+      const result = await executeCSharp(module)
+
+      expect(result.stages[0].stderr).toEqual("")
+      expect(result.stages[1].stderr).toEqual("")
+      expect(result.stages[1].stdout).toContain("0 Warning(s)")
+      expect(result.stages[2].stdout).toEqual(stdout)
+    }
+  })
+
   it("produces byte-identical deterministic managed outputs in two fresh project directories", async () => {
     const source = await readFile(new URL("fixtures/operators/program.ts", import.meta.url), "utf8")
     const module = parse({filename: "program.ts", language: "typescript", source})

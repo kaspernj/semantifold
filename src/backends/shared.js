@@ -77,7 +77,9 @@ function validateScaffoldingNames(module, language) {
     ["javascript", "typescript"].includes(language) ? new Set(["console"]) : new Set()
   const ownedPrintReceiverNames = language == "csharp" || language == "java" ? new Set(["System"]) :
     ["javascript", "typescript"].includes(language) ? new Set(["console"]) : new Set()
-  const ownedCallableNames = language == "csharp" ? new Set(["Main", "Program", "System"]) :
+  const ownedCallableNames = language == "csharp" ? new Set([
+    "Equals", "Finalize", "GetHashCode", "GetType", "Main", "MemberwiseClone", "Program", "ReferenceEquals", "System", "ToString"
+  ]) :
     ["javascript", "typescript"].includes(language) ? new Set(["console"]) :
     language == "ruby" ? new Set(["puts"]) : new Set()
 

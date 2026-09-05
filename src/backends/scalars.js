@@ -36,7 +36,9 @@ export function emitStringLiteral(language, value) {
 
   if (typeof literal != "string") throw new TypeError("A validated semantic string did not serialize.")
 
-  return literal.replaceAll("\u2028", "\\u2028").replaceAll("\u2029", "\\u2029")
+  const escapedLineSeparators = literal.replaceAll("\u2028", "\\u2028").replaceAll("\u2029", "\\u2029")
+
+  return language == "csharp" ? escapedLineSeparators.replaceAll("\u0085", "\\u0085") : escapedLineSeparators
 }
 
 /**
