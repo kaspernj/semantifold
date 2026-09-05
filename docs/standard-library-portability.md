@@ -39,9 +39,9 @@ Only transitively used compatibility and provider modules enter the artifact set
 
 ## Ruby-to-PHP example
 
-Consider supported Ruby source that requires `socket`, creates `TCPSocket.new(host, port)`, reads lines with `gets`, and closes the socket. Once the necessary semantic tasks exist, Ruby stdlib resolution can prove that `TCPSocket` refers to the supported native symbol and substitute the Ruby language compatibility stdlib/facade.
+Consider supported Ruby source that requires `socket`, creates `TCPSocket.new(host, port)`, reads lines with `gets`, calls `puts line`, and closes the socket. Once the necessary semantic tasks exist, Ruby stdlib resolution can prove that `TCPSocket` and the unqualified `puts(string)` or equivalent `Kernel.puts(string)` call refer to the supported native symbols and substitute their Ruby language compatibility stdlib/facades.
 
-The portable facade can be expressed schematically as:
+The portable facades can be expressed schematically as:
 
 ```ruby
 # Public compatibility declaration: Ruby-compatible supported profile.
@@ -58,9 +58,15 @@ class TCPSocket
     Semantifold::Resource.v1_close(@client)
   end
 end
+
+module Kernel
+  def self.puts(value)
+    Semantifold::Output.v1_write_line(value)
+  end
+end
 ```
 
-This is illustrative pseudocode, not syntax accepted by `0.2.0`. The real facade must use explicit types, optional/presence results, typed failures, and ownership rules from the selected contract versions. Its `gets` preserves the supported Ruby behavior, including newline retention and an absent value at EOF, by composing canonical capabilities rather than by recognizing a source read loop.
+This is illustrative pseudocode, not syntax accepted by `0.2.0`. The real facades must use explicit types, optional/presence results, typed failures, and ownership rules from the selected contract versions. `TCPSocket#gets` preserves the supported Ruby behavior, including newline retention and an absent value at EOF, by composing canonical capabilities rather than by recognizing a source read loop. The bounded `puts` facade accepts exactly one string and calls `Output.v1_write_line(text)`, which outputs the string once and appends LF only when the string does not already end in LF. Multiple arguments, arrays or recursive output, implicit string conversion, custom output separators, and every other Ruby `puts` behavior are outside this profile.
 
 The PHP target host provider/native binding can be expressed schematically as:
 
@@ -78,19 +84,24 @@ function text_stream_v1_read_line(SocketResource $socket): ?string {
 function resource_v1_close(SocketResource $socket): void {
     checked_fclose_once($socket->nativeHandle);
 }
+
+function output_v1_write_line(string $text): void {
+    $output = str_ends_with($text, "\n") ? $text : $text . "\n";
+    checked_fwrite_all(STDOUT, $output);
+}
 ```
 
-The application and Ruby facade compile to PHP. Generated PHP may define a source-compatible `TCPSocket` class in a generated compatibility namespace and alias it at the call site. Its methods call the linked canonical `SocketClient`, text-stream, and resource provider operations, while application output uses the canonical output capability. Those provider operations alone call PHP's genuine native stdlib, including `fsockopen`, `fgets`, and `fclose` for the socket operations.
+The application and Ruby facades compile to PHP. Generated PHP may define a source-compatible `TCPSocket` class and `puts` compatibility function in a generated compatibility namespace and alias them at their call sites. The class methods call the linked canonical `SocketClient`, text-stream, and resource provider operations; the `puts` facade calls the canonical output operation. The PHP target host provider/native binding writes the canonical line output to native `STDOUT` without duplicating an existing LF, while `fsockopen`, `fgets`, and `fclose` remain the genuine native socket operations.
 
 The path is therefore:
 
 ```text
-Ruby application + Ruby TCPSocket facade
+Ruby application + Ruby TCPSocket/puts facades
   → semantic IR
-  → generated PHP compatibility class
+  → generated PHP compatibility class/function
   → canonical SocketClient/TextStream/Output/Resource calls
   → PHP provider
-  → fsockopen/fgets/fclose
+  → native stdout + fsockopen/fgets/fclose
 ```
 
 There is no handwritten Ruby-on-PHP library, pair-specific bridge, embedded Ruby runtime, or whole-program intelligent refactor. Syntax becomes PHP syntax while the supported Ruby library shape and behavior remain in the compiled facade.
@@ -163,17 +174,17 @@ The executable facade plus canonical capability plus provider path is the correc
 
 Each facade publishes the exact source APIs and forms it supports. Each canonical module publishes exact capability versions. Each provider publishes its target/runtime constraints. Unsupported operations remain unsupported even when a target happens to expose a similarly named native function.
 
-The first planned proof is intentionally narrow: a blocking TCP client, a Ruby `TCPSocket` compatibility facade, and a PHP native provider. It does not imply coverage for every language or every networking API. The dependency sequence is maintained in the [implementation plan](plans/2026-09-05-standard-library-portability.md) and [roadmap](../todo/README.md).
+The first planned proof is intentionally narrow: a blocking TCP client, Ruby `TCPSocket` and bounded one-string `puts` compatibility facades, and a PHP native provider. It does not imply coverage for every language, every networking API, or general Ruby output behavior. The dependency sequence is maintained in the [implementation plan](plans/2026-09-05-standard-library-portability.md) and [roadmap](../todo/README.md).
 
 ## Acceptance strategy
 
 Every implementation slice requires deterministic parser, semantic, link, generation, and real-toolchain acceptance. The first vertical slice will:
 
 1. start a real local ephemeral TCP server under test control, with no external network dependency;
-2. parse supported Ruby source and prove its `socket`/`TCPSocket` identity;
-3. compile the application and used Ruby compatibility facade to PHP;
+2. parse supported Ruby source and prove its `socket`/`TCPSocket` and `puts`/`Kernel.puts` identities;
+3. compile the application and used Ruby compatibility facades to PHP;
 4. link only the required PHP provider/native-binding modules;
-5. run the generated artifacts with real `php` and assert exact output, retained newlines, distinct EOF absence, normalized connection failure, deterministic close, repeated-close policy, and use-after-close rejection; and
+5. run the generated artifacts with real `php` and assert exact output, retained input newlines, exactly one appended LF for a final unterminated string, no duplicate LF, distinct EOF absence, normalized connection failure, deterministic close, repeated-close policy, and use-after-close rejection; and
 6. cover unresolved, shadowed, monkey-patched, unsupported, provider-missing, collision, and transactional-failure cases.
 
 Same-language acceptance must additionally prove that the protected native binding bypasses the compatibility facade. Generated artifacts are reparsed where the target frontend supports their profile, generated twice for byte-for-byte determinism, inspected for unused module exclusion, and checked for complete provenance. Snapshots or source-only assertions cannot replace actual execution.

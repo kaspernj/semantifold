@@ -30,13 +30,14 @@ The direct dependency chain is also recorded in the [roadmap graph and task inde
 Task 037 provides only these initial integrations:
 
 - canonical versioned blocking `SocketClient`, text-stream line-read, output, and resource-close capabilities;
-- a Ruby language compatibility stdlib/facade preserving the supported `TCPSocket.new(host, port)`, `gets`, and `close` shape;
-- a PHP target host provider/native binding implemented with genuine `fsockopen`, `fgets`, and `fclose`; and
-- generated PHP that can retain `TCPSocket` in a collision-safe compatibility namespace/import alias while its methods call canonical provider operations.
+- Ruby language compatibility stdlib/facades preserving the supported `TCPSocket.new(host, port)`, `gets`, and `close` shape plus bounded one-string `puts(string)`/`Kernel.puts(string)`;
+- a canonical output operation that writes the string once and appends LF only when it does not already end in LF;
+- a PHP target host provider/native binding implemented with genuine `fsockopen`, `fgets`, and `fclose` for socket operations plus native stdout output without a duplicate LF; and
+- generated PHP that can retain `TCPSocket` and the bounded `puts` function in a collision-safe compatibility namespace/import alias while they call canonical provider operations.
 
-Acceptance starts a real local ephemeral TCP server controlled by the test. Generated PHP runs with the real PHP CLI and must prove exact output, newline retention, an absent result only at clean EOF, normalized connection error before a usable resource escapes, deterministic successful close, the specified repeated-close result, and a typed use-after-close failure. The server and client tests use bounded timeouts so blocking behavior cannot hang the lane.
+Acceptance starts a real local ephemeral TCP server controlled by the test. Generated PHP runs with the real PHP CLI and must prove exact output, retained input newlines, one appended LF for a final unterminated string, no duplicate LF, an absent result only at clean EOF, normalized connection error before a usable resource escapes, deterministic successful close, the specified repeated-close result, and a typed use-after-close failure. The server and client tests use bounded timeouts so blocking behavior cannot hang the lane.
 
-Negative acceptance covers unresolved or shadowed `TCPSocket`, monkey-patching/reopening, dynamic require/lookup, unsupported APIs/options, missing provider capabilities, namespace collisions, version mismatch, and late provider/link failure. Every failure occurs before partial artifact exposure.
+Negative acceptance covers unresolved or shadowed `TCPSocket` or `puts`, monkey-patching/reopening, dynamic require/lookup, unsupported APIs/options, excluded multi-argument/array/coercive/custom-separator `puts` behavior, missing provider capabilities, namespace collisions, version mismatch, and late provider/link failure. Every failure occurs before partial artifact exposure.
 
 ## Delivery discipline for future implementation
 
