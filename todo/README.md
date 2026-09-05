@@ -2,9 +2,9 @@
 
 ## Purpose and current baseline
 
-This folder is Semantifold's durable, dependency-ordered implementation backlog and delivered design record. The released baseline is `semantifold@0.1.1` / `v0.1.1` at merged `master` commit `61990ddffe31eb48ef36201eda1fc25549e8b87f`; repository and external evidence is recorded in [SOURCES.md](SOURCES.md).
+This folder is Semantifold's durable, dependency-ordered implementation backlog and delivered design record. The released baseline is `semantifold@0.2.0` / `v0.2.0` at merged `master` commit `e41d66fb40db783df9d84069567f15bcaeef4a41`; repository and external evidence is recorded in [SOURCES.md](SOURCES.md).
 
-Tasks 001–004 and 015 are delivered. Semantifold currently models safe integer, Boolean, and Unicode string scalars; explicitly typed locals and assignment; typed unary/binary expressions; ordered lexical blocks; nested strict-Boolean conditionals; explicit returns; two-argument direct calls; and entry-point printing. PHP, Ruby, JavaScript with JSDoc, TypeScript, and Java are implemented as frontends and source backends with real-runtime and provenance/source-map coverage. Task 015 adds the shared role registry, single-module generated artifact sets, byte provenance, parser qualification policy, and fail-loud staged toolchain acceptance without adding a language or semantic feature. Tasks 005–014 and 016–031 remain roadmap work.
+Tasks 001–004, 015, and 016 are delivered. Semantifold currently models safe integer, Boolean, and Unicode string scalars; explicitly typed locals and assignment; typed unary/binary expressions; ordered lexical blocks; nested strict-Boolean conditionals; explicit returns; two-argument direct calls; and entry-point printing. PHP, Ruby, JavaScript with JSDoc, TypeScript, Java, and strictly annotated Python are implemented as frontends and source backends with real-runtime and provenance/source-map coverage. Task 015 adds the shared role registry, single-module generated artifact sets, byte provenance, parser qualification policy, and fail-loud staged toolchain acceptance; Task 016 adds Python for the same Tasks 001–004 subset. Tasks 005–014 and 017–037 remain roadmap work.
 
 The immediate priority is a bounded language-baseline expansion against this small stable IR. That exposes registration, parser, artifact, toolchain, ownership, and diagnostic flaws before collections, optionals, records, modules, errors, and generics multiply the work. It does not mean every platform, legacy bridge, or later language must block semantic progress.
 
@@ -20,6 +20,7 @@ The immediate priority is a bounded language-baseline expansion against this sma
 8. Acceptance uses real installed compilers, runtimes, validators, browsers, and configured simulators/emulators. A declared lane fails rather than skips when its required toolchain is unavailable.
 9. Parser/runtime dependencies come from qualified registries or official distributions. Do not bundle generated archives, fetch tools during tests, or add source-text fallbacks.
 10. Keep the roadmap bounded. Add languages for distinct semantic, ecosystem, or deployment value; record lower-value candidates with a concrete reason to reconsider rather than creating an endless wishlist.
+11. Standard-library portability is hub-and-spoke: a source-language compatibility stdlib/facade and a target host provider/native binding meet only through versioned canonical Semantifold stdlib contracts/capabilities. Facades are executable portable definitions; providers alone cross a protected native boundary; unsupported identity or behavior fails before partial artifacts. Do not add pairwise adapters or direct behavior-changing rewrites.
 
 ## Prioritized phases
 
@@ -38,9 +39,14 @@ These are durable design records for the implemented baseline.
 
 Task 015 separates roles/capabilities, defines deterministic single-module project and binary artifact sets, records the parser-distribution qualification gate, standardizes toolchain discovery and native/platform acceptance, and extends provenance beyond one text file. The Phase L1 language tasks may now proceed subject to their own parser qualification and dependency records.
 
-### Phase L1 — immediate stable-IR language cohort (P0)
+### Delivered Python expansion — Task 016
 
 - [016 — Python source and target support](016-python-source-and-target.md)
+
+Task 016 adds the sixth frontend/text backend for exactly the Tasks 001–004 baseline. It does not add imports, classes, loops, exceptions, resources, host APIs, or standard-library portability.
+
+### Phase L1 — immediate stable-IR language cohort (P0)
+
 - [017 — C# source and target support](017-csharp-source-and-target.md)
 - [018 — C source and target support](018-c-source-and-target.md)
 - [019 — C++ source and target support](019-cpp-source-and-target.md)
@@ -50,7 +56,7 @@ Task 015 separates roles/capabilities, defines deterministic single-module proje
 - [024 — Go source and target support](024-go-source-and-target.md)
 - [025 — Core expanded-language baseline acceptance](025-core-language-baseline-acceptance.md)
 
-Tasks 016–020, 022–024 adopt exactly Tasks 001–004 after Task 015; only C++ waits for C's native/string boundary. They otherwise need not serialize. Task 025 is the single gate before tasks 005 and 007. Its acceptance is spanning rather than a quadratic all-pairs matrix: every new frontend reaches the same IR, every new backend executes the canonical modules, every new language round-trips once, and representative cross-family paths prove registry composition.
+Task 016 has already adopted exactly Tasks 001–004 for Python. Tasks 017–020 and 022–024 adopt the same baseline after Task 015; only C++ waits for C's native/string boundary, and the remaining language tasks otherwise need not serialize. Task 025 is the single gate before tasks 005 and 007. Its acceptance is spanning rather than a quadratic all-pairs matrix: every new frontend reaches the same IR, every new backend executes the canonical modules, every new language round-trips once, and representative cross-family paths prove registry composition.
 
 Swift is in this cohort because it is a modern general-purpose language independently of iOS. Kotlin/JVM adds a major JVM language without making Android tooling part of the gate. Go adds a distinct garbage-collected native/package/toolchain model. Dart and Zig remain concrete planned languages but are intentionally later: Flutter supplies most of Dart's requested platform value, while C/C++/Rust already cover the first native contract pressure that Zig would repeat.
 
@@ -78,6 +84,17 @@ Task 010 owns the shared semantic project model: multiple caller-supplied source
 - [012 — Type parameters and generic declarations](012-type-parameters-and-generics.md)
 
 Generic declarations follow concrete collection and record types. No frontend/backend may erase a semantic type parameter into `mixed`, `object`, a raw type, pointer, or dynamic value.
+
+### Phase S — standard-library portability (P1, dependency-gated and non-blocking)
+
+- [032 — Condition-controlled loops and break/continue](032-condition-controlled-loops-and-break.md)
+- [033 — Reference classes, methods, and constructors](033-reference-classes-methods-and-constructors.md)
+- [034 — Effectful capabilities and resource lifetime](034-effectful-capabilities-and-resource-lifetime.md)
+- [035 — Versioned standard-library contracts and provider linking](035-versioned-standard-library-contracts-and-provider-linking.md)
+- [036 — Language compatibility stdlib/facades](036-language-compatibility-stdlib-facades.md)
+- [037 — Blocking TCP client stdlib vertical slice](037-blocking-tcp-client-stdlib-vertical-slice.md)
+
+Phase S is planned to implement the [standard-library portability design](../docs/standard-library-portability.md) in dependency order. It remains non-blocking until its semantic prerequisites are delivered: Task 032 follows Tasks 004/005; Task 033 follows Tasks 005/009; Task 034 joins Tasks 005/007/011/033; Task 035 joins Tasks 010/034; Task 036 adds facades after Task 035; and Task 037 joins Tasks 032/036 for one Ruby `TCPSocket` to PHP provider proof. No task in this phase claims current implementation or all-language stdlib support. See the [implementation plan](../docs/plans/2026-09-05-standard-library-portability.md).
 
 ### Phase P — non-blocking deployment and later-language lanes
 
@@ -133,6 +150,7 @@ An application target consumes semantic projects; it does not make Ruby, Python,
 | Objective-C compatibility | none | iOS 026 then bridge 027 | Objective-C frontend/backend or Objective-C++ |
 | Android/Flutter delivery | none | Kotlin 023/Android 028 and Dart 029/Flutter 030 | automatic signing/store submission |
 | Task 013 compatibility | original five only | new-language acceptance stays in 025/owning tasks | expanded all-pairs coverage |
+| Standard-library portability | none in `0.2.0` | Tasks 032–037 after their prerequisites | arbitrary stdlibs, applications, or pairwise adapters |
 
 ## Dependency graph
 
@@ -157,6 +175,12 @@ An application target consumes semantic projects; it does not make Ruby, Python,
 005 + 006 + 009 ── 012 generics
 001–008 ── 013 original-five acceptance
 
+004 + 005 ── 032 condition-controlled loops ───────────────────────────────┐
+005 + 009 ── 033 reference classes/methods                                 │
+005 + 007 + 011 + 033 ── 034 effects/resources                            │
+010 + 034 ── 035 canonical stdlib contracts/providers ── 036 facades ─────┤
+                                                                          037 blocking TCP proof
+
 015 ── 021 browser Wasm (parallel, non-blocking)
 022 + 010 ── 026 iOS ── 027 Objective-C bridge
 023 + 010 ── 028 Android ─┐
@@ -175,7 +199,7 @@ Dependencies in task files are authoritative. Existing IDs remain stable; numeri
 | [003](003-typed-operators-and-expressions.md) | delivered | — | Typed expressions | 001 |
 | [004](004-statement-sequencing-and-conditionals.md) | delivered | — | Blocks/conditionals | 002, 003 |
 | [015](015-language-expansion-foundation.md) | delivered | — | Roles, artifacts, parser/toolchain qualification, provenance | 001–004 |
-| [016](016-python-source-and-target.md) | L1 | P0 | Python frontend/backend | 015 |
+| [016](016-python-source-and-target.md) | delivered (L1) | — | Python frontend/backend | 015 |
 | [017](017-csharp-source-and-target.md) | L1 | P0 | C# frontend/backend/project | 015 |
 | [018](018-c-source-and-target.md) | L1 | P0 | C frontend/backend/ownership | 015 |
 | [019](019-cpp-source-and-target.md) | L1 | P0 | C++ frontend/backend/value boundaries | 015, 018 |
@@ -201,6 +225,12 @@ Dependencies in task files are authoritative. Existing IDs remain stable; numeri
 | [029](029-dart-source-and-target.md) | P | P1 | Dart frontend/backend/package | 005, 015 |
 | [030](030-flutter-application-target.md) | P | P2 | Flutter application artifacts | 010, 028, 029 |
 | [031](031-zig-source-and-target.md) | P | P2 | Zig frontend/backend/project | 005, 015, 018, 020 |
+| [032](032-condition-controlled-loops-and-break.md) | S | P1 | Strict-Boolean loops and break/continue | 004, 005 |
+| [033](033-reference-classes-methods-and-constructors.md) | S | P1 | Reference classes, methods, constructors | 005, 009 |
+| [034](034-effectful-capabilities-and-resource-lifetime.md) | S | P1 | Effects, resource ownership/lifetime | 005, 007, 011, 033 |
+| [035](035-versioned-standard-library-contracts-and-provider-linking.md) | S | P1 | Canonical stdlib contracts/provider linking | 010, 034 |
+| [036](036-language-compatibility-stdlib-facades.md) | S | P1 | Source-language compatibility facades | 035 |
+| [037](037-blocking-tcp-client-stdlib-vertical-slice.md) | S | P1 proof | Ruby-to-PHP blocking TCP slice | 032, 036 |
 
 ## Researched candidates deliberately deferred
 
@@ -223,6 +253,8 @@ A task is complete only when its own criteria and these repository-wide rules ho
 - one registry is authoritative for frontend, text, binary, application-artifact, interop, mapping, and acceptance capabilities; public discovery never overstates a role or feature;
 - every accepted parser child is converted and every unmodeled/recovered child fails at its location; no adapter scans source text to recover rejected meaning;
 - every backend validates complete semantic and target/platform capability before transactionally returning artifacts; unsupported behavior is never implemented with a lossy runtime approximation;
+- stdlib work keeps language compatibility stdlib/facades, canonical Semantifold stdlib contracts/capabilities, and target host providers/native bindings as distinct roles. Facades contain executable portable behavior and public declarations; only providers use protected native bindings; canonical contracts define versions, types, evaluation order, effects, failures, EOF/presence, encoding/newlines, blocking/timeouts, ownership/lifetime, close behavior, and dependencies;
+- known stdlib imports/requires are substituted only from proved parser-backed module and symbol identity. Linking includes only reachable facade/provider modules, isolates same-language native access, negotiates every canonical capability, and fails transactionally on an unsupported API, missing target capability, collision, or semantic mismatch;
 - Tasks 016–020 and 022–025 prove Tasks 001–004 for the immediate cohort. Later semantic tasks state their required cohort; other registered roles remain explicit tested rejections until focused adoption, without blocking the semantic task merely because they exist;
 - text, binary, and application artifacts are deterministic before signing/build-system mutation and preserve rich semantic/synthetic provenance plus interoperable maps where the ecosystem defines them;
 - applicable tests invoke every real compiler/runtime/validator/browser/simulator/emulator declared by the task. Platform-specific jobs fail when their configured tools are unavailable; Linux tests do not pretend to execute Xcode/iOS Simulator;
@@ -232,8 +264,10 @@ A task is complete only when its own criteria and these repository-wide rules ho
 
 ## Explicit exclusions
 
-This planning change implements no adapter, backend, runtime, dependency, app, or semantic behavior. It excludes source-text fallbacks, parser AST exposure, bundled parser/tool archives, runtime downloads during tests, user package-manager resolution, lossless formatting, macro/preprocessor systems, reflection, FFI/unsafe code, native extensions, automatic credentials/signing/provisioning, device registration, TestFlight/App Store/Play Store submission, and a compiler-framework rewrite.
+This planning change implements no adapter, backend, runtime, dependency, app, semantic behavior, standard-library facade, canonical capability, provider, native binding, or TCP feature. It excludes source-text fallbacks, parser AST exposure, bundled parser/tool archives, runtime downloads during tests, user package-manager resolution, lossless formatting, macro/preprocessor systems, reflection, FFI/unsafe code, native extensions, automatic credentials/signing/provisioning, device registration, TestFlight/App Store/Play Store submission, and a compiler-framework rewrite.
 
 Ruby-to-iOS is semantic translation into generated Swift application code, never an embedded Ruby VM. Objective-C++ and Metal remain outside the Objective-C bridge. Android and Flutter lanes do not make platform APIs semantic nodes. Browser Wasm remains distinct from WASI and Wasm source input.
 
 Async functions, actors, promises/futures, generators, goroutines/channels, isolates, coroutines, threads, shared memory, atomics, event loops, cancellation, and general host I/O remain excluded until separate proposals define portable scheduling, memory, failure, and resource-lifetime semantics.
+
+Standard-library portability never means arbitrary full-stdlib or arbitrary-application translation. User-defined, shadowed, monkey-patched, reflective, dynamic, native-extension, or unresolved stdlib-like behavior remains outside the supported profile. Pair-specific bridges and direct behavior-changing rewrites are excluded; later direct idiomatic lowering requires a separately proven semantics-preserving optimization.
