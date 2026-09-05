@@ -23,6 +23,11 @@ const sourceScalarTypes = Object.freeze({
     ["string", "string"],
     ["System.String", "string"]
   ]),
+  go: sourceTypeMap([
+    ["int64", "integer"],
+    ["bool", "boolean"],
+    ["string", "string"]
+  ]),
   java: sourceTypeMap([
     ["int", "integer"],
     ["boolean", "boolean"],

@@ -185,7 +185,7 @@ export function createGenerationIndex(module, providedSources = []) {
    */
   function addSource(filename, content, language) {
     if (typeof filename != "string" || content !== null && typeof content != "string" ||
-      language !== null && !["php", "ruby", "javascript", "typescript", "java", "python", "csharp"].includes(language)) {
+      language !== null && !["php", "ruby", "javascript", "typescript", "java", "python", "csharp", "go"].includes(language)) {
       throw new TypeError("Malformed semantic source registry entry.")
     }
 
@@ -242,7 +242,7 @@ function usableSourceProvenance(provenance) {
     if (!source || typeof source.id != "string" || sourceIds.has(source.id) || typeof source.filename != "string" ||
       source.filename.length == 0 ||
       source.content !== null && typeof source.content != "string" || source.language !== null &&
-      !["php", "ruby", "javascript", "typescript", "java", "python", "csharp"].includes(source.language)) return undefined
+      !["php", "ruby", "javascript", "typescript", "java", "python", "csharp", "go"].includes(source.language)) return undefined
     sourceIds.add(source.id)
   }
 

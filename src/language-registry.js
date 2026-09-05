@@ -4,6 +4,7 @@ import {isDenseArray} from "./array.js"
 import {SemantifoldDiagnostic, unsupportedRole} from "./diagnostic.js"
 import {generateJava} from "./backends/java.js"
 import {generateCSharpProject} from "./backends/csharp.js"
+import {generateGoModule} from "./backends/go.js"
 import {generateJavaScript} from "./backends/javascript.js"
 import {generatePhp} from "./backends/php.js"
 import {generatePython} from "./backends/python.js"
@@ -11,6 +12,7 @@ import {generateRuby} from "./backends/ruby.js"
 import {generateTypeScript} from "./backends/typescript.js"
 import {parseJava} from "./frontends/java.js"
 import {parseCSharp} from "./frontends/csharp.js"
+import {parseGo} from "./frontends/go.js"
 import {parseJavaScriptTypeScript} from "./frontends/javascript-typescript.js"
 import {parsePhp} from "./frontends/php.js"
 import {parsePython} from "./frontends/python.js"
@@ -272,6 +274,12 @@ const pythonFrontend = ({filename, source}) => parsePython({filename, source})
  */
 const csharpFrontend = ({filename, source}) => parseCSharp({filename, source})
 
+/**
+ * Go registry frontend wrapper.
+ * @type {Frontend}
+ */
+const goFrontend = ({filename, source}) => parseGo({filename, source})
+
 const records = [
   language({
     acceptance: {stages: ["parse", "generate", "execute"], toolchains: ["php"]},
@@ -329,6 +337,15 @@ const records = [
     id: "csharp",
     mediaType: "text/x-csharp",
     textBackend: generateCSharpProject
+  }),
+  language({
+    acceptance: {stages: ["parse", "generate", "compile", "validate", "execute"], toolchains: ["go"]},
+    artifactMultiplicity: "multiple",
+    defaultFilename: "main.go",
+    frontend: goFrontend,
+    id: "go",
+    mediaType: "text/x-go",
+    textBackend: generateGoModule
   })
 ]
 

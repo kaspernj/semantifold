@@ -18,7 +18,8 @@ export const canonicalToolchains = deepFreeze({
   javac: definition("javac", "SEMANTIFOLD_JAVAC", ["-version"], /^javac (?:1[7-9]|2[0-9])\./u),
   java: definition("java", "SEMANTIFOLD_JAVA", ["-version"], /^(?:openjdk|java) version "(?:1[7-9]|2[0-9])\./u),
   python: definition("python3", "SEMANTIFOLD_PYTHON", ["--version"], /^Python 3\./u),
-  dotnet: definition("dotnet", "SEMANTIFOLD_DOTNET", ["--version"], /^10\./u)
+  dotnet: definition("dotnet", "SEMANTIFOLD_DOTNET", ["--version"], /^10\./u),
+  go: definition("go", "SEMANTIFOLD_GO", ["version"], /^go version go1\.26\.\d+ linux\/amd64$/u)
 })
 
 /**
