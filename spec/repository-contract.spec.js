@@ -9,6 +9,15 @@ import {parse as parseYaml} from "yaml"
 const {DockerfileParser} = DockerfileAst
 const matchingGofmtReadback = 'test "$(readlink -f "$(command -v gofmt)")" = ' +
   '"$(readlink -f "$(go env GOROOT)/bin/gofmt")"'
+const providerPackages = Object.freeze([
+  "opencode-ai", "@openai/codex", "@anthropic-ai/claude-code", "@moonshot-ai/kimi-code"
+])
+const providerExecutables = /** @type {Readonly<Record<string, string>>} */ (Object.freeze({
+  "@anthropic-ai/claude-code": "claude",
+  "@moonshot-ai/kimi-code": "kimi",
+  "@openai/codex": "codex",
+  "opencode-ai": "opencode"
+}))
 
 describe("repository delivery contracts", () => {
   it("uses the released Velocious framework and standalone runner for every spec", async () => {
@@ -110,6 +119,75 @@ describe("repository delivery contracts", () => {
     assert.ok(runs.includes(matchingGofmtReadback))
     assert.ok(instructions.some((instruction) => instruction.getKeyword() == "USER" && instruction.getArgumentsContent() == "dev"))
     assert.ok(instructions.some((instruction) => instruction.getKeyword() == "WORKDIR" && instruction.getArgumentsContent() == "/home/dev/semantifold"))
+  })
+
+  it("installs the four native provider CLIs globally before probing them as the development user", async () => {
+    const [source, packageJson, packageLock] = await Promise.all([
+      readFile(new URL("../Dockerfile", import.meta.url), "utf8"),
+      readFile(new URL("../package.json", import.meta.url), "utf8").then(JSON.parse),
+      readFile(new URL("../package-lock.json", import.meta.url), "utf8").then(JSON.parse)
+    ])
+    const instructions = DockerfileParser.parse(source).getInstructions()
+    const runs = instructions.map((instruction, index) => ({
+      arguments: instruction.getArgumentsContent(),
+      index,
+      keyword: instruction.getKeyword()
+    })).filter(({keyword}) => keyword == "RUN")
+    const providerInstalls = runs.filter(({arguments: command}) => command.includes("npm install --global"))
+
+    assert.equal(providerInstalls.length, 1)
+    const providerInstall = providerInstalls[0]
+    const normalizedInstall = providerInstall.arguments.replace(/\s+/gu, " ")
+    const installCommand = normalizedInstall.match(/npm install --global [^&]+/u)?.[0].trim()
+    const expectedInstall = [
+      "npm install --global", "--cache", '"${PROVIDER_NPM_CACHE}"', ...providerPackages
+    ].join(" ")
+
+    expect(installCommand).toEqual(expectedInstall)
+    assert.match(providerInstall.arguments, /PROVIDER_NPM_CACHE="\$\(mktemp -d\)"/u)
+    assert.match(providerInstall.arguments, /rm -rf "\$\{PROVIDER_NPM_CACHE\}"/u)
+    assert.doesNotMatch(providerInstall.arguments, /@latest/u)
+    for (const packageName of providerPackages) assert.equal(providerInstall.arguments.includes(`${packageName}@`), false)
+
+    const identity = runs.find(({arguments: command}) => command.includes("usermod --login dev --home /home/dev --move-home ubuntu"))
+    const userIndex = instructions.findIndex((instruction) =>
+      instruction.getKeyword() == "USER" && instruction.getArgumentsContent() == "dev")
+    const homeIndex = instructions.findIndex((instruction) =>
+      instruction.getKeyword() == "ENV" && instruction.getArgumentsContent() == "HOME=/home/dev")
+    const probe = runs.find(({arguments: command}) => providerPackages.every((packageName) => {
+      const executable = providerExecutables[packageName]
+
+      return command.includes(`command -v ${executable}`) && command.includes(`${executable} --version`)
+    }))
+
+    assert.ok(identity)
+    for (const command of [
+      'test "$(id -u ubuntu)" = "1000"', 'test "$(id -g ubuntu)" = "1000"',
+      "groupmod --new-name dev ubuntu", 'test "$(id -u dev)" = "1000"', 'test "$(id -g dev)" = "1000"'
+    ]) assert.ok(identity.arguments.includes(command))
+    assert.ok(identity.index < providerInstall.index)
+    assert.equal(instructions.slice(0, providerInstall.index).some((instruction) => instruction.getKeyword() == "USER"), false)
+    assert.ok(userIndex > providerInstall.index)
+    assert.ok(homeIndex > userIndex)
+    assert.ok(probe && probe.index > homeIndex)
+    assert.equal(instructions.slice(0, probe.index + 1)
+      .filter((instruction) => instruction.getKeyword() == "USER").at(-1)?.getArgumentsContent(), "dev")
+
+    assert.doesNotMatch(source, /@latest/u)
+    assert.doesNotMatch(source, /^ARG\s+.*(?:OPENCODE|CODEX|CLAUDE|KIMI|PROVIDER).*VERSION/imu)
+    assert.doesNotMatch(source, /NODE_AUTH_TOKEN|NPM_TOKEN|npm_config_(?:_auth|token)|npm (?:adduser|login)|_authToken/u)
+    const projectDependencies = {
+      ...packageJson.dependencies,
+      ...packageJson.devDependencies,
+      ...packageJson.optionalDependencies,
+      ...packageJson.peerDependencies
+    }
+
+    for (const packageName of providerPackages) {
+      assert.equal(Object.hasOwn(projectDependencies, packageName), false)
+      assert.equal(Object.hasOwn(packageLock.packages, `node_modules/${packageName}`), false)
+    }
+    assert.doesNotMatch(JSON.stringify([source, packageJson, packageLock]), /threadwire/iu)
   })
 
   it("defines one canonical dev service with only the home and read-only GitHub binds", async () => {

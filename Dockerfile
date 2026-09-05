@@ -59,8 +59,25 @@ RUN test "$(id -u ubuntu)" = "1000" \
   && test "$(id -u dev)" = "1000" \
   && test "$(id -g dev)" = "1000"
 
+RUN PROVIDER_NPM_CACHE="$(mktemp -d)" \
+  && npm install --global --cache "${PROVIDER_NPM_CACHE}" \
+    opencode-ai \
+    @openai/codex \
+    @anthropic-ai/claude-code \
+    @moonshot-ai/kimi-code \
+  && rm -rf "${PROVIDER_NPM_CACHE}"
+
 USER dev
 ENV HOME=/home/dev
 WORKDIR /home/dev/semantifold
+
+RUN command -v opencode \
+  && opencode --version \
+  && command -v codex \
+  && codex --version \
+  && command -v claude \
+  && claude --version \
+  && command -v kimi \
+  && kimi --version
 
 CMD ["sleep", "infinity"]
