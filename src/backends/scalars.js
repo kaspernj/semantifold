@@ -2,6 +2,7 @@
 
 /** @type {Readonly<Record<import("../semantic/types.js").SemanticLanguage, Readonly<Record<import("../semantic/types.js").SemanticTypeName, string>>>>} */
 const targetScalarTypes = Object.freeze({
+  csharp: Object.freeze({boolean: "bool", integer: "long", string: "string"}),
   java: Object.freeze({boolean: "boolean", integer: "int", string: "String"}),
   javascript: Object.freeze({boolean: "boolean", integer: "number", string: "string"}),
   php: Object.freeze({boolean: "bool", integer: "int", string: "string"}),

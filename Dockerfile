@@ -14,6 +14,7 @@ RUN apt-get update \
     ca-certificates \
     curl \
     default-jdk-headless \
+    dotnet-sdk-10.0 \
     git \
     gh \
     gnupg \
@@ -38,6 +39,8 @@ RUN apt-get update \
   && ruby --version \
   && javac -version \
   && java -version \
+  && dotnet --info \
+  && test "$(dotnet --version | cut -d. -f1)" = "10" \
   && rm -rf /var/lib/apt/lists/*
 
 RUN test "$(id -u ubuntu)" = "1000" \

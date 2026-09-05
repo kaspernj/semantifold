@@ -14,7 +14,7 @@ const acceptanceMaxBuffer = 16 * 1024 * 1024
 const launchErrorCodes = new Set([
   "E2BIG", "EACCES", "EAGAIN", "ELOOP", "EMFILE", "ENAMETOOLONG", "ENFILE", "ENOENT", "ENOEXEC", "ENOMEM", "ENOTDIR", "ENOTSUP", "EPERM", "ETXTBSY"
 ])
-const orderedStages = Object.freeze(["parse", "generate", "compile", "link", "validate", "instantiate", "execute"])
+const orderedStages = Object.freeze(["parse", "generate", "restore", "compile", "link", "validate", "instantiate", "execute"])
 const stageIndexes = new Map(orderedStages.map((stage, index) => [stage, index]))
 
 /**

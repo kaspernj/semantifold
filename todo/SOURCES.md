@@ -1,6 +1,6 @@
 # Roadmap research sources
 
-Access date for existing semantic-roadmap sources: **2026-09-02**. Language-expansion sources were checked **2026-09-04**.
+Access date for existing semantic-roadmap sources: **2026-09-02**. Language-expansion sources were checked **2026-09-04**; Task 017 registry and .NET evidence was rechecked **2026-09-05**.
 
 ## Repository baseline and inspected evidence
 
@@ -59,16 +59,20 @@ Resolved versions come from `package-lock.json`; manifest ranges come from `pack
 | `@lezer/common` | `^1.2.3` | `1.5.2` | [Lezer reference](https://lezer.codemirror.net/docs/ref/) |
 | `tree-sitter` | `0.25.1` | `0.25.1` | [official tag](https://github.com/tree-sitter/node-tree-sitter/tree/v0.25.1), [exact registry record](https://registry.npmjs.org/tree-sitter/0.25.1), [qualification record](../docs/parser-qualification.md#task-016-python-qualification) |
 | `tree-sitter-python` | `0.25.0` | `0.25.0` | [official tag](https://github.com/tree-sitter/tree-sitter-python/tree/v0.25.0), [exact registry record](https://registry.npmjs.org/tree-sitter-python/0.25.0), [qualification record](../docs/parser-qualification.md#task-016-python-qualification) |
+| `tree-sitter-c-sharp` | `0.23.5` | `0.23.5` | [official tag](https://github.com/tree-sitter/tree-sitter-c-sharp/tree/v0.23.5), [exact registry record](https://registry.npmjs.org/tree-sitter-c-sharp/0.23.5), [qualification record](../docs/parser-qualification.md#task-017-c-qualification) |
 | TypeScript compiler | `^7.0.0` | `7.0.2` | [exact registry record](https://registry.npmjs.org/typescript/7.0.2), [compiler options](https://www.typescriptlang.org/docs/handbook/compiler-options.html) |
 | Node.js | Docker/TensorBuzz exact | `24.18.1` | `Dockerfile`, `tensorbuzz.yml` |
 | PHP CLI | Ubuntu package, not exact-pinned | locally observed `8.5.4` | `Dockerfile`, `tensorbuzz.yml` |
 | Ruby | Ubuntu package, not exact-pinned | locally observed `3.3.8` | `Dockerfile`, `tensorbuzz.yml` |
 | Java compiler/runtime | Ubuntu default JDK, not exact-pinned | locally observed OpenJDK `25.0.4` | `Dockerfile`, `tensorbuzz.yml` |
 | Python compiler/runtime | Ubuntu `python3`, not exact-pinned | locally observed Python `3.14.4` | `Dockerfile`, `tensorbuzz.yml`, configured `SEMANTIFOLD_PYTHON` discovery |
+| .NET SDK/runtime | Ubuntu `dotnet-sdk-10.0`, rolling maintained patch | SDK `10.0.111`, runtime/targeting packs `10.0.11`, RID `ubuntu.26.04-x64` | `Dockerfile`, `tensorbuzz.yml`, configured `SEMANTIFOLD_DOTNET` discovery and native Task 017 acceptance |
 
 Parser evidence note: Babel documents attached comments, offsets/locations, TypeScript syntax plugins, and its AST deviations. Prism's JavaScript API exposes a parse result containing a typed AST, comments, errors, warnings, and node locations. `php-parser` 3.7.0 documents positional ASTs and extracted documentation. Lezer documents compact concrete syntax trees and error recovery/error nodes; Semantifold must continue rejecting a `⚠` node rather than treating a recovered tree as valid. Inspection of the installed `@lezer/java@1.1.3` grammar confirmed nodes for locals, assignments, arrays, field access, calls, loops, packages/imports, classes, type parameters, and try/throw, but no Java record-declaration grammar; Task 009 therefore uses a conventional final-class mapping for Java.
 
 Task 016's exact Node binding/official Python grammar identity, ABI, registry integrity/signatures, clean-install lifecycle, shipped sources, typed API, recovery behavior, coordinates, and accepted corpus are recorded in [parser qualification](../docs/parser-qualification.md#task-016-python-qualification). Python language behavior is checked against the configured official `python3` using `-m py_compile` and deterministic UTF-8 execution.
+
+Task 017's exact official C# grammar identity, ABI, registry integrity/signatures/attestation result, Node 24 clean install/load, lifecycle/package contents, recovery/coordinate behavior, grammar shapes, fixture hashes, and .NET compiler comparison are recorded in [parser qualification](../docs/parser-qualification.md#task-017-c-qualification). The normal manifest and lock use only the exact npm registry package.
 
 ## Ruby and RBS
 
@@ -144,8 +148,10 @@ Evidence note: Python annotations do not enforce types at runtime, conditions ar
 - [C# language specification](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/language-specification/), especially [types](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/language-specification/types), [variables](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/language-specification/variables), [expressions](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/language-specification/expressions), and [statements](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/language-specification/statements) — value/reference types, conversions, operators, calls, blocks, and control flow.
 - [Nullable reference types](https://learn.microsoft.com/en-us/dotnet/csharp/nullable-references), [nullable compiler option](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/compiler-options/language#nullable), and [integral numeric types](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/builtin-types/integral-numeric-types) — exact nullable-analysis and signed `long` boundaries.
 - [.NET project SDK overview](https://learn.microsoft.com/en-us/dotnet/core/project-sdk/overview), [`dotnet restore`](https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-restore), [`dotnet build`](https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-build), and [`dotnet run`](https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-run) — deterministic project artifact and real managed compile/runtime lane.
+- [.NET support policy](https://dotnet.microsoft.com/en-us/platform/support/policy), [Ubuntu .NET installation](https://learn.microsoft.com/en-us/dotnet/core/install/linux-ubuntu-install), and [C# language versioning](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/language-versioning) — .NET 10 active-LTS selection, Ubuntu `dotnet-sdk-10.0`, and matching C# 14 profile.
+- [C# warning waves](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/compiler-messages/warning-waves), [warning options](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/compiler-options/errors-warnings), and [.NET globalization settings](https://learn.microsoft.com/en-us/dotnet/core/runtime-config/globalization) — warning level 10, warnings-as-errors, and invariant runtime properties used by the fixed project.
 
-Evidence note: C# `long` and `bool` are value types, while `string` is a sealed immutable reference type; nullable reference annotations are compile-time metadata backed by flow warnings, not distinct runtime types. Task 017 requires a pinned SDK/target framework, nullable enabled with warnings as errors, exact scalar types, and no boxing, `dynamic`, overload, identity, or nullable approximation.
+Evidence note: C# `long` and `bool` are value types, while `string` is a sealed immutable reference type; nullable reference annotations are compile-time metadata backed by flow warnings, not distinct runtime types. Task 017 selects .NET 10 LTS, C# 14, `net10.0`, nullable enabled, warning wave 10 with warnings as errors, invariant globalization, and checked signed-64-bit arithmetic. It permits no boxing, `dynamic`, overload, identity, conversion, or nullable approximation.
 
 ## C and Clang
 

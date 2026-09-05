@@ -112,7 +112,7 @@ export function generateArtifactSet(input) {
     if (record.artifactMultiplicity == "multiple") {
       const backend = languageRegistry.resolve(language, "textBackend", module?.location)
 
-      return constructArtifactSet(backend({filename, language, module, sources}))
+      return constructArtifactSet(backend({filename, language, mapDirective, module, sourceMapFilename, sources}))
     }
     const artifact = generateArtifactSource({
       filename,

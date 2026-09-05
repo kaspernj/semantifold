@@ -34,11 +34,20 @@ const binaryOperationSyntax = Object.freeze({
  * @returns {void}
  */
 export function validateBackendModule(module, language) {
+  if (!module || typeof module != "object" || Array.isArray(module)) {
+    return unsupportedCapability(language, "missing or invalid module", undefined)
+  }
   if (module.kind != "Module") unsupportedCapability(language, module.kind, module.location)
+  if (!Array.isArray(module.functions) || !module.entryPoint || typeof module.entryPoint != "object" ||
+    module.entryPoint.kind != "EntryPoint") unsupportedCapability(language, "missing or invalid module members", module.location)
   if (module.functions.length == 0) unsupportedCapability(language, "module without functions", module.location)
   validateBlock(module.entryPoint.body, language, module.entryPoint.location)
 
   for (const functionDeclaration of module.functions) {
+    if (!functionDeclaration || typeof functionDeclaration != "object" || Array.isArray(functionDeclaration) ||
+      functionDeclaration.kind != "FunctionDeclaration" || !Array.isArray(functionDeclaration.parameters)) {
+      unsupportedCapability(language, "missing or invalid function declaration", module.location)
+    }
     validateTargetBindingIdentifier(language, functionDeclaration.name, "function", functionDeclaration.location)
 
     if (functionDeclaration.parameters.length != 2) {
@@ -47,10 +56,11 @@ export function validateBackendModule(module, language) {
     validateBlock(functionDeclaration.body, language, functionDeclaration.location)
 
     for (const parameter of functionDeclaration.parameters) {
+      if (!parameter || typeof parameter != "object" || Array.isArray(parameter) || parameter.kind != "Parameter") {
+        unsupportedCapability(language, "missing or invalid parameter", functionDeclaration.location)
+      }
       validateTargetBindingIdentifier(language, parameter.name, "parameter", parameter.location)
-
     }
-
   }
   validateScaffoldingNames(module, language)
   validateBackendTypes(module, language)
@@ -63,11 +73,12 @@ export function validateBackendModule(module, language) {
  * @returns {void}
  */
 function validateScaffoldingNames(module, language) {
-  const ownedEntryNames = language == "java" ? new Set(["args", "System"]) :
+  const ownedEntryNames = language == "csharp" ? new Set(["System"]) : language == "java" ? new Set(["args", "System"]) :
     ["javascript", "typescript"].includes(language) ? new Set(["console"]) : new Set()
-  const ownedPrintReceiverNames = language == "java" ? new Set(["System"]) :
+  const ownedPrintReceiverNames = language == "csharp" || language == "java" ? new Set(["System"]) :
     ["javascript", "typescript"].includes(language) ? new Set(["console"]) : new Set()
-  const ownedCallableNames = ["javascript", "typescript"].includes(language) ? new Set(["console"]) :
+  const ownedCallableNames = language == "csharp" ? new Set(["Main", "Program", "System"]) :
+    ["javascript", "typescript"].includes(language) ? new Set(["console"]) :
     language == "ruby" ? new Set(["puts"]) : new Set()
 
   for (const statement of allStatements(module.entryPoint.body)) {
@@ -229,6 +240,9 @@ function validateExpression(expression, language, ownerLocation, allowJavaNegate
     if (language == "java" && !validNegatedMinimumOperand && (candidate.value < -2147483648 || candidate.value > 2147483647)) {
       unsupportedCapability(language, "integer literal outside signed 32-bit int range", location)
     }
+    if (language == "csharp" && candidate.value < 0) {
+      unsupportedCapability(language, "negative integer literal without semantic negation", location)
+    }
     return
   }
   if (candidate.kind == "BooleanLiteral" || candidate.kind == "StringLiteral") return
@@ -248,7 +262,7 @@ function validateExpression(expression, language, ownerLocation, allowJavaNegate
       unsupportedCapability(language, `unary operation ${String(candidate.operation)}`, location)
     }
     validateExpression(candidate.operand, language, location, candidate.operation == "IntegerNegate")
-    validateKnownJavaInteger(candidate, language, location)
+    validateKnownTargetInteger(candidate, language, location)
     return
   }
   if (candidate.kind == "BinaryExpression") {
@@ -257,7 +271,7 @@ function validateExpression(expression, language, ownerLocation, allowJavaNegate
     }
     validateExpression(candidate.left, language, location)
     validateExpression(candidate.right, language, location)
-    validateKnownJavaInteger(candidate, language, location)
+    validateKnownTargetInteger(candidate, language, location)
     return
   }
 
@@ -271,13 +285,14 @@ function validateExpression(expression, language, ownerLocation, allowJavaNegate
  * @param {import("../semantic/types.js").SourceLocation | undefined} location - Operation location.
  * @returns {void}
  */
-function validateKnownJavaInteger(expression, language, location) {
-  if (language != "java") return
-
+function validateKnownTargetInteger(expression, language, location) {
   const value = knownIntegerValue(expression)
 
-  if (value !== undefined && (value < -2147483648n || value > 2147483647n)) {
+  if (language == "java" && value !== undefined && (value < -2147483648n || value > 2147483647n)) {
     unsupportedCapability(language, "compile-time-known integer operation outside signed 32-bit int range", location)
+  }
+  if (language == "csharp" && value !== undefined && (value < -9223372036854775808n || value > 9223372036854775807n)) {
+    unsupportedCapability(language, "compile-time-known integer operation outside signed 64-bit long range", location)
   }
 }
 
@@ -321,7 +336,9 @@ export function emitExpression(writer, expression, path, language, emitIdentifie
     return
   }
   if (expression.kind == "IntegerLiteral") {
-    writer.mapped(String(expression.value), {mappingKind: "exact", node: expression, path, role: "literal"})
+    const spelling = language == "csharp" ? `${expression.value}L` : String(expression.value)
+
+    writer.mapped(spelling, {mappingKind: "exact", node: expression, path, role: "literal"})
     return
   }
   if (expression.kind == "BooleanLiteral") {
@@ -346,11 +363,31 @@ export function emitExpression(writer, expression, path, language, emitIdentifie
   }
 
   if (expression.kind == "UnaryExpression") {
+    if (language == "csharp" && expression.operation == "IntegerNegate") {
+      writer.mapped("checked(", {mappingKind: "anchor", node: expression, path})
+      writer.mapped("-", {mappingKind: "exact", node: expression, path, role: "operator"})
+      emitExpression(writer, expression.operand, `${path}/operand`, language, emitIdentifier)
+      writer.mapped(")", {mappingKind: "anchor", node: expression, path})
+      return
+    }
     writer.mapped("(", {mappingKind: "anchor", node: expression, path})
     writer.mapped(language == "python" && expression.operation == "BooleanNot" ? "not " : unaryOperationSyntax[expression.operation], {
       mappingKind: "exact", node: expression, path, role: "operator"
     })
     emitExpression(writer, expression.operand, `${path}/operand`, language, emitIdentifier)
+    writer.mapped(")", {mappingKind: "anchor", node: expression, path})
+    return
+  }
+
+  if (language == "csharp" && ["IntegerAdd", "IntegerSubtract", "IntegerMultiply"].includes(expression.operation)) {
+    writer.mapped("checked(", {mappingKind: "anchor", node: expression, path})
+    emitExpression(writer, expression.left, `${path}/left`, language, emitIdentifier)
+    writer.synthetic(" ", "operator spacing", [expression], [path])
+    writer.mapped(binaryOperationSpelling(expression.operation, language), {
+      mappingKind: "exact", node: expression, path, role: "operator"
+    })
+    writer.synthetic(" ", "operator spacing", [expression], [path])
+    emitExpression(writer, expression.right, `${path}/right`, language, emitIdentifier)
     writer.mapped(")", {mappingKind: "anchor", node: expression, path})
     return
   }

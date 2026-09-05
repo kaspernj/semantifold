@@ -616,6 +616,7 @@ printf '%s|%s|%s|%s\\n' "$1" "$LC_ALL" "$TZ" "$PWD"
         stages: [
           {arguments: parseArguments, stage: "parse", tool},
           {arguments: ["generate"], stage: "generate", tool},
+          {arguments: ["restore"], stage: "restore", tool},
           {arguments: ["compile"], stage: "compile", tool},
           {arguments: ["link"], stage: "link", tool},
           {arguments: ["validate"], stage: "validate", tool},
@@ -628,7 +629,7 @@ printf '%s|%s|%s|%s\\n' "$1" "$LC_ALL" "$TZ" "$PWD"
 
       parseArguments[0] = "caller-mutated"
       expect(result.stages.map(({stage}) => stage)).toEqual([
-        "parse", "generate", "compile", "link", "validate", "instantiate", "execute"
+        "parse", "generate", "restore", "compile", "link", "validate", "instantiate", "execute"
       ])
       expect(result.stages[0].arguments).toEqual(["parse"])
       expect(Object.isFrozen(result.stages[0].arguments)).toBeTrue()
@@ -1357,7 +1358,7 @@ printf 'executed\n'
     })
   })
 
-  it("executes small programs through every declared six-language real toolchain", async () => {
+  it("executes small programs through every original-six real toolchain", async () => {
     const php = await discoverCanonicalToolchain("php")
     const ruby = await discoverCanonicalToolchain("ruby")
     const node = await discoverCanonicalToolchain("node")
@@ -1366,7 +1367,7 @@ printf 'executed\n'
     const java = await discoverCanonicalToolchain("java")
     const python = await discoverCanonicalToolchain("python")
 
-    expect(Object.keys(canonicalToolchains)).toEqual(["php", "ruby", "node", "tsc", "javac", "java", "python"])
+    expect(Object.keys(canonicalToolchains)).toEqual(["php", "ruby", "node", "tsc", "javac", "java", "python", "dotnet"])
     await runProgram("php", "program.php", "<?php\necho \"ok\\n\";\n", [{arguments: ["program.php"], stage: "execute", tool: php}])
     await runProgram("ruby", "program.rb", "puts \"ok\"\n", [{arguments: ["program.rb"], stage: "execute", tool: ruby}])
     await runProgram("javascript", "program.js", "console.log(\"ok\")\n", [{arguments: ["program.js"], stage: "execute", tool: node}])

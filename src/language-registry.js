@@ -3,19 +3,21 @@
 import {isDenseArray} from "./array.js"
 import {SemantifoldDiagnostic, unsupportedRole} from "./diagnostic.js"
 import {generateJava} from "./backends/java.js"
+import {generateCSharpProject} from "./backends/csharp.js"
 import {generateJavaScript} from "./backends/javascript.js"
 import {generatePhp} from "./backends/php.js"
 import {generatePython} from "./backends/python.js"
 import {generateRuby} from "./backends/ruby.js"
 import {generateTypeScript} from "./backends/typescript.js"
 import {parseJava} from "./frontends/java.js"
+import {parseCSharp} from "./frontends/csharp.js"
 import {parseJavaScriptTypeScript} from "./frontends/javascript-typescript.js"
 import {parsePhp} from "./frontends/php.js"
 import {parsePython} from "./frontends/python.js"
 import {parseRuby} from "./frontends/ruby.js"
 
 const registryRoles = Object.freeze(["frontend", "textBackend", "binaryBackend", "applicationBackend", "interoperability"])
-const acceptanceStageOrder = ["parse", "generate", "compile", "link", "validate", "instantiate", "execute"]
+const acceptanceStageOrder = ["parse", "generate", "restore", "compile", "link", "validate", "instantiate", "execute"]
 const acceptanceStages = new Map(acceptanceStageOrder.map((stage, index) => [stage, index]))
 const registryKeys = new Set([
   "acceptance", "applicationBackend", "artifactMultiplicity", "binaryBackend", "defaultFilename", "frontend", "id",
@@ -264,6 +266,12 @@ const javaFrontend = ({filename, source}) => parseJava({filename, source})
  */
 const pythonFrontend = ({filename, source}) => parsePython({filename, source})
 
+/**
+ * C# registry frontend wrapper.
+ * @type {Frontend}
+ */
+const csharpFrontend = ({filename, source}) => parseCSharp({filename, source})
+
 const records = [
   language({
     acceptance: {stages: ["parse", "generate", "execute"], toolchains: ["php"]},
@@ -312,6 +320,15 @@ const records = [
     id: "python",
     mediaType: "text/x-python",
     textBackend: generatePython
+  }),
+  language({
+    acceptance: {stages: ["parse", "generate", "restore", "compile", "execute"], toolchains: ["dotnet"]},
+    artifactMultiplicity: "multiple",
+    defaultFilename: "Program.cs",
+    frontend: csharpFrontend,
+    id: "csharp",
+    mediaType: "text/x-csharp",
+    textBackend: generateCSharpProject
   })
 ]
 

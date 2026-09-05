@@ -1,12 +1,12 @@
 // @ts-check
 
-/** @typedef {"php" | "ruby" | "javascript" | "typescript" | "java" | "python"} SemanticLanguage */
+/** @typedef {"php" | "ruby" | "javascript" | "typescript" | "java" | "python" | "csharp"} SemanticLanguage */
 /** @typedef {"integer" | "boolean" | "string"} SemanticTypeName */
 /** @typedef {"IntegerNegate" | "BooleanNot"} SemanticUnaryOperation */
 /** @typedef {"IntegerAdd" | "IntegerSubtract" | "IntegerMultiply" | "BooleanAnd" | "BooleanOr" | "IntegerEqual" | "IntegerNotEqual" | "BooleanEqual" | "BooleanNotEqual" | "StringEqual" | "StringNotEqual" | "IntegerLessThan" | "IntegerLessThanOrEqual" | "IntegerGreaterThan" | "IntegerGreaterThanOrEqual" | "StringConcat"} SemanticBinaryOperation */
 /** @typedef {"function" | "parameter" | "local"} SemanticSymbolKind */
 /** @typedef {"declaration" | "read" | "write" | "call"} SemanticSymbolRole */
-/** @typedef {"parse" | "generate" | "compile" | "link" | "validate" | "instantiate" | "execute"} AcceptanceStage */
+/** @typedef {"parse" | "generate" | "restore" | "compile" | "link" | "validate" | "instantiate" | "execute"} AcceptanceStage */
 /** @typedef {"entry" | "source" | "manifest" | "support" | "mapping" | "resource" | "loader"} GeneratedArtifactRole */
 
 /**
