@@ -2,7 +2,7 @@ before_install:
   - curl --fail --silent --show-error --location --retry 5 --retry-delay 5 --retry-all-errors https://nodejs.org/dist/v24.18.1/node-v24.18.1-linux-x64.tar.xz --output /tmp/node-v24.18.1-linux-x64.tar.xz
   - sudo tar -xJf /tmp/node-v24.18.1-linux-x64.tar.xz -C /usr/local --strip-components=1
   - sudo apt-get update
-  - sudo apt-get install --yes --no-install-recommends php-cli python3 ruby default-jdk-headless dotnet-sdk-10.0
+  - sudo apt-get install --yes --no-install-recommends php-cli python3 ruby default-jdk-headless dotnet-sdk-10.0 golang-go
   - node --version
   - npm --version
   - php --version
@@ -12,6 +12,14 @@ before_install:
   - java -version
   - dotnet --info
   - test "$(dotnet --version | cut -d. -f1)" = "10"
+  - go version
+  - go env GOVERSION GOOS GOARCH GOROOT
+  - test "$(go env GOVERSION | cut -d. -f1,2)" = "go1.26"
+  - test "$(go env GOOS)" = "linux"
+  - test "$(go env GOARCH)" = "amd64"
+  - test -n "$(go env GOROOT)"
+  - test -x "$(go env GOROOT)/bin/gofmt"
+  - test "$(readlink -f "$(command -v gofmt)")" = "$(readlink -f "$(go env GOROOT)/bin/gofmt")"
 before_script:
   - npm ci
 environment:
@@ -19,6 +27,7 @@ environment:
   SEMANTIFOLD_NODE: /usr/local/bin/node
   SEMANTIFOLD_PYTHON: /usr/bin/python3
   SEMANTIFOLD_DOTNET: /usr/bin/dotnet
+  SEMANTIFOLD_GO: /usr/bin/go
 builds:
   quality:
     name: Quality and package
@@ -30,6 +39,6 @@ builds:
       - npm ls --omit=dev --all
       - npm pack --dry-run --json
   end_to_end:
-    name: Six-language end-to-end tests
+    name: Eight-language end-to-end tests
     script:
       - npm test

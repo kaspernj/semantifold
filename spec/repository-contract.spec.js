@@ -7,6 +7,8 @@ import DockerfileAst from "dockerfile-ast"
 import {parse as parseYaml} from "yaml"
 
 const {DockerfileParser} = DockerfileAst
+const matchingGofmtReadback = 'test "$(readlink -f "$(command -v gofmt)")" = ' +
+  '"$(readlink -f "$(go env GOROOT)/bin/gofmt")"'
 
 describe("repository delivery contracts", () => {
   it("uses the released Velocious framework and standalone runner for every spec", async () => {
@@ -45,8 +47,10 @@ describe("repository delivery contracts", () => {
     expect(config.environment.SEMANTIFOLD_NODE).toEqual("/usr/local/bin/node")
     expect(config.environment.SEMANTIFOLD_PYTHON).toEqual("/usr/bin/python3")
     expect(config.environment.SEMANTIFOLD_DOTNET).toEqual("/usr/bin/dotnet")
+    expect(config.environment.SEMANTIFOLD_GO).toEqual("/usr/bin/go")
     assert.match(beforeInstall, /php-cli python3 ruby default-jdk-headless/u)
     assert.match(beforeInstall, /dotnet-sdk-10\.0/u)
+    assert.match(beforeInstall, /golang-go/u)
     assert.match(beforeInstall, /tar .* -C \/usr\/local/u)
     assert.match(beforeInstall, /node --version/u)
     assert.match(beforeInstall, /php --version/u)
@@ -56,6 +60,14 @@ describe("repository delivery contracts", () => {
     assert.match(beforeInstall, /java -version/u)
     assert.match(beforeInstall, /dotnet --info/u)
     assert.match(beforeInstall, /test "\$\(dotnet --version \| cut -d\. -f1\)" = "10"/u)
+    assert.match(beforeInstall, /go version/u)
+    assert.match(beforeInstall, /go env GOVERSION GOOS GOARCH GOROOT/u)
+    assert.match(beforeInstall, /test "\$\(go env GOVERSION \| cut -d\. -f1,2\)" = "go1\.26"/u)
+    assert.match(beforeInstall, /test "\$\(go env GOOS\)" = "linux"/u)
+    assert.match(beforeInstall, /test "\$\(go env GOARCH\)" = "amd64"/u)
+    assert.match(beforeInstall, /test -n "\$\(go env GOROOT\)"/u)
+    assert.match(beforeInstall, /test -x "\$\(go env GOROOT\)\/bin\/gofmt"/u)
+    assert.ok(beforeInstall.includes(matchingGofmtReadback))
     assert.ok(buildCommands.includes("npm run lint"))
     assert.ok(buildCommands.includes("npm run typecheck"))
     assert.ok(buildCommands.includes("npm run build"))
@@ -63,6 +75,7 @@ describe("repository delivery contracts", () => {
     assert.ok(buildCommands.includes("npm audit --audit-level=high"))
     assert.ok(buildCommands.includes("npm ls --omit=dev --all"))
     assert.ok(buildCommands.includes("npm pack --dry-run --json"))
+    expect(config.builds.end_to_end.name).toEqual("Eight-language end-to-end tests")
     await assert.rejects(access(new URL("../.github/workflows", import.meta.url)))
   })
 
@@ -83,9 +96,18 @@ describe("repository delivery contracts", () => {
     assert.match(runs, /ruby/u)
     assert.match(runs, /default-jdk-headless/u)
     assert.match(runs, /dotnet-sdk-10\.0/u)
+    assert.match(runs, /golang-go/u)
     assert.match(runs, /node_24\.x/u)
     assert.match(runs, /dotnet --info/u)
     assert.match(runs, /test "\$\(dotnet --version \| cut -d\. -f1\)" = "10"/u)
+    assert.match(runs, /go version/u)
+    assert.match(runs, /go env GOVERSION GOOS GOARCH GOROOT/u)
+    assert.match(runs, /test "\$\(go env GOVERSION \| cut -d\. -f1,2\)" = "go1\.26"/u)
+    assert.match(runs, /test "\$\(go env GOOS\)" = "linux"/u)
+    assert.match(runs, /test "\$\(go env GOARCH\)" = "amd64"/u)
+    assert.match(runs, /test -n "\$\(go env GOROOT\)"/u)
+    assert.match(runs, /test -x "\$\(go env GOROOT\)\/bin\/gofmt"/u)
+    assert.ok(runs.includes(matchingGofmtReadback))
     assert.ok(instructions.some((instruction) => instruction.getKeyword() == "USER" && instruction.getArgumentsContent() == "dev"))
     assert.ok(instructions.some((instruction) => instruction.getKeyword() == "WORKDIR" && instruction.getArgumentsContent() == "/home/dev/semantifold"))
   })

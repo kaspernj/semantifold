@@ -18,6 +18,7 @@ RUN apt-get update \
     git \
     gh \
     gnupg \
+    golang-go \
     jq \
     openssh-client \
     php-cli \
@@ -41,6 +42,14 @@ RUN apt-get update \
   && java -version \
   && dotnet --info \
   && test "$(dotnet --version | cut -d. -f1)" = "10" \
+  && go version \
+  && go env GOVERSION GOOS GOARCH GOROOT \
+  && test "$(go env GOVERSION | cut -d. -f1,2)" = "go1.26" \
+  && test "$(go env GOOS)" = "linux" \
+  && test "$(go env GOARCH)" = "amd64" \
+  && test -n "$(go env GOROOT)" \
+  && test -x "$(go env GOROOT)/bin/gofmt" \
+  && test "$(readlink -f "$(command -v gofmt)")" = "$(readlink -f "$(go env GOROOT)/bin/gofmt")" \
   && rm -rf /var/lib/apt/lists/*
 
 RUN test "$(id -u ubuntu)" = "1000" \
