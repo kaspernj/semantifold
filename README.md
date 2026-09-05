@@ -1,6 +1,6 @@
 # Semantifold
 
-Semantifold is an early language-neutral semantic code toolkit. This first release candidate proves a deliberately small end-to-end slice: parse equivalent PHP, Ruby, JavaScript with JSDoc, TypeScript, Java, and strictly annotated Python programs into one typed semantic representation, then generate and genuinely execute equivalent programs in every target language.
+Semantifold is an early language-neutral semantic code toolkit. The current `semantifold@0.2.0` release proves a deliberately small six-language end-to-end baseline: parse equivalent PHP, Ruby, JavaScript with JSDoc, TypeScript, Java, and strictly annotated Python programs into one typed semantic representation, then generate and genuinely execute equivalent programs in every target language.
 
 ## Current API
 
@@ -45,6 +45,12 @@ This is not general-purpose support for any of the six languages. The implemente
 
 Semantic integers must be JavaScript-safe mathematical integers and have one unsigned zero. Generated JavaScript and TypeScript canonically render scalar output for modules containing negation or multiplication so IEEE-754 `-0` is observed as `0` without folding or rewriting the semantic operation tree. Java generation narrows literals and compile-time-known arithmetic trees further to signed 32-bit `int`; general runtime-overflow equivalence remains outside the portable contract. Strings are parser-decoded Unicode scalar values and are re-escaped for each target without preserving source quotes or escapes. Equality never coerces and never applies to objects or collections. Division, remainder, exponentiation, bitwise/shift/update/compound operations, ternary/nullish forms, casts/assertions, truthiness, implicit returns, loops, switches, exceptions, and constant folding are unsupported. JavaScript and TypeScript functions must be synchronous and non-generator; Ruby annotations must be immediately associated comment blocks; and PHP accepts only an optional exact `declare(strict_types=1)`. Python requires exact `int`/`bool`/`str` annotations on parameters, returns, and initialized locals, treats `bool` and `int` as distinct, and rejects dynamic forms; its exact adjacent `# @semantifold-immutable` carrier preserves immutable-local intent. Frontends reject syntax instead of dropping receivers, arguments, parameters, declarations, or statements. Before emission, each backend recursively validates blocks, flow, scalar types, typed operations, modeled bindings, mutability, target identifiers, and literal representability.
 
+## Standard-library portability direction
+
+Standard-library portability is planned and is not implemented in `semantifold@0.2.0`. The design is hub-and-spoke, with two integrations per language: a source-facing **language compatibility stdlib/facade** preserves that language's familiar supported API shape in portable executable definitions, while a **target host provider/native binding** implements versioned **canonical Semantifold stdlib contracts/capabilities** with the target's genuine native standard library.
+
+For example, planned Ruby-to-PHP compilation would compile both a Ruby application and a portable Ruby `TCPSocket` compatibility facade through the semantic IR. The generated PHP could retain the source-compatible `TCPSocket` name in a collision-safe compatibility namespace, call canonical `SocketClient`, text-stream, output, and resource capabilities, and link only the required PHP provider modules; that provider would use native `fsockopen`, `fgets`, and `fclose` for the socket operations. This requires no handwritten Ruby-on-PHP bridge and no whole-program intelligent refactor. See the [authoritative standard-library portability design](docs/standard-library-portability.md) and [dependency-ordered implementation plan](docs/plans/2026-09-05-standard-library-portability.md).
+
 ## Development
 
 Use Node.js 24 and install with `npm ci`. Specs use `@velocious/testing@0.0.0` and the standalone `velocious-test` runner. Run a focused spec with `npx velocious-test spec/repository-contract.spec.js`; run the framework-native `spec` directory discovery with `npm test`.
@@ -72,6 +78,8 @@ The execution specs require PHP CLI, Ruby, Python 3, TypeScript, and a Java JDK 
 - [Parser qualification](docs/parser-qualification.md)
 - [Testing](docs/testing.md)
 - [Source provenance and mappings](docs/source-maps.md)
+- [Standard-library portability design](docs/standard-library-portability.md)
+- [Standard-library portability implementation plan](docs/plans/2026-09-05-standard-library-portability.md)
 - [Language feature roadmap](https://github.com/kaspernj/semantifold/blob/master/todo/README.md)
 - [Initial toolchain plan](docs/plans/2026-09-02-initial-toolchain.md)
 

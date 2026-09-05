@@ -2,6 +2,8 @@
 
 Semantifold is an ESM JavaScript package with strict JSDoc typing. Keep parser-specific trees inside `src/frontends/`; public values use only the semantic types in `src/semantic/types.js`. Keep target syntax inside `src/backends/` and fail with a `SemantifoldDiagnostic` when source syntax or backend capabilities exceed the implemented subset. Never add source-text parsing fallbacks when a parser adapter rejects a construct.
 
+Future standard-library portability is strictly hub-and-spoke: each language supplies a language compatibility stdlib/facade and a target host provider/native binding joined only through versioned canonical Semantifold stdlib contracts/capabilities. Never add pairwise adapters or direct behavior-changing rewrites; keep the host-native provider boundary protected from portable code and fail loudly before exposing partial artifacts.
+
 Every behavior change needs a focused spec and matching documentation. Use one top-level `describe` per spec file. Runtime-generation coverage must invoke real `php`, `ruby`, `node`, `tsc`, `javac`, and `java` commands and must fail if a command is unavailable. Do not replace these checks with snapshots or source-only assertions.
 
 Specs use the released `@velocious/testing` package and its standalone `velocious-test` runner. Use its `expect` API for clean direct assertions and retain `node:assert/strict` where predicate-rich checks provide clearer diagnostics.
