@@ -19,6 +19,17 @@ async function goModuleFrom(fixture) {
   return parseGo({filename: "main.go", source})
 }
 
+/** @param {string} body */
+function expectUnreadLocal(body) {
+  const source = "function value(left: number, right: number): number {\n" + body +
+    "\n\treturn right\n}\n\nconsole.log(value(1, 2))\n"
+  const module = parse({filename: "unread.ts", language: "typescript", source})
+
+  assert.throws(() => generateGoModule({module}), (error) =>
+    Boolean(error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
+      error.language == "go" && error.location))
+}
+
 describe("Go backend validation", () => {
   it("returns the deterministic manifest-first Go module artifact shape", async () => {
     const module = await moduleFrom()
@@ -143,5 +154,13 @@ describe("Go backend validation", () => {
       assert.throws(() => generateGoModule({module}), (error) =>
         Boolean(error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" && error.language == "go"), invalid)
     }
+  })
+
+  it("rejects an initialized local that is never read", () => {
+    expectUnreadLocal("\tconst unused: number = left")
+  })
+
+  it("rejects a local whose only later occurrence is an assignment target", () => {
+    expectUnreadLocal("\tlet unused: number = left\n\tunused = right")
   })
 })

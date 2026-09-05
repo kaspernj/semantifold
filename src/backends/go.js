@@ -28,6 +28,7 @@ export function generateGoModule({filename, mapDirective, module, sourceMapFilen
     unsupportedCapability("go", "source-map filename or directive option", module.location)
   }
   validateRoundTripMutability(module)
+  validateLocalReads(module)
   const writer = new SourceWriter({filename: "main.go", language: "go", module, sources})
 
   emitProgram(module, writer)
@@ -78,6 +79,49 @@ function validateRoundTripMutability(module) {
         unsupportedCapability("go", "mutable local without a later syntactic assignment", statement.location)
       }
     })
+  }
+}
+
+/**
+ * Rejects locals that Go would reject as declared but never read.
+ * @param {import("../semantic/types.js").SemanticModule} module Semantic module.
+ * @returns {void}
+ */
+function validateLocalReads(module) {
+  for (const root of [...module.functions.map(({body}) => body), module.entryPoint.body]) {
+    /** @type {import("../semantic/types.js").LocalDeclaration[]} */
+    const declarations = []
+    const reads = new Set()
+
+    visitStatements(root, (statement) => {
+      if (statement.kind == "LocalDeclaration") {
+        declarations.push(statement)
+        collectIdentifierReads(statement.initializer, reads)
+      } else if (statement.kind == "IfStatement") collectIdentifierReads(statement.condition, reads)
+      else collectIdentifierReads(statement.expression, reads)
+    })
+    for (const declaration of declarations) {
+      if (!reads.has(declaration.name)) {
+        unsupportedCapability("go", `local '${declaration.name}' is never read`, declaration.location)
+      }
+    }
+  }
+}
+
+/**
+ * Collects genuine identifier reads recursively from one validated expression.
+ * @param {import("../semantic/types.js").Expression} expression Semantic expression.
+ * @param {Set<string>} reads Collected names.
+ * @returns {void}
+ */
+function collectIdentifierReads(expression, reads) {
+  if (expression.kind == "IdentifierExpression") reads.add(expression.name)
+  else if (expression.kind == "CallExpression") {
+    for (const argument of expression.arguments) collectIdentifierReads(argument, reads)
+  } else if (expression.kind == "UnaryExpression") collectIdentifierReads(expression.operand, reads)
+  else if (expression.kind == "BinaryExpression") {
+    collectIdentifierReads(expression.left, reads)
+    collectIdentifierReads(expression.right, reads)
   }
 }
 
