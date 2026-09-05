@@ -1,6 +1,6 @@
 # Roadmap research sources
 
-Access date for existing semantic-roadmap sources: **2026-09-02**. Language-expansion sources were checked **2026-09-04**; Task 017 registry and .NET evidence was rechecked **2026-09-05**.
+Access date for existing semantic-roadmap sources: **2026-09-02**. Language-expansion sources were checked **2026-09-04**; Task 017 registry/.NET and Task 024 registry/Go evidence were rechecked **2026-09-05**.
 
 ## Repository baseline and inspected evidence
 
@@ -60,6 +60,7 @@ Resolved versions come from `package-lock.json`; manifest ranges come from `pack
 | `tree-sitter` | `0.25.1` | `0.25.1` | [official tag](https://github.com/tree-sitter/node-tree-sitter/tree/v0.25.1), [exact registry record](https://registry.npmjs.org/tree-sitter/0.25.1), [qualification record](../docs/parser-qualification.md#task-016-python-qualification) |
 | `tree-sitter-python` | `0.25.0` | `0.25.0` | [official tag](https://github.com/tree-sitter/tree-sitter-python/tree/v0.25.0), [exact registry record](https://registry.npmjs.org/tree-sitter-python/0.25.0), [qualification record](../docs/parser-qualification.md#task-016-python-qualification) |
 | `tree-sitter-c-sharp` | `0.23.5` | `0.23.5` | [official tag](https://github.com/tree-sitter/tree-sitter-c-sharp/tree/v0.23.5), [exact registry record](https://registry.npmjs.org/tree-sitter-c-sharp/0.23.5), [qualification record](../docs/parser-qualification.md#task-017-c-qualification) |
+| `tree-sitter-go` | `0.25.0` | `0.25.0` | [official tag](https://github.com/tree-sitter/tree-sitter-go/tree/v0.25.0), [exact registry record](https://registry.npmjs.org/tree-sitter-go/0.25.0), [qualification record](../docs/parser-qualification.md#task-024-go-qualification) |
 | TypeScript compiler | `^7.0.0` | `7.0.2` | [exact registry record](https://registry.npmjs.org/typescript/7.0.2), [compiler options](https://www.typescriptlang.org/docs/handbook/compiler-options.html) |
 | Node.js | Docker/TensorBuzz exact | `24.18.1` | `Dockerfile`, `tensorbuzz.yml` |
 | PHP CLI | Ubuntu package, not exact-pinned | locally observed `8.5.4` | `Dockerfile`, `tensorbuzz.yml` |
@@ -67,12 +68,15 @@ Resolved versions come from `package-lock.json`; manifest ranges come from `pack
 | Java compiler/runtime | Ubuntu default JDK, not exact-pinned | locally observed OpenJDK `25.0.4` | `Dockerfile`, `tensorbuzz.yml` |
 | Python compiler/runtime | Ubuntu `python3`, not exact-pinned | locally observed Python `3.14.4` | `Dockerfile`, `tensorbuzz.yml`, configured `SEMANTIFOLD_PYTHON` discovery |
 | .NET SDK/runtime | Ubuntu `dotnet-sdk-10.0`, rolling maintained patch | SDK `10.0.111`, runtime/targeting packs `10.0.11`, RID `ubuntu.26.04-x64` | `Dockerfile`, `tensorbuzz.yml`, configured `SEMANTIFOLD_DOTNET` discovery and native Task 017 acceptance |
+| Go compiler/toolchain | Ubuntu `golang-go`, rolling Go 1.26 patch | `go1.26.0 linux/amd64`, GOROOT `/usr/lib/go-1.26` | `Dockerfile`, `tensorbuzz.yml`, configured `SEMANTIFOLD_GO` discovery, GOROOT-bound `gofmt`, and native Task 024 qualification |
 
 Parser evidence note: Babel documents attached comments, offsets/locations, TypeScript syntax plugins, and its AST deviations. Prism's JavaScript API exposes a parse result containing a typed AST, comments, errors, warnings, and node locations. `php-parser` 3.7.0 documents positional ASTs and extracted documentation. Lezer documents compact concrete syntax trees and error recovery/error nodes; Semantifold must continue rejecting a `⚠` node rather than treating a recovered tree as valid. Inspection of the installed `@lezer/java@1.1.3` grammar confirmed nodes for locals, assignments, arrays, field access, calls, loops, packages/imports, classes, type parameters, and try/throw, but no Java record-declaration grammar; Task 009 therefore uses a conventional final-class mapping for Java.
 
 Task 016's exact Node binding/official Python grammar identity, ABI, registry integrity/signatures, clean-install lifecycle, shipped sources, typed API, recovery behavior, coordinates, and accepted corpus are recorded in [parser qualification](../docs/parser-qualification.md#task-016-python-qualification). Python language behavior is checked against the configured official `python3` using `-m py_compile` and deterministic UTF-8 execution.
 
 Task 017's exact official C# grammar identity, ABI, registry integrity/signatures/attestation result, Node 24 clean install/load, lifecycle/package contents, recovery/coordinate behavior, grammar shapes, fixture hashes, and .NET compiler comparison are recorded in [parser qualification](../docs/parser-qualification.md#task-017-c-qualification). The normal manifest and lock use only the exact npm registry package.
+
+Task 024's exact official Go grammar identity, ABI, registry integrity/signatures/attestation result, Node 24 clean install/load, lifecycle/package contents, recovery/coordinate behavior, grammar shapes, fixture hashes, and Go 1.26 formatter/compiler/vet/runtime differential are recorded in [parser qualification](../docs/parser-qualification.md#task-024-go-qualification). Qualification selected exact `tree-sitter-go@0.25.0` with existing exact `tree-sitter@0.25.1`; the grammar has a verified registry signature but advertises no npm attestation. Native checks use the matching GOROOT `gofmt` and isolated offline/local, cgo-disabled Go state.
 
 ## Ruby and RBS
 

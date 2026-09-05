@@ -4,7 +4,7 @@ import "fmt"
 
 func arithmetic(left int64, right int64) int64 {
 	if (left < right) && !(left == right) {
-		return -left + right * 2
+		return -left + right*2
 	} else {
 		return left - right
 	}
