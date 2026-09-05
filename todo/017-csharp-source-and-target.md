@@ -1,6 +1,6 @@
 # 017 — C# source and target support
 
-- Status: `todo`
+- Status: `delivered`
 - Phase/priority: Phase L1 / P0
 - Dependencies: [015-language-expansion-foundation.md](015-language-expansion-foundation.md)
 
@@ -28,7 +28,7 @@ Add C# as a first-class frontend and managed textual/project backend for the exa
 - Emit a deterministic artifact set containing `Program.cs` and `Semantifold.csproj`. Pin a documented supported .NET target framework and C# language major selected during implementation; set nullable enabled, warnings as errors, deterministic build, invariant globalization where appropriate, and an explicit overflow-checking policy.
 - Use no NuGet packages, restore-time network dependency, implicit SDK analyzers beyond the pinned SDK contract, or generated source tools. Restore/build must succeed offline after the SDK is installed.
 - Emit fully qualified runtime names where that avoids Task 010 imports. Use invariant, exact scalar output and target escaping; do not approximate semantic strings through culture-sensitive formatting.
-- Validate reserved/contextual identifiers, `Main`/class scaffolding collisions, `long` range, malformed IR, and every unsupported node before returning either artifact.
+- Validate reserved/contextual identifiers, `Main`/`Program`/native-proven `System` method scaffolding collisions, parameter/local `System` capture, `long` range, malformed IR, and every unsupported node before returning either artifact.
 - Generated `Program.cs` reparses through the frontend to equivalent meaning after exact synthetic project/entry scaffolding is removed. Both artifacts carry deterministic provenance; the project file is synthetic with related module origins.
 
 ## Compiler/runtime, diagnostics, and rejections
@@ -54,6 +54,10 @@ Document the selected SDK/C# major, target framework, class/entry profile, exact
 - The complete Tasks 001–004 subset round-trips without nullability, boxing, overload, or dynamic leakage.
 - The deterministic project restores offline, builds without warnings, and runs with exact output on the real supported SDK/runtime.
 - Cross-language, negative, provenance, diagnostic, docs/changelog, and repository gates pass.
+
+## Delivery record
+
+Delivered by `feature/csharp-source-target` on 2026-09-05. The implementation pins qualified official registry grammar `tree-sitter-c-sharp@0.23.5` with the existing `tree-sitter@0.25.1` binding, adds the exact Tasks 001–004 C# frontend, and emits deterministic ordered `Program.cs` plus fixed `Semantifold.csproj` for .NET 10/C# 14/`net10.0`. It uses checked signed-64-bit arithmetic, exact nullable/scaffolding/type/identifier profiles, rich/v3 program provenance, synthetic related manifest provenance, separate local-only restore/build/execute stages, and configured .NET 10 discovery. Focused tests cover all five profiles, parser ABI/recovery/UTF-16 behavior, broad source rejection, dense external-IR validation, legacy API failure, two-artifact determinism, real native execution, C# into all original-five targets, and a rotated original-five source into C# for each profile. The original-six APIs and characterized bytes remain unchanged. Review, TensorBuzz CI, merge, and publication remain coordinator-owned.
 
 ## Non-goals
 

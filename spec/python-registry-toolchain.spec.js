@@ -3,11 +3,10 @@
 import assert from "node:assert/strict"
 import path from "node:path"
 import {describe, expect, it} from "@velocious/testing"
-import {canonicalToolchains, discoverCanonicalToolchain, languageCapabilities, SemantifoldDiagnostic, supportedLanguages} from "../index.js"
+import {canonicalToolchains, discoverCanonicalToolchain, languageCapabilities, SemantifoldDiagnostic} from "../index.js"
 
 describe("Python registry and toolchain", () => {
-  it("registers Python last as a truthful round-trip single-text language", () => {
-    expect(supportedLanguages.at(-1)).toEqual("python")
+  it("registers Python as a truthful round-trip single-text language", () => {
     const python = languageCapabilities.find(({id}) => id == "python")
 
     expect(python).toEqual({

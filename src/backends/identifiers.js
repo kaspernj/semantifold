@@ -4,6 +4,7 @@ import {unsupportedCapability} from "../diagnostic.js"
 
 /** @type {Record<import("../semantic/types.js").SemanticLanguage, RegExp>} */
 const identifierPatterns = {
+  csharp: /^[A-Za-z_][A-Za-z0-9_]*$/u,
   java: /^[A-Za-z_$][A-Za-z0-9_$]*$/u,
   javascript: /^[A-Za-z_$][A-Za-z0-9_$]*$/u,
   php: /^[A-Za-z_][A-Za-z0-9_]*$/u,
@@ -14,6 +15,20 @@ const identifierPatterns = {
 
 /** @type {Record<import("../semantic/types.js").SemanticLanguage, Set<string>>} */
 const reservedWords = {
+  csharp: new Set([
+    "__arglist", "__makeref", "__reftype", "__refvalue", "abstract", "add", "alias", "allows", "and", "as",
+    "ascending", "async", "await", "base", "bool", "break",
+    "by", "byte", "case", "catch", "char", "checked", "class", "const", "continue", "decimal", "default",
+    "delegate", "descending", "do", "double", "dynamic", "else", "enum", "equals", "event", "explicit", "extension", "extern",
+    "false", "field", "file", "finally", "fixed", "float", "for", "foreach", "from", "get", "global", "goto",
+    "group", "if", "implicit", "in", "init", "int", "interface", "internal", "into", "is", "join", "let", "lock",
+    "long", "managed", "nameof", "namespace", "new", "nint", "not", "notnull", "null", "nuint", "object", "on",
+    "operator", "or", "orderby", "out", "override", "params", "partial", "private", "protected", "public", "readonly",
+    "record", "ref", "remove", "required", "return", "sbyte", "scoped", "sealed", "select", "set", "short", "sizeof",
+    "stackalloc", "static", "string", "struct", "switch", "this", "throw", "true", "try", "typeof", "uint", "ulong",
+    "unchecked", "unmanaged", "unsafe", "ushort", "using", "value", "var", "virtual", "void", "volatile", "when",
+    "where", "while", "with", "yield"
+  ]),
   java: new Set([
     "_", "abstract", "assert", "boolean", "break", "byte", "case", "catch", "char", "class", "const", "continue",
     "default", "do", "double", "else", "enum", "exports", "extends", "false", "final", "finally", "float", "for",

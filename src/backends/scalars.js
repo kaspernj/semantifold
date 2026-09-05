@@ -2,6 +2,7 @@
 
 /** @type {Readonly<Record<import("../semantic/types.js").SemanticLanguage, Readonly<Record<import("../semantic/types.js").SemanticTypeName, string>>>>} */
 const targetScalarTypes = Object.freeze({
+  csharp: Object.freeze({boolean: "bool", integer: "long", string: "string"}),
   java: Object.freeze({boolean: "boolean", integer: "int", string: "String"}),
   javascript: Object.freeze({boolean: "boolean", integer: "number", string: "string"}),
   php: Object.freeze({boolean: "bool", integer: "int", string: "string"}),
@@ -35,7 +36,9 @@ export function emitStringLiteral(language, value) {
 
   if (typeof literal != "string") throw new TypeError("A validated semantic string did not serialize.")
 
-  return literal.replaceAll("\u2028", "\\u2028").replaceAll("\u2029", "\\u2029")
+  const escapedLineSeparators = literal.replaceAll("\u2028", "\\u2028").replaceAll("\u2029", "\\u2029")
+
+  return language == "csharp" ? escapedLineSeparators.replaceAll("\u0085", "\\u0085") : escapedLineSeparators
 }
 
 /**

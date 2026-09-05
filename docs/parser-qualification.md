@@ -27,7 +27,7 @@ All Tree-sitter languages use the official `tree-sitter` Node binding. The langu
 | Owning task | Language | Required upstream route | Qualification state before owner starts |
 | --- | --- | --- | --- |
 | 016 | Python | official [`tree-sitter/tree-sitter-python`](https://github.com/tree-sitter/tree-sitter-python) grammar package | blocked until the exact release record above passes |
-| 017 | C# | official [`tree-sitter/tree-sitter-c-sharp`](https://github.com/tree-sitter/tree-sitter-c-sharp) grammar package | blocked until the exact release record above passes |
+| 017 | C# | official [`tree-sitter/tree-sitter-c-sharp`](https://github.com/tree-sitter/tree-sitter-c-sharp) grammar package | passed for exact `tree-sitter-c-sharp@0.23.5`; see the checked-in record below |
 | 018 | C | official [`tree-sitter/tree-sitter-c`](https://github.com/tree-sitter/tree-sitter-c) grammar package | blocked until the exact release record above passes |
 | 019 | C++ | official [`tree-sitter/tree-sitter-cpp`](https://github.com/tree-sitter/tree-sitter-cpp) grammar package | blocked until the exact release record above passes |
 | 020 | Rust | official [`tree-sitter/tree-sitter-rust`](https://github.com/tree-sitter/tree-sitter-rust) grammar package | blocked until the exact release record above passes |
@@ -68,3 +68,32 @@ npm pack tree-sitter-python@0.25.0 --dry-run --json
 ```
 
 The accepted Python corpus is `spec/fixtures/{program.py,scalars/program.py,locals/program.py,operators/program.py,statements/program.py}` with SHA-256 values, in that order: `045ac897756dde15066878b56e40c84ee1aabdbd6fd32bddb9d0058ad512972a`, `b4acdda8c4c096ef7d76f83aec7dc148e049a0cd33583c55a79fd18ab1d6f6a6`, `123bb06c0833786168722ad7dfdcb47b95d37b502f6240fde4c12cd60f8e6715`, `35dce1aef96e5dc381baa1b2c39b58232d76b9e14350f0e81c4dd296da77df1e`, and `4907b25568006f65ce749f4c57b4b1eb9c7e6f655ad6be6e014d94c84885ada4`. Run `PYTHONPYCACHEPREFIX="$(mktemp -d)" python3 -m py_compile` over those paths so bytecode remains outside the checkout.
+
+## Task 017 C# qualification
+
+Qualification passed in a credential-free empty `/tmp` package on canonical Node `v24.18.1`, npm `11.16.0`, Linux x64, and .NET SDK `10.0.111` (runtime/`Microsoft.NETCore.App` `10.0.11`, RID `ubuntu.26.04-x64`, `Microsoft.NETCore.App.Ref`/`Microsoft.AspNetCore.App.Ref` targeting packs `10.0.11`). Task 017 therefore uses the existing exact `tree-sitter@0.25.1` binding with official registry grammar `tree-sitter-c-sharp@0.23.5`; neither dependency is a Git/archive path or vendored artifact.
+
+| Evidence | Qualified result |
+| --- | --- |
+| npm distribution | `tree-sitter-c-sharp@0.23.5`, resolved from `https://registry.npmjs.org/tree-sitter-c-sharp/-/tree-sitter-c-sharp-0.23.5.tgz` with integrity `sha512-xJGOeXPMmld0nES5+080N/06yY6LQi+KWGWV4LfZaZe6srJPtUtfhIbRSN7EZN6IaauzW28v6W4QHFwmeUW6HQ==`; exact peer `tree-sitter@^0.25.0` is satisfied by `0.25.1`. |
+| upstream identity | Official [`tree-sitter/tree-sitter-c-sharp`](https://github.com/tree-sitter/tree-sitter-c-sharp) annotated tag `v0.23.5` (tag object `173c15453b733ccde654032fec7103705b5ad04f`), peeled commit and npm `gitHead` `cac6d5fb595f5811a076336682d5d595ac1c9e85`. |
+| legal and registry provenance | The grammar declares MIT. In the clean exact installation, `npm audit signatures` verified all four installed-package registry signatures and two attestations. The grammar's registry signature, tag/commit identity, package contents, and lockfile integrity were checked; no credential was exposed or requested. |
+| clean Node 24 install/load | With npm auth/token environment variables removed, exact installation and `npm ls --all` passed with zero vulnerabilities. The package has no Node engine declaration, so compatibility was proven empirically: its explicit Node binding import loaded, `Parser#setLanguage` succeeded, and all fixtures parsed through the native binding. |
+| ABI, typing, lifecycle, and package inputs | The grammar declares ABI `15`; `tree-sitter@0.25.1` supports ABI `13`–`15`. The grammar ships typed `bindings/node/index.d.ts`, Linux x64/arm64 prebuilds, grammar C source fallback, and only `install: node-gyp-build`; no runtime downloader is declared. Dry-run packs showed normal registry package contents. No tarball, parser source copy, prebuild, `node_modules`, NuGet cache, `bin`, or `obj` entered the repository. |
+| coordinates and recovery | `child(index)` traversal covered every named, anonymous, comment, nullable directive, error, and missing node. The Node binding exposes UTF-16 code-unit indexes for JavaScript strings despite Tree-sitter's byte-oriented native contract; astral text before an identifier and CRLF probes separated UTF-16 and UTF-8 offsets. The adapter rejects lone surrogates and verifies every boundary through the shared UTF-8-byte-to-UTF-16 converter. Malformed braces, operands, and missing semicolons produced explicit or propagated `hasError`/`isError`/`isMissing`; propagated ancestor error state is rejected even where no distinct `ERROR` child exists. |
+| Tasks 001–004 grammar shapes | The five fixtures proved exact shapes for `preproc_nullable`, file-scoped namespace, class/modifiers, methods/parameters/types, blocks, declarations, carrier comments, assignments, calls/arguments, print member access, checked expressions, all scalar literals/operators, returns, and `if`/`else if`/`else`. Adapter specs retain field and token ranges and reject every unmodeled present child. |
+| official compiler comparison | All five fixture projects restored without external packages, built under .NET 10/C# 14 with warnings as errors and no warning output, and executed with exact expected stdout. Restore, build, and execution were separate; the isolated `NUGET_PACKAGES` path was resolved to an absolute path because the SDK rejects a relative global packages folder. The official grammar needs no community-grammar differential exception. |
+
+Reproduce the registry qualification in an empty temporary directory with:
+
+```sh
+npm init -y
+env -u NODE_AUTH_TOKEN -u NPM_TOKEN -u npm_config__auth -u npm_config_token \
+  npm install --save-exact tree-sitter@0.25.1 tree-sitter-c-sharp@0.23.5
+npm audit signatures
+npm ls --all
+npm pack tree-sitter@0.25.1 --dry-run --json
+npm pack tree-sitter-c-sharp@0.23.5 --dry-run --json
+```
+
+The accepted C# corpus is `spec/fixtures/{Program.cs,scalars/Program.cs,locals/Program.cs,operators/Program.cs,statements/Program.cs}` with SHA-256 values, in that order: `5ca661d09dff2d775094df99b40e5c5604796c9bff4c32c1da11fa1b4c564a00`, `9cefd6d01c5855480629829489945f2f43338b84879c7a26043963151a8439da`, `ee775fea59ee812212ce325152e4e4cb79c20e699aba081bf39cc698b324444d`, `7137f4acc88dbdc1d0bafd6bb8eb57bed9386daf3e6b11c6fbae3831abceae18`, and `ba63cb72490605437e1efaa7d69ce0abdbfbb07c076aec787bc025e7a277468f`.
