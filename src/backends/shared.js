@@ -73,11 +73,14 @@ export function validateBackendModule(module, language) {
  * @returns {void}
  */
 function validateScaffoldingNames(module, language) {
-  const ownedEntryNames = language == "csharp" ? new Set(["System"]) : language == "java" ? new Set(["args", "System"]) :
+  const ownedEntryNames = language == "go" ? new Set(["fmt", "int64", "bool", "string", "true", "false"]) :
+    language == "csharp" ? new Set(["System"]) : language == "java" ? new Set(["args", "System"]) :
     ["javascript", "typescript"].includes(language) ? new Set(["console"]) : new Set()
-  const ownedPrintReceiverNames = language == "csharp" || language == "java" ? new Set(["System"]) :
+  const ownedPrintReceiverNames = language == "go" ? new Set(["fmt", "int64", "bool", "string", "true", "false"]) :
+    language == "csharp" || language == "java" ? new Set(["System"]) :
     ["javascript", "typescript"].includes(language) ? new Set(["console"]) : new Set()
-  const ownedCallableNames = language == "csharp" ? new Set([
+  const ownedCallableNames = language == "go" ? new Set(["main", "init", "fmt", "int64", "bool", "string", "true", "false"]) :
+    language == "csharp" ? new Set([
     "Equals", "Finalize", "GetHashCode", "GetType", "Main", "MemberwiseClone", "Program", "ReferenceEquals", "System", "ToString"
   ]) :
     ["javascript", "typescript"].includes(language) ? new Set(["console"]) :
@@ -242,7 +245,7 @@ function validateExpression(expression, language, ownerLocation, allowJavaNegate
     if (language == "java" && !validNegatedMinimumOperand && (candidate.value < -2147483648 || candidate.value > 2147483647)) {
       unsupportedCapability(language, "integer literal outside signed 32-bit int range", location)
     }
-    if (language == "csharp" && candidate.value < 0) {
+    if ((language == "csharp" || language == "go") && candidate.value < 0) {
       unsupportedCapability(language, "negative integer literal without semantic negation", location)
     }
     return
@@ -293,7 +296,8 @@ function validateKnownTargetInteger(expression, language, location) {
   if (language == "java" && value !== undefined && (value < -2147483648n || value > 2147483647n)) {
     unsupportedCapability(language, "compile-time-known integer operation outside signed 32-bit int range", location)
   }
-  if (language == "csharp" && value !== undefined && (value < -9223372036854775808n || value > 9223372036854775807n)) {
+  if ((language == "csharp" || language == "go") && value !== undefined &&
+    (value < -9223372036854775808n || value > 9223372036854775807n)) {
     unsupportedCapability(language, "compile-time-known integer operation outside signed 64-bit long range", location)
   }
 }

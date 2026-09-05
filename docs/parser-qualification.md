@@ -33,7 +33,7 @@ All Tree-sitter languages use the official `tree-sitter` Node binding. The langu
 | 020 | Rust | official [`tree-sitter/tree-sitter-rust`](https://github.com/tree-sitter/tree-sitter-rust) grammar package | blocked until the exact release record above passes |
 | 022 | Swift | community [`alex-pinkus/tree-sitter-swift`](https://github.com/alex-pinkus/tree-sitter-swift) candidate plus differential `swiftc` checks | candidate only; blocked until exact release and differential record pass |
 | 023 | Kotlin/JVM | community [`fwcd/tree-sitter-kotlin`](https://github.com/fwcd/tree-sitter-kotlin) candidate plus differential `kotlinc` checks | candidate only; blocked until exact release and differential record pass |
-| 024 | Go | official [`tree-sitter/tree-sitter-go`](https://github.com/tree-sitter/tree-sitter-go) grammar package | blocked until the exact release record above passes |
+| 024 | Go | official [`tree-sitter/tree-sitter-go`](https://github.com/tree-sitter/tree-sitter-go) grammar package | passed for exact `tree-sitter-go@0.25.0`; see the checked-in record below |
 | 029 | Dart | candidate selected and qualified by Task 029 | intentionally deferred |
 | 031 | Zig | candidate selected and qualified by Task 031 | intentionally deferred |
 
@@ -97,3 +97,33 @@ npm pack tree-sitter-c-sharp@0.23.5 --dry-run --json
 ```
 
 The accepted C# corpus is `spec/fixtures/{Program.cs,scalars/Program.cs,locals/Program.cs,operators/Program.cs,statements/Program.cs}` with SHA-256 values, in that order: `5ca661d09dff2d775094df99b40e5c5604796c9bff4c32c1da11fa1b4c564a00`, `9cefd6d01c5855480629829489945f2f43338b84879c7a26043963151a8439da`, `ee775fea59ee812212ce325152e4e4cb79c20e699aba081bf39cc698b324444d`, `7137f4acc88dbdc1d0bafd6bb8eb57bed9386daf3e6b11c6fbae3831abceae18`, and `ba63cb72490605437e1efaa7d69ce0abdbfbb07c076aec787bc025e7a277468f`.
+
+## Task 024 Go qualification
+
+Qualification passed in a credential-free empty `/tmp` package on canonical Node `v24.18.1`, npm `11.16.0`, Linux x64, and Go `go1.26.0 linux/amd64` with GOROOT `/usr/lib/go-1.26`. Task 024 therefore uses the existing exact `tree-sitter@0.25.1` binding with official registry grammar `tree-sitter-go@0.25.0`; neither dependency is a Git/archive path or vendored artifact.
+
+| Evidence | Qualified result |
+| --- | --- |
+| npm distribution | `tree-sitter-go@0.25.0`, resolved from `https://registry.npmjs.org/tree-sitter-go/-/tree-sitter-go-0.25.0.tgz` with integrity `sha512-APBc/Dq3xz/e35Xpkhb1blu5UgW+2E3RyGWawZSCNcbGwa7jhSQPS8KsUupuzBla8PCo8+lz9W/JDJjmfRa2tw==`; peer `tree-sitter@^0.25.0` is satisfied by exact `tree-sitter@0.25.1` with integrity `sha512-mrcEdkYtHfrK1A6fs3O6FxkBo0Qig5XUXqHhxUOQu0bmPo00QF4XaSx4edpazdHwxnSCjlGKGgIqWdaN4dvTLA==`. |
+| upstream identity | Official [`tree-sitter/tree-sitter-go`](https://github.com/tree-sitter/tree-sitter-go) annotated tag `v0.25.0` (tag object `6048bfc6e5238eaf062c2221bd934489c39fbb61`), peeled commit and npm `gitHead` `1547678a9da59885853f5f5cc8a99cc203fa2e2c`. The binding is official tag `v0.25.1`, npm `gitHead` `75a0eccfedc491e26843bd744bb6806f8a8bfff4`. |
+| legal and registry provenance | Both packages declare MIT. `npm audit signatures` verified all four installed-package registry signatures and two attestations with no invalid or missing signature. The binding publishes npm SLSA provenance; the grammar has a verified registry signature but did not advertise an npm attestation, so tag/commit identity and registry integrity were checked independently. |
+| clean install/load | With npm auth/token environment variables removed, `npm install --save-exact tree-sitter@0.25.1 tree-sitter-go@0.25.0` succeeded from the registry in a fresh package with zero vulnerabilities. `npm ls --all` resolved only `node-addon-api@8.9.2`, `node-gyp-build@4.8.4`, the exact binding, and the exact grammar. The explicit ESM import loaded on Node 24, `Parser#setLanguage` succeeded, and typed `nodeTypeInfo` exposed 188 grammar entries. |
+| ABI, typing, lifecycle, and package inputs | The shipped grammar declares ABI `15`; `tree-sitter@0.25.1` accepts ABI `13` through `15`. The grammar declaration exposes its language handle and `NodeInfo[]` metadata. Both packages use only `install: node-gyp-build`, with no downloader URL or extra lifecycle dependency. Dry-run packs contained 80 binding files (1,594,590-byte archive) and 25 grammar files (558,540-byte archive), including declarations, licenses, platform prebuilds, and source fallback. No archive, prebuild, generated parser, native binary, `node_modules`, or qualification output entered Semantifold. |
+| coordinates, comments, and recovery | The Node binding exposed UTF-16 code-unit indexes: after astral text and CRLF, one literal occupied indexes 61–65 while raw UTF-8 byte boundaries were 63–69; both round-tripped through `utf8ByteOffsetToUtf16Offset()`. Lone surrogates were rejected before parsing. Ordinary and `//go:`, `// +build`, and `//line` directive comments remained visible nodes. Malformed package clauses, parameter lists, missing operands, braces, semicolons, and incomplete strings all exposed `hasError`, `isError`, or `isMissing`. |
+| Tasks 001–004 tree corpus | Exhaustive `child(index)` traversal covered every named and anonymous child, token, comment, and `fieldNameForChild` edge in all five fixtures. Observed shapes include the exact package/import/function/parameter/type/result/block scaffold; variable declarations/specs; assignment/expression lists; returns, calls, arguments, and selectors; parentheses; every accepted scalar/operator node; and nested `if`/`else if`/`else`. No source scan supplied missing structure. |
+| official-tool differential | Matching `/usr/lib/go-1.26/bin/gofmt -d` produced no diff for all five fixtures. In separate dependency-free modules with fixed `go.mod`, every fixture passed offline/local, cgo-disabled `go build`, mandatory `go vet`, and `go run` with exact output. A no-import sample passed `go tool compile`. All six malformed samples were rejected by both `gofmt` and `go tool compile`. A slice/range/short-declaration sample parsed, formatted, built, vetted, and ran under official Go, establishing the intentional valid-but-`UNSUPPORTED_SYNTAX` differential boundary. No `go.sum`, `go.work`, vendor tree, or source mutation appeared. |
+| toolchain isolation | Every Go process used `GOTOOLCHAIN=local`, `GOPROXY=off`, `GOSUMDB=off`, `GOVCS=off`, `CGO_ENABLED=0`, `GOENV=off`, `GOWORK=off`, `GOOS=linux`, `GOARCH=amd64`, and separate absolute cache/module/GOPATH/temp/home paths. `/usr/bin/gofmt` resolved to `/usr/lib/go-1.26/bin/gofmt`, the same verified GOROOT as `go`. |
+
+Reproduce the registry qualification in a fresh empty temporary directory with:
+
+```sh
+npm init -y
+env -u NODE_AUTH_TOKEN -u NPM_TOKEN -u npm_config__auth -u npm_config_token \
+  npm install --save-exact tree-sitter@0.25.1 tree-sitter-go@0.25.0
+npm audit signatures
+npm ls --all
+npm pack tree-sitter@0.25.1 --dry-run --json
+npm pack tree-sitter-go@0.25.0 --dry-run --json
+```
+
+The accepted Go corpus is `spec/fixtures/{program.go,scalars/program.go,locals/program.go,operators/program.go,statements/program.go}` with SHA-256 values, in that order: `5f4ad40a233d8728c90ca885d4bfe6f018f1d7a5e6f2e2cfb97b4b9db4887f1c`, `6d4251def8b1bccdff177df901bf9fe109a8a01ae1514cb8d5aaf364298669b9`, `a7b6eb2f5eae0a20d7cd4982e4d26cc6653760ad03e8b21ff5c360239861dd6f`, `4a263413830a41a59b6d8326a78067826853e3491e65d52559e5acea0d9cf56c`, and `d64f083d70697d25d2ea7f5c7a44cada0ab13a878640fd10bc547df185fa7bba`.

@@ -1358,7 +1358,7 @@ printf 'executed\n'
     })
   })
 
-  it("executes small programs through every original-six real toolchain", async () => {
+  it("executes small programs through every original-six and Go real toolchain", async () => {
     const php = await discoverCanonicalToolchain("php")
     const ruby = await discoverCanonicalToolchain("ruby")
     const node = await discoverCanonicalToolchain("node")
@@ -1367,7 +1367,7 @@ printf 'executed\n'
     const java = await discoverCanonicalToolchain("java")
     const python = await discoverCanonicalToolchain("python")
 
-    expect(Object.keys(canonicalToolchains)).toEqual(["php", "ruby", "node", "tsc", "javac", "java", "python", "dotnet"])
+    expect(Object.keys(canonicalToolchains)).toEqual(["php", "ruby", "node", "tsc", "javac", "java", "python", "dotnet", "go"])
     await runProgram("php", "program.php", "<?php\necho \"ok\\n\";\n", [{arguments: ["program.php"], stage: "execute", tool: php}])
     await runProgram("ruby", "program.rb", "puts \"ok\"\n", [{arguments: ["program.rb"], stage: "execute", tool: ruby}])
     await runProgram("javascript", "program.js", "console.log(\"ok\")\n", [{arguments: ["program.js"], stage: "execute", tool: node}])
@@ -1383,6 +1383,53 @@ printf 'executed\n'
       {arguments: ["-m", "py_compile", "program.py"], stage: "compile", tool: python},
       {arguments: ["program.py"], stage: "execute", tool: python}
     ], {PATH: process.env.PATH, PYTHONIOENCODING: "utf-8", PYTHONUTF8: "1"})
+    await withTemporaryDirectory("semantifold-go-toolchain-caches-", async (directory) => {
+      const cacheDirectories = ["build", "modules", "gopath", "tmp", "home"]
+
+      await Promise.all(cacheDirectories.map(async (name) => await mkdir(path.join(directory, name), {recursive: true})))
+      const environment = {
+        CGO_ENABLED: "0",
+        GOARCH: "amd64",
+        GOCACHE: path.join(directory, "build"),
+        GOENV: "off",
+        GOMODCACHE: path.join(directory, "modules"),
+        GOOS: "linux",
+        GOPATH: path.join(directory, "gopath"),
+        GOPROXY: "off",
+        GOSUMDB: "off",
+        GOTOOLCHAIN: "local",
+        GOTMPDIR: path.join(directory, "tmp"),
+        GOVCS: "off",
+        GOWORK: "off",
+        HOME: path.join(directory, "home"),
+        PATH: process.env.PATH
+      }
+      const go = await discoverCanonicalToolchain("go", {environment})
+      const artifacts = createGeneratedArtifactSet({artifacts: [{
+        content: "module example.com/semantifold/acceptance\n\ngo 1.26.0\n",
+        contentKind: "text",
+        mediaType: "text/plain",
+        ownership: "generated",
+        path: "go.mod",
+        provenance: synthetic(),
+        role: "manifest"
+      }, {
+        content: "package main\n\nimport \"fmt\"\n\nfunc main() {\n\tfmt.Println(\"ok\")\n}\n",
+        contentKind: "text",
+        mediaType: "text/x-go",
+        ownership: "generated",
+        path: "main.go",
+        provenance: synthetic(),
+        role: "entry"
+      }], target: "go"})
+      const result = await runAcceptanceStages({artifacts, environment, stages: [
+        {arguments: ["build", "-mod=readonly", "-trimpath", "-buildvcs=false", "-ldflags=-buildid=", "-o", "semantifold-go", "."], stage: "compile", tool: go},
+        {arguments: ["vet", "-mod=readonly", "."], stage: "validate", tool: go},
+        {arguments: ["run", "-mod=readonly", "-trimpath", "-buildvcs=false", "."], stage: "execute", tool: go}
+      ], target: "go", timeoutMs: 20_000})
+
+      expect(result.stages.at(-1).stdout).toEqual("ok\n")
+    })
   })
 })
 

@@ -5,6 +5,7 @@ import {unsupportedCapability} from "../diagnostic.js"
 /** @type {Record<import("../semantic/types.js").SemanticLanguage, RegExp>} */
 const identifierPatterns = {
   csharp: /^[A-Za-z_][A-Za-z0-9_]*$/u,
+  go: /^[A-Za-z_][A-Za-z0-9_]*$/u,
   java: /^[A-Za-z_$][A-Za-z0-9_$]*$/u,
   javascript: /^[A-Za-z_$][A-Za-z0-9_$]*$/u,
   php: /^[A-Za-z_][A-Za-z0-9_]*$/u,
@@ -28,6 +29,11 @@ const reservedWords = {
     "stackalloc", "static", "string", "struct", "switch", "this", "throw", "true", "try", "typeof", "uint", "ulong",
     "unchecked", "unmanaged", "unsafe", "ushort", "using", "value", "var", "virtual", "void", "volatile", "when",
     "where", "while", "with", "yield"
+  ]),
+  go: new Set([
+    "_", "break", "default", "func", "interface", "select", "case", "defer", "go", "map", "struct", "chan",
+    "else", "goto", "package", "switch", "const", "fallthrough", "if", "range", "type", "continue", "for",
+    "import", "return", "var"
   ]),
   java: new Set([
     "_", "abstract", "assert", "boolean", "break", "byte", "case", "catch", "char", "class", "const", "continue",

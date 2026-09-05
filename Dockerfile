@@ -18,6 +18,7 @@ RUN apt-get update \
     git \
     gh \
     gnupg \
+    golang-go \
     jq \
     openssh-client \
     php-cli \
@@ -41,6 +42,14 @@ RUN apt-get update \
   && java -version \
   && dotnet --info \
   && test "$(dotnet --version | cut -d. -f1)" = "10" \
+  && go version \
+  && go env GOVERSION GOOS GOARCH GOROOT \
+  && test "$(go env GOVERSION | cut -d. -f1,2)" = "go1.26" \
+  && test "$(go env GOOS)" = "linux" \
+  && test "$(go env GOARCH)" = "amd64" \
+  && test -n "$(go env GOROOT)" \
+  && test -x "$(go env GOROOT)/bin/gofmt" \
+  && test "$(readlink -f "$(command -v gofmt)")" = "$(readlink -f "$(go env GOROOT)/bin/gofmt")" \
   && rm -rf /var/lib/apt/lists/*
 
 RUN test "$(id -u ubuntu)" = "1000" \
@@ -50,8 +59,25 @@ RUN test "$(id -u ubuntu)" = "1000" \
   && test "$(id -u dev)" = "1000" \
   && test "$(id -g dev)" = "1000"
 
+RUN PROVIDER_NPM_CACHE="$(mktemp -d)" \
+  && npm install --global --cache "${PROVIDER_NPM_CACHE}" \
+    opencode-ai \
+    @openai/codex \
+    @anthropic-ai/claude-code \
+    @moonshot-ai/kimi-code \
+  && rm -rf "${PROVIDER_NPM_CACHE}"
+
 USER dev
 ENV HOME=/home/dev
 WORKDIR /home/dev/semantifold
+
+RUN command -v opencode \
+  && opencode --version \
+  && command -v codex \
+  && codex --version \
+  && command -v claude \
+  && claude --version \
+  && command -v kimi \
+  && kimi --version
 
 CMD ["sleep", "infinity"]

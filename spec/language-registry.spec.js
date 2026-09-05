@@ -13,7 +13,7 @@ import {createLanguageRegistry} from "../src/language-registry.js"
 
 const originalFive = ["php", "ruby", "javascript", "typescript", "java"]
 const originalSix = [...originalFive, "python"]
-const allLanguages = [...originalSix, "csharp"]
+const allLanguages = [...originalSix, "csharp", "go"]
 
 describe("language role registry", () => {
   it("derives stable immutable public discovery from the dispatch registry", () => {
@@ -33,7 +33,7 @@ describe("language role registry", () => {
         interoperability: false,
         textBackend: true
       })
-      expect(descriptor.artifactMultiplicity).toEqual(descriptor.id == "csharp" ? "multiple" : "single")
+      expect(descriptor.artifactMultiplicity).toEqual(["csharp", "go"].includes(descriptor.id) ? "multiple" : "single")
       expect(descriptor.roundTrip).toBeTrue()
       expect(descriptor.mapping).toEqual({binaryRanges: false, richText: true, sourceMapV3: true})
       assert.ok(descriptor.acceptance.stages.includes("parse"))

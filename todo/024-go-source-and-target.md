@@ -1,6 +1,6 @@
 # 024 — Go source and target support
 
-- Status: `todo`
+- Status: `delivered`
 - Phase/priority: Phase L1 / P0
 - Dependencies: [015-language-expansion-foundation.md](015-language-expansion-foundation.md)
 
@@ -48,6 +48,10 @@ Document the Go profile, module/artifact layout, environment/toolchain pins, imm
 - Go is registered as a frontend and native module backend for Tasks 001–004 with truthful capabilities.
 - Generated modules reparse, format, build, and execute deterministically with the real installed offline toolchain.
 - Parser qualification, rejection/location, mutability, cross-language, artifact/provenance, docs/changelog, and repository gates pass.
+
+## Delivery record
+
+Task 024 qualifies and pins official `tree-sitter-go@0.25.0` against `tree-sitter@0.25.1` on Node 24, registers Go last as a round-trip multi-artifact text language, and implements the exact `package main`/optional `fmt`/typed functions/final `func main()` profile. Its transactional backend returns fixed `go.mod` then mapped `main.go`, preserves assignment-derived mutability with the immutable carrier, and validates known signed-64-bit bounds before emission. Focused acceptance covers all five Tasks 001–004 fixtures, parser recovery and coordinates, original-five rotations, matching-GOROOT `gofmt`, offline Go 1.26 Linux/amd64 build/vet/run, evaluation order, reparsing, and two-directory binary/output determinism. Review, CI, merge, publication, and release state are intentionally not asserted here.
 
 ## Non-goals
 
