@@ -51,15 +51,27 @@ describe("repository delivery contracts", () => {
     const config = parseYaml(source)
     const beforeInstall = config.before_install.join("\n")
     const buildCommands = Object.values(config.builds).flatMap((build) => build.script)
+    const goArchive = "/tmp/go1.26.7.linux-amd64.tar.gz"
+    const goCommands = [
+      "curl --fail --silent --show-error --location --retry 5 --retry-delay 5 --retry-all-errors " +
+        `https://go.dev/dl/go1.26.7.linux-amd64.tar.gz --output ${goArchive}`,
+      "printf '%s  %s\\n' 'ffb5f8de10c62550dfddab66b36b57030721e0a44a3218e9e1181d7b59f121ca' " +
+        `'${goArchive}' | sha256sum --check -`,
+      "sudo rm -rf /usr/local/go",
+      `sudo tar -xzf ${goArchive} -C /usr/local`,
+      "sudo ln --symbolic --force /usr/local/go/bin/go /usr/local/bin/go",
+      "sudo ln --symbolic --force /usr/local/go/bin/gofmt /usr/local/bin/gofmt"
+    ]
 
     assert.deepEqual(config.before_script, ["npm ci"])
     expect(config.environment.SEMANTIFOLD_NODE).toEqual("/usr/local/bin/node")
     expect(config.environment.SEMANTIFOLD_PYTHON).toEqual("/usr/bin/python3")
     expect(config.environment.SEMANTIFOLD_DOTNET).toEqual("/usr/bin/dotnet")
-    expect(config.environment.SEMANTIFOLD_GO).toEqual("/usr/bin/go")
+    expect(config.environment.SEMANTIFOLD_GO).toEqual("/usr/local/bin/go")
+    assert.deepEqual(config.before_install.filter((command) => goCommands.includes(command)), goCommands)
     assert.match(beforeInstall, /php-cli python3 ruby default-jdk-headless/u)
     assert.match(beforeInstall, /dotnet-sdk-10\.0/u)
-    assert.match(beforeInstall, /golang-go/u)
+    assert.doesNotMatch(beforeInstall, /(?:^|\s)golang-go(?:\s|$)/u)
     assert.match(beforeInstall, /tar .* -C \/usr\/local/u)
     assert.match(beforeInstall, /node --version/u)
     assert.match(beforeInstall, /php --version/u)
@@ -71,6 +83,7 @@ describe("repository delivery contracts", () => {
     assert.match(beforeInstall, /test "\$\(dotnet --version \| cut -d\. -f1\)" = "10"/u)
     assert.match(beforeInstall, /go version/u)
     assert.match(beforeInstall, /go env GOVERSION GOOS GOARCH GOROOT/u)
+    assert.match(beforeInstall, /test "\$\(go env GOVERSION\)" = "go1\.26\.7"/u)
     assert.match(beforeInstall, /test "\$\(go env GOVERSION \| cut -d\. -f1,2\)" = "go1\.26"/u)
     assert.match(beforeInstall, /test "\$\(go env GOOS\)" = "linux"/u)
     assert.match(beforeInstall, /test "\$\(go env GOARCH\)" = "amd64"/u)
