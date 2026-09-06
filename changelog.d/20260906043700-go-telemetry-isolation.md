@@ -1,0 +1,1 @@
+Made the focused Go toolchain discovery fixture disable Go 1.26 telemetry inside its isolated home before invocation, preventing its unawaited telemetry uploader from racing mandatory temporary-directory cleanup.

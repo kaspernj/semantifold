@@ -3,7 +3,7 @@
 import path from "node:path"
 import assert from "node:assert/strict"
 import {execFile} from "node:child_process"
-import {chmod, mkdir, mkdtemp, realpath, rm, writeFile} from "node:fs/promises"
+import {chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile} from "node:fs/promises"
 import os from "node:os"
 import {promisify} from "node:util"
 import {describe, expect, it} from "@velocious/testing"
@@ -43,6 +43,10 @@ describe("Go registry and toolchain", () => {
       })
       expect(path.isAbsolute(go.executable)).toBeTrue()
       expect(go.version).toMatch(/^go version go1\.26\.\d+ linux\/amd64$/u)
+      const telemetryDirectory = path.join(environment.HOME, ".config", "go", "telemetry")
+
+      expect(await readdir(telemetryDirectory)).toEqual(["mode"])
+      expect(await readFile(path.join(telemetryDirectory, "mode"), "utf8")).toEqual("off\n")
     })
   })
 
@@ -108,9 +112,12 @@ async function withGoEnvironment(callback) {
     GOCACHE: path.join(root, "cache"), GOMODCACHE: path.join(root, "modules"), GOPATH: path.join(root, "gopath"),
     GOTMPDIR: path.join(root, "tmp"), HOME: path.join(root, "home")
   }
+  const telemetryDirectory = path.join(paths.HOME, ".config", "go", "telemetry")
 
   try {
     await Promise.all(Object.values(paths).map(async (directory) => await mkdir(directory, {recursive: true})))
+    await mkdir(telemetryDirectory, {recursive: true})
+    await writeFile(path.join(telemetryDirectory, "mode"), "off\n")
     await callback({...paths, CGO_ENABLED: "0", GOARCH: "amd64", GOENV: "off", GOOS: "linux", GOPROXY: "off",
       GOSUMDB: "off", GOTOOLCHAIN: "local", GOVCS: "off", GOWORK: "off", PATH: process.env.PATH ?? "",
       ...(process.env.SEMANTIFOLD_GO === undefined ? {} : {SEMANTIFOLD_GO: process.env.SEMANTIFOLD_GO})})
