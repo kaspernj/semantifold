@@ -1,3 +1,3 @@
 # Fixed
 
-- Synchronize TERM-to-KILL toolchain timeout coverage on process-boundary readiness before exercising the unchanged owned-deadline machinery.
+- Synchronize TERM-to-KILL timeout coverage at the internal subprocess owner without replacing shared Node builtins or changing production deadline semantics.

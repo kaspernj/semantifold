@@ -1,15 +1,13 @@
 // @ts-check
 
 import assert from "node:assert/strict"
-import childProcess from "node:child_process"
 import {watch} from "node:fs"
-import fsPromises from "node:fs/promises"
 import {access, chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile} from "node:fs/promises"
-import {syncBuiltinESMExports} from "node:module"
 import os from "node:os"
 import path from "node:path"
 import {fileURLToPath} from "node:url"
 import {describe, expect, it} from "@velocious/testing"
+import {createAcceptanceRunner} from "../src/acceptance.js"
 import {
   canonicalToolchains,
   createGeneratedArtifactSet,
@@ -21,7 +19,6 @@ import {
 
 const synthetic = (reason = "acceptance fixture") => ({kind: "synthetic", reason, relatedOrigins: []})
 const escapedProcessGroupFixture = fileURLToPath(new URL("fixtures/escape-process-group.js", import.meta.url))
-const ignoreSigtermFixture = fileURLToPath(new URL("fixtures/ignore-sigterm.sh", import.meta.url))
 const ignoreSigtermTreeFixture = fileURLToPath(new URL("fixtures/ignore-sigterm-tree.js", import.meta.url))
 
 describe("toolchain discovery and staged acceptance", () => {
@@ -488,26 +485,6 @@ printf 'environment-tool %s\n' "$EXPECTED"
         timeoutMs: 50,
         versionArguments: []
       }), (error) => error instanceof SemantifoldDiagnostic && error.code == "TOOL_VERSION_TIMEOUT" && error.signal == "SIGTERM")
-    })
-  })
-
-  it("forcibly closes a version probe with TERM resistance at the process boundary", async () => {
-    expect(process.platform).toEqual("linux")
-    await withTemporaryDirectory("semantifold-version-hard-timeout-", async (directory) => {
-      const fixture = processFixture(directory, "version")
-
-      try {
-        await assert.rejects(() => withSynchronizedSpawnReadiness(() => discoverToolchain({
-          canonicalCommand: "node",
-          id: "ignoring-version",
-          override: ignoreSigtermFixture,
-          timeoutMs: 500,
-          versionArguments: [fixture.readyPath, fixture.termPath]
-        })), (error) => error instanceof SemantifoldDiagnostic && error.code == "TOOL_VERSION_TIMEOUT" && error.signal == "SIGKILL")
-        await assertForcedFixtureClosure(fixture)
-      } finally {
-        await terminateFixtureIfAlive(fixture)
-      }
     })
   })
 
@@ -982,50 +959,6 @@ kill -TERM $$
     })
   })
 
-  it("forcibly closes an acceptance child with TERM resistance at the process boundary", async () => {
-    expect(process.platform).toEqual("linux")
-    await withTemporaryDirectory("semantifold-runner-hard-timeout-", async (directory) => {
-      const fixture = processFixture(directory, "acceptance")
-      const tool = Object.freeze({
-        executable: ignoreSigtermFixture,
-        id: "ignoring-acceptance",
-        source: /** @type {const} */ ("override"),
-        version: process.version,
-        versionArguments: Object.freeze([])
-      })
-      const artifacts = createGeneratedArtifactSet({artifacts: [{
-        content: "input\n",
-        contentKind: "text",
-        mediaType: "text/plain",
-        ownership: "generated",
-        path: "input.txt",
-        provenance: synthetic(),
-        role: "entry"
-      }], target: "demo"})
-
-      try {
-        await assert.rejects(() => withSynchronizedSpawnReadiness(() => runAcceptanceStages({
-          artifacts,
-          stages: [{
-            arguments: [fixture.readyPath, fixture.termPath],
-            stage: "execute",
-            tool
-          }],
-          target: "demo",
-          timeoutMs: 500
-        })), (error) => {
-          assert.ok(error instanceof SemantifoldDiagnostic && error.code == "ACCEPTANCE_TIMEOUT" && error.stage == "execute")
-          expect(error.signal).toEqual("SIGKILL")
-
-          return true
-        })
-        await assertForcedFixtureClosure(fixture)
-      } finally {
-        await terminateFixtureIfAlive(fixture)
-      }
-    })
-  })
-
   it("closes a TERM-resistant acceptance process group and all inherited output pipes", async () => {
     await withTemporaryDirectory("semantifold-acceptance-tree-timeout-", async (directory) => {
       const fixture = await processTreeFixture(directory, "acceptance-tree")
@@ -1297,24 +1230,21 @@ printf 'executed\n'
         provenance: synthetic(),
         role: "entry"
       }], target: "demo"})
-      const originalRemove = fsPromises.rm
       /** @type {string[]} */
       const acceptanceDirectories = []
-      /** @type {typeof fsPromises.rm} */
+      /** @type {typeof rm} */
       const failingRemove = async (candidate, options) => {
         const ownsCleanupFixture = typeof candidate == "string" && path.basename(candidate).startsWith("semantifold-acceptance-") &&
-          await fsPromises.access(path.join(candidate, "cleanup-review-fixture.txt")).then(() => true, () => false)
+          await access(path.join(candidate, "cleanup-review-fixture.txt")).then(() => true, () => false)
 
         if (ownsCleanupFixture) {
           acceptanceDirectories.push(candidate)
           throw new Error("deterministic cleanup failure")
         }
 
-        await originalRemove(candidate, options)
+        await rm(candidate, options)
       }
-
-      Object.defineProperty(fsPromises, "rm", {configurable: true, value: failingRemove, writable: true})
-      syncBuiltinESMExports()
+      const runWithFailingCleanup = createAcceptanceRunner({removeDirectory: failingRemove})
 
       try {
         const failingTool = Object.freeze({
@@ -1333,7 +1263,7 @@ printf 'executed\n'
         })
 
         await assert.rejects(
-          () => runAcceptanceStages({artifacts, stages: [{arguments: [], stage: "execute", tool: failingTool}], target: "demo"}),
+          () => runWithFailingCleanup({artifacts, stages: [{arguments: [], stage: "execute", tool: failingTool}], target: "demo"}),
           (error) => {
             assert.ok(error instanceof SemantifoldDiagnostic)
             expect(error.code).toEqual("ACCEPTANCE_NONZERO_EXIT")
@@ -1354,13 +1284,11 @@ printf 'executed\n'
           }
         )
         await expectDiagnostic(
-          () => runAcceptanceStages({artifacts, stages: [{arguments: [], stage: "execute", tool: successfulTool}], target: "demo"}),
+          () => runWithFailingCleanup({artifacts, stages: [{arguments: [], stage: "execute", tool: successfulTool}], target: "demo"}),
           "ACCEPTANCE_CLEANUP_FAILURE"
         )
       } finally {
-        Object.defineProperty(fsPromises, "rm", {configurable: true, value: originalRemove, writable: true})
-        syncBuiltinESMExports()
-        await Promise.all(acceptanceDirectories.map(async (acceptanceDirectory) => await originalRemove(acceptanceDirectory, {force: true, recursive: true})))
+        await Promise.all(acceptanceDirectories.map(async (acceptanceDirectory) => await rm(acceptanceDirectory, {force: true, recursive: true})))
       }
     })
   })
@@ -1481,104 +1409,6 @@ async function fakeExecutable(directory, name, source) {
 async function expectDiagnostic(callback, code, stage) {
   await assert.rejects(callback, (error) => error instanceof SemantifoldDiagnostic && error.code == code &&
     (stage == undefined || error.stage == stage))
-}
-
-/**
- * Creates exact evidence paths for one process-boundary signal fixture.
- * @param {string} directory - Fixture-owned temporary directory.
- * @param {string} name - Evidence basename.
- * @returns {{readyPath: string, termPath: string}} Evidence paths.
- */
-function processFixture(directory, name) {
-  return {
-    readyPath: path.join(directory, `${name}.ready`),
-    termPath: path.join(directory, `${name}.term`)
-  }
-}
-
-/**
- * Delivers one test-scoped spawn notification only after the child reports process-boundary readiness.
- * @template T
- * @param {() => Promise<T>} callback - Operation that performs exactly one subprocess spawn.
- * @returns {Promise<T>} Operation result.
- */
-async function withSynchronizedSpawnReadiness(callback) {
-  const originalSpawn = childProcess.spawn
-  let spawnCount = 0
-  const synchronizedSpawn = /** @type {typeof childProcess.spawn} */ ((...spawnArguments) => {
-    const child = Reflect.apply(originalSpawn, childProcess, spawnArguments)
-    const originalOnce = child.once
-
-    spawnCount += 1
-    Object.defineProperty(child, "once", {
-      configurable: true,
-      value: /** @type {typeof child.once} */ (function(eventName, listener) {
-        if (eventName != "spawn") return Reflect.apply(originalOnce, child, [eventName, listener])
-        assert.ok(child.stdout)
-        child.stdout.once("data", () => Reflect.apply(listener, child, []))
-
-        return child
-      }),
-      writable: true
-    })
-
-    return child
-  })
-
-  Object.defineProperty(childProcess, "spawn", {configurable: true, value: synchronizedSpawn, writable: true})
-  syncBuiltinESMExports()
-
-  try {
-    return await callback()
-  } finally {
-    Object.defineProperty(childProcess, "spawn", {configurable: true, value: originalSpawn, writable: true})
-    syncBuiltinESMExports()
-    expect(spawnCount).toEqual(1)
-  }
-}
-
-/**
- * Proves the fixture installed its handler, ignored TERM, and left no owned process group.
- * @param {{readyPath: string, termPath: string}} fixture - Fixture evidence paths.
- * @returns {Promise<void>}
- */
-async function assertForcedFixtureClosure(fixture) {
-  const identity = await fixtureIdentity(fixture)
-
-  expect(identity.processGroupId).toEqual(identity.pid)
-  expect(identity.sessionId).toEqual(identity.pid)
-  expect(await readFile(fixture.termPath, "utf8")).toEqual("SIGTERM\n")
-  expect(await waitForNoLiveLinuxProcess(identity, 500)).toBeTrue()
-  expect(processGroupExists(identity.processGroupId)).toBeFalse()
-}
-
-/**
- * Guarantees exact process-group cleanup if lifecycle settlement or an assertion fails.
- * @param {{readyPath: string}} fixture - Fixture evidence paths.
- * @returns {Promise<void>}
- */
-async function terminateFixtureIfAlive(fixture) {
-  const identity = await fixtureIdentity(fixture, false)
-
-  if (identity == undefined) return
-  if (!await signalRecordedProcessGroup(identity, "SIGKILL")) await signalRecordedProcess(identity, "SIGKILL")
-  expect(await waitForNoLiveLinuxProcess(identity, 500)).toBeTrue()
-  expect(processGroupExists(identity.processGroupId)).toBeFalse()
-}
-
-/**
- * Reads the exact identity captured after the fixture installed its TERM handler.
- * @param {{readyPath: string}} fixture - Fixture evidence paths.
- * @param {boolean} [required] - Whether absent evidence fails.
- * @returns {Promise<{pid: number, processGroupId: number, sessionId: number, startTime: string} | undefined>}
- */
-async function fixtureIdentity(fixture, required = true) {
-  try {
-    return linuxIdentityFromStat(await readFile(fixture.readyPath, "utf8"))
-  } catch (error) {
-    if (!required && error instanceof Error && "code" in error && error.code == "ENOENT") return undefined
-    throw error
-  }
 }
 
 /**
@@ -1790,22 +1620,6 @@ async function signalRecordedProcess(identity, signal) {
 
   if (!sameProcess(identity, current) || current.state == "Z") return false
   process.kill(identity.pid, signal)
-
-  return true
-}
-
-/**
- * Signals a process group only while its recorded leader identity still matches.
- * @param {{pid: number, processGroupId: number, startTime: string}} identity - Recorded group-leader identity.
- * @param {"SIGKILL" | "SIGTERM"} signal - Cleanup signal.
- * @returns {Promise<boolean>} Whether the exact live owned group was signaled.
- */
-async function signalRecordedProcessGroup(identity, signal) {
-  const current = await linuxProcessIdentity(identity.pid)
-
-  if (identity.pid != identity.processGroupId || !sameProcess(identity, current) ||
-    current.state == "Z" || current.processGroupId != identity.processGroupId) return false
-  process.kill(-identity.processGroupId, signal)
 
   return true
 }

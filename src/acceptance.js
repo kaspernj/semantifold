@@ -28,6 +28,26 @@ const stageIndexes = new Map(orderedStages.map((stage, index) => [stage, index])
  * @returns {Promise<import("./semantic/types.js").AcceptanceResult>} Captured results after cleanup.
  */
 export async function runAcceptanceStages(input) {
+  return await runAcceptanceStagesWithDependencies(input, rm)
+}
+
+/**
+ * Creates an acceptance runner with instance-owned cleanup behavior.
+ * @param {object} dependencies - Internal runner dependencies.
+ * @param {typeof rm} dependencies.removeDirectory - Isolated-directory removal operation.
+ * @returns {typeof runAcceptanceStages} Acceptance runner.
+ */
+export function createAcceptanceRunner({removeDirectory}) {
+  return async (input) => await runAcceptanceStagesWithDependencies(input, removeDirectory)
+}
+
+/**
+ * Runs acceptance with exact instance-owned dependencies.
+ * @param {Parameters<typeof runAcceptanceStages>[0]} input - Acceptance request.
+ * @param {typeof rm} removeDirectory - Isolated-directory removal operation.
+ * @returns {ReturnType<typeof runAcceptanceStages>} Captured results after cleanup.
+ */
+async function runAcceptanceStagesWithDependencies(input, removeDirectory) {
   if (!isPlainObject(input)) invalidRunner("Acceptance requires a request object.", "acceptance")
   const artifacts = /** @type {import("./semantic/types.js").GeneratedArtifactSet} */ (input.artifacts)
   const environment = /** @type {Readonly<Record<string, string | undefined>>} */ (
@@ -84,7 +104,7 @@ export async function runAcceptanceStages(input) {
   let cleanupFailed = false
 
   try {
-    await removeAcceptanceDirectory(directory, request.target)
+    await removeAcceptanceDirectory(directory, request.target, removeDirectory)
   } catch (error) {
     cleanupFailed = true
     cleanupFailure = error
@@ -300,11 +320,12 @@ function isPlainObject(value) {
  * Removes the isolated acceptance directory with a normalized failure.
  * @param {string} directory - Exact temporary directory.
  * @param {string} target - Acceptance target.
+ * @param {typeof rm} removeDirectory - Instance-owned removal operation.
  * @returns {Promise<void>} Cleanup completion.
  */
-async function removeAcceptanceDirectory(directory, target) {
+async function removeAcceptanceDirectory(directory, target, removeDirectory) {
   try {
-    await rm(directory, {force: true, recursive: true})
+    await removeDirectory(directory, {force: true, recursive: true})
   } catch (error) {
     throw new SemantifoldDiagnostic({
       cause: error instanceof Error ? error : undefined,
