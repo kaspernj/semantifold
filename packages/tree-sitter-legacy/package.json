@@ -1,0 +1,45 @@
+{
+  "name": "@kaspernj/semantifold-tree-sitter-legacy",
+  "version": "0.1.0",
+  "description": "Parser-neutral snapshots from Tree-sitter grammars requiring the legacy Node runtime",
+  "type": "module",
+  "exports": {
+    "./c": {
+      "types": "./build/c.d.ts",
+      "import": "./build/c.js"
+    }
+  },
+  "files": [
+    "build/c.d.ts",
+    "build/c.d.ts.map",
+    "build/c.js",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node scripts/clean-build.js && tsc",
+    "prepack": "npm run build",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kaspernj/semantifold.git",
+    "directory": "packages/tree-sitter-legacy"
+  },
+  "author": "kasper@diestoeckels.de",
+  "license": "ISC",
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "tree-sitter": "0.21.1",
+    "tree-sitter-c": "0.23.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "typescript": "^7.0.0"
+  }
+}

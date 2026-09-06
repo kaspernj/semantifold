@@ -44,7 +44,9 @@ builds:
       - npm run build
       - npm audit --audit-level=high
       - npm ls --omit=dev --all
+      - npm ls --all
       - npm pack --dry-run --json
+      - npm pack --workspace=@kaspernj/semantifold-tree-sitter-legacy --dry-run --json
   end_to_end:
     name: Eight-language end-to-end tests
     script:

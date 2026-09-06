@@ -64,8 +64,12 @@ npm run typecheck
 npm run build
 npm audit --audit-level=high
 npm ls --omit=dev --all
+npm ls --all
 npm pack --dry-run --json
+npm pack --workspace=@kaspernj/semantifold-tree-sitter-legacy --dry-run --json
 ```
+
+The `packages/tree-sitter-legacy` workspace is an independently releasable adapter, not a runtime dependency of the root `semantifold` package. Its C export returns frozen parser-neutral CST data while isolating an exact legacy Tree-sitter runtime. Repository tests pack and install its real tarball beside the modern Go parser in a temporary consumer. A future Semantifold C frontend may depend on it only after a separately authorized registry publication and live-package verification.
 
 The execution specs require PHP CLI, Ruby, Python 3, TypeScript, a Java JDK, .NET 10, and Go 1.26 with matching `gofmt` in addition to Node; missing tools are failures. The canonical container provides them: `docker compose up --build --detach`, followed by `docker compose exec dev npm ci` and the commands above.
 

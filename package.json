@@ -20,14 +20,18 @@
     "src/**",
     "tsconfig.json"
   ],
+  "workspaces": [
+    "packages/tree-sitter-legacy"
+  ],
   "scripts": {
     "all-checks": "npm run lint && npm test",
-    "build": "node scripts/clean-build.js && tsc",
+    "build": "node scripts/clean-build.js && tsc && npm run build --workspace=@kaspernj/semantifold-tree-sitter-legacy",
     "eslint": "eslint --max-warnings 0 .",
     "lint": "npm run eslint && npm run typecheck",
     "prepack": "npm run build",
+    "pretest": "npm run build --workspace=@kaspernj/semantifold-tree-sitter-legacy",
     "test": "velocious-test spec",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && npm run typecheck --workspace=@kaspernj/semantifold-tree-sitter-legacy"
   },
   "engines": {
     "node": ">=24"
@@ -58,6 +62,7 @@
     "tree-sitter-python": "0.25.0"
   },
   "devDependencies": {
+    "@kaspernj/semantifold-tree-sitter-legacy": "0.1.0",
     "@eslint/js": "^10.0.1",
     "@types/node": "^24.3.0",
     "@velocious/testing": "0.0.0",
