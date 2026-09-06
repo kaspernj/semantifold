@@ -1,3 +1,3 @@
 # Fixed
 
-- Make TERM-to-KILL toolchain timeout coverage deterministic when JavaScript has not installed a signal handler before its owned deadline.
+- Synchronize TERM-to-KILL toolchain timeout coverage on process-boundary readiness before exercising the unchanged owned-deadline machinery.

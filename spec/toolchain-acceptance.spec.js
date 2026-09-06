@@ -1,6 +1,7 @@
 // @ts-check
 
 import assert from "node:assert/strict"
+import childProcess from "node:child_process"
 import {watch} from "node:fs"
 import fsPromises from "node:fs/promises"
 import {access, chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile} from "node:fs/promises"
@@ -496,13 +497,13 @@ printf 'environment-tool %s\n' "$EXPECTED"
       const fixture = processFixture(directory, "version")
 
       try {
-        await assert.rejects(() => discoverToolchain({
+        await assert.rejects(() => withSynchronizedSpawnReadiness(() => discoverToolchain({
           canonicalCommand: "node",
           id: "ignoring-version",
           override: ignoreSigtermFixture,
           timeoutMs: 500,
           versionArguments: [fixture.readyPath, fixture.termPath]
-        }), (error) => error instanceof SemantifoldDiagnostic && error.code == "TOOL_VERSION_TIMEOUT" && error.signal == "SIGKILL")
+        })), (error) => error instanceof SemantifoldDiagnostic && error.code == "TOOL_VERSION_TIMEOUT" && error.signal == "SIGKILL")
         await assertForcedFixtureClosure(fixture)
       } finally {
         await terminateFixtureIfAlive(fixture)
@@ -1003,7 +1004,7 @@ kill -TERM $$
       }], target: "demo"})
 
       try {
-        await assert.rejects(() => runAcceptanceStages({
+        await assert.rejects(() => withSynchronizedSpawnReadiness(() => runAcceptanceStages({
           artifacts,
           stages: [{
             arguments: [fixture.readyPath, fixture.termPath],
@@ -1012,8 +1013,12 @@ kill -TERM $$
           }],
           target: "demo",
           timeoutMs: 500
-        }), (error) => error instanceof SemantifoldDiagnostic && error.code == "ACCEPTANCE_TIMEOUT" &&
-          error.stage == "execute" && error.signal == "SIGKILL")
+        })), (error) => {
+          assert.ok(error instanceof SemantifoldDiagnostic && error.code == "ACCEPTANCE_TIMEOUT" && error.stage == "execute")
+          expect(error.signal).toEqual("SIGKILL")
+
+          return true
+        })
         await assertForcedFixtureClosure(fixture)
       } finally {
         await terminateFixtureIfAlive(fixture)
@@ -1488,6 +1493,47 @@ function processFixture(directory, name) {
   return {
     readyPath: path.join(directory, `${name}.ready`),
     termPath: path.join(directory, `${name}.term`)
+  }
+}
+
+/**
+ * Delivers one test-scoped spawn notification only after the child reports process-boundary readiness.
+ * @template T
+ * @param {() => Promise<T>} callback - Operation that performs exactly one subprocess spawn.
+ * @returns {Promise<T>} Operation result.
+ */
+async function withSynchronizedSpawnReadiness(callback) {
+  const originalSpawn = childProcess.spawn
+  let spawnCount = 0
+  const synchronizedSpawn = /** @type {typeof childProcess.spawn} */ ((...spawnArguments) => {
+    const child = Reflect.apply(originalSpawn, childProcess, spawnArguments)
+    const originalOnce = child.once
+
+    spawnCount += 1
+    Object.defineProperty(child, "once", {
+      configurable: true,
+      value: /** @type {typeof child.once} */ (function(eventName, listener) {
+        if (eventName != "spawn") return Reflect.apply(originalOnce, child, [eventName, listener])
+        assert.ok(child.stdout)
+        child.stdout.once("data", () => Reflect.apply(listener, child, []))
+
+        return child
+      }),
+      writable: true
+    })
+
+    return child
+  })
+
+  Object.defineProperty(childProcess, "spawn", {configurable: true, value: synchronizedSpawn, writable: true})
+  syncBuiltinESMExports()
+
+  try {
+    return await callback()
+  } finally {
+    Object.defineProperty(childProcess, "spawn", {configurable: true, value: originalSpawn, writable: true})
+    syncBuiltinESMExports()
+    expect(spawnCount).toEqual(1)
   }
 }
 
