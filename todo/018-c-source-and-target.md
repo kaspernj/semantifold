@@ -4,6 +4,10 @@
 - Phase/priority: Phase L1 / P0
 - Dependencies: [015-language-expansion-foundation.md](015-language-expansion-foundation.md)
 
+## Release prerequisite
+
+Before Task 018 adds `@kaspernj/semantifold-tree-sitter-legacy@0.1.0` to the root runtime dependency graph or starts C frontend integration, the adapter must receive explicit publication authorization, be published through the repository release workflow, and be independently read back from the public registry. The current workspace and packed-consumer proof qualify the isolation boundary but are not registry publication; this task does not authorize publication.
+
 ## Purpose
 
 Add C as a first-class frontend and native textual/project backend for the exact Tasks 001–004 subset. C is its own language lane, not a restricted C++ mode. It establishes explicit fixed-width scalar, allocation/ownership, compile/link/run, and no-exception/no-GC contracts.

@@ -55,9 +55,13 @@ For example, planned Ruby-to-PHP compilation would compile a Ruby application wi
 
 Use Node.js 24 and install with `npm ci`. Specs use `@velocious/testing@0.0.0` and the standalone `velocious-test` runner. Run a focused spec with `npx velocious-test spec/repository-contract.spec.js`; run the framework-native `spec` directory discovery with `npm test`.
 
+The aggregate suite includes direct real-toolchain specs that inherit the outer test process locale, so repository validation requires `LANG=C.UTF-8` and `LC_ALL=C.UTF-8`. The canonical container currently exports neither variable. This outer-suite requirement is separate from `runAcceptanceStages`, which normalizes the locale and timezone of every child it owns and does not depend on ambient locale.
+
 The complete local gate is:
 
 ```sh
+export LANG=C.UTF-8
+export LC_ALL=C.UTF-8
 npm test
 npm run lint
 npm run typecheck
@@ -67,6 +71,7 @@ npm ls --omit=dev --all
 npm ls --all
 npm pack --dry-run --json
 npm pack --workspace=@kaspernj/semantifold-tree-sitter-legacy --dry-run --json
+git diff --check
 ```
 
 The `packages/tree-sitter-legacy` workspace is an independently releasable adapter, not a runtime dependency of the root `semantifold` package. Its C export returns frozen parser-neutral CST data while isolating an exact legacy Tree-sitter runtime. Repository tests pack and install its real tarball beside the modern Go parser in a temporary consumer. A future Semantifold C frontend may depend on it only after a separately authorized registry publication and live-package verification.

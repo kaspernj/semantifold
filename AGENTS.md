@@ -22,7 +22,7 @@ export GH_CONFIG_SOURCE_PATH="${GH_CONFIG_SOURCE_PATH:-${XDG_CONFIG_HOME:-$HOME/
 docker compose -p semantifold-dev -f compose.yml up --build --detach
 docker compose -p semantifold-dev -f compose.yml exec dev npm ci
 docker compose -p semantifold-dev -f compose.yml exec dev npx velocious-test spec/repository-contract.spec.js
-docker compose -p semantifold-dev -f compose.yml exec dev npm test
+docker compose -p semantifold-dev -f compose.yml exec -e LANG=C.UTF-8 -e LC_ALL=C.UTF-8 dev npm test
 docker compose -p semantifold-dev -f compose.yml exec dev npm run lint
 docker compose -p semantifold-dev -f compose.yml exec dev npm run typecheck
 docker compose -p semantifold-dev -f compose.yml exec dev npm run build
@@ -38,7 +38,7 @@ Run one focused behavior spec with `npx velocious-test spec/repository-contract.
 
 TensorBuzz is the only CI topology. Do not add GitHub Actions. Before handing off changes, run:
 
-1. `npm test`
+1. `LANG=C.UTF-8 LC_ALL=C.UTF-8 npm test`
 2. `npm run lint`
 3. `npm run typecheck`
 4. `npm run build`
