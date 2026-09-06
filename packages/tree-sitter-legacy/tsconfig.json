@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "declaration": true,
+    "declarationMap": true,
+    "inlineSourceMap": true,
+    "inlineSources": true,
+    "outDir": "build",
+    "rootDir": "src",
+    "target": "ES2024",
+    "moduleResolution": "nodenext",
+    "module": "nodenext",
+    "types": ["node"],
+    "strict": true
+  },
+  "include": ["src/**/*"]
+}

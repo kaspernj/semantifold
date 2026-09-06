@@ -28,7 +28,7 @@ All Tree-sitter languages use the official `tree-sitter` Node binding. The langu
 | --- | --- | --- | --- |
 | 016 | Python | official [`tree-sitter/tree-sitter-python`](https://github.com/tree-sitter/tree-sitter-python) grammar package | blocked until the exact release record above passes |
 | 017 | C# | official [`tree-sitter/tree-sitter-c-sharp`](https://github.com/tree-sitter/tree-sitter-c-sharp) grammar package | passed for exact `tree-sitter-c-sharp@0.23.5`; see the checked-in record below |
-| 018 | C | official [`tree-sitter/tree-sitter-c`](https://github.com/tree-sitter/tree-sitter-c) grammar package | blocked until the exact release record above passes |
+| 018 | C | official [`tree-sitter/tree-sitter-c`](https://github.com/tree-sitter/tree-sitter-c) grammar package | legacy pair qualified behind the adapter boundary below; source/target work remains blocked until the adapter is separately published and verified |
 | 019 | C++ | official [`tree-sitter/tree-sitter-cpp`](https://github.com/tree-sitter/tree-sitter-cpp) grammar package | blocked until the exact release record above passes |
 | 020 | Rust | official [`tree-sitter/tree-sitter-rust`](https://github.com/tree-sitter/tree-sitter-rust) grammar package | blocked until the exact release record above passes |
 | 022 | Swift | community [`alex-pinkus/tree-sitter-swift`](https://github.com/alex-pinkus/tree-sitter-swift) candidate plus differential `swiftc` checks | candidate only; blocked until exact release and differential record pass |
@@ -97,6 +97,34 @@ npm pack tree-sitter-c-sharp@0.23.5 --dry-run --json
 ```
 
 The accepted C# corpus is `spec/fixtures/{Program.cs,scalars/Program.cs,locals/Program.cs,operators/Program.cs,statements/Program.cs}` with SHA-256 values, in that order: `5ca661d09dff2d775094df99b40e5c5604796c9bff4c32c1da11fa1b4c564a00`, `9cefd6d01c5855480629829489945f2f43338b84879c7a26043963151a8439da`, `ee775fea59ee812212ce325152e4e4cb79c20e699aba081bf39cc698b324444d`, `7137f4acc88dbdc1d0bafd6bb8eb57bed9386daf3e6b11c6fbae3831abceae18`, and `ba63cb72490605437e1efaa7d69ce0abdbfbb07c076aec787bc025e7a277468f`.
+
+## Task 018 legacy C parser boundary qualification
+
+The C grammar's compatible published runtime line cannot share Semantifold's root Tree-sitter instance. The root remains on exact `tree-sitter@0.25.1` with its Python, C#, and Go grammars. The independently releasable `@kaspernj/semantifold-tree-sitter-legacy@0.1.0` workspace instead owns exact `tree-sitter@0.21.1` and `tree-sitter-c@0.23.2`, whose peer range and grammar ABI agree. A separately tested `tree-sitter@0.22.4` plus `tree-sitter-c@0.24.1` install was rejected because `Parser#setLanguage` failed with an undefined `nodeTypeNamesById`; an installable graph alone is not qualification.
+
+| Evidence | Qualified boundary result |
+| --- | --- |
+| npm distribution | `tree-sitter@0.21.1`, integrity `sha512-7dxoA6kYvtgWw80265MyqJlkRl4yawIjO7S5MigytjELkX43fV2WsAXzsNfO7sBpPPCF5Gp0+XzHk0DwLCq3xQ==`; `tree-sitter-c@0.23.2`, integrity `sha512-9kADOx31AF94DHcrsMGW0zM/2LS6v7wFkPHPVm7RQU+vYVVZMKZ2FJ9e99pm5feqsAcjUzB9CarqDLgRT1Fe/w==`. The workspace and root development relationship are exact `0.1.0`; no alias, override, forced peer, archive dependency, or copied binding is used. |
+| upstream identity | Official [`tree-sitter/node-tree-sitter`](https://github.com/tree-sitter/node-tree-sitter) tag/commit `v0.21.1` / `bbdba663dc0b8487f1212524a83a7c39e8a5c3ca`; official [`tree-sitter/tree-sitter-c`](https://github.com/tree-sitter/tree-sitter-c) tag/commit and npm `gitHead` `v0.23.2` / `6a4ae2e08916fd08e5739250bb64a14392b01c99`. |
+| legal and registry provenance | Both upstream packages declare MIT and publish registry signatures. Their exact registry URLs and integrities are recorded in `package-lock.json`; the repository gate verifies installed-package signatures and audits the ordinary dependency graph. The adapter itself uses ISC and is not yet published. |
+| ABI and API | `tree-sitter-c@0.23.2` declares language ABI 14; `tree-sitter@0.21.1` accepts ABI 13–14 and the grammar's peer is `^0.21.1`. The legacy binding provides `child(index)` and `fieldNameForChild(index)` but not the newer `fieldNameForNamedChild` convenience API. The adapter therefore traverses every ordered named and anonymous child and copies field names without exposing binding types. |
+| runtime isolation | A real packed adapter installed with `tree-sitter@0.25.1` and `tree-sitter-go@0.25.0` resolves the legacy runtime and C grammar below the adapter at distinct paths. One Node `v24.18.1` process parses modern Go and legacy C without a native-module collision. Ordinary npm install and peer resolution are mandatory. |
+| public boundary | `parseCst(source)` returns only a recursively frozen `semantifold.parser-cst` version 1 envelope. Nodes contain plain scalar state, UTF-16 indices/row-column positions, and ordered frozen `{field, node}` edges. Parser, tree, syntax-node, language, method, function, parent, circular, and source-text values do not cross the export. The caller retains source ownership and can slice it by the normalized offsets. |
+| recovery and coordinates | Astral text before a later definition plus CRLF separates UTF-8 bytes from UTF-16 code units; the snapshot retains exact UTF-16 indices and row/column positions. Comments remain visible as extra nodes. A missing closing brace propagates `hasError` and preserves the missing node rather than recovering through source text. |
+| lifecycle and package inputs | Both dependencies use only `install: node-gyp-build` and ship native prebuild/source fallback without a runtime downloader. The adapter tarball contains exactly `package.json`, `README.md`, `LICENSE`, `build/c.js`, `build/c.d.ts`, and `build/c.d.ts.map`; no dependency, native handle, archive, `node_modules`, or source-tree fallback is bundled. |
+| task boundary | This record qualifies only the runtime/package boundary. It does not implement or claim the Task 018 C frontend, semantic normalization, backend, registry, toolchain, compiler comparison, or Tasks 001–004 C corpus. `todo/018-c-source-and-target.md` remains `todo`. A later C consumer change is blocked until a separately authorized adapter release is installed and verified from the public registry. |
+
+Reproduce the repository-owned proof on Node 24 with:
+
+```sh
+npm ci
+npx velocious-test spec/tree-sitter-legacy-adapter.spec.js
+npx velocious-test spec/tree-sitter-legacy-packed-consumer.spec.js
+npm ls --all
+npm pack --workspace=@kaspernj/semantifold-tree-sitter-legacy --dry-run --json
+```
+
+The packed-consumer spec creates the tarball and consumer only under unique temporary directories, strips npm token/auth environment entries, installs exact modern Go dependencies beside the tarball, checks the complete npm tree and resolved runtime paths, executes both parsers in one process, and removes the directory in `finally`. Publication is intentionally excluded from this qualification.
 
 ## Task 024 Go qualification
 

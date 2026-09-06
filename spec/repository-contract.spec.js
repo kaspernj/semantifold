@@ -20,6 +20,41 @@ const providerExecutables = /** @type {Readonly<Record<string, string>>} */ (Obj
 }))
 
 describe("repository delivery contracts", () => {
+  it("owns and validates the independently releasable legacy Tree-sitter workspace", async () => {
+    const [rootManifest, adapterManifest, lockfile, tensorbuzz, instructions] = await Promise.all([
+      readFile(new URL("../package.json", import.meta.url), "utf8").then(JSON.parse),
+      readFile(new URL("../packages/tree-sitter-legacy/package.json", import.meta.url), "utf8").then(JSON.parse),
+      readFile(new URL("../package-lock.json", import.meta.url), "utf8").then(JSON.parse),
+      readFile(new URL("../tensorbuzz.yml", import.meta.url), "utf8").then(parseYaml),
+      readFile(new URL("../AGENTS.md", import.meta.url), "utf8")
+    ])
+    const packagePack = "npm pack --workspace=@kaspernj/semantifold-tree-sitter-legacy --dry-run --json"
+    const buildCommands = Object.values(tensorbuzz.builds).flatMap((build) => build.script)
+
+    expect(rootManifest.workspaces).toEqual(["packages/tree-sitter-legacy"])
+    expect(rootManifest.devDependencies[adapterManifest.name]).toEqual("0.1.0")
+    expect(rootManifest.dependencies[adapterManifest.name]).toEqual(undefined)
+    expect(rootManifest.files.includes("packages/**")).toBeFalse()
+    expect({name: adapterManifest.name, version: adapterManifest.version}).toEqual({
+      name: "@kaspernj/semantifold-tree-sitter-legacy", version: "0.1.0"
+    })
+    expect(adapterManifest.exports).toEqual({
+      "./c": {import: "./build/c.js", types: "./build/c.d.ts"}
+    })
+    expect(adapterManifest.files).toEqual([
+      "build/c.d.ts", "build/c.d.ts.map", "build/c.js", "LICENSE", "README.md"
+    ])
+    expect(adapterManifest.dependencies).toEqual({"tree-sitter": "0.21.1", "tree-sitter-c": "0.23.2"})
+    expect(lockfile.packages["node_modules/@kaspernj/semantifold-tree-sitter-legacy"]).toEqual({
+      link: true, resolved: "packages/tree-sitter-legacy"
+    })
+    expect(lockfile.packages["packages/tree-sitter-legacy/node_modules/tree-sitter"].version).toEqual("0.21.1")
+    expect(lockfile.packages["packages/tree-sitter-legacy/node_modules/tree-sitter-c"].version).toEqual("0.23.2")
+    expect(buildCommands.includes("npm ls --all")).toBeTrue()
+    expect(buildCommands.includes(packagePack)).toBeTrue()
+    expect(instructions).toContain(packagePack)
+  })
+
   it("uses the released Velocious framework and standalone runner for every spec", async () => {
     const packageJson = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"))
     const specDirectory = new URL("./", import.meta.url)
