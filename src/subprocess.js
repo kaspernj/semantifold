@@ -18,7 +18,27 @@ const deadlineFailures = new WeakSet()
  * @param {number} input.timeoutMs - Deadline before termination begins.
  * @returns {Promise<{stderr: string, stdout: string}>} Output after the owned process group closes.
  */
-export function executeFileWithDeadline({arguments: processArguments, cwd, environment, executable, maxBuffer, timeoutMs}) {
+export function executeFileWithDeadline(input) {
+  return executeFileWithDeadlineUsing(input, registerChildSpawn)
+}
+
+/**
+ * Creates an executor whose spawn observation belongs only to that executor instance.
+ * @param {object} dependencies - Internal lifecycle dependencies.
+ * @param {(child: import("node:child_process").ChildProcess, listener: () => void) => void} dependencies.registerSpawnListener - Registers deadline initialization.
+ * @returns {typeof executeFileWithDeadline} Owned subprocess executor.
+ */
+export function createExecuteFileWithDeadline({registerSpawnListener}) {
+  return (input) => executeFileWithDeadlineUsing(input, registerSpawnListener)
+}
+
+/**
+ * Executes with exact instance-owned spawn observation.
+ * @param {Parameters<typeof executeFileWithDeadline>[0]} input - Process request.
+ * @param {(child: import("node:child_process").ChildProcess, listener: () => void) => void} registerSpawnListener - Registers deadline initialization.
+ * @returns {Promise<{stderr: string, stdout: string}>} Output after the owned process group closes.
+ */
+function executeFileWithDeadlineUsing({arguments: processArguments, cwd, environment, executable, maxBuffer, timeoutMs}, registerSpawnListener) {
   if (process.platform == "win32") {
     return Promise.reject(Object.assign(new Error("Owned process-tree termination is unavailable on this platform."), {
       code: "ENOTSUP",
@@ -54,7 +74,7 @@ export function executeFileWithDeadline({arguments: processArguments, cwd, envir
     child.once("error", (error) => {
       launchError = error
     })
-    child.once("spawn", () => {
+    registerSpawnListener(child, () => {
       if (processGroupId == undefined || !verifyOwnedProcessGroup(processGroupId)) {
         launchError = Object.assign(new Error("Spawned subprocess did not establish its required process group."), {code: "ENOTSUP"})
         child.kill("SIGKILL")
@@ -130,6 +150,15 @@ export function executeFileWithDeadline({arguments: processArguments, cwd, envir
       }
     }
   })
+}
+
+/**
+ * Registers production deadline initialization on the child's real spawn event.
+ * @param {import("node:child_process").ChildProcess} child - Exact spawned child.
+ * @param {() => void} listener - Deadline initialization.
+ */
+function registerChildSpawn(child, listener) {
+  child.once("spawn", listener)
 }
 
 /**
