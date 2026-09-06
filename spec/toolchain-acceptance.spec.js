@@ -20,7 +20,7 @@ import {
 
 const synthetic = (reason = "acceptance fixture") => ({kind: "synthetic", reason, relatedOrigins: []})
 const escapedProcessGroupFixture = fileURLToPath(new URL("fixtures/escape-process-group.js", import.meta.url))
-const ignoreSigtermFixture = fileURLToPath(new URL("fixtures/ignore-sigterm.js", import.meta.url))
+const ignoreSigtermFixture = fileURLToPath(new URL("fixtures/ignore-sigterm.sh", import.meta.url))
 const ignoreSigtermTreeFixture = fileURLToPath(new URL("fixtures/ignore-sigterm-tree.js", import.meta.url))
 
 describe("toolchain discovery and staged acceptance", () => {
@@ -490,7 +490,8 @@ printf 'environment-tool %s\n' "$EXPECTED"
     })
   })
 
-  it("forcibly closes a version probe that ignores the owned deadline signal", async () => {
+  it("forcibly closes a version probe with TERM resistance at the process boundary", async () => {
+    expect(process.platform).toEqual("linux")
     await withTemporaryDirectory("semantifold-version-hard-timeout-", async (directory) => {
       const fixture = processFixture(directory, "version")
 
@@ -498,13 +499,13 @@ printf 'environment-tool %s\n' "$EXPECTED"
         await assert.rejects(() => discoverToolchain({
           canonicalCommand: "node",
           id: "ignoring-version",
-          override: process.execPath,
+          override: ignoreSigtermFixture,
           timeoutMs: 500,
-          versionArguments: [ignoreSigtermFixture, fixture.readyPath, fixture.termPath, fixture.safetyPath]
+          versionArguments: [fixture.readyPath, fixture.termPath]
         }), (error) => error instanceof SemantifoldDiagnostic && error.code == "TOOL_VERSION_TIMEOUT" && error.signal == "SIGKILL")
         await assertForcedFixtureClosure(fixture)
       } finally {
-        await terminateFixtureIfAlive(fixture.readyPath)
+        await terminateFixtureIfAlive(fixture)
       }
     })
   })
@@ -980,11 +981,12 @@ kill -TERM $$
     })
   })
 
-  it("forcibly closes an acceptance child that ignores the owned stage deadline", async () => {
+  it("forcibly closes an acceptance child with TERM resistance at the process boundary", async () => {
+    expect(process.platform).toEqual("linux")
     await withTemporaryDirectory("semantifold-runner-hard-timeout-", async (directory) => {
       const fixture = processFixture(directory, "acceptance")
       const tool = Object.freeze({
-        executable: process.execPath,
+        executable: ignoreSigtermFixture,
         id: "ignoring-acceptance",
         source: /** @type {const} */ ("override"),
         version: process.version,
@@ -1004,7 +1006,7 @@ kill -TERM $$
         await assert.rejects(() => runAcceptanceStages({
           artifacts,
           stages: [{
-            arguments: [ignoreSigtermFixture, fixture.readyPath, fixture.termPath, fixture.safetyPath],
+            arguments: [fixture.readyPath, fixture.termPath],
             stage: "execute",
             tool
           }],
@@ -1014,7 +1016,7 @@ kill -TERM $$
           error.stage == "execute" && error.signal == "SIGKILL")
         await assertForcedFixtureClosure(fixture)
       } finally {
-        await terminateFixtureIfAlive(fixture.readyPath)
+        await terminateFixtureIfAlive(fixture)
       }
     })
   })
@@ -1477,51 +1479,59 @@ async function expectDiagnostic(callback, code, stage) {
 }
 
 /**
- * Creates deterministic evidence paths for one signal-handling child.
+ * Creates exact evidence paths for one process-boundary signal fixture.
  * @param {string} directory - Fixture-owned temporary directory.
  * @param {string} name - Evidence basename.
- * @returns {{readyPath: string, safetyPath: string, termPath: string}} Evidence paths.
+ * @returns {{readyPath: string, termPath: string}} Evidence paths.
  */
 function processFixture(directory, name) {
   return {
     readyPath: path.join(directory, `${name}.ready`),
-    safetyPath: path.join(directory, `${name}.safety`),
     termPath: path.join(directory, `${name}.term`)
   }
 }
 
 /**
- * Proves the fixture installed its handler, ignored TERM, and closed before its safety exit.
- * @param {{readyPath: string, safetyPath: string, termPath: string}} fixture - Evidence paths.
+ * Proves the fixture installed its handler, ignored TERM, and left no owned process group.
+ * @param {{readyPath: string, termPath: string}} fixture - Fixture evidence paths.
  * @returns {Promise<void>}
  */
 async function assertForcedFixtureClosure(fixture) {
-  const pid = Number.parseInt(await readFile(fixture.readyPath, "utf8"), 10)
+  const identity = await fixtureIdentity(fixture)
 
+  expect(identity.processGroupId).toEqual(identity.pid)
+  expect(identity.sessionId).toEqual(identity.pid)
   expect(await readFile(fixture.termPath, "utf8")).toEqual("SIGTERM\n")
-  await assert.rejects(access(fixture.safetyPath), (error) => error instanceof Error && "code" in error && error.code == "ENOENT")
-  assert.throws(() => process.kill(pid, 0), (error) => error instanceof Error && "code" in error && error.code == "ESRCH")
+  expect(await waitForNoLiveLinuxProcess(identity, 500)).toBeTrue()
+  expect(processGroupExists(identity.processGroupId)).toBeFalse()
 }
 
 /**
- * Removes a fixture child if an assertion aborts before the owned runner closes it.
- * @param {string} readyPath - PID evidence path.
+ * Guarantees exact process-group cleanup if lifecycle settlement or an assertion fails.
+ * @param {{readyPath: string}} fixture - Fixture evidence paths.
  * @returns {Promise<void>}
  */
-async function terminateFixtureIfAlive(readyPath) {
-  let pid
+async function terminateFixtureIfAlive(fixture) {
+  const identity = await fixtureIdentity(fixture, false)
 
+  if (identity == undefined) return
+  if (!await signalRecordedProcessGroup(identity, "SIGKILL")) await signalRecordedProcess(identity, "SIGKILL")
+  expect(await waitForNoLiveLinuxProcess(identity, 500)).toBeTrue()
+  expect(processGroupExists(identity.processGroupId)).toBeFalse()
+}
+
+/**
+ * Reads the exact identity captured after the fixture installed its TERM handler.
+ * @param {{readyPath: string}} fixture - Fixture evidence paths.
+ * @param {boolean} [required] - Whether absent evidence fails.
+ * @returns {Promise<{pid: number, processGroupId: number, sessionId: number, startTime: string} | undefined>}
+ */
+async function fixtureIdentity(fixture, required = true) {
   try {
-    pid = Number.parseInt(await readFile(readyPath, "utf8"), 10)
+    return linuxIdentityFromStat(await readFile(fixture.readyPath, "utf8"))
   } catch (error) {
-    if (error instanceof Error && "code" in error && error.code == "ENOENT") return
+    if (!required && error instanceof Error && "code" in error && error.code == "ENOENT") return undefined
     throw error
-  }
-
-  try {
-    process.kill(pid, "SIGKILL")
-  } catch (error) {
-    if (!(error instanceof Error && "code" in error && error.code == "ESRCH")) throw error
   }
 }
 
@@ -1704,12 +1714,22 @@ async function processIdentity(stateDirectory, name, required = true) {
 async function linuxProcessIdentity(pid) {
   try {
     const stat = await readFile(`/proc/${pid}/stat`, "utf8")
-    const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ")
-
-    return {processGroupId: Number(fields[2]), sessionId: Number(fields[3]), startTime: fields[19], state: fields[0]}
+    return {...linuxIdentityFromStat(stat), state: stat.slice(stat.lastIndexOf(")") + 2).split(" ")[0]}
   } catch (error) {
     if (error instanceof Error && "code" in error && error.code == "ENOENT") return undefined
     throw error
+  }
+}
+
+/** @param {string} stat Linux `/proc/PID/stat` content. */
+function linuxIdentityFromStat(stat) {
+  const fields = stat.slice(stat.lastIndexOf(")") + 2).trim().split(" ")
+
+  return {
+    pid: Number.parseInt(stat, 10),
+    processGroupId: Number(fields[2]),
+    sessionId: Number(fields[3]),
+    startTime: fields[19]
   }
 }
 
@@ -1724,6 +1744,22 @@ async function signalRecordedProcess(identity, signal) {
 
   if (!sameProcess(identity, current) || current.state == "Z") return false
   process.kill(identity.pid, signal)
+
+  return true
+}
+
+/**
+ * Signals a process group only while its recorded leader identity still matches.
+ * @param {{pid: number, processGroupId: number, startTime: string}} identity - Recorded group-leader identity.
+ * @param {"SIGKILL" | "SIGTERM"} signal - Cleanup signal.
+ * @returns {Promise<boolean>} Whether the exact live owned group was signaled.
+ */
+async function signalRecordedProcessGroup(identity, signal) {
+  const current = await linuxProcessIdentity(identity.pid)
+
+  if (identity.pid != identity.processGroupId || !sameProcess(identity, current) ||
+    current.state == "Z" || current.processGroupId != identity.processGroupId) return false
+  process.kill(-identity.processGroupId, signal)
 
   return true
 }
