@@ -70,11 +70,14 @@ npm audit --audit-level=high
 npm ls --omit=dev --all
 npm ls --all
 npm pack --dry-run --json
-npm pack --workspace=@kaspernj/semantifold-tree-sitter-legacy --dry-run --json
 git diff --check
 ```
 
-The `packages/tree-sitter-legacy` workspace is an independently releasable adapter, not a runtime dependency of the root `semantifold` package. Its C export returns frozen parser-neutral CST data while isolating an exact legacy Tree-sitter runtime. Repository tests pack and install its real tarball beside the modern Go parser in a temporary consumer. A future Semantifold C frontend may depend on it only after a separately authorized registry publication and live-package verification.
+The one `semantifold@0.2.0` distribution explicitly bundles root `tree-sitter@0.25.1` and a private internal package containing an isolated exact `tree-sitter@0.21.1` plus `tree-sitter-c@0.23.2` dependency subtree. The private `packages/tree-sitter-legacy` workspace owns source checking and declaration generation, but has no export or publication identity. Its serializer returns only recursively frozen parser-neutral CST data; native parser, tree, node, and language handles stay inside the legacy runtime. The packed-consumer spec installs the real root tarball with a fresh npm cache and proves modern Go and legacy C parsing together without a workspace or registry fallback for the internal package.
+
+Because `install-links=true` installs a copy of the private runtime, run `npm ci` again after editing its shipped files under `packages/tree-sitter-legacy/runtime/`. Tests, lint, and `npm pack` reject a stale installed payload with that recovery instruction. The gate compares npm's source file inventory and every file's bytes, including the manifest, serializer, README, and license; it never copies or repairs dependencies itself.
+
+Consumers need no Semantifold-specific npm settings: default `npm install`, `npm ls --all`, and subsequent `npm ci` work with `install-links=false`. The repository alone uses `install-links=true` to materialize the local source. Root `acceptDependencies` accepts the exact private `0.1.0` package already present in the bundle; npm still resolves new installations from the declared `file:` source, never from a registry release of the internal name. The cold-consumer proof isolates user/global configuration, verifies the public registry and ordinary default, and repeats dependency, parser, and TypeScript checks after both install and clean reinstall.
 
 The execution specs require PHP CLI, Ruby, Python 3, TypeScript, a Java JDK, .NET 10, and Go 1.26 with matching `gofmt` in addition to Node; missing tools are failures. The canonical container provides them: `docker compose up --build --detach`, followed by `docker compose exec dev npm ci` and the commands above.
 

@@ -1,1 +1,1 @@
-Added the independently releasable `@kaspernj/semantifold-tree-sitter-legacy` workspace with an isolated legacy C parser, a frozen parser-neutral CST boundary, and real packed-consumer coexistence proof beside Semantifold's modern Tree-sitter runtime. C source and target support remain unimplemented pending a separately authorized adapter publication.
+Added an isolated legacy C parser boundary with recursively frozen parser-neutral CST data and exact UTF-16 coordinates. C source and target support remain unimplemented.

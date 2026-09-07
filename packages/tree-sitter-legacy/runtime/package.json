@@ -1,0 +1,21 @@
+{
+  "name": "semantifold-tree-sitter-legacy-internal",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Private parser-neutral C snapshots using Semantifold's isolated legacy Tree-sitter runtime",
+  "type": "module",
+  "main": "./src/c.js",
+  "files": [
+    "src/c.js",
+    "LICENSE",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "license": "ISC",
+  "dependencies": {
+    "tree-sitter": "0.21.1",
+    "tree-sitter-c": "0.23.2"
+  }
+}

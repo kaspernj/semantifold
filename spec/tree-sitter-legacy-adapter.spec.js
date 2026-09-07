@@ -2,7 +2,11 @@
 
 import assert from "node:assert/strict"
 import {readFile} from "node:fs/promises"
+import {fileURLToPath} from "node:url"
 import {describe, expect, it} from "@velocious/testing"
+import {verifyLegacyRuntime} from "../scripts/verify-legacy-runtime.js"
+
+await verifyLegacyRuntime(fileURLToPath(new URL("../", import.meta.url)))
 
 /** @param {unknown} value */
 function assertDeeplyFrozen(value) {
@@ -14,7 +18,7 @@ function assertDeeplyFrozen(value) {
 
 describe("legacy Tree-sitter adapter", () => {
   it("returns a frozen parser-neutral C CST with ordered field-bearing edges", async () => {
-    const {parseCst} = await import("@kaspernj/semantifold-tree-sitter-legacy/c")
+    const {parseCst} = await import("semantifold-tree-sitter-legacy-internal")
     const source = "int main(void) { return 0; }\n"
     const snapshot = parseCst(source)
 
@@ -36,7 +40,7 @@ describe("legacy Tree-sitter adapter", () => {
     assert.deepEqual(JSON.parse(JSON.stringify(snapshot)), snapshot)
   })
 
-  it("emits declarations containing only the parser-neutral public contract", async () => {
+  it("emits declarations containing only the parser-neutral internal contract", async () => {
     const declarations = await readFile(new URL(
       "../packages/tree-sitter-legacy/build/c.d.ts", import.meta.url
     ), "utf8")
@@ -49,7 +53,7 @@ describe("legacy Tree-sitter adapter", () => {
   })
 
   it("preserves recovery, extras, and UTF-16 positions without native values", async () => {
-    const {parseCst} = await import("@kaspernj/semantifold-tree-sitter-legacy/c")
+    const {parseCst} = await import("semantifold-tree-sitter-legacy-internal")
     const prefix = "/* 😀 */\r\n"
     const source = `${prefix}int main(void) { return 0;\r\n`
     const snapshot = parseCst(source)
@@ -86,7 +90,7 @@ function containsFunction(value) {
   return false
 }
 
-/** @param {import("@kaspernj/semantifold-tree-sitter-legacy/c").CstNode} root */
+/** @param {import("semantifold-tree-sitter-legacy-internal").CstNode} root */
 function descendants(root) {
   return [root, ...root.children.flatMap(({node}) => descendants(node))]
 }

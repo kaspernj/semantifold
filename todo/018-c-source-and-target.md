@@ -4,9 +4,9 @@
 - Phase/priority: Phase L1 / P0
 - Dependencies: [015-language-expansion-foundation.md](015-language-expansion-foundation.md)
 
-## Release prerequisite
+## Packaging prerequisite
 
-Before Task 018 adds `@kaspernj/semantifold-tree-sitter-legacy@0.1.0` to the root runtime dependency graph or starts C frontend integration, the adapter must receive explicit publication authorization, be published through the repository release workflow, and be independently read back from the public registry. The current workspace and packed-consumer proof qualify the isolation boundary but are not registry publication; this task does not authorize publication.
+Before Task 018 starts C frontend integration, the reviewed and merged root `semantifold@0.2.0` package graph must be verified to physically bundle root `tree-sitter@0.25.1` and the private internal legacy subtree with exact `tree-sitter@0.21.1` and `tree-sitter-c@0.23.2`. The root-tarball consumer proof must pass default npm install, full dependency listing, and clean `npm ci` without consumer-specific settings, resolve distinct runtime paths, and parse modern Go beside legacy C while exposing only recursively frozen parser-neutral data across the boundary. No separately published adapter is a prerequisite, and this task authorizes neither package publication nor C implementation before that packaged-root correction is reviewed, green in TensorBuzz, merged, and verified.
 
 ## Purpose
 

@@ -1,15 +1,11 @@
-# `@kaspernj/semantifold-tree-sitter-legacy`
+# Legacy Tree-sitter development workspace
 
-This independently releasable ESM workspace is currently unpublished. It isolates Tree-sitter grammars that require a legacy Node runtime from Semantifold's modern Tree-sitter dependency graph.
+This private workspace owns source checking and declaration generation for Semantifold's internal legacy Tree-sitter boundary. It has no public export or publication route.
 
-The only current export is `@kaspernj/semantifold-tree-sitter-legacy/c`. Its `parseCst(source)` operation returns a recursively frozen `semantifold.parser-cst` version 1 snapshot containing plain structural data and UTF-16 coordinates. Parser, tree, syntax-node, and language handles never cross the package boundary.
+The runtime package under `runtime/` is installed as an ordinary local package and bundled into the root `semantifold` tarball. Its parser-neutral serializer returns recursively frozen plain data with UTF-16 coordinates. Parser, tree, syntax-node, and language handles remain inside the isolated exact `tree-sitter@0.21.1` and `tree-sitter-c@0.23.2` subtree.
 
-```js
-import {parseCst} from "@kaspernj/semantifold-tree-sitter-legacy/c"
+The workspace layer keeps matching legacy development types beside the owned source while leaving the nested `file:` dependency materialized instead of represented as an npm workspace link. It adds no package export or release layer.
 
-const snapshot = parseCst("int main(void) { return 0; }\n")
-```
+Root `acceptDependencies` accepts the exact private runtime version already physically bundled under root `node_modules`; it does not change the `file:` installation source or require an internal registry release. This lets consumers use npm's ordinary `install-links=false` default even though development uses a materialized local copy. Native runtime and grammar version requirements remain exact and unchanged.
 
-The package owns exact runtime dependencies `tree-sitter@0.21.1` and `tree-sitter-c@0.23.2`. A future Rust export may reuse this isolation boundary only after a separate parser qualification; no Rust dependency or export is currently shipped.
-
-Any publication of this workspace is separate from `semantifold` and requires explicit authorization. Semantifold must not adopt it as a runtime dependency until the registry artifact has been published and independently verified.
+After editing any shipped file in `runtime/`, run `npm ci` from the repository root before testing or packing. npm installs a copy of this local package, so building declarations alone cannot refresh its runtime bytes. `npm run verify:legacy-runtime` compares npm's current source pack list with the complete installed payload (excluding registry-owned dependencies), then checks every file byte for byte. Pretest, prepack, lint, and the direct runtime spec reject any mismatch. The packed-consumer proof also compares the archive payload with the owned source.

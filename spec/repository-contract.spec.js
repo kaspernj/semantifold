@@ -18,41 +18,77 @@ const providerExecutables = /** @type {Readonly<Record<string, string>>} */ (Obj
   "@openai/codex": "codex",
   "opencode-ai": "opencode"
 }))
+const internalLegacyPackage = "semantifold-tree-sitter-legacy-internal"
+const retiredLegacyPackage = "@kaspernj/semantifold-tree-sitter-legacy"
 
 describe("repository delivery contracts", () => {
-  it("owns and validates the independently releasable legacy Tree-sitter workspace", async () => {
-    const [rootManifest, adapterManifest, lockfile, tensorbuzz, instructions] = await Promise.all([
+  it("owns and bundles the private legacy Tree-sitter workspace in the root package", async () => {
+    const [rootManifest, workspaceManifest, internalManifest, workspaceConfig, npmConfig, lockfile, tensorbuzz,
+      instructions] = await Promise.all([
       readFile(new URL("../package.json", import.meta.url), "utf8").then(JSON.parse),
       readFile(new URL("../packages/tree-sitter-legacy/package.json", import.meta.url), "utf8").then(JSON.parse),
+      readFile(new URL("../packages/tree-sitter-legacy/runtime/package.json", import.meta.url), "utf8").then(JSON.parse),
+      readFile(new URL("../packages/tree-sitter-legacy/tsconfig.json", import.meta.url), "utf8").then(JSON.parse),
+      readFile(new URL("../.npmrc", import.meta.url), "utf8"),
       readFile(new URL("../package-lock.json", import.meta.url), "utf8").then(JSON.parse),
       readFile(new URL("../tensorbuzz.yml", import.meta.url), "utf8").then(parseYaml),
       readFile(new URL("../AGENTS.md", import.meta.url), "utf8")
     ])
-    const packagePack = "npm pack --workspace=@kaspernj/semantifold-tree-sitter-legacy --dry-run --json"
+    const rootPack = "npm pack --dry-run --json"
     const buildCommands = Object.values(tensorbuzz.builds).flatMap((build) => build.script)
 
     expect(rootManifest.workspaces).toEqual(["packages/tree-sitter-legacy"])
-    expect(rootManifest.devDependencies[adapterManifest.name]).toEqual("0.1.0")
-    expect(rootManifest.dependencies[adapterManifest.name]).toEqual(undefined)
+    expect(rootManifest.version).toEqual("0.2.0")
+    expect(rootManifest.dependencies[internalLegacyPackage]).toEqual("file:packages/tree-sitter-legacy/runtime")
+    expect(rootManifest.acceptDependencies).toEqual({[internalLegacyPackage]: "0.1.0"})
+    expect(rootManifest.devDependencies[workspaceManifest.name]).toEqual("0.1.0")
+    expect(rootManifest.devDependencies[retiredLegacyPackage]).toEqual(undefined)
+    expect(rootManifest.bundleDependencies).toEqual([internalLegacyPackage, "tree-sitter"])
     expect(rootManifest.files.includes("packages/**")).toBeFalse()
-    expect({name: adapterManifest.name, version: adapterManifest.version}).toEqual({
-      name: "@kaspernj/semantifold-tree-sitter-legacy", version: "0.1.0"
+    expect(rootManifest.exports).toEqual({
+      ".": {import: "./build/index.js", types: "./build/index.d.ts"}
     })
-    expect(adapterManifest.exports).toEqual({
-      "./c": {import: "./build/c.js", types: "./build/c.d.ts"}
+    expect({name: workspaceManifest.name, private: workspaceManifest.private, version: workspaceManifest.version}).toEqual({
+      name: "semantifold-tree-sitter-legacy-workspace", private: true, version: "0.1.0"
     })
-    expect(adapterManifest.files).toEqual([
-      "build/c.d.ts", "build/c.d.ts.map", "build/c.js", "LICENSE", "README.md"
-    ])
-    expect(adapterManifest.dependencies).toEqual({"tree-sitter": "0.21.1", "tree-sitter-c": "0.23.2"})
-    expect(lockfile.packages["node_modules/@kaspernj/semantifold-tree-sitter-legacy"]).toEqual({
+    expect({name: internalManifest.name, private: internalManifest.private, version: internalManifest.version}).toEqual({
+      name: internalLegacyPackage, private: true, version: "0.1.0"
+    })
+    expect(workspaceManifest.exports).toEqual(undefined)
+    expect(workspaceManifest.publishConfig).toEqual(undefined)
+    expect(workspaceManifest.devDependencies).toEqual({
+      "@types/node": "^24.3.0",
+      "tree-sitter": "0.21.1",
+      "tree-sitter-c": "0.23.2",
+      typescript: "^7.0.0"
+    })
+    expect(workspaceConfig.compilerOptions.rootDir).toEqual("runtime/src")
+    expect(workspaceConfig.include).toEqual(["runtime/src/**/*"])
+    expect(npmConfig).toEqual("install-links=true\n")
+    expect(internalManifest.exports).toEqual(undefined)
+    expect(internalManifest.main).toEqual("./src/c.js")
+    expect(internalManifest.publishConfig).toEqual(undefined)
+    expect(internalManifest.files).toEqual(["src/c.js", "LICENSE", "README.md"])
+    expect(internalManifest.dependencies).toEqual({"tree-sitter": "0.21.1", "tree-sitter-c": "0.23.2"})
+    expect(internalManifest.bundleDependencies).toEqual(undefined)
+    expect(lockfile.packages[`node_modules/${workspaceManifest.name}`]).toEqual({
       link: true, resolved: "packages/tree-sitter-legacy"
     })
-    expect(lockfile.packages["packages/tree-sitter-legacy/node_modules/tree-sitter"].version).toEqual("0.21.1")
-    expect(lockfile.packages["packages/tree-sitter-legacy/node_modules/tree-sitter-c"].version).toEqual("0.23.2")
+    expect(lockfile.packages[`node_modules/${retiredLegacyPackage}`]).toEqual(undefined)
+    expect(lockfile.packages[`node_modules/${internalLegacyPackage}`].resolved)
+      .toEqual("file:packages/tree-sitter-legacy/runtime")
+    expect(lockfile.packages[`node_modules/${internalLegacyPackage}`].inBundle).toBeTrue()
+    expect(lockfile.packages[""].acceptDependencies).toEqual(rootManifest.acceptDependencies)
+    expect(lockfile.packages[`node_modules/${internalLegacyPackage}`].link).toEqual(undefined)
+    expect(lockfile.packages["node_modules/tree-sitter"].version).toEqual("0.25.1")
+    expect(lockfile.packages["node_modules/tree-sitter"].inBundle).toBeTrue()
+    expect(lockfile.packages[`node_modules/${internalLegacyPackage}/node_modules/tree-sitter`].version).toEqual("0.21.1")
+    expect(lockfile.packages[`node_modules/${internalLegacyPackage}/node_modules/tree-sitter-c`].version).toEqual("0.23.2")
     expect(buildCommands.includes("npm ls --all")).toBeTrue()
-    expect(buildCommands.includes(packagePack)).toBeTrue()
-    expect(instructions).toContain(packagePack)
+    expect(buildCommands.filter((command) => command == rootPack)).toEqual([rootPack])
+    expect(buildCommands.some((command) => command.includes("--workspace") && command.includes("npm pack"))).toBeFalse()
+    expect(instructions).toContain(rootPack)
+    expect(instructions).not.toContain(`npm pack --workspace=${retiredLegacyPackage}`)
   })
 
   it("uses the released Velocious framework and standalone runner for every spec", async () => {
@@ -128,7 +164,7 @@ describe("repository delivery contracts", () => {
     assert.ok(buildCommands.includes("npm run lint"))
     assert.ok(buildCommands.includes("npm run typecheck"))
     assert.ok(buildCommands.includes("npm run build"))
-    assert.ok(buildCommands.includes("npm test"))
+    assert.ok(buildCommands.includes("LANG=C.UTF-8 LC_ALL=C.UTF-8 npm test"))
     assert.ok(buildCommands.includes("npm audit --audit-level=high"))
     assert.ok(buildCommands.includes("npm ls --omit=dev --all"))
     assert.ok(buildCommands.includes("npm pack --dry-run --json"))
