@@ -3,3 +3,5 @@ Add independent C17 source and native multi-artifact target support for the exis
 Qualify pinned Ubuntu Clang 21.1.8/compiler-rt with separate strict compile/link/native execution at O0/O2, mandatory ASan/UBSan/leak checks, deterministic native ownership instrumentation, original-five bidirectional crossings, rich/v3 provenance and ordinary packed-consumer C API/type proof. Document the C profile and portable image/CI commands. No dependencies, semantic operations, public API lifecycle, package version or publication contract change.
 
 Reject preprocessing-sensitive parser-backed comments, hexadecimal escapes split across parser nodes, uppercase `TRUE`/`FALSE` expressions and identifiers, and the imported `MB_LEN_MAX` macro. Native differential regressions prove the original comment/byte/binding mismatches and macro expansion failure while preserving ordinary comments, CRLF, canonical ordered regions, bounded escapes, NUL and Unicode.
+
+- Qualify CI Clang/compiler-rt on the standard Ubuntu 24.04 runner through checksum-pinned, signed official LLVM packages, independently of the Ubuntu 26.04 development-image package pins.

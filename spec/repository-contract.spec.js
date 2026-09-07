@@ -139,12 +139,12 @@ describe("repository delivery contracts", () => {
     expect(config.environment.SEMANTIFOLD_PYTHON).toEqual("/usr/bin/python3")
     expect(config.environment.SEMANTIFOLD_DOTNET).toEqual("/usr/bin/dotnet")
     expect(config.environment.SEMANTIFOLD_GO).toEqual("/usr/local/bin/go")
-    expect(config.environment.SEMANTIFOLD_CLANG).toEqual("/usr/bin/clang")
-    for (const pin of ["clang=1:21.1.6-71", "clang-21=1:21.1.8-6ubuntu1", "libclang-rt-21-dev=1:21.1.8-6ubuntu1"]) assert.ok(beforeInstall.includes(pin))
-    for (const probe of ["clang --version", "clang -dumpmachine", "clang -print-resource-dir",
-      'test "$(clang -dumpversion)" = "21.1.8"', 'test "$(clang -dumpmachine)" = "x86_64-pc-linux-gnu"',
-      'test -r "$(clang -print-resource-dir)/lib/linux/libclang_rt.asan-x86_64.a"',
-      'test -r "$(clang -print-resource-dir)/lib/linux/libclang_rt.ubsan_standalone-x86_64.a"']) assert.ok(config.before_install.includes(probe), probe)
+    expect(config.environment.SEMANTIFOLD_CLANG).toEqual("/usr/bin/clang-21")
+    for (const pin of ["clang-21=1:21.1.8~++20251221032922+2078da43e25a-1~exp1~20251221153059.70", "libclang-rt-21-dev=1:21.1.8~++20251221032922+2078da43e25a-1~exp1~20251221153059.70"]) assert.ok(beforeInstall.includes(pin))
+    for (const probe of ["clang-21 --version", "clang-21 -dumpmachine", "clang-21 -print-resource-dir",
+      'test "$(clang-21 -dumpversion)" = "21.1.8"', 'test "$(clang-21 -dumpmachine)" = "x86_64-pc-linux-gnu"',
+      'test -r "$(clang-21 -print-resource-dir)/lib/linux/libclang_rt.asan-x86_64.a"',
+      'test -r "$(clang-21 -print-resource-dir)/lib/linux/libclang_rt.ubsan_standalone-x86_64.a"']) assert.ok(config.before_install.includes(probe), probe)
     assert.deepEqual(config.before_install.filter((command) => goCommands.includes(command)), goCommands)
     assert.match(beforeInstall, /php-cli python3 ruby default-jdk-headless/u)
     assert.match(beforeInstall, /dotnet-sdk-10\.0/u)

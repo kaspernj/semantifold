@@ -2,7 +2,7 @@
 
 ## Task 018 C operational qualification
 
-The canonical Ubuntu 26.04 image and TensorBuzz install `clang=1:21.1.6-71`, `clang-21=1:21.1.8-6ubuntu1`, and `libclang-rt-21-dev=1:21.1.8-6ubuntu1`. These exact installed versions were read with `dpkg-query -W clang clang-21 libclang-rt-21-dev`. The `clang` metapackage version differs from the compiler version; the discovered executable is Ubuntu Clang 21.1.8 at `/usr/lib/llvm-21/bin/clang`, target `x86_64-pc-linux-gnu`. Compiler-rt is required for ASan/UBSan and leak detection. Missing tools or runtime libraries fail the C lane; sanitizer coverage is mandatory on this qualified Linux platform.
+The canonical Ubuntu 26.04 development image installs `clang=1:21.1.6-71`, `clang-21=1:21.1.8-6ubuntu1`, and `libclang-rt-21-dev=1:21.1.8-6ubuntu1`. These exact installed versions were read with `dpkg-query -W clang clang-21 libclang-rt-21-dev`. The `clang` metapackage version differs from the compiler version; the discovered executable is Ubuntu Clang 21.1.8 at `/usr/lib/llvm-21/bin/clang`, target `x86_64-pc-linux-gnu`. Compiler-rt is required for ASan/UBSan and leak detection. Missing tools or runtime libraries fail the C lane; sanitizer coverage is mandatory on this qualified Linux platform.
 
 The source-independent root `Dockerfile` remains the canonical image definition and `compose.yml` service `dev` remains the canonical lane. An operator can reproduce the package prerequisite on Ubuntu 26.04 with:
 
@@ -19,7 +19,26 @@ test -r "$(clang -print-resource-dir)/lib/linux/libclang_rt.asan-x86_64.a"
 test -r "$(clang -print-resource-dir)/lib/linux/libclang_rt.ubsan_standalone-x86_64.a"
 ```
 
-TensorBuzz performs these version/target/resource checks and selects `/usr/bin/clang` through `SEMANTIFOLD_CLANG`. The image prints the same compiler probes. Provider versions/authentication, container replacement and host preparation remain external. Package pins can become unavailable if Ubuntu repositories retire them; that is an operational failure requiring deliberate requalification, never a skip or unpinned fallback.
+TensorBuzz uses the standard Peakflow Ubuntu 24.04 (`noble`) base, not the development image. Its package repositories cannot resolve the Ubuntu 26.04 pins above. CI instead installs the exact Clang 21.1.8 and compiler-rt builds from the official signed LLVM Noble repository and selects `/usr/bin/clang-21` through `SEMANTIFOLD_CLANG`. The signing key is checksum-pinned before APT receives it, and the repository is restricted to that key through `signed-by`; there is no unsigned package or unpinned compiler fallback. The checked-in `tensorbuzz.yml` owns the executable CI setup:
+
+```sh
+sudo apt-get install --yes --no-install-recommends php-cli python3 ruby default-jdk-headless dotnet-sdk-10.0 ca-certificates curl gnupg
+curl --fail --silent --show-error --location https://apt.llvm.org/llvm-snapshot.gpg.key --output /tmp/semantifold-llvm.asc
+printf '%s  %s\n' '8b2a587ffd672c4687e7581dad4b2f6c1bb2ad6b480cd9771ba2ff48e0b8c75d' '/tmp/semantifold-llvm.asc' | sha256sum --check -
+sudo install -D -m 0644 /tmp/semantifold-llvm.asc /etc/apt/keyrings/llvm.asc
+printf '%s\n' 'deb [arch=amd64 signed-by=/etc/apt/keyrings/llvm.asc] https://apt.llvm.org/noble/ llvm-toolchain-noble-21 main' | sudo tee /etc/apt/sources.list.d/semantifold-llvm21.list
+sudo apt-get update
+sudo apt-get install --yes --no-install-recommends clang-21=1:21.1.8~++20251221032922+2078da43e25a-1~exp1~20251221153059.70 libclang-rt-21-dev=1:21.1.8~++20251221032922+2078da43e25a-1~exp1~20251221153059.70
+clang-21 --version
+clang-21 -dumpmachine
+clang-21 -print-resource-dir
+test "$(clang-21 -dumpversion)" = "21.1.8"
+test "$(clang-21 -dumpmachine)" = "x86_64-pc-linux-gnu"
+test -r "$(clang-21 -print-resource-dir)/lib/linux/libclang_rt.asan-x86_64.a"
+test -r "$(clang-21 -print-resource-dir)/lib/linux/libclang_rt.ubsan_standalone-x86_64.a"
+```
+
+The standard CI base was qualified at `peakflow/base-ubuntu-24-04@sha256:9b23d3d5f82a8babb312b7ce549e02d60a6f32344b0088b90d3f486a9d8207a5`: signed APT installation plus UID1000 compile/link/run passed at O0/O2, ordinary and ASan/UBSan/leak profiles. The development image retains its working Ubuntu 26.04 package pins and prints the same compiler probes. Provider versions/authentication, container replacement and host preparation remain external. Package pins can become unavailable if Ubuntu repositories retire them; that is an operational failure requiring deliberate requalification, never a skip or unpinned fallback.
 
 For an already materialized generated `program.c` and `semantifold_runtime.h`, use separate compile, link and native execution commands in a fresh directory:
 

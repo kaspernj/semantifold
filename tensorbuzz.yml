@@ -8,16 +8,22 @@ before_install:
   - sudo ln --symbolic --force /usr/local/go/bin/go /usr/local/bin/go
   - sudo ln --symbolic --force /usr/local/go/bin/gofmt /usr/local/bin/gofmt
   - sudo apt-get update
-  - sudo apt-get install --yes --no-install-recommends php-cli python3 ruby default-jdk-headless dotnet-sdk-10.0 clang=1:21.1.6-71 clang-21=1:21.1.8-6ubuntu1 libclang-rt-21-dev=1:21.1.8-6ubuntu1
+  - sudo apt-get install --yes --no-install-recommends php-cli python3 ruby default-jdk-headless dotnet-sdk-10.0 ca-certificates curl gnupg
+  - curl --fail --silent --show-error --location https://apt.llvm.org/llvm-snapshot.gpg.key --output /tmp/semantifold-llvm.asc
+  - printf '%s  %s\n' '8b2a587ffd672c4687e7581dad4b2f6c1bb2ad6b480cd9771ba2ff48e0b8c75d' '/tmp/semantifold-llvm.asc' | sha256sum --check -
+  - sudo install -D -m 0644 /tmp/semantifold-llvm.asc /etc/apt/keyrings/llvm.asc
+  - printf '%s\n' 'deb [arch=amd64 signed-by=/etc/apt/keyrings/llvm.asc] https://apt.llvm.org/noble/ llvm-toolchain-noble-21 main' | sudo tee /etc/apt/sources.list.d/semantifold-llvm21.list
+  - sudo apt-get update
+  - sudo apt-get install --yes --no-install-recommends clang-21=1:21.1.8~++20251221032922+2078da43e25a-1~exp1~20251221153059.70 libclang-rt-21-dev=1:21.1.8~++20251221032922+2078da43e25a-1~exp1~20251221153059.70
   - node --version
   - npm --version
-  - clang --version
-  - clang -dumpmachine
-  - clang -print-resource-dir
-  - test "$(clang -dumpversion)" = "21.1.8"
-  - test "$(clang -dumpmachine)" = "x86_64-pc-linux-gnu"
-  - test -r "$(clang -print-resource-dir)/lib/linux/libclang_rt.asan-x86_64.a"
-  - test -r "$(clang -print-resource-dir)/lib/linux/libclang_rt.ubsan_standalone-x86_64.a"
+  - clang-21 --version
+  - clang-21 -dumpmachine
+  - clang-21 -print-resource-dir
+  - test "$(clang-21 -dumpversion)" = "21.1.8"
+  - test "$(clang-21 -dumpmachine)" = "x86_64-pc-linux-gnu"
+  - test -r "$(clang-21 -print-resource-dir)/lib/linux/libclang_rt.asan-x86_64.a"
+  - test -r "$(clang-21 -print-resource-dir)/lib/linux/libclang_rt.ubsan_standalone-x86_64.a"
   - php --version
   - python3 --version
   - ruby --version
@@ -42,7 +48,7 @@ environment:
   SEMANTIFOLD_PYTHON: /usr/bin/python3
   SEMANTIFOLD_DOTNET: /usr/bin/dotnet
   SEMANTIFOLD_GO: /usr/local/bin/go
-  SEMANTIFOLD_CLANG: /usr/bin/clang
+  SEMANTIFOLD_CLANG: /usr/bin/clang-21
 builds:
   quality:
     name: Quality and package
