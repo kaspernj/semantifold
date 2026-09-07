@@ -1,6 +1,6 @@
 // @ts-check
 
-/** @typedef {"php" | "ruby" | "javascript" | "typescript" | "java" | "python" | "csharp" | "go"} SemanticLanguage */
+/** @typedef {"php" | "ruby" | "javascript" | "typescript" | "java" | "python" | "csharp" | "go" | "c"} SemanticLanguage */
 /** @typedef {"integer" | "boolean" | "string"} SemanticTypeName */
 /** @typedef {"IntegerNegate" | "BooleanNot"} SemanticUnaryOperation */
 /** @typedef {"IntegerAdd" | "IntegerSubtract" | "IntegerMultiply" | "BooleanAnd" | "BooleanOr" | "IntegerEqual" | "IntegerNotEqual" | "BooleanEqual" | "BooleanNotEqual" | "StringEqual" | "StringNotEqual" | "IntegerLessThan" | "IntegerLessThanOrEqual" | "IntegerGreaterThan" | "IntegerGreaterThanOrEqual" | "StringConcat"} SemanticBinaryOperation */

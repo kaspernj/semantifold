@@ -4,7 +4,7 @@
 
 This folder is Semantifold's durable, dependency-ordered implementation backlog and delivered design record. The released baseline is `semantifold@0.2.0` / `v0.2.0` at merged `master` commit `e41d66fb40db783df9d84069567f15bcaeef4a41`; repository and external evidence is recorded in [SOURCES.md](SOURCES.md).
 
-Tasks 001–004, 015–017, and 024 are delivered. Semantifold currently models safe integer, Boolean, and Unicode string scalars; explicitly typed locals and assignment; typed unary/binary expressions; ordered lexical blocks; nested strict-Boolean conditionals; explicit returns; two-argument direct calls; and entry-point printing. PHP, Ruby, JavaScript with JSDoc, TypeScript, Java, strictly annotated Python, canonical C#, and bounded Go are implemented as frontends and source backends with real-runtime and provenance/source-map coverage. Task 015 adds the shared role registry, generated artifact sets, byte provenance, parser qualification policy, and fail-loud staged toolchain acceptance; Tasks 016, 017, and 024 add Python, a deterministic two-file .NET 10/C# 14 project, and a deterministic manifest-first Go 1.26 module for that same Tasks 001–004 subset. Tasks 005–014, 018–023, and 025–037 remain roadmap work.
+Tasks 001–004, 015–017, and 024 are delivered. Task 018's C implementation and initial-review corrections are delivered locally, with coordinator verification/CI/merge pending. Semantifold currently models safe integer, Boolean, and Unicode string scalars; explicitly typed locals and assignment; typed unary/binary expressions; ordered lexical blocks; nested strict-Boolean conditionals; explicit returns; two-argument direct calls; and entry-point printing. PHP, Ruby, JavaScript with JSDoc, TypeScript, Java, strictly annotated Python, canonical C#, bounded Go, and bounded C are implemented as frontends and source backends with real-runtime and provenance/source-map coverage. Task 015 adds the shared role registry, generated artifact sets, byte provenance, parser qualification policy, and fail-loud staged toolchain acceptance; Tasks 016, 017, 024, and 018 add Python, a deterministic two-file .NET 10/C# 14 project, a deterministic manifest-first Go 1.26 module, and a C17 program/support header for that same Tasks 001–004 subset. Tasks 005–014, 019–023, and 025–037 remain roadmap work.
 
 The immediate priority is a bounded language-baseline expansion against this small stable IR. That exposes registration, parser, artifact, toolchain, ownership, and diagnostic flaws before collections, optionals, records, modules, errors, and generics multiply the work. It does not mean every platform, legacy bridge, or later language must block semantic progress.
 
@@ -57,16 +57,22 @@ Task 017 adds the seventh frontend and a deterministic `Program.cs`/`Semantifold
 
 Task 024 adds the eighth frontend and a deterministic `go.mod`/`main.go` native module backend for exactly Tasks 001–004. It adds official `tree-sitter-go@0.25.0`, Go 1.26 Linux/amd64 build/vet/run acceptance, and assignment-derived local mutability, but no third-party modules, architecture-sized integers, general imports, collections, methods, errors, concurrency, cgo, or standard-library portability.
 
-### Phase L1 — immediate stable-IR language cohort (P0)
+### C implementation delivered locally — Task 018
 
 - [018 — C source and target support](018-c-source-and-target.md)
+
+Task 018 adds the ninth frontend and deterministic `program.c`/`semantifold_runtime.h` native text artifacts for Tasks 001–004. It reuses the unchanged private bundled C CST, checks signed-64-bit arithmetic, owns immutable UTF-8 slices in a module-lifetime arena, and validates generated ordered-expression regions through the complete parser tree. Local Clang O0/O2 and mandatory sanitizer, original-five crossing, provenance, negative and package gates pass. [The task delivery record](018-c-source-and-target.md#implementation-delivery-record--2026-09-07) records exact evidence and profile limits. The prerequisite [PR 19](https://github.com/kaspernj/semantifold/pull/19) is merged and verified. The single independent C review completed; its four findings were reproduced and corrected in the original session with 97 focused tests passing. Coordinator correction verification, exact-head TensorBuzz and merge remain pending. No dependency, public semantic operation, pointer/ownership API, or publication is added.
+
+### Phase L1 — immediate stable-IR language cohort (P0)
+
+- [018 — C source and target support](018-c-source-and-target.md) — implementation delivered locally; coordinator delivery pending
 - [019 — C++ source and target support](019-cpp-source-and-target.md)
 - [020 — Rust source and target support](020-rust-source-and-target.md)
 - [022 — Swift source and target support](022-swift-source-and-target.md)
 - [023 — Kotlin/JVM source and target support](023-kotlin-source-and-target.md)
 - [025 — Core expanded-language baseline acceptance](025-core-language-baseline-acceptance.md)
 
-Tasks 016, 017, and 024 have adopted exactly Tasks 001–004 for Python, C#, and Go. Tasks 018–020 and 022–023 adopt the same baseline after Task 015; only C++ waits for C's native/string boundary, and the remaining language tasks otherwise need not serialize. Task 025 is the single gate before tasks 005 and 007. Its acceptance is spanning rather than a quadratic all-pairs matrix: every new frontend reaches the same IR, every new backend executes the canonical modules, every new language round-trips once, and representative cross-family paths prove registry composition.
+Tasks 016, 017, and 024 have adopted exactly Tasks 001–004 for Python, C#, and Go; Task 018 has locally delivered the same baseline for C. Tasks 019–020 and 022–023 adopt that baseline after Task 015; only C++ waits for C's native/string delivery, and the remaining language tasks otherwise need not serialize. Task 025 is the single gate before tasks 005 and 007. Its acceptance is spanning rather than a quadratic all-pairs matrix: every new frontend reaches the same IR, every new backend executes the canonical modules, every new language round-trips once, and representative cross-family paths prove registry composition.
 
 Swift is in this cohort because it is a modern general-purpose language independently of iOS. Kotlin/JVM adds a major JVM language without making Android tooling part of the gate. Go adds a distinct garbage-collected native/package/toolchain model. Dart and Zig remain concrete planned languages but are intentionally later: Flutter supplies most of Dart's requested platform value, while C/C++/Rust already cover the first native contract pressure that Zig would repeat.
 
@@ -132,7 +138,7 @@ Legend: **implemented** describes the baseline, **core** gates Task 025, **later
 | Python | implemented 016 | implemented text 016 | `program.py` | `tree-sitter@0.25.1` + official `tree-sitter-python@0.25.0` | Tasks 001–004 |
 | C# | implemented 017 | implemented managed project 017 | `Program.cs`, `Semantifold.csproj` | `tree-sitter@0.25.1` + official `tree-sitter-c-sharp@0.23.5`; .NET 10 | Tasks 001–004 |
 | Go | implemented 024 | implemented native module 024 | `go.mod`, `main.go` | `tree-sitter@0.25.1` + official `tree-sitter-go@0.25.0`; Go 1.26 | Tasks 001–004 |
-| C | core 018 | core native project 018 | `.c`, support header | qualified Tree-sitter C | Tasks 001–004 |
+| C | implemented locally 018 | implemented native text project 018; coordinator delivery pending | `program.c`, `semantifold_runtime.h` | bundled private Tree-sitter C; Clang 21.1.8/C17 | Tasks 001–004 |
 | C++ | core 019 | core native text 019 | `.cpp` | qualified Tree-sitter C++ | Tasks 001–004 |
 | Rust | core 020 | core Cargo project 020 | manifest, lockfile, `.rs` | qualified Tree-sitter Rust | Tasks 001–004 |
 | Swift | core 022 | core native text 022 | `.swift` | qualified Swift grammar + `swiftc` | Tasks 001–004 |
@@ -212,7 +218,7 @@ Dependencies in task files are authoritative. Existing IDs remain stable; numeri
 | [016](016-python-source-and-target.md) | delivered (L1) | — | Python frontend/backend | 015 |
 | [017](017-csharp-source-and-target.md) | delivered (L1) | — | C# frontend/backend/project | 015 |
 | [024](024-go-source-and-target.md) | delivered (L1) | — | Go frontend/backend/module | 015 |
-| [018](018-c-source-and-target.md) | L1 | P0 | C frontend/backend/ownership | 015 |
+| [018](018-c-source-and-target.md) | implementation and corrections delivered locally (L1) | P0 | C frontend/backend/ownership; coordinator verification/CI/merge pending | 015 |
 | [019](019-cpp-source-and-target.md) | L1 | P0 | C++ frontend/backend/value boundaries | 015, 018 |
 | [020](020-rust-source-and-target.md) | L1 | P0 | Rust frontend/backend/crate | 015 |
 | [022](022-swift-source-and-target.md) | L1 | P0 | Swift frontend/backend | 015 |

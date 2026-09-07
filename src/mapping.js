@@ -1105,7 +1105,7 @@ function validPoint(value) {
  */
 function isLanguage(value) {
   return value == "php" || value == "ruby" || value == "javascript" || value == "typescript" || value == "java" ||
-    value == "python" || value == "csharp" || value == "go"
+    value == "python" || value == "csharp" || value == "go" || value == "c"
 }
 
 /**

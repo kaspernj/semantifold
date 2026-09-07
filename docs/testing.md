@@ -1,5 +1,56 @@
 # Testing
 
+## Task 018 C operational qualification
+
+The canonical Ubuntu 26.04 image and TensorBuzz install `clang=1:21.1.6-71`, `clang-21=1:21.1.8-6ubuntu1`, and `libclang-rt-21-dev=1:21.1.8-6ubuntu1`. These exact installed versions were read with `dpkg-query -W clang clang-21 libclang-rt-21-dev`. The `clang` metapackage version differs from the compiler version; the discovered executable is Ubuntu Clang 21.1.8 at `/usr/lib/llvm-21/bin/clang`, target `x86_64-pc-linux-gnu`. Compiler-rt is required for ASan/UBSan and leak detection. Missing tools or runtime libraries fail the C lane; sanitizer coverage is mandatory on this qualified Linux platform.
+
+The source-independent root `Dockerfile` remains the canonical image definition and `compose.yml` service `dev` remains the canonical lane. An operator can reproduce the package prerequisite on Ubuntu 26.04 with:
+
+```sh
+sudo apt-get update
+sudo apt-get install --yes --no-install-recommends clang=1:21.1.6-71 clang-21=1:21.1.8-6ubuntu1 libclang-rt-21-dev=1:21.1.8-6ubuntu1
+dpkg-query -W clang clang-21 libclang-rt-21-dev
+clang --version
+clang -dumpmachine
+clang -print-resource-dir
+test "$(clang -dumpversion)" = "21.1.8"
+test "$(clang -dumpmachine)" = "x86_64-pc-linux-gnu"
+test -r "$(clang -print-resource-dir)/lib/linux/libclang_rt.asan-x86_64.a"
+test -r "$(clang -print-resource-dir)/lib/linux/libclang_rt.ubsan_standalone-x86_64.a"
+```
+
+TensorBuzz performs these version/target/resource checks and selects `/usr/bin/clang` through `SEMANTIFOLD_CLANG`. The image prints the same compiler probes. Provider versions/authentication, container replacement and host preparation remain external. Package pins can become unavailable if Ubuntu repositories retire them; that is an operational failure requiring deliberate requalification, never a skip or unpinned fallback.
+
+For an already materialized generated `program.c` and `semantifold_runtime.h`, use separate compile, link and native execution commands in a fresh directory:
+
+```sh
+export LANG=C.UTF-8 LC_ALL=C.UTF-8 TZ=UTC
+clang --no-default-config -std=c17 -Wall -Wextra -Werror -pedantic-errors -Wconversion -Wsign-conversion -Wshadow -Wstrict-prototypes -Wmissing-prototypes -Wformat=2 -ftrapv -finput-charset=UTF-8 -fexec-charset=UTF-8 -fno-color-diagnostics -O0 -c program.c -o program.o
+clang --no-default-config -O0 program.o -o program
+./program
+```
+
+Repeat with `-O2`. For both optimizations, repeat compilation and linking with `-g -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer`, then execute with `ASAN_OPTIONS=detect_leaks=1:halt_on_error=1:allocator_may_return_null=1` and `UBSAN_OPTIONS=halt_on_error=1`. The initial UID1000 image qualification passed all four profiles with exact `OK\n`, status zero and empty stderr. Repository C specs independently compile/link/run generated artifacts under all four profiles and compare raw stdout bytes, decoded stdout, stderr and status. Their native byte capture is private test infrastructure; the public acceptance API/lifecycle is unchanged.
+
+The C focused files are `c-registry-toolchain.spec.js`, `c-frontend-validation.spec.js`, `c-backend-validation.spec.js`, `c-ordered-expressions.spec.js`, `c-provenance.spec.js`, `c-native-execution.spec.js`, `c-runtime-ownership.spec.js`, and `c-cross-language-acceptance.spec.js`, all under `spec/`. Run explicit files sequentially, for example:
+
+```sh
+npm run verify:legacy-runtime
+npx velocious-test spec/c-frontend-validation.spec.js
+npx velocious-test spec/c-ordered-expressions.spec.js
+npx velocious-test spec/c-native-execution.spec.js
+npx velocious-test spec/c-runtime-ownership.spec.js
+npx velocious-test spec/c-cross-language-acceptance.spec.js
+```
+
+The ownership spec separately compiles native linker instrumentation for `--wrap=malloc` and `--wrap=free`: exact allocation/free counts are checked at normal/fatal exit, the second allocation can fail deterministically, and duplicate/foreign frees are fatal. It never patches a dependency or adds a runtime test hook. Direct native header probes cover invalid lengths, metadata overflow and cumulative arena limits before any borrowed memory access. Signed-64-bit minimum/maximum output and all four arithmetic failures execute at O0/O2 with and without sanitizers. Compile, link and native status failures are tested independently, including removal of their temporary directories. Unicode/NUL copies, returned slices, every operator/consumer, eager ordering, both short-circuit paths, branch fallthrough, forward calls, recursion and unused bindings execute through real Clang.
+
+The unchanged legacy parser has a measured 32,767-UTF-16-code-unit source limit (including comments and whitespace). Direct parsing succeeds at that boundary, including astral comment text, and fails at 32,768. Both C source validation and exact generated-size preflight enforce it with located diagnostics before artifacts; no parser payload or consumer setting changes. Clang itself accepts larger generated programs, so native compilation alone cannot establish round-trip support. Strict C17 additionally rejects decoded literals above 4095 bytes; runtime concatenations can exceed that literal limit. The focused C specs execute the accepted literal boundary and nested-region round trips, and reject larger unrepresentable input/output before artifacts.
+
+The five C Tasks 001–004 fixtures generate/reparse/execute all original-five targets using real PHP, Ruby, Node, TypeScript/Node and Java compiler/runtime commands. One original-five source rotates through each C profile. Rich/v3 tests verify token origins, synthetic context, shared occurrences, stale metadata and UTF-16 coordinates. Negative corpora cover parser recovery, preprocessing/declarators, ownership/pointers, collisions, malformed IR and every ordered-region boundary. [The C profile](c.md) specifies the exact source, memory and overflow contracts.
+
+For this delivery, local testing is restricted to explicitly named changed/affected files. Aggregate `npm test`, directories and shards run only in TensorBuzz, whose end-to-end label includes nine languages and mandatory C O0/O2 sanitizers. Existing generic aggregate examples below describe that CI gate. Coordinator-owned independent review, exact-head CI and merge remain separate from local implementation delivery; publication/version/tag/release is not part of Task 018.
+
 Specs use the released `@velocious/testing@0.0.0` framework and standalone `velocious-test` runner with one top-level `describe` per file. Direct value checks use the framework's `expect` API where it improves clarity; predicate-rich diagnostic assertions retain `node:assert/strict`. Frontend tests load real fixtures through Babel, php-parser, Prism, Lezer, and the qualified official Tree-sitter Python/C#/Go routes and compare modeled meaning after removing source locations and the separately tested provenance index. They separately assert normalized annotations, complete named/anonymous/comment/directive traversal, parser recovery rejection, and exact UTF-16 locations.
 
 The private `packages/tree-sitter-legacy` workspace owns source checking and parser-neutral declaration generation for the internal legacy runtime; neither package is independently publishable. Its direct spec asserts the versioned frozen plain-data C CST, ordered field-bearing children, error/missing/extra state, UTF-16 indices and positions, and a declaration surface without native types. Its distribution spec runs the root package's real `prepack`, checks that the root tarball physically contains root `tree-sitter@0.25.1` and the internal package's isolated `tree-sitter@0.21.1` plus `tree-sitter-c@0.23.2` subtree, including licenses, platform prebuilds, and source fallbacks. It installs only that root tarball into a credential-free consumer with a fresh npm cache, verifies the installed lock and full npm tree, compiles a root API type consumer, and runs modern Go beside legacy C in one Node 24 process. The temporary tarball, cache, lockfile, dependencies, and consumer are always removed; no packed archive or dependency build is committed.
@@ -29,6 +80,7 @@ Task 024 adds configured Go 1.26.x discovery restricted to Linux/amd64; the patc
 | `python` | `python3` | `SEMANTIFOLD_PYTHON` | Python 3.x |
 | `dotnet` | `dotnet` | `SEMANTIFOLD_DOTNET` | .NET SDK 10.x |
 | `go` | `go` | `SEMANTIFOLD_GO` | Go 1.26.x, Linux/amd64 |
+| `clang` | `clang` | `SEMANTIFOLD_CLANG` | Ubuntu Clang 21.1.8, x86_64-pc-linux-gnu |
 
 Canonical toolchain IDs must be non-empty primitive strings and are validated before property lookup or diagnostic formatting; malformed values normalize to `INVALID_TOOLCHAIN`, while an unknown valid string retains that string as its diagnostic identity. Discovery records the complete version output and first version line. Optional discovery and runner configuration defaults only when a field is `undefined`; explicit `null`, including in an environment entry, is invalid before lookup, setup, or launch. Explicit timeouts must be positive integers no greater than Node's exact timer ceiling of 2,147,483,647 milliseconds; larger values are rejected before lookup, setup, or launch rather than being clamped to one millisecond. Explicit environments must be ordinary or null-prototype records containing only enumerable own data properties with string or `undefined` values; inherited fields, accessors, symbol keys, collection/class instances, and other object shapes are rejected. Accepted environment values are synchronously detached before override lookup, setup, or launch. An override must be an executable absolute path resolving to a regular file; directories and other invalid file types report `TOOL_NOT_FOUND`. Canonical lookup examines the explicit PATH, accepts only executable regular files, resolves symlinks to exact paths, deduplicates aliases of the same executable, and rejects zero or multiple distinct matches. Version arguments and the accepted non-global/non-sticky version-policy expression are validated and detached before asynchronous executable lookup; the immutable discovery result retains the exact argument array that was executed, and caller mutation cannot change the pending version decision. TensorBuzz installs its pinned Node archive at `/usr/local/bin/node` and binds that exact executable through `SEMANTIFOLD_NODE`; a distinct host `/usr/bin/node` therefore cannot make the real-runtime lane ambiguous. This does not weaken canonical ambiguity detection when no override is configured. The runner inherits no ambient variables other than PATH unless the caller explicitly supplies them; locale and timezone are always normalized. Stage executable and version fields are copied and frozen before setup yields, embedded NUL is rejected before temporary-directory setup, and each completed stage returns a frozen copy of its executed argument array, so caller mutation cannot change execution or its audit record. On POSIX, version probes and acceptance stages spawn into one distinct owned process group: the configured deadline signals that exact group with `SIGTERM`, a fixed 250ms grace escalates the still-open group to `SIGKILL`, and a second fixed 250ms grace closes only the owned capture-pipe readers if an escaped descendant still retains their writers. The API then settles on the direct child's `close` event without claiming that an escaped process was terminated; captured output and timer-owned timeout classification remain unchanged. Platforms without this process-group contract fail with normalized unsupported launch/version diagnostics before spawning rather than claiming descendant cleanup. Timeout diagnostics derive from timer ownership rather than a subprocess signal, so spontaneous signals remain `TOOL_VERSION_FAILURE` or `ACCEPTANCE_SIGNAL` with their exact evidence. If a stage and isolated-directory cleanup both fail, the stage diagnostic remains primary with its exact stage, exit, signal, and bounded output fields; a bounded `ACCEPTANCE_CLEANUP_FAILURE` diagnostic is retained in its cause chain. Cleanup failure after successful stages remains `ACCEPTANCE_CLEANUP_FAILURE`.
 

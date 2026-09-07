@@ -8,9 +8,16 @@ before_install:
   - sudo ln --symbolic --force /usr/local/go/bin/go /usr/local/bin/go
   - sudo ln --symbolic --force /usr/local/go/bin/gofmt /usr/local/bin/gofmt
   - sudo apt-get update
-  - sudo apt-get install --yes --no-install-recommends php-cli python3 ruby default-jdk-headless dotnet-sdk-10.0
+  - sudo apt-get install --yes --no-install-recommends php-cli python3 ruby default-jdk-headless dotnet-sdk-10.0 clang=1:21.1.6-71 clang-21=1:21.1.8-6ubuntu1 libclang-rt-21-dev=1:21.1.8-6ubuntu1
   - node --version
   - npm --version
+  - clang --version
+  - clang -dumpmachine
+  - clang -print-resource-dir
+  - test "$(clang -dumpversion)" = "21.1.8"
+  - test "$(clang -dumpmachine)" = "x86_64-pc-linux-gnu"
+  - test -r "$(clang -print-resource-dir)/lib/linux/libclang_rt.asan-x86_64.a"
+  - test -r "$(clang -print-resource-dir)/lib/linux/libclang_rt.ubsan_standalone-x86_64.a"
   - php --version
   - python3 --version
   - ruby --version
@@ -35,6 +42,7 @@ environment:
   SEMANTIFOLD_PYTHON: /usr/bin/python3
   SEMANTIFOLD_DOTNET: /usr/bin/dotnet
   SEMANTIFOLD_GO: /usr/local/bin/go
+  SEMANTIFOLD_CLANG: /usr/bin/clang
 builds:
   quality:
     name: Quality and package
@@ -47,6 +55,6 @@ builds:
       - npm ls --all
       - npm pack --dry-run --json
   end_to_end:
-    name: Eight-language end-to-end tests
+    name: Nine-language end-to-end tests with C O0/O2 and sanitizers
     script:
       - LANG=C.UTF-8 LC_ALL=C.UTF-8 npm test
