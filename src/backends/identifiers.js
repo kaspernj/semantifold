@@ -4,6 +4,7 @@ import {unsupportedCapability} from "../diagnostic.js"
 
 /** @type {Record<import("../semantic/types.js").SemanticLanguage, RegExp>} */
 const identifierPatterns = {
+  c: /^[A-Za-z][A-Za-z0-9_]*$/u,
   csharp: /^[A-Za-z_][A-Za-z0-9_]*$/u,
   go: /^[A-Za-z_][A-Za-z0-9_]*$/u,
   java: /^[A-Za-z_$][A-Za-z0-9_$]*$/u,
@@ -16,6 +17,27 @@ const identifierPatterns = {
 
 /** @type {Record<import("../semantic/types.js").SemanticLanguage, Set<string>>} */
 const reservedWords = {
+  c: new Set([
+    "auto", "break", "case", "char", "const", "continue", "default", "do", "double", "else", "enum", "extern",
+    "float", "for", "goto", "if", "inline", "int", "long", "register", "restrict", "return", "short", "signed",
+    "sizeof", "static", "struct", "switch", "typedef", "union", "unsigned", "void", "volatile", "while",
+    "bool", "true", "false", "TRUE", "FALSE", "int64_t", "uint64_t", "size_t", "ptrdiff_t", "main", "NULL", "INT64_C", "UINT64_C",
+    "INT64_MIN", "INT64_MAX", "PTRDIFF_MAX", "CHAR_BIT", "stdin", "stdout", "stderr", "malloc", "free", "exit",
+    "fwrite", "fflush", "memcpy", "memcmp", "FILE", "fpos_t", "div_t", "ldiv_t", "lldiv_t", "wchar_t", "max_align_t",
+    "offsetof", "alignas", "alignof", "noreturn", "true", "false", "assert", "static_assert", "errno",
+    "EOF", "BUFSIZ", "FOPEN_MAX", "FILENAME_MAX", "L_tmpnam", "SEEK_CUR", "SEEK_END", "SEEK_SET", "TMP_MAX",
+    "EXIT_FAILURE", "EXIT_SUCCESS", "MB_CUR_MAX", "MB_LEN_MAX", "RAND_MAX",
+    "remove", "rename", "tmpfile", "tmpnam", "fclose", "fopen", "freopen", "setbuf", "setvbuf",
+    "fprintf", "fscanf", "printf", "scanf", "snprintf", "sprintf", "sscanf", "vfprintf", "vfscanf", "vprintf",
+    "vscanf", "vsnprintf", "vsprintf", "vsscanf", "fgetc", "fgets", "fputc", "fputs", "getc", "getchar",
+    "putc", "putchar", "puts", "ungetc", "fread", "fgetpos", "fseek", "fsetpos", "ftell", "rewind", "clearerr",
+    "feof", "ferror", "perror", "atof", "atoi", "atol", "atoll", "strtod", "strtof", "strtold", "strtol",
+    "strtoll", "strtoul", "strtoull", "rand", "srand", "aligned_alloc", "calloc", "realloc", "abort", "atexit",
+    "at_quick_exit", "quick_exit", "getenv", "system", "bsearch", "qsort", "abs", "labs", "llabs", "div", "ldiv",
+    "lldiv", "mblen", "mbtowc", "wctomb", "mbstowcs", "wcstombs", "memmove", "strcpy", "strncpy", "strcat",
+    "strncat", "strcmp", "strcoll", "strncmp", "strxfrm", "memchr", "strchr", "strcspn", "strpbrk", "strrchr",
+    "strspn", "strstr", "strtok", "memset", "strerror", "strlen"
+  ]),
   csharp: new Set([
     "__arglist", "__makeref", "__reftype", "__refvalue", "abstract", "add", "alias", "allows", "and", "as",
     "ascending", "async", "await", "base", "bool", "break",
@@ -102,9 +124,21 @@ export function validateTargetIdentifier(language, name, role, location) {
   const reservedName = language == "php" ? name.toLowerCase() : name
 
   if (!identifierPatterns[language].test(name) || reservedWords[language].has(reservedName) ||
-    language == "python" && name.normalize("NFKC") != name) {
+    language == "python" && name.normalize("NFKC") != name ||
+    language == "c" && !isCIdentifier(name)) {
     unsupportedCapability(language, `${role} identifier '${name}'`, location)
   }
+}
+
+/**
+ * Protects the exact C header environment and implementation-reserved namespace in either direction.
+ * @param {string} name - Caller identifier.
+ * @returns {boolean} Whether the spelling is safe in the canonical translation unit.
+ */
+export function isCIdentifier(name) {
+  return identifierPatterns.c.test(name) && !reservedWords.c.has(name) &&
+    !/^(?:semantifold_|SEMANTIFOLD_|Semantifold|atomic_|INT[0-9_A-Z]|UINT[0-9_A-Z]|INTMAX_|UINTMAX_|SIZE_|PTRDIFF_|SIG_ATOMIC_|WCHAR_|WINT_|CHAR_|SCHAR_|UCHAR_|SHRT_|USHRT_|LONG_|ULONG_|LLONG_|ULLONG_)/u.test(name) &&
+    !/^(?:u?int(?:8|16|32|64|max|ptr|_least[0-9]+|_fast[0-9]+)_t)$/u.test(name)
 }
 
 /**

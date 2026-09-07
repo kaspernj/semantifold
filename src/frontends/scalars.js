@@ -15,6 +15,7 @@ function sourceTypeMap(entries) {
 
 /** @type {Readonly<Record<import("../semantic/types.js").SemanticLanguage, Map<string, import("../semantic/types.js").SemanticTypeName>>>} */
 const sourceScalarTypes = Object.freeze({
+  c: sourceTypeMap([["int64_t", "integer"], ["bool", "boolean"], ["SemantifoldString", "string"]]),
   csharp: sourceTypeMap([
     ["long", "integer"],
     ["System.Int64", "integer"],

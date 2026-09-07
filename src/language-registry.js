@@ -13,6 +13,8 @@ import {generateTypeScript} from "./backends/typescript.js"
 import {parseJava} from "./frontends/java.js"
 import {parseCSharp} from "./frontends/csharp.js"
 import {parseGo} from "./frontends/go.js"
+import {parseC} from "./frontends/c.js"
+import {generateCProgram} from "./backends/c.js"
 import {parseJavaScriptTypeScript} from "./frontends/javascript-typescript.js"
 import {parsePhp} from "./frontends/php.js"
 import {parsePython} from "./frontends/python.js"
@@ -346,6 +348,15 @@ const records = [
     id: "go",
     mediaType: "text/x-go",
     textBackend: generateGoModule
+  }),
+  language({
+    acceptance: {stages: ["parse", "generate", "compile", "link", "execute"], toolchains: ["clang"]},
+    artifactMultiplicity: "multiple",
+    defaultFilename: "program.c",
+    frontend: parseC,
+    id: "c",
+    mediaType: "text/x-c",
+    textBackend: generateCProgram
   })
 ]
 

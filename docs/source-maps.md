@@ -1,5 +1,7 @@
 # Source provenance and mappings
 
+C `program.c` uses the same rich/v3 contracts. Original operator, callee, literal, binding and final-consumer tokens retain their parser origins, including after exact ordered-region reconstruction. Generated temporary declarations/names, short-circuit control, markers, prototypes, unused-binding uses and cleanup are synthetic with related semantic origins. Shared semantic objects have separate occurrence paths and temporaries. `semantifold_runtime.h` is a synthetic support artifact related to the module root. C accepts no source-map directive or alternate map filename; use `generateArtifactSet()` and its mapped entry provenance. See the [C profile](c.md).
+
 Semantifold keeps one authoritative, language-neutral provenance chain:
 
 ```text

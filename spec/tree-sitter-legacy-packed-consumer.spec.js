@@ -296,13 +296,16 @@ function alternateNpmEnvironment(alternateConfig) {
 }
 
 const typeConsumerSource = `
-import {parse, supportedLanguages} from "semantifold"
+import {generateArtifactSet, parse, supportedLanguages} from "semantifold"
 
 const parser: typeof parse = parse
 const languages: readonly string[] = supportedLanguages
+const cModule = parse({language: "c", filename: "program.c", source: ""})
+const cArtifacts = generateArtifactSet({language: "c", module: cModule})
 
 void parser
 void languages
+void cArtifacts
 `
 
 const consumerSource = `
@@ -354,6 +357,12 @@ assert.equal(goTree.rootNode.hasError, false)
 assert.equal(cSnapshot.root.hasError, false)
 assert.equal(cSnapshot.root.endIndex, "/* 😀 */\\r\\nint main(void) { return 0; }\\r\\n".length)
 assert.deepEqual(JSON.parse(JSON.stringify(cSnapshot)), cSnapshot)
+const semanticC = semantifold.parse({language: "c", filename: "program.c", source:
+  '#include "semantifold_runtime.h"\\nstatic int64_t add(int64_t left, int64_t right) { return left + right; }\\n' +
+  'int main(void) { semantifold_print_integer(add(1, 2)); semantifold_cleanup(); return 0; }\\n'})
+const cArtifacts = semantifold.generateArtifactSet({language: "c", module: semanticC})
+assert.deepEqual(cArtifacts.artifacts.map(({path: artifactPath}) => artifactPath), ["program.c", "semantifold_runtime.h"])
+assert.equal(semantifold.parse({language: "c", filename: "program.c", source: cArtifacts.artifacts[0].content}).functions[0].name, "add")
 assert.throws(() => consumerRequire.resolve(internalPackageName), {code: "MODULE_NOT_FOUND"})
 assert.throws(() => semantifoldRequire.resolve(retiredPackageName), {code: "MODULE_NOT_FOUND"})
 process.stdout.write(JSON.stringify({

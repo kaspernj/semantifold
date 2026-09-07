@@ -12,6 +12,9 @@ RUN apt-get update \
     bash \
     build-essential \
     ca-certificates \
+    clang=1:21.1.6-71 \
+    clang-21=1:21.1.8-6ubuntu1 \
+    libclang-rt-21-dev=1:21.1.8-6ubuntu1 \
     curl \
     default-jdk-headless \
     dotnet-sdk-10.0 \
@@ -35,6 +38,9 @@ RUN apt-get update \
   && apt-get update \
   && apt-get install --yes --no-install-recommends "nodejs=${NODEJS_VERSION}" \
   && test "$(node --version)" = "v${NODEJS_VERSION%-1nodesource1}" \
+  && clang --version \
+  && clang -dumpmachine \
+  && clang -print-resource-dir \
   && php --version \
   && python3 --version \
   && ruby --version \
