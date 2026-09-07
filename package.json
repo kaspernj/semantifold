@@ -25,13 +25,14 @@
   ],
   "scripts": {
     "all-checks": "npm run lint && npm test",
-    "build": "node scripts/clean-build.js && tsc && npm run build --workspace=@kaspernj/semantifold-tree-sitter-legacy",
+    "build": "node scripts/clean-build.js && tsc && npm run build --workspace=semantifold-tree-sitter-legacy-workspace",
     "eslint": "eslint --max-warnings 0 .",
-    "lint": "npm run eslint && npm run typecheck",
-    "prepack": "npm run build",
-    "pretest": "npm run build --workspace=@kaspernj/semantifold-tree-sitter-legacy",
+    "lint": "npm run verify:legacy-runtime && npm run eslint && npm run typecheck",
+    "prepack": "npm run verify:legacy-runtime && npm run build",
+    "pretest": "npm run verify:legacy-runtime && npm run build --workspace=semantifold-tree-sitter-legacy-workspace",
     "test": "velocious-test spec",
-    "typecheck": "tsc --noEmit && npm run typecheck --workspace=@kaspernj/semantifold-tree-sitter-legacy"
+    "typecheck": "tsc --noEmit && npm run typecheck --workspace=semantifold-tree-sitter-legacy-workspace",
+    "verify:legacy-runtime": "node scripts/verify-legacy-runtime.js"
   },
   "engines": {
     "node": ">=24"
@@ -56,13 +57,20 @@
     "@ruby/prism": "^1.9.0",
     "comment-parser": "^1.4.1",
     "php-parser": "^3.7.0",
+    "semantifold-tree-sitter-legacy-internal": "file:packages/tree-sitter-legacy/runtime",
     "tree-sitter": "0.25.1",
     "tree-sitter-c-sharp": "0.23.5",
     "tree-sitter-go": "0.25.0",
     "tree-sitter-python": "0.25.0"
   },
+  "bundleDependencies": [
+    "semantifold-tree-sitter-legacy-internal",
+    "tree-sitter"
+  ],
+  "acceptDependencies": {
+    "semantifold-tree-sitter-legacy-internal": "0.1.0"
+  },
   "devDependencies": {
-    "@kaspernj/semantifold-tree-sitter-legacy": "0.1.0",
     "@eslint/js": "^10.0.1",
     "@types/node": "^24.3.0",
     "@velocious/testing": "0.0.0",
@@ -72,6 +80,7 @@
     "eslint-plugin-jsdoc-inline-type-casts": "https://github.com/kaspernj/eslint-plugin-jsdoc-inline-type-casts/archive/441b6c5ca335a115a75d9f050134357ddb0a61d1.tar.gz",
     "eslint-plugin-jsdoc-tag-lines": "^1.0.1",
     "globals": "^17.0.0",
+    "semantifold-tree-sitter-legacy-workspace": "0.1.0",
     "typescript": "^7.0.0",
     "yaml": "^2.9.0"
   }

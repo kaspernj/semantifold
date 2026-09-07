@@ -2,7 +2,7 @@
 
 import assert from "node:assert/strict"
 import {execFile} from "node:child_process"
-import {mkdir, mkdtemp, readdir, rm, writeFile} from "node:fs/promises"
+import {mkdir, mkdtemp, readFile, readdir, rm, writeFile} from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import {fileURLToPath} from "node:url"
@@ -11,80 +11,234 @@ import {describe, expect, it} from "@velocious/testing"
 
 const executeFile = promisify(execFile)
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url))
-const packageName = "@kaspernj/semantifold-tree-sitter-legacy"
-const expectedFiles = [
-  "LICENSE", "README.md", "build/c.d.ts", "build/c.d.ts.map", "build/c.js", "package.json"
+const internalPackageName = "semantifold-tree-sitter-legacy-internal"
+const retiredPackageName = "@kaspernj/semantifold-tree-sitter-legacy"
+const modernTreeSitterRoot = "node_modules/tree-sitter"
+const internalPackageRoot = `node_modules/${internalPackageName}`
+const legacyTreeSitterRoot = `${internalPackageRoot}/node_modules/tree-sitter`
+const cGrammarRoot = `${internalPackageRoot}/node_modules/tree-sitter-c`
+const requiredPackedFiles = [
+  `${modernTreeSitterRoot}/LICENSE`,
+  `${modernTreeSitterRoot}/binding.gyp`,
+  `${modernTreeSitterRoot}/package.json`,
+  `${modernTreeSitterRoot}/vendor/tree-sitter/lib/src/lib.c`,
+  `${internalPackageRoot}/LICENSE`,
+  `${internalPackageRoot}/README.md`,
+  `${internalPackageRoot}/package.json`,
+  `${internalPackageRoot}/src/c.js`,
+  `${legacyTreeSitterRoot}/LICENSE`,
+  `${legacyTreeSitterRoot}/binding.gyp`,
+  `${legacyTreeSitterRoot}/package.json`,
+  `${legacyTreeSitterRoot}/vendor/tree-sitter/lib/src/lib.c`,
+  `${cGrammarRoot}/LICENSE`,
+  `${cGrammarRoot}/binding.gyp`,
+  `${cGrammarRoot}/package.json`,
+  `${cGrammarRoot}/src/parser.c`
+]
+const requiredPrebuilds = [
+  ...platformPrebuilds(modernTreeSitterRoot, "tree-sitter", [
+    "darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-arm64", "win32-x64"
+  ]),
+  ...platformPrebuilds(legacyTreeSitterRoot, "tree-sitter", [
+    "darwin-arm64", "darwin-x64", "linux-x64", "win32-x64"
+  ]),
+  ...platformPrebuilds(cGrammarRoot, "tree-sitter-c", [
+    "darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-arm64", "win32-x64"
+  ])
 ]
 
-describe("packed legacy Tree-sitter adapter", () => {
-  it("installs an exact isolated legacy runtime beside modern Go and exposes only frozen data", async () => {
-    const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "semantifold-legacy-consumer-"))
-    const packDirectory = path.join(temporaryRoot, "pack")
-    const consumerDirectory = path.join(temporaryRoot, "consumer")
+describe("packed Semantifold legacy Tree-sitter boundary", () => {
+  it("isolates npm's effective configuration from inherited alternate registries and credentials", async () => {
+    const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "semantifold-npm-config-"))
+    const userConfig = path.join(temporaryRoot, "user.npmrc")
+    const globalConfig = path.join(temporaryRoot, "global.npmrc")
+    const alternateConfig = path.join(temporaryRoot, "alternate.npmrc")
+    const cacheDirectory = path.join(temporaryRoot, "cache")
 
     try {
-      await Promise.all([mkdir(packDirectory), mkdir(consumerDirectory)])
-      const packed = await executeFile("npm", [
-        "pack", `--workspace=${packageName}`, "--pack-destination", packDirectory, "--json"
-      ], {cwd: repositoryRoot, maxBuffer: 10 * 1024 * 1024})
-      const packResult = parsePackResult(packed.stdout)
+      await writeFile(userConfig, "")
+      await writeFile(globalConfig, "")
+      await writeFile(alternateConfig, "registry=https://global.invalid/\n@types:registry=https://scoped.invalid/\n")
+      await writeFile(`${alternateConfig}.user`, "registry=https://user.invalid/\n")
+      const inherited = alternateNpmEnvironment(alternateConfig)
+      const before = await executeFile("npm", ["config", "get", "registry"], {
+        cwd: temporaryRoot, env: inherited
+      })
 
-      expect(packResult.files.map(({path: filename}) => filename)).toEqual(expectedFiles)
-      expect(packResult.entryCount).toEqual(expectedFiles.length)
-      expect(packResult.bundled).toEqual([])
+      expect(before.stdout.trim()).toEqual("https://environment.invalid/")
+      const environment = registryEnvironment(cacheDirectory, userConfig, globalConfig, inherited)
+      const configured = await executeFile("npm", ["config", "list", "--json"], {
+        cwd: temporaryRoot, env: environment
+      })
+      const effective = JSON.parse(configured.stdout)
+
+      expect(effective.registry).toEqual("https://registry.npmjs.org/")
+      expect(effective.userconfig).toEqual(userConfig)
+      expect(effective.globalconfig).toEqual(globalConfig)
+      expect(effective.cache).toEqual(cacheDirectory)
+      expect(effective["install-links"]).toBeFalse()
+      expect(Object.keys(effective).some((name) => name.endsWith(":registry"))).toBeFalse()
+      for (const name of Object.keys(inherited)) {
+        if (/^(?:NODE_AUTH_TOKEN|NPM_TOKEN|NODE_PATH)$/iu.test(name) ||
+          /^npm_config_/iu.test(name)) expect(Object.hasOwn(environment, name)).toBeFalse()
+      }
+    } finally {
+      await rm(temporaryRoot, {force: true, recursive: true})
+    }
+  })
+
+  it("installs both bundled runtimes from one root tarball and exposes only frozen data", async () => {
+    const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "semantifold-packed-consumer-"))
+    const packDirectory = path.join(temporaryRoot, "pack")
+    const consumerDirectory = path.join(temporaryRoot, "consumer")
+    const cacheDirectory = path.join(temporaryRoot, "npm-cache")
+    const userConfig = path.join(temporaryRoot, "empty-npmrc")
+    const globalConfig = path.join(temporaryRoot, "empty-global-npmrc")
+    const alternateConfig = path.join(temporaryRoot, "alternate.npmrc")
+
+    try {
+      await Promise.all([mkdir(packDirectory), mkdir(consumerDirectory), mkdir(cacheDirectory)])
+      await writeFile(userConfig, "")
+      await writeFile(globalConfig, "")
+      await writeFile(alternateConfig, "registry=https://global.invalid/\n@types:registry=https://scoped.invalid/\n")
+      await writeFile(`${alternateConfig}.user`, "registry=https://user.invalid/\n")
+      const packed = await executeFile("npm", [
+        "pack", "--pack-destination", packDirectory, "--json"
+      ], {cwd: repositoryRoot, maxBuffer: 20 * 1024 * 1024})
+      const packResult = parsePackResult(packed.stdout)
+      const packedFiles = packResult.files.map(({path: filename}) => filename)
+      const bundledPackages = new Set(packResult.bundled)
+
+      expect({name: packResult.name, version: packResult.version}).toEqual({name: "semantifold", version: "0.2.0"})
+      for (const packageName of [internalPackageName, "node-addon-api", "node-gyp-build", "tree-sitter"]) {
+        expect(bundledPackages.has(packageName)).toBeTrue()
+      }
+      for (const filename of [...requiredPackedFiles, ...requiredPrebuilds]) {
+        expect(packedFiles.includes(filename)).toBeTrue()
+      }
+      expect(packedFiles.some((filename) => filename.startsWith("packages/tree-sitter-legacy/"))).toBeFalse()
+      expect(packedFiles.includes(".npmrc")).toBeFalse()
+      expect(packedFiles.some((filename) => /node_modules\/[^/]+\/build\/(?:Debug|Release)\//u.test(filename))).toBeFalse()
       const tarball = path.join(packDirectory, packResult.filename)
 
+      for (const filename of packedFiles.filter((filename) => filename.startsWith(`${internalPackageRoot}/`) &&
+        !filename.startsWith(`${internalPackageRoot}/node_modules/`))) {
+        const relative = filename.slice(internalPackageRoot.length + 1)
+        const source = await readFile(path.join(repositoryRoot, "packages/tree-sitter-legacy/runtime", relative))
+        const extracted = await executeFile("tar", ["-xOf", tarball, `package/${filename}`], {
+          encoding: "buffer", maxBuffer: 10 * 1024 * 1024
+        })
+
+        assert.deepEqual(extracted.stdout, source, `Bundled runtime payload differs: ${relative}`)
+      }
+
       await writeFile(path.join(consumerDirectory, "package.json"), `${JSON.stringify({
-        dependencies: {
-          [packageName]: `file:${tarball}`,
-          "tree-sitter": "0.25.1",
-          "tree-sitter-go": "0.25.0"
-        },
-        name: "semantifold-legacy-packed-consumer",
+        dependencies: {semantifold: `file:${tarball}`},
+        devDependencies: {"@types/node": "^24.3.0", typescript: "^7.0.0"},
+        name: "semantifold-packed-consumer",
         private: true,
         type: "module",
         version: "1.0.0"
       }, null, 2)}\n`)
       await writeFile(path.join(consumerDirectory, "consumer.mjs"), consumerSource)
-      const installed = await executeFile("npm", ["install"], {
-        cwd: consumerDirectory, env: registryEnvironment(), maxBuffer: 10 * 1024 * 1024
+      await writeFile(path.join(consumerDirectory, "type-consumer.mts"), typeConsumerSource)
+      const consumerEnvironment = registryEnvironment(
+        cacheDirectory, userConfig, globalConfig, alternateNpmEnvironment(alternateConfig)
+      )
+      const configured = await executeFile("npm", ["config", "list", "--json"], {
+        cwd: consumerDirectory, env: consumerEnvironment
       })
+      const effective = JSON.parse(configured.stdout)
 
-      expect(installed.stderr).not.toMatch(/ERESOLVE|peer dep|overrid/iu)
-      const listed = await executeFile("npm", ["ls", "--all", "--json"], {
-        cwd: consumerDirectory, env: registryEnvironment(), maxBuffer: 10 * 1024 * 1024
-      })
-      const dependencyTree = JSON.parse(listed.stdout)
-      const adapter = dependencyTree.dependencies[packageName]
+      expect(effective.registry).toEqual("https://registry.npmjs.org/")
+      expect(effective.userconfig).toEqual(userConfig)
+      expect(effective.globalconfig).toEqual(globalConfig)
+      expect(effective.cache).toEqual(cacheDirectory)
+      expect(effective["install-links"]).toBeFalse()
+      expect(Object.keys(effective).some((name) => name.endsWith(":registry"))).toBeFalse()
+      for (const command of ["install", "ci"]) {
+        const installed = await executeFile("npm", [command], {
+          cwd: consumerDirectory, env: consumerEnvironment, maxBuffer: 20 * 1024 * 1024
+        })
 
-      expect(dependencyTree.problems).toEqual(undefined)
-      expect(dependencyTree.dependencies["tree-sitter"].version).toEqual("0.25.1")
-      expect(dependencyTree.dependencies["tree-sitter-go"].version).toEqual("0.25.0")
-      expect(adapter.version).toEqual("0.1.0")
-      expect(adapter.dependencies["tree-sitter"].version).toEqual("0.21.1")
-      expect(adapter.dependencies["tree-sitter-c"].version).toEqual("0.23.2")
-      const executed = await executeFile(process.execPath, ["consumer.mjs"], {
-        cwd: consumerDirectory, maxBuffer: 10 * 1024 * 1024
-      })
-      const proof = JSON.parse(executed.stdout)
+        expect(installed.stderr).not.toMatch(/ERESOLVE|legacy-peer-deps|overrid/iu)
+        const listed = await executeFile("npm", ["ls", "--all", "--json"], {
+          cwd: consumerDirectory, env: consumerEnvironment, maxBuffer: 20 * 1024 * 1024
+        })
+        const dependencyTree = JSON.parse(listed.stdout)
+        const semantifold = dependencyTree.dependencies.semantifold
+        const internalPackage = semantifold.dependencies[internalPackageName]
 
-      expect(proof).toEqual({
-        cGrammarVersion: "0.23.2",
-        cRoot: "translation_unit",
-        grammarIsAdapterLocal: true,
-        goRoot: "source_file",
-        legacyRuntimeIsAdapterLocal: true,
-        legacyRuntimeVersion: "0.21.1",
-        modernRuntimeVersion: "0.25.1",
-        pathsAreDistinct: true,
-        snapshotIsPlainFrozenData: true
+        expect(dependencyTree.problems).toEqual(undefined)
+        expect(semantifold.version).toEqual("0.2.0")
+        expect(semantifold.dependencies["tree-sitter"].version).toEqual("0.25.1")
+        expect(internalPackage.version).toEqual("0.1.0")
+        expect(internalPackage.dependencies["tree-sitter"].version).toEqual("0.21.1")
+        expect(internalPackage.dependencies["tree-sitter-c"].version).toEqual("0.23.2")
+        expect(semantifold.dependencies[retiredPackageName]).toEqual(undefined)
+        const installedLock = JSON.parse(await readFile(path.join(consumerDirectory, "package-lock.json"), "utf8"))
+        const installedPackagePaths = Object.keys(installedLock.packages)
+
+        for (const packageRoot of [modernTreeSitterRoot, internalPackageRoot, legacyTreeSitterRoot, cGrammarRoot]) {
+          const entry = installedLock.packages[`node_modules/semantifold/${packageRoot}`]
+
+          expect(entry.inBundle).toBeTrue()
+          expect(entry.link).toEqual(undefined)
+          expect(entry.resolved).toEqual(undefined)
+        }
+        expect(installedPackagePaths.some((filename) => filename.includes(retiredPackageName))).toBeFalse()
+        expect(installedPackagePaths.some((filename) => filename.includes("packages/tree-sitter-legacy"))).toBeFalse()
+        const executed = await executeFile(process.execPath, ["consumer.mjs"], {
+          cwd: consumerDirectory, env: consumerEnvironment, maxBuffer: 10 * 1024 * 1024
+        })
+        const proof = JSON.parse(executed.stdout)
+
+        expect(proof).toEqual({
+          cGrammarVersion: "0.23.2",
+          cRoot: "translation_unit",
+          grammarIsInternal: true,
+          goRoot: "source_file",
+          internalPackageIsNotConsumerDependency: true,
+          internalPackageIsPrivate: true,
+          legacyRuntimeIsInternal: true,
+          legacyRuntimeVersion: "0.21.1",
+          modernRuntimeIsBundled: true,
+          modernRuntimeVersion: "0.25.1",
+          pathsAreDistinct: true,
+          retiredPackageIsAbsent: true,
+          rootApiIsPrivate: true,
+          snapshotIsPlainFrozenData: true
+        })
+        const typed = await executeFile(path.join(consumerDirectory, "node_modules/.bin/tsc"), [
+          "--module", "nodenext", "--moduleResolution", "nodenext", "--noEmit", "--strict",
+          "--target", "ES2024", "--types", "node", "type-consumer.mts"
+        ], {cwd: consumerDirectory, env: consumerEnvironment, maxBuffer: 10 * 1024 * 1024})
+
+        expect(typed.stderr).toEqual("")
+      }
+      const cache = await executeFile("npm", ["cache", "ls"], {
+        cwd: consumerDirectory, env: consumerEnvironment, maxBuffer: 10 * 1024 * 1024
       })
+      const requests = decodeURIComponent(cache.stdout).split("\n").filter((line) => line.includes("request-cache:"))
+
+      expect(requests.some((line) => line.includes("https://registry.npmjs.org/"))).toBeTrue()
+      expect(requests.some((line) => line.includes(internalPackageName) || line.includes(retiredPackageName))).toBeFalse()
+      expect((await readdir(cacheDirectory)).length > 0).toBeTrue()
       expect((await readdir(repositoryRoot)).some((filename) => filename.endsWith(".tgz"))).toBeFalse()
     } finally {
       await rm(temporaryRoot, {force: true, recursive: true})
     }
   })
 })
+
+/**
+ * @param {string} packageRoot
+ * @param {string} binaryName
+ * @param {readonly string[]} platforms
+ */
+function platformPrebuilds(packageRoot, binaryName, platforms) {
+  return platforms.map((platform) => `${packageRoot}/prebuilds/${platform}/${binaryName}.node`)
+}
 
 /** @param {string} output */
 function parsePackResult(output) {
@@ -97,32 +251,92 @@ function parsePackResult(output) {
   return parsed[0]
 }
 
-function registryEnvironment() {
-  return Object.fromEntries(Object.entries(process.env).filter(([name]) => {
-    return !/^(?:NODE_AUTH_TOKEN|NPM_TOKEN)$/iu.test(name) && !/^npm_config_.*(?:auth|token)/iu.test(name)
+/**
+ * @param {string} cacheDirectory
+ * @param {string} userConfig
+ * @param {string} globalConfig
+ * @param {NodeJS.ProcessEnv} inheritedEnvironment
+ */
+function registryEnvironment(cacheDirectory, userConfig, globalConfig, inheritedEnvironment) {
+  const environment = Object.fromEntries(Object.entries(inheritedEnvironment).filter(([name]) => {
+    return !/^(?:npm_config_|NODE_AUTH_TOKEN$|NPM_TOKEN$|NODE_PATH$)/iu.test(name)
   }))
+
+  return {
+    ...environment,
+    npm_config_audit: "false",
+    npm_config_cache: cacheDirectory,
+    npm_config_fund: "false",
+    npm_config_userconfig: userConfig,
+    npm_config_globalconfig: globalConfig,
+    npm_config_registry: "https://registry.npmjs.org/"
+  }
 }
+
+/** @param {string} alternateConfig */
+function alternateNpmEnvironment(alternateConfig) {
+  const environment = Object.fromEntries(Object.entries(process.env).filter(([name]) =>
+    !/^(?:npm_config_|NODE_AUTH_TOKEN$|NPM_TOKEN$|NODE_PATH$)/iu.test(name)))
+
+  return {
+    ...environment,
+    NPM_CONFIG_USERCONFIG: `${alternateConfig}.user`,
+    NPM_CONFIG_GLOBALCONFIG: alternateConfig,
+    NPM_CONFIG_REGISTRY: "https://environment.invalid/",
+    NPM_CONFIG_INSTALL_LINKS: "false",
+    "NpM_CoNfIg_@types:registry": "https://environment-scoped.invalid/",
+    "NpM_CoNfIg_//registry.npmjs.org/:_authToken": "synthetic-token",
+    NpM_CoNfIg_username: "synthetic-user",
+    NpM_CoNfIg__password: "c3ludGhldGlj",
+    NpM_CoNfIg_proxy: "http://synthetic-user:synthetic-password@proxy.invalid/",
+    NoDe_AuTh_ToKeN: "synthetic-node-token",
+    NpM_ToKeN: "synthetic-npm-token",
+    NoDe_PaTh: "/synthetic/unused/modules"
+  }
+}
+
+const typeConsumerSource = `
+import {parse, supportedLanguages} from "semantifold"
+
+const parser: typeof parse = parse
+const languages: readonly string[] = supportedLanguages
+
+void parser
+void languages
+`
 
 const consumerSource = `
 import assert from "node:assert/strict"
-import {readFile} from "node:fs/promises"
+import {readFile, realpath} from "node:fs/promises"
 import {createRequire} from "node:module"
 import path from "node:path"
-import {fileURLToPath} from "node:url"
-import {parseCst} from "@kaspernj/semantifold-tree-sitter-legacy/c"
-import Parser from "tree-sitter"
-import GoLanguage from "tree-sitter-go/bindings/node/index.js"
+import {fileURLToPath, pathToFileURL} from "node:url"
+import * as semantifold from "semantifold"
 
-const require = createRequire(import.meta.url)
-const adapterEntry = fileURLToPath(import.meta.resolve("@kaspernj/semantifold-tree-sitter-legacy/c"))
-const adapterDirectory = path.dirname(path.dirname(adapterEntry))
-const adapterRequire = createRequire(adapterEntry)
-const modernRuntimePath = require.resolve("tree-sitter")
-const legacyRuntimePath = adapterRequire.resolve("tree-sitter")
-const cGrammarPath = adapterRequire.resolve("tree-sitter-c")
-const modernRuntime = JSON.parse(await readFile(require.resolve("tree-sitter/package.json"), "utf8"))
-const legacyRuntime = JSON.parse(await readFile(adapterRequire.resolve("tree-sitter/package.json"), "utf8"))
-const cGrammar = JSON.parse(await readFile(adapterRequire.resolve("tree-sitter-c/package.json"), "utf8"))
+const internalPackageName = "${internalPackageName}"
+const retiredPackageName = "${retiredPackageName}"
+const consumerRequire = createRequire(import.meta.url)
+const semantifoldEntry = fileURLToPath(import.meta.resolve("semantifold"))
+const semantifoldDirectory = path.dirname(path.dirname(semantifoldEntry))
+const semantifoldRequire = createRequire(semantifoldEntry)
+const internalEntry = semantifoldRequire.resolve(internalPackageName)
+const internalDirectory = path.dirname(path.dirname(internalEntry))
+const internalRequire = createRequire(internalEntry)
+const modernRuntimePath = semantifoldRequire.resolve("tree-sitter")
+const legacyRuntimePath = internalRequire.resolve("tree-sitter")
+const cGrammarPath = internalRequire.resolve("tree-sitter-c")
+const goGrammarPath = semantifoldRequire.resolve("tree-sitter-go/bindings/node/index.js")
+const modernRuntime = JSON.parse(await readFile(semantifoldRequire.resolve("tree-sitter/package.json"), "utf8"))
+const legacyRuntime = JSON.parse(await readFile(internalRequire.resolve("tree-sitter/package.json"), "utf8"))
+const cGrammar = JSON.parse(await readFile(internalRequire.resolve("tree-sitter-c/package.json"), "utf8"))
+const internalManifest = JSON.parse(await readFile(path.join(internalDirectory, "package.json"), "utf8"))
+
+for (const filename of [semantifoldEntry, internalEntry, modernRuntimePath, legacyRuntimePath, cGrammarPath]) {
+  assert.ok((await realpath(filename)).startsWith(path.join(process.cwd(), "node_modules") + path.sep))
+}
+const {parseCst} = await import(pathToFileURL(internalEntry).href)
+const {default: Parser} = await import(pathToFileURL(modernRuntimePath).href)
+const {default: GoLanguage} = await import(pathToFileURL(goGrammarPath).href)
 const goParser = new Parser()
 
 goParser.setLanguage(GoLanguage)
@@ -140,15 +354,22 @@ assert.equal(goTree.rootNode.hasError, false)
 assert.equal(cSnapshot.root.hasError, false)
 assert.equal(cSnapshot.root.endIndex, "/* 😀 */\\r\\nint main(void) { return 0; }\\r\\n".length)
 assert.deepEqual(JSON.parse(JSON.stringify(cSnapshot)), cSnapshot)
+assert.throws(() => consumerRequire.resolve(internalPackageName), {code: "MODULE_NOT_FOUND"})
+assert.throws(() => semantifoldRequire.resolve(retiredPackageName), {code: "MODULE_NOT_FOUND"})
 process.stdout.write(JSON.stringify({
   cGrammarVersion: cGrammar.version,
   cRoot: cSnapshot.root.type,
-  grammarIsAdapterLocal: cGrammarPath.startsWith(adapterDirectory + path.sep),
+  grammarIsInternal: cGrammarPath.startsWith(internalDirectory + path.sep),
   goRoot: goTree.rootNode.type,
-  legacyRuntimeIsAdapterLocal: legacyRuntimePath.startsWith(adapterDirectory + path.sep),
+  internalPackageIsNotConsumerDependency: true,
+  internalPackageIsPrivate: internalManifest.private === true && internalManifest.exports === undefined,
+  legacyRuntimeIsInternal: legacyRuntimePath.startsWith(internalDirectory + path.sep),
   legacyRuntimeVersion: legacyRuntime.version,
+  modernRuntimeIsBundled: modernRuntimePath.startsWith(semantifoldDirectory + path.sep),
   modernRuntimeVersion: modernRuntime.version,
   pathsAreDistinct: modernRuntimePath !== legacyRuntimePath,
+  retiredPackageIsAbsent: true,
+  rootApiIsPrivate: !("parseCst" in semantifold),
   snapshotIsPlainFrozenData: isPlainFrozenData(cSnapshot)
 }))
 `

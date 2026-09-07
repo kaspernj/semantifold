@@ -7,12 +7,12 @@
     "inlineSourceMap": true,
     "inlineSources": true,
     "outDir": "build",
-    "rootDir": "src",
+    "rootDir": "runtime/src",
     "target": "ES2024",
     "moduleResolution": "nodenext",
     "module": "nodenext",
     "types": ["node"],
     "strict": true
   },
-  "include": ["src/**/*"]
+  "include": ["runtime/src/**/*"]
 }
