@@ -25,6 +25,21 @@ describe("C exact ordered-expression regions", () => {
     expect(meaning(read(generated()))).toEqual(meaning(moduleFrom()))
   })
 
+  it("reconstructs nested checked and string operations only through the generated temporary plan", () => {
+    const module = parse({language: "typescript", filename: "helpers.ts", source:
+      'function calculate(left: number, right: number): number { return -(left + right) * (left - right); } ' +
+      'function compare(left: string, right: string): boolean { return (left + right) === (right + left) && (left + right) !== left; } ' +
+      'console.log(calculate(4 + 1, -(2 * 3))); console.log(compare("é\\u0000", "😀"));'})
+    const content = generateArtifactSet({language: "c", module}).artifacts[0].content
+    const reparsed = read(content)
+
+    expect(meaning(reparsed)).toEqual(meaning(module))
+    expect(generateArtifactSet({language: "c", module: reparsed}).artifacts[0].content).toEqual(content)
+    for (const helper of ["integer_add", "integer_subtract", "integer_multiply", "integer_negate", "string_concat", "string_equal", "string_not_equal"]) {
+      assert.ok(content.includes(`semantifold_${helper}(`))
+    }
+  })
+
   it("accepts ordinary comments and whitespace without weakening scaffold structure", () => {
     const content = generated().replaceAll(";\n", "; /* ordinary 😀 comment */ // ordinary line comment\n").replaceAll("\n", "\r\n")
 

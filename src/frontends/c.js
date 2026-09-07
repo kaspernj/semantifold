@@ -290,6 +290,8 @@ export class CReader {
         if (call.arguments[0].type != "number_literal") this.fail(node, "integer literal macro operand")
         return withParserRanges({...this.expression(call.arguments[0]), location}, {literal: location})
       }
+      // Generated operations are separate temporary initializers; only literal macros may nest as calls.
+      if (nested) this.fail(node, "caller call in unspecified-order expression")
       if (name == "semantifold_integer_negate") {
         if (call.arguments.length != 1) this.fail(node, "negation helper arity")
         return this.unary(node, "Negate", this.expression(call.arguments[0], true), call.name)
@@ -300,7 +302,6 @@ export class CReader {
         if (call.arguments.length != 2) this.fail(node, "scalar helper arity")
         return this.binary(node, intent, this.expression(call.arguments[0], true), this.expression(call.arguments[1], true), call.name)
       }
-      if (nested) this.fail(node, "caller call in unspecified-order expression")
       if (call.arguments.length != 2) this.fail(node, "semantic call arity")
       const callee = this.identifier(call.name)
 

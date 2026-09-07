@@ -5,3 +5,5 @@ Qualify pinned Ubuntu Clang 21.1.8/compiler-rt with separate strict compile/link
 Reject preprocessing-sensitive parser-backed comments, hexadecimal escapes split across parser nodes, uppercase `TRUE`/`FALSE` expressions and identifiers, and the imported `MB_LEN_MAX` macro. Native differential regressions prove the original comment/byte/binding mismatches and macro expansion failure while preserving ordinary comments, CRLF, canonical ordered regions, bounded escapes, NUL and Unicode.
 
 - Qualify CI Clang/compiler-rt on the standard Ubuntu 24.04 runner through checksum-pinned, signed official LLVM packages, independently of the Ubuntu 26.04 development-image package pins.
+
+Reject caller-authored nested scalar helper calls, including checked negation and string concatenation, before interpreting them as ordered semantic operations. Preserve exact literal macros, root helper expressions and generated temporary-based ordered regions; cover located rejections, equivalent reparses and real O0/O2 sanitizer execution.

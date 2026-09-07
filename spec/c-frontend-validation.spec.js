@@ -65,6 +65,82 @@ describe("C frontend validation", () => {
       error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_SYNTAX" && error.language == "c" && Boolean(error.location), source)
   })
 
+  for (const helper of ["semantifold_integer_add", "semantifold_integer_subtract", "semantifold_integer_multiply", "semantifold_integer_negate"]) {
+    it("rejects nested checked helper " + helper + " in caller expressions", () => {
+      const call = helper + (helper == "semantifold_integer_negate" ? "(left)" : "(left, right)")
+
+      for (const expression of [
+        `${call} + right`, `left + (${call})`, `-(${call})`,
+        `value(${call}, right)`, `value(left, ${call})`,
+        `semantifold_integer_add(${call}, right)`, `semantifold_integer_negate(${call})`
+      ]) {
+        const source = program(`return ${expression};`)
+
+        assert.throws(() => read(source), (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_SYNTAX" &&
+          error.language == "c" && source.slice(error.location.start.offset, error.location.end.offset) == call, expression)
+      }
+    })
+  }
+
+  it("rejects nested string concatenation in semantic calls and scalar helper operands", () => {
+    const call = "semantifold_string_concat(left, right)"
+
+    for (const body of [
+      `return value(${call}, right);`, `return value(left, (${call}));`,
+      `return semantifold_string_concat(${call}, right);`,
+      `if (semantifold_string_equal(${call}, right)) { return left; } return right;`
+    ]) {
+      const source = '#include "semantifold_runtime.h"\n' +
+        `static SemantifoldString value(SemantifoldString left, SemantifoldString right) { ${body} }\n` +
+        'int main(void) { semantifold_print_string(value(SEMANTIFOLD_STRING("é\\000"), SEMANTIFOLD_STRING("😀"))); semantifold_cleanup(); return 0; }\n'
+
+      assert.throws(() => read(source), (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_SYNTAX" &&
+        error.language == "c" && source.slice(error.location.start.offset, error.location.end.offset) == call, body)
+    }
+  })
+
+  for (const helper of ["semantifold_string_equal", "semantifold_string_not_equal"]) {
+    it("rejects nested string comparison helper " + helper + " in caller expressions", () => {
+      const call = `${helper}(left, right)`
+
+      for (const expression of [`${call} == true`, `!(${call})`, `(${call}) && true`, `choose(${call}, false)`]) {
+        const source = '#include "semantifold_runtime.h"\n' +
+          'static bool choose(bool first, bool second) { return first || second; }\n' +
+          `static bool value(SemantifoldString left, SemantifoldString right) { return ${expression}; }\n` +
+          'int main(void) { semantifold_print_boolean(value(SEMANTIFOLD_STRING("é"), SEMANTIFOLD_STRING("😀"))); semantifold_cleanup(); return 0; }\n'
+
+        assert.throws(() => read(source), (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_SYNTAX" &&
+          error.language == "c" && source.slice(error.location.start.offset, error.location.end.offset) == call, expression)
+      }
+    })
+  }
+
+  it("retains root helper operations and literal macros in operands and semantic arguments", () => {
+    for (const [helper, operation] of [
+      ["semantifold_integer_add", "IntegerAdd"], ["semantifold_integer_subtract", "IntegerSubtract"],
+      ["semantifold_integer_multiply", "IntegerMultiply"], ["semantifold_integer_negate", "IntegerNegate"]
+    ]) {
+      const operands = helper == "semantifold_integer_negate" ? "INT64_C(4)" : "INT64_C(4), INT64_C(9)"
+      const module = read(program(`return ${helper}(${operands});`))
+
+      expect(module.functions[0].body.statements[0].expression.operation).toEqual(operation)
+      expect(module.entryPoint.body.statements[0].expression.arguments.map(({value}) => value)).toEqual([4, 9])
+    }
+    for (const [helper, type, operation, printType] of [
+      ["semantifold_string_concat", "SemantifoldString", "StringConcat", "string"],
+      ["semantifold_string_equal", "bool", "StringEqual", "boolean"],
+      ["semantifold_string_not_equal", "bool", "StringNotEqual", "boolean"]
+    ]) {
+      const source = '#include "semantifold_runtime.h"\n' +
+        `static ${type} value(SemantifoldString left, SemantifoldString right) { return ${helper}(left, SEMANTIFOLD_STRING("é\\000😀")); }\n` +
+        `int main(void) { semantifold_print_${printType}(value(SEMANTIFOLD_STRING(""), SEMANTIFOLD_STRING("😀"))); semantifold_cleanup(); return 0; }\n`
+      const module = read(source)
+
+      expect(module.functions[0].body.statements[0].expression.operation).toEqual(operation)
+      expect(module.functions[0].body.statements[0].expression.right.value).toEqual("é\0😀")
+    }
+  })
+
   it("reports grammar recovery and existing semantic failures without dropping syntax", () => {
     for (const [source, code] of [
       [program("return left - ;"), "PARSE_ERROR"],

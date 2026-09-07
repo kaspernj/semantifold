@@ -267,4 +267,39 @@ console.log(first(2, 9));`
     assert.throws(() => generateArtifactSet({language: "c", module: collision}), (error) =>
       error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" && Boolean(error.location))
   })
+
+  it("executes root checked/string helpers and literal macros before and after ordered C generation", async () => {
+    const content = '#include "semantifold_runtime.h"\n' +
+      'static int64_t calculate(int64_t left, int64_t right) {\n' +
+      '    const int64_t added = semantifold_integer_add(left, right);\n' +
+      '    const int64_t subtracted = semantifold_integer_subtract(added, INT64_C(1));\n' +
+      '    const int64_t multiplied = semantifold_integer_multiply(subtracted, INT64_C(2));\n' +
+      '    return semantifold_integer_negate(multiplied);\n}\n' +
+      'static SemantifoldString combine(SemantifoldString left, SemantifoldString right) { return semantifold_string_concat(left, right); }\n' +
+      'static bool equal(SemantifoldString left, SemantifoldString right) { return semantifold_string_equal(left, right); }\n' +
+      'static bool unequal(SemantifoldString left, SemantifoldString right) { return semantifold_string_not_equal(left, right); }\n' +
+      'int main(void) {\n' +
+      '    semantifold_print_integer(calculate(INT64_C(4), INT64_C(9)));\n' +
+      '    const SemantifoldString joined = combine(SEMANTIFOLD_STRING("é\\000"), SEMANTIFOLD_STRING("😀"));\n' +
+      '    semantifold_print_string(joined);\n' +
+      '    semantifold_print_boolean(equal(joined, SEMANTIFOLD_STRING("é\\000😀")));\n' +
+      '    semantifold_print_boolean(unequal(joined, SEMANTIFOLD_STRING("é")));\n' +
+      '    semantifold_cleanup();\n    return 0;\n}\n'
+    const module = parse({language: "c", filename: "helpers.c", source: content})
+    const set = generateArtifactSet({language: "c", module})
+    const reparsed = parse({language: "c", filename: "program.c", source: set.artifacts[0].content})
+    const expected = "-24\né\0😀\ntrue\ntrue\n"
+
+    for (const optimization of ["-O0", "-O2"]) for (const sanitized of [false, true]) {
+      const original = await executeCArtifacts({artifacts: [{path: "program.c", content}, set.artifacts[1]]}, {optimization, sanitized})
+      const generated = await executeC(reparsed, {optimization, sanitized})
+
+      for (const result of [original, generated]) {
+        expect(result.stdout).toEqual(expected)
+        assert.deepEqual(result.bytes, Buffer.from(expected))
+        expect(result.stderr).toEqual("")
+        expect(result.status).toEqual(0)
+      }
+    }
+  })
 })

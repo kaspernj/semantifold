@@ -1,6 +1,6 @@
 # 018 — C source and target support
 
-- Status: `implementation and initial-review corrections delivered locally; coordinator verification/CI/merge pending`
+- Status: Implemented and locally verified; [PR 20](https://github.com/kaspernj/semantifold/pull/20) is the authoritative CI/merge record. Npm publication is not authorized.
 - Phase/priority: Phase L1 / P0
 - Dependencies: [015-language-expansion-foundation.md](015-language-expansion-foundation.md)
 
@@ -177,3 +177,38 @@ The first PR20 generation at `460a0083bdae154eebdfaa031f034e14fb883b8c` failed b
 This directly causal operational correction applies the previously qualified LLVM Noble source, exact compiler/compiler-rt versions, checksum-pinned signing key and explicit `/usr/bin/clang-21` selection only to CI; it updates the existing configuration contract and the two-environment qualification documentation. No C production source, parser, runtime, public contract, dependency, capacity, timeout, runner or development-image change is included. The existing repository-contract test reproduced the mismatched compiler path (6 passed, 1 failed) before the CI correction. Exact-head CI remains the aggregate acceptance gate; no merge, npm publication, release or tag is claimed by this historical record.
 
 The corrected CI setup subsequently passed a fresh standard Noble base installation using the exact checked-in signed-repository commands, followed by generated C arithmetic and Unicode/NUL compile/link/execute as UID1000 in all four O0/O2 ordinary/sanitized profiles. Compiler 21.1.8, native target and installed package versions matched. Repository contract 7/7, C registry/toolchain 3/3, native execution 16/16 and packed-consumer 2/2 passed, as did lint, typecheck, build and diff checks. These are local qualification results; the corrected-head TensorBuzz aggregate verdict is still required.
+
+### Initial automatic-review helper-order correction — PR 20
+
+The initial automatic review of `460a0083bdae154eebdfaa031f034e14fb883b8c` reported [nested scalar helpers bypassing the caller-call boundary](https://github.com/kaspernj/semantifold/pull/20#discussion_r3951482519), thread `PRRT_kwDOULx_Ws6f-3Oz`. The original implementation session reproduced and corrected that single finding on clean base `d75ab585d212babb88a35c3921e520ec9660e757`. The coordinator's Noble CI prerequisite correction and all four prior private-review repairs are preserved. This is local feedback correction for [PR 20](https://github.com/kaspernj/semantifold/pull/20), with no new review, GitHub write or review trigger.
+
+The seven scalar helper families all reproduced: integer add/subtract/multiply/negate and string concat/equal/not-equal returned before the existing `nested` guard. The regression corpus now rejects 40 caller forms across unary/binary operands, parenthesized operands, either semantic-call argument, nested binary helpers and checked unary-helper arguments. Every rejection asserts `UNSUPPORTED_SYNTAX`, language `c`, and the exact original helper-call span. `npx velocious-test spec/c-frontend-validation.spec.js` produced **18 passed, 7 failed, 25 total** before the production edit; all seven failures were missing expected exceptions. The same command and assertions then passed **25/25**.
+
+The production correction moves that existing guard immediately after exact literal-macro handling and before both unary and binary scalar helpers. Literal macros still pass through their existing arity/token/UTF-8 checks. Root helper expressions remain supported. No generated-mode bypass was added: the backend already emits helper operations into individual temporary initializers with pure references/literals as operands. Reparse reconstructs nested semantic expressions from those temporary references, followed by the unchanged complete canonical CST validation. Positive coverage explicitly regenerates/reparses all seven helper operations and runs direct root-helper C beside its regenerated form at O0/O2, ordinary and sanitized, with exact byte/stdout/stderr/status assertions.
+
+All affected specs ran sequentially, **one named file per invocation**, with these final results:
+
+| Exact command | GREEN |
+| --- | --- |
+| `npx velocious-test spec/c-frontend-validation.spec.js` | 25/25 |
+| `npx velocious-test spec/c-ordered-expressions.spec.js` | 6/6; also passed before the guard move |
+| `npx velocious-test spec/c-provenance.spec.js` | 4/4 |
+| `npx velocious-test spec/c-backend-validation.spec.js` | 14/14 |
+| `npx velocious-test spec/c-native-execution.spec.js` | 17/17 |
+| `npx velocious-test spec/c-runtime-ownership.spec.js` | 5/5 |
+| `npx velocious-test spec/c-cross-language-acceptance.spec.js` | 3/3 |
+| `npx velocious-test spec/tree-sitter-legacy-packed-consumer.spec.js` | 2/2 |
+
+This is **76 passing focused tests**, including 74 C tests and the ordinary-default packed-consumer proof. Ten tests were added: seven rejection tests and three preservation tests. One complete execution of the three native/ownership/crossing files performs 142 C program launches: 105 expected successes, 36 expected fatal status-70 exits and one intentional status-7 stage failure, plus six intentional compile failures and one intentional link failure. O0/O2, ASan/UBSan/leak detection, existing deterministic ownership/failure assertions and 25 C-to-original-five real target executions all remain green. No allocation-failure instrumentation, runtime helper, timeout, compiler flag, parser payload or dependency was changed for this finding.
+
+`npm run verify:legacy-runtime` passed first. `npm run lint`, `npm run typecheck`, `npm run build`, `npm audit --audit-level=high` (zero vulnerabilities), `npm ls --omit=dev --all`, `npm ls --all`, `npm pack --dry-run --json` and `git diff --check` also passed. Build output was produced only by the owning build command. No aggregate suite or shard ran locally.
+
+The seven changed files are `src/frontends/c.js`, `spec/c-frontend-validation.spec.js`, `spec/c-ordered-expressions.spec.js`, `spec/c-native-execution.spec.js`, `docs/c.md`, `changelog.d/20260907135939-c-source-and-target.md` and this task record. They remain uncommitted on `feature/c-source-target`; no local technical blocker remains. The coordinator owns publication, callback rotation, review reply/resolution and merge. CI is still an outstanding exact-head verdict, and this record claims no merge, package publication, version, tag or release.
+
+Proposed reply for the coordinator to post to the existing [PR 20 discussion](https://github.com/kaspernj/semantifold/pull/20#discussion_r3951482519):
+
+> Reproduced for all seven scalar helpers, including checked negation. The existing nested-call guard now runs after literal macros and before helper conversion, so caller nesting receives a located diagnostic. Generated ordered regions still reconstruct through separate temporary initializers and complete CST validation. The frontend regression went from 18 passed/7 failed to 25 passed/0 failed; 76 focused tests passed, including native O0/O2 sanitizer, ownership, original-five crossing and packed-consumer coverage.
+
+### Coordinator acceptance
+
+The coordinator independently reran all eight named focused specs above on the repaired candidate: **76 passed, zero failed**, with each file invoked separately. Aggregate lint (including typecheck), build, public-registry packed-consumer proof, audit (zero vulnerabilities), both dependency graphs, pack dry-run and diff checks passed. Production and regression-test bytes were unchanged throughout verification; the final edit only reconciles this delivery record. The automatic-review finding is ready for reply/resolution after the corrective commit is pushed. The live PR records the final exact-head CI, finding closure and merge; this record does not authorize npm publication.
