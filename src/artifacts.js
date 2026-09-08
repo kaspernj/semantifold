@@ -27,6 +27,9 @@ export function createGeneratedArtifactSet(candidate) {
       invalidArtifactSet("Artifact set requires a non-empty ordered artifact array.", candidate.target)
     }
     const target = candidate.target
+    const metadata = candidate.metadata === undefined
+      ? undefined
+      : snapshotMetadataObject(candidate.metadata, target)
 
     const paths = new Set()
     const directoryPaths = new Set()
@@ -102,6 +105,7 @@ export function createGeneratedArtifactSet(candidate) {
     return Object.freeze({
       artifacts: Object.freeze(artifacts),
       entry: entryPaths[0],
+      ...(metadata === undefined ? {} : {metadata}),
       schema: /** @type {const} */ ("GeneratedArtifactSet"),
       target,
       version: /** @type {const} */ (1)
@@ -111,6 +115,69 @@ export function createGeneratedArtifactSet(candidate) {
 
     return invalidArtifactSet("Artifact-set validation failed.", targetOf(candidate), error)
   }
+}
+
+/**
+ * Validates target-specific metadata as detached, immutable JSON.
+ * @param {unknown} value - Metadata candidate.
+ * @param {string} target - Artifact target.
+ * @returns {Readonly<Record<string, unknown>>} Metadata snapshot.
+ */
+function snapshotMetadataObject(value, target) {
+  if (!isPlainObject(value)) invalidArtifactSet("Artifact-set metadata must be a plain JSON object.", target)
+
+  return /** @type {Readonly<Record<string, unknown>>} */ (
+    deepFreeze(snapshotMetadataValue(value, target, new WeakSet())))
+}
+
+/**
+ * Recursively snapshots a JSON metadata value without retaining caller objects.
+ * @param {unknown} value - JSON candidate.
+ * @param {string} target - Artifact target.
+ * @param {WeakSet<object>} ancestors - Active object path for cycle rejection.
+ * @returns {unknown} Detached JSON value.
+ */
+function snapshotMetadataValue(value, target, ancestors) {
+  if (value === null || typeof value == "boolean") return value
+  if (typeof value == "string") {
+    if (!hasOnlyUnicodeScalars(value)) invalidArtifactSet("Artifact-set metadata contains a lone Unicode surrogate.", target)
+
+    return value
+  }
+  if (typeof value == "number") {
+    if (!Number.isFinite(value)) invalidArtifactSet("Artifact-set metadata numbers must be finite.", target)
+
+    return value
+  }
+  if (typeof value != "object") invalidArtifactSet("Artifact-set metadata must contain only JSON values.", target)
+  if (ancestors.has(value)) invalidArtifactSet("Artifact-set metadata must not contain cycles.", target)
+  ancestors.add(value)
+
+  if (Array.isArray(value)) {
+    if (!isDenseArray(value)) invalidArtifactSet("Artifact-set metadata arrays must be dense.", target)
+    /** @type {unknown[]} */
+    const result = []
+
+    for (let index = 0; index < value.length; index += 1) result.push(snapshotMetadataValue(value[index], target, ancestors))
+    ancestors.delete(value)
+
+    return result
+  }
+  if (!isPlainObject(value)) invalidArtifactSet("Artifact-set metadata must contain only plain JSON objects.", target)
+  /** @type {Record<string, unknown>} */
+  const result = {}
+
+  for (const key of Object.keys(value).sort()) {
+    Object.defineProperty(result, key, {
+      configurable: true,
+      enumerable: true,
+      value: snapshotMetadataValue(value[key], target, ancestors),
+      writable: true
+    })
+  }
+  ancestors.delete(value)
+
+  return result
 }
 
 /**

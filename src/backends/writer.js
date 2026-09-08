@@ -8,7 +8,7 @@ export class SourceWriter {
    * Creates a source-aware writer.
    * @param {object} options - Writer options.
    * @param {string} options.filename - Output filename.
-   * @param {import("../semantic/types.js").SemanticLanguage} options.language - Output language.
+   * @param {import("../semantic/types.js").GeneratedTextLanguage} options.language - Output text language.
    * @param {import("../semantic/types.js").SemanticModule} options.module - Semantic module.
    * @param {{filename: string, content: string, language?: import("../semantic/types.js").SemanticLanguage}[]} [options.sources] - Caller-provided sources.
    */

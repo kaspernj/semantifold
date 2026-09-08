@@ -53,6 +53,25 @@ printf '%s|%s|%s|%s\\n' "$1" "$LC_ALL" "$TZ" "$PWD"
     })
   })
 
+  it("normalizes Chrome's observed stdout and ignores launcher diagnostics for exact pinned-version matching", async () => {
+    await withTemporaryDirectory("semantifold-chromium-version-", async (directory) => {
+      const pinned = await fakeExecutable(directory, "pinned-chromium", `#!/bin/sh
+printf 'Google Chrome 152.0.7977.82 \\n'
+printf 'mkdir: Permission denied\\n' >&2
+printf "touch: cannot touch '/.local/share/applications/mimeapps.list': No such file or directory\\n" >&2
+`)
+      const other = await fakeExecutable(directory, "other-chromium", "#!/bin/sh\nprintf 'Google Chrome 152.0.7977.83 \\n'\n")
+      const chromium = await discoverCanonicalToolchain("chromium", {override: pinned})
+
+      expect(chromium.version).toEqual("Google Chrome 152.0.7977.82")
+      expect(chromium.versionOutput).toEqual("Google Chrome 152.0.7977.82")
+      await expectDiagnostic(
+        () => discoverCanonicalToolchain("chromium", {override: other}),
+        "TOOL_UNSUPPORTED_VERSION"
+      )
+    })
+  })
+
   it("uses the configured Node executable while the same canonical PATH remains ambiguous", async () => {
     await withTemporaryDirectory("semantifold-node-override-", async (root) => {
       const [firstDirectory, secondDirectory] = await Promise.all([
@@ -1302,7 +1321,7 @@ printf 'executed\n'
     const java = await discoverCanonicalToolchain("java")
     const python = await discoverCanonicalToolchain("python")
 
-    expect(Object.keys(canonicalToolchains)).toEqual(["php", "ruby", "node", "tsc", "javac", "java", "python", "dotnet", "go", "clangpp", "clang", "rustc", "cargo"])
+    expect(Object.keys(canonicalToolchains)).toEqual(["php", "ruby", "node", "tsc", "javac", "java", "python", "dotnet", "go", "clangpp", "clang", "rustc", "cargo", "wasm-validate", "chromium"])
     await runProgram("php", "program.php", "<?php\necho \"ok\\n\";\n", [{arguments: ["program.php"], stage: "execute", tool: php}])
     await runProgram("ruby", "program.rb", "puts \"ok\"\n", [{arguments: ["program.rb"], stage: "execute", tool: ruby}])
     await runProgram("javascript", "program.js", "console.log(\"ok\")\n", [{arguments: ["program.js"], stage: "execute", tool: node}])

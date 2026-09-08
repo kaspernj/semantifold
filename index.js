@@ -72,7 +72,7 @@ export function generateArtifact(input) {
 /**
  * Generates a deterministic artifact set for one semantic module.
  * @param {object} input - Artifact-set generation request.
- * @param {string} input.language - Registered target language or platform ID.
+ * @param {import("./src/semantic/types.js").BackendLanguage} input.language - Registered target language or platform ID.
  * @param {import("./src/semantic/types.js").SemanticModule} input.module - Semantic module.
  * @param {"text" | "binary" | "application"} [input.role] - Requested backend artifact role.
  * @param {string} [input.filename] - Safe output path for a text target.
@@ -164,5 +164,5 @@ export function generateArtifactSet(input) {
   const registryRole = role == "binary" ? "binaryBackend" : "applicationBackend"
   const backend = languageRegistry.resolve(language, registryRole, module?.location)
 
-  return constructArtifactSet(backend({filename, language, module, sources}))
+  return constructArtifactSet(backend({filename, language, mapDirective, module, sourceMapFilename, sources}))
 }

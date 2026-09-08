@@ -104,7 +104,7 @@ export function semanticFailure(language, code, detail, location) {
 
 /**
  * Throws an unsupported backend-capability diagnostic.
- * @param {import("./semantic/types.js").SemanticLanguage} language - Backend language.
+ * @param {import("./semantic/types.js").BackendLanguage} language - Backend language or binary target.
  * @param {string} capability - Unsupported semantic capability.
  * @param {import("./semantic/types.js").SourceLocation | undefined} location - Semantic source location.
  * @returns {never} Always throws.

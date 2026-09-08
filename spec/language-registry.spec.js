@@ -14,11 +14,12 @@ import {createLanguageRegistry} from "../src/language-registry.js"
 const originalFive = ["php", "ruby", "javascript", "typescript", "java"]
 const originalSix = [...originalFive, "python"]
 const allLanguages = [...originalSix, "csharp", "go", "c", "cpp", "rust"]
+const allTargets = [...allLanguages, "wasm"]
 
 describe("language role registry", () => {
   it("derives stable immutable public discovery from the dispatch registry", () => {
     expect(supportedLanguages).toEqual(allLanguages)
-    expect(languageCapabilities.map(({id}) => id)).toEqual(allLanguages)
+    expect(languageCapabilities.map(({id}) => id)).toEqual(allTargets)
     expect(Object.isFrozen(languageCapabilities)).toBeTrue()
 
     for (const descriptor of languageCapabilities) {
@@ -26,6 +27,19 @@ describe("language role registry", () => {
       expect(Object.isFrozen(descriptor.roles)).toBeTrue()
       expect(Object.isFrozen(descriptor.mapping)).toBeTrue()
       expect(Object.isFrozen(descriptor.acceptance)).toBeTrue()
+      if (descriptor.id == "wasm") {
+        expect(descriptor.roles).toEqual({
+          applicationBackend: true,
+          binaryBackend: true,
+          frontend: false,
+          interoperability: false,
+          textBackend: false
+        })
+        expect(descriptor.artifactMultiplicity).toEqual("multiple")
+        expect(descriptor.roundTrip).toBeFalse()
+        expect(descriptor.mapping).toEqual({binaryRanges: true, richText: true, sourceMapV3: true})
+        continue
+      }
       expect(descriptor.roles).toEqual({
         applicationBackend: false,
         binaryBackend: false,

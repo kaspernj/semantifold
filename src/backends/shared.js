@@ -30,7 +30,7 @@ const binaryOperationSyntax = Object.freeze({
 /**
  * Checks the intentionally narrow backend contract.
  * @param {import("../semantic/types.js").SemanticModule} module - Semantic module.
- * @param {import("../semantic/types.js").SemanticLanguage} language - Backend language.
+ * @param {import("../semantic/types.js").BackendLanguage} language - Backend language or binary target.
  * @returns {void}
  */
 export function validateBackendModule(module, language) {
@@ -69,7 +69,7 @@ export function validateBackendModule(module, language) {
 /**
  * Rejects semantic names that would capture syntax owned by one backend emitter.
  * @param {import("../semantic/types.js").SemanticModule} module - Semantic module.
- * @param {import("../semantic/types.js").SemanticLanguage} language - Backend language.
+ * @param {import("../semantic/types.js").BackendLanguage} language - Backend language or binary target.
  * @returns {void}
  */
 function validateScaffoldingNames(module, language) {
@@ -122,7 +122,7 @@ function allStatements(block) {
 /**
  * Validates one complete semantic block before emission.
  * @param {unknown} block - Candidate block.
- * @param {import("../semantic/types.js").SemanticLanguage} language - Backend language.
+ * @param {import("../semantic/types.js").BackendLanguage} language - Backend language or binary target.
  * @param {import("../semantic/types.js").SourceLocation | undefined} ownerLocation - Enclosing location.
  * @returns {void}
  */
@@ -143,7 +143,7 @@ function validateBlock(block, language, ownerLocation) {
 /**
  * Validates one supported statement recursively.
  * @param {unknown} statement - Candidate statement.
- * @param {import("../semantic/types.js").SemanticLanguage} language - Backend language.
+ * @param {import("../semantic/types.js").BackendLanguage} language - Backend language or binary target.
  * @param {import("../semantic/types.js").SourceLocation | undefined} ownerLocation - Enclosing body location.
  * @returns {void}
  */
@@ -194,7 +194,7 @@ function validateStatement(statement, language, ownerLocation) {
 /**
  * Validates the simple identifier target introduced by task 002.
  * @param {unknown} target - Candidate assignment target.
- * @param {import("../semantic/types.js").SemanticLanguage} language - Backend language.
+ * @param {import("../semantic/types.js").BackendLanguage} language - Backend language or binary target.
  * @param {import("../semantic/types.js").SourceLocation | undefined} ownerLocation - Assignment location.
  * @returns {void}
  */
@@ -216,7 +216,7 @@ function validateAssignmentTarget(target, language, ownerLocation) {
 /**
  * Checks expression backend capabilities recursively.
  * @param {unknown} expression - Candidate semantic expression.
- * @param {import("../semantic/types.js").SemanticLanguage} language - Backend language.
+ * @param {import("../semantic/types.js").BackendLanguage} language - Backend language or binary target.
  * @param {import("../semantic/types.js").SourceLocation | undefined} ownerLocation - Nearest owning node location.
  * @param {boolean} [allowJavaNegatedMinimumOperand] - Whether Java may use 2147483648 only beneath integer negation.
  * @returns {void}
@@ -287,7 +287,7 @@ function validateExpression(expression, language, ownerLocation, allowJavaNegate
 /**
  * Rejects compile-time-known Java integer operation results outside primitive int.
  * @param {import("../semantic/types.js").UnaryExpression | import("../semantic/types.js").BinaryExpression} expression - Validated operation shape.
- * @param {import("../semantic/types.js").SemanticLanguage} language - Backend language.
+ * @param {import("../semantic/types.js").BackendLanguage} language - Backend language or binary target.
  * @param {import("../semantic/types.js").SourceLocation | undefined} location - Operation location.
  * @returns {void}
  */
@@ -297,9 +297,9 @@ function validateKnownTargetInteger(expression, language, location) {
   if (language == "java" && value !== undefined && (value < -2147483648n || value > 2147483647n)) {
     unsupportedCapability(language, "compile-time-known integer operation outside signed 32-bit int range", location)
   }
-  if ((language == "csharp" || language == "go" || language == "c" || language == "cpp" || language == "rust") && value !== undefined &&
+  if ((language == "csharp" || language == "go" || language == "c" || language == "cpp" || language == "rust" || language == "wasm") && value !== undefined &&
     (value < -9223372036854775808n || value > 9223372036854775807n)) {
-    unsupportedCapability(language, "compile-time-known integer operation outside signed 64-bit long range", location)
+    unsupportedCapability(language, `compile-time-known integer operation outside signed 64-bit ${language == "wasm" ? "i64" : "long"} range`, location)
   }
 }
 
