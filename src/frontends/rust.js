@@ -646,6 +646,7 @@ class RustReader {
       } else definitions.push(node)
     }
     if (!main) this.fail(root, "canonical fn main() required")
+    if (!definitions.length) this.fail(root, "semantic function required")
     const name = this.field(main, "name")
     const parameters = this.field(main, "parameters")
     const body = this.field(main, "body")

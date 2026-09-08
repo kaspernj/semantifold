@@ -33,6 +33,13 @@ describe("Rust strict source profile", () => {
     expect(module.functions[0].body.statements[0].expression.value).toEqual("é😀\0\n\r\t\\\"'\x7f😀")
   })
 
+  it("rejects a crate with only the canonical empty main", () => {
+    const source = "fn main() {}\n"
+
+    assert.throws(() => read(source), error => rejected(error) && error.message.includes("semantic function required") &&
+      error.location.start.offset == 0 && error.location.end.offset == source.length)
+  })
+
   it("accepts explicit String clones, concat borrowing, comparisons and nested direct calls", () => {
     const source = printString + 'fn join(left: String, right: String) -> String {\n' +
       '  let saved: String = left.clone();\n  if left == right { return saved; }\n' +
