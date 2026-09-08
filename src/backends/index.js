@@ -3,6 +3,7 @@
 import {unsupportedCapability, unsupportedRole} from "../diagnostic.js"
 import {isValidFilenameMetadata} from "../artifact-path.js"
 import {languageRegistry} from "../language-registry.js"
+import {validateNativeGraph} from "./native-validation.js"
 import {validateBackendModule} from "./shared.js"
 import {SourceWriter} from "./writer.js"
 import {finalizeMapping, toSourceMapV3} from "../mapping.js"
@@ -37,7 +38,12 @@ export function generateArtifactSource({language, filename, mapDirective = "none
   if (record.artifactMultiplicity != "single") unsupportedRole(language, "single-text backend", module?.location)
   if (filename === undefined) filename = record.defaultFilename
   if (sourceMapFilename === undefined) sourceMapFilename = `${filename}.map`
+  if (language == "cpp") validateNativeGraph(module, "cpp")
   validateBackendModule(module, language)
+
+  if (language == "cpp" && (mapDirective != "none" || sourceMapFilename != "program.cpp.map")) {
+    unsupportedCapability(language, "CPP map directive or alternate source-map filename", module.location)
+  }
 
   if (!isValidFilenameMetadata(filename)) {
     throw new TypeError("Generated filename must be a non-empty single-line string.")
@@ -45,6 +51,7 @@ export function generateArtifactSource({language, filename, mapDirective = "none
   if (!isValidFilenameMetadata(sourceMapFilename)) {
     throw new TypeError("Source map filename must be a non-empty single-line string.")
   }
+  if (language == "cpp" && filename != "program.cpp") unsupportedCapability(language, "artifact filename other than program.cpp", module.location)
   if (language == "java" && filename.split(/[\\/]/u).at(-1) != "Main.java") {
     unsupportedCapability(language, "artifact filename basename other than Main.java", module.location)
   }

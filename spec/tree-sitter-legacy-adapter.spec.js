@@ -17,6 +17,24 @@ function assertDeeplyFrozen(value) {
 }
 
 describe("legacy Tree-sitter adapter", () => {
+  it("parses C++ through its official grammar while retaining frozen parser-neutral isolation", async () => {
+    const {parseCst} = await import("semantifold-tree-sitter-legacy-internal")
+    const source = "/* 😀 */\r\nstd::string copy(std::string a, std::string b) { return a; }\n"
+    const snapshot = parseCst(source, "cpp")
+
+    expect(snapshot.language).toEqual("cpp")
+    expect(snapshot.root.hasError).toBeFalse()
+    expect(snapshot.root.children[1].node.startIndex).toEqual(10)
+    expect(descendants(snapshot.root).some(({type}) => type == "qualified_identifier")).toBeTrue()
+    assertDeeplyFrozen(snapshot)
+    assert.equal(containsFunction(snapshot), false)
+    expect(parseCst(source).root.hasError).toBeTrue()
+    const broken = parseCst("int main() { return 0;", "cpp")
+
+    expect(broken.root.hasError).toBeTrue()
+    expect(descendants(broken.root).some(({missing}) => missing)).toBeTrue()
+  })
+
   it("returns a frozen parser-neutral C CST with ordered field-bearing edges", async () => {
     const {parseCst} = await import("semantifold-tree-sitter-legacy-internal")
     const source = "int main(void) { return 0; }\n"
@@ -46,7 +64,7 @@ describe("legacy Tree-sitter adapter", () => {
     ), "utf8")
     const declarationsWithoutComments = declarations.replace(/\/\*[\s\S]*?\*\//gu, "")
 
-    expect(declarations).toContain("export declare function parseCst(source: string): CstSnapshot")
+    expect(declarations).toContain('export declare function parseCst(source: string, language?: "c" | "cpp"): CstSnapshot')
     expect(declarationsWithoutComments).not.toMatch(
       /(?:from|import\()["']tree-sitter|SyntaxNode|\bParser\b|\bTree\b|\bLanguage\b/u
     )

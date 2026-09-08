@@ -17,7 +17,14 @@ const modernTreeSitterRoot = "node_modules/tree-sitter"
 const internalPackageRoot = `node_modules/${internalPackageName}`
 const legacyTreeSitterRoot = `${internalPackageRoot}/node_modules/tree-sitter`
 const cGrammarRoot = `${internalPackageRoot}/node_modules/tree-sitter-c`
+const cppGrammarRoot = `${internalPackageRoot}/node_modules/tree-sitter-cpp`
 const requiredPackedFiles = [
+  `${cppGrammarRoot}/LICENSE`,
+  `${cppGrammarRoot}/binding.gyp`,
+  `${cppGrammarRoot}/package.json`,
+  `${cppGrammarRoot}/bindings/node/index.d.ts`,
+  `${cppGrammarRoot}/src/parser.c`,
+  `${cppGrammarRoot}/src/scanner.c`,
   `${modernTreeSitterRoot}/LICENSE`,
   `${modernTreeSitterRoot}/binding.gyp`,
   `${modernTreeSitterRoot}/package.json`,
@@ -36,6 +43,9 @@ const requiredPackedFiles = [
   `${cGrammarRoot}/src/parser.c`
 ]
 const requiredPrebuilds = [
+  ...platformPrebuilds(cppGrammarRoot, "tree-sitter-cpp", [
+    "darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-arm64", "win32-x64"
+  ]),
   ...platformPrebuilds(modernTreeSitterRoot, "tree-sitter", [
     "darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-arm64", "win32-x64"
   ]),
@@ -175,11 +185,12 @@ describe("packed Semantifold legacy Tree-sitter boundary", () => {
         expect(internalPackage.version).toEqual("0.1.0")
         expect(internalPackage.dependencies["tree-sitter"].version).toEqual("0.21.1")
         expect(internalPackage.dependencies["tree-sitter-c"].version).toEqual("0.23.2")
+        expect(internalPackage.dependencies["tree-sitter-cpp"].version).toEqual("0.23.4")
         expect(semantifold.dependencies[retiredPackageName]).toEqual(undefined)
         const installedLock = JSON.parse(await readFile(path.join(consumerDirectory, "package-lock.json"), "utf8"))
         const installedPackagePaths = Object.keys(installedLock.packages)
 
-        for (const packageRoot of [modernTreeSitterRoot, internalPackageRoot, legacyTreeSitterRoot, cGrammarRoot]) {
+        for (const packageRoot of [modernTreeSitterRoot, internalPackageRoot, legacyTreeSitterRoot, cGrammarRoot, cppGrammarRoot]) {
           const entry = installedLock.packages[`node_modules/semantifold/${packageRoot}`]
 
           expect(entry.inBundle).toBeTrue()
@@ -194,6 +205,10 @@ describe("packed Semantifold legacy Tree-sitter boundary", () => {
         const proof = JSON.parse(executed.stdout)
 
         expect(proof).toEqual({
+          cppGrammarVersion: "0.23.4",
+          cppGrammarIsInternal: true,
+          cppSnapshotIsPlainFrozenData: true,
+          cppRoundTrip: true,
           cGrammarVersion: "0.23.2",
           cRoot: "translation_unit",
           grammarIsInternal: true,
@@ -306,6 +321,9 @@ const cArtifacts = generateArtifactSet({language: "c", module: cModule})
 void parser
 void languages
 void cArtifacts
+const cppModule = parse({language: "cpp", filename: "program.cpp", source: ""})
+const cppArtifacts = generateArtifactSet({language: "cpp", module: cppModule})
+void cppArtifacts
 `
 
 const consumerSource = `
@@ -327,6 +345,8 @@ const internalDirectory = path.dirname(path.dirname(internalEntry))
 const internalRequire = createRequire(internalEntry)
 const modernRuntimePath = semantifoldRequire.resolve("tree-sitter")
 const legacyRuntimePath = internalRequire.resolve("tree-sitter")
+const cppGrammarPath = internalRequire.resolve("tree-sitter-cpp")
+const cppGrammar = JSON.parse(await readFile(internalRequire.resolve("tree-sitter-cpp/package.json"), "utf8"))
 const cGrammarPath = internalRequire.resolve("tree-sitter-c")
 const goGrammarPath = semantifoldRequire.resolve("tree-sitter-go/bindings/node/index.js")
 const modernRuntime = JSON.parse(await readFile(semantifoldRequire.resolve("tree-sitter/package.json"), "utf8"))
@@ -334,7 +354,7 @@ const legacyRuntime = JSON.parse(await readFile(internalRequire.resolve("tree-si
 const cGrammar = JSON.parse(await readFile(internalRequire.resolve("tree-sitter-c/package.json"), "utf8"))
 const internalManifest = JSON.parse(await readFile(path.join(internalDirectory, "package.json"), "utf8"))
 
-for (const filename of [semantifoldEntry, internalEntry, modernRuntimePath, legacyRuntimePath, cGrammarPath]) {
+for (const filename of [semantifoldEntry, internalEntry, modernRuntimePath, legacyRuntimePath, cGrammarPath, cppGrammarPath]) {
   assert.ok((await realpath(filename)).startsWith(path.join(process.cwd(), "node_modules") + path.sep))
 }
 const {parseCst} = await import(pathToFileURL(internalEntry).href)
@@ -353,6 +373,9 @@ function isPlainFrozenData(value) {
   return Reflect.ownKeys(value).every((key) => typeof key == "string" && isPlainFrozenData(value[key]))
 }
 
+const cppSnapshot = parseCst("std::string copy(std::string a, std::string b) { return a; }", "cpp")
+assert.equal(cppSnapshot.language, "cpp")
+assert.equal(cppSnapshot.root.hasError, false)
 assert.equal(goTree.rootNode.hasError, false)
 assert.equal(cSnapshot.root.hasError, false)
 assert.equal(cSnapshot.root.endIndex, "/* 😀 */\\r\\nint main(void) { return 0; }\\r\\n".length)
@@ -363,9 +386,17 @@ const semanticC = semantifold.parse({language: "c", filename: "program.c", sourc
 const cArtifacts = semantifold.generateArtifactSet({language: "c", module: semanticC})
 assert.deepEqual(cArtifacts.artifacts.map(({path: artifactPath}) => artifactPath), ["program.c", "semantifold_runtime.h"])
 assert.equal(semantifold.parse({language: "c", filename: "program.c", source: cArtifacts.artifacts[0].content}).functions[0].name, "add")
+const cppArtifact = semantifold.generateArtifact({language: "cpp", module: semanticC})
+const cppModule = semantifold.parse({language: "cpp", filename: "program.cpp", source: cppArtifact.code})
+assert.equal(cppModule.functions[0].name, "add")
+assert.equal(semantifold.generate({language: "cpp", module: cppModule}), cppArtifact.code)
 assert.throws(() => consumerRequire.resolve(internalPackageName), {code: "MODULE_NOT_FOUND"})
 assert.throws(() => semantifoldRequire.resolve(retiredPackageName), {code: "MODULE_NOT_FOUND"})
 process.stdout.write(JSON.stringify({
+  cppGrammarVersion: cppGrammar.version,
+  cppGrammarIsInternal: cppGrammarPath.startsWith(internalDirectory + path.sep),
+  cppSnapshotIsPlainFrozenData: isPlainFrozenData(cppSnapshot),
+  cppRoundTrip: true,
   cGrammarVersion: cGrammar.version,
   cRoot: cSnapshot.root.type,
   grammarIsInternal: cGrammarPath.startsWith(internalDirectory + path.sep),

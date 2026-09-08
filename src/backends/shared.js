@@ -245,8 +245,8 @@ function validateExpression(expression, language, ownerLocation, allowJavaNegate
     if (language == "java" && !validNegatedMinimumOperand && (candidate.value < -2147483648 || candidate.value > 2147483647)) {
       unsupportedCapability(language, "integer literal outside signed 32-bit int range", location)
     }
-    if ((language == "csharp" || language == "go" || language == "c") && candidate.value < 0 ||
-      language == "c" && Object.is(candidate.value, -0)) {
+    if ((language == "csharp" || language == "go" || language == "c" || language == "cpp") && candidate.value < 0 ||
+      (language == "c" || language == "cpp") && Object.is(candidate.value, -0)) {
       unsupportedCapability(language, "negative integer literal without semantic negation", location)
     }
     return
@@ -297,7 +297,7 @@ function validateKnownTargetInteger(expression, language, location) {
   if (language == "java" && value !== undefined && (value < -2147483648n || value > 2147483647n)) {
     unsupportedCapability(language, "compile-time-known integer operation outside signed 32-bit int range", location)
   }
-  if ((language == "csharp" || language == "go" || language == "c") && value !== undefined &&
+  if ((language == "csharp" || language == "go" || language == "c" || language == "cpp") && value !== undefined &&
     (value < -9223372036854775808n || value > 9223372036854775807n)) {
     unsupportedCapability(language, "compile-time-known integer operation outside signed 64-bit long range", location)
   }

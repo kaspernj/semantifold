@@ -13,6 +13,8 @@ import {generateTypeScript} from "./backends/typescript.js"
 import {parseJava} from "./frontends/java.js"
 import {parseCSharp} from "./frontends/csharp.js"
 import {parseGo} from "./frontends/go.js"
+import {parseCpp} from "./frontends/cpp.js"
+import {generateCpp} from "./backends/cpp.js"
 import {parseC} from "./frontends/c.js"
 import {generateCProgram} from "./backends/c.js"
 import {parseJavaScriptTypeScript} from "./frontends/javascript-typescript.js"
@@ -357,6 +359,10 @@ const records = [
     id: "c",
     mediaType: "text/x-c",
     textBackend: generateCProgram
+  }),
+  language({
+    acceptance: {stages: ["parse", "generate", "compile", "link", "execute"], toolchains: ["clangpp"]},
+    defaultFilename: "program.cpp", frontend: parseCpp, id: "cpp", mediaType: "text/x-c++src", textBackend: generateCpp
   })
 ]
 

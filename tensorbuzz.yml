@@ -8,7 +8,7 @@ before_install:
   - sudo ln --symbolic --force /usr/local/go/bin/go /usr/local/bin/go
   - sudo ln --symbolic --force /usr/local/go/bin/gofmt /usr/local/bin/gofmt
   - sudo apt-get update
-  - sudo apt-get install --yes --no-install-recommends php-cli python3 ruby default-jdk-headless dotnet-sdk-10.0 ca-certificates curl gnupg
+  - sudo apt-get install --yes --no-install-recommends php-cli python3 ruby default-jdk-headless dotnet-sdk-10.0 ca-certificates curl gnupg g++-13
   - curl --fail --silent --show-error --location https://apt.llvm.org/llvm-snapshot.gpg.key --output /tmp/semantifold-llvm.asc
   - printf '%s  %s\n' '8b2a587ffd672c4687e7581dad4b2f6c1bb2ad6b480cd9771ba2ff48e0b8c75d' '/tmp/semantifold-llvm.asc' | sha256sum --check -
   - sudo install -D -m 0644 /tmp/semantifold-llvm.asc /etc/apt/keyrings/llvm.asc
@@ -18,6 +18,10 @@ before_install:
   - node --version
   - npm --version
   - clang-21 --version
+  - clang++-21 --version
+  - test "$(clang++-21 -dumpversion)" = "21.1.8"
+  - test -r "$(clang++-21 -print-file-name=libstdc++.so)"
+  - dpkg-query -W libstdc++-13-dev
   - clang-21 -dumpmachine
   - clang-21 -print-resource-dir
   - test "$(clang-21 -dumpversion)" = "21.1.8"
@@ -49,6 +53,7 @@ environment:
   SEMANTIFOLD_DOTNET: /usr/bin/dotnet
   SEMANTIFOLD_GO: /usr/local/bin/go
   SEMANTIFOLD_CLANG: /usr/bin/clang-21
+  SEMANTIFOLD_CLANGPP: /usr/bin/clang++-21
 builds:
   quality:
     name: Quality and package
@@ -61,6 +66,6 @@ builds:
       - npm ls --all
       - npm pack --dry-run --json
   end_to_end:
-    name: Nine-language end-to-end tests with C O0/O2 and sanitizers
+    name: Ten-language end-to-end tests with C and CPP O0/O2 and sanitizers
     script:
       - LANG=C.UTF-8 LC_ALL=C.UTF-8 npm test

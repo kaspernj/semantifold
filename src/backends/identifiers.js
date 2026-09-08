@@ -4,6 +4,7 @@ import {unsupportedCapability} from "../diagnostic.js"
 
 /** @type {Record<import("../semantic/types.js").SemanticLanguage, RegExp>} */
 const identifierPatterns = {
+  cpp: /^[A-Za-z][A-Za-z0-9_]*$/u,
   c: /^[A-Za-z][A-Za-z0-9_]*$/u,
   csharp: /^[A-Za-z_][A-Za-z0-9_]*$/u,
   go: /^[A-Za-z_][A-Za-z0-9_]*$/u,
@@ -17,6 +18,11 @@ const identifierPatterns = {
 
 /** @type {Record<import("../semantic/types.js").SemanticLanguage, Set<string>>} */
 const reservedWords = {
+  cpp: new Set([
+    "alignas", "alignof", "and", "and_eq", "asm", "auto", "bitand", "bitor", "bool", "break", "case", "catch", "char", "char8_t", "char16_t", "char32_t", "class", "compl", "concept", "const", "consteval", "constexpr", "constinit", "const_cast", "continue", "co_await", "co_return", "co_yield", "decltype", "default", "delete", "do", "double", "dynamic_cast", "else", "enum", "explicit", "export", "extern", "false", "float", "for", "friend", "goto", "if", "inline", "int", "long", "mutable", "namespace", "new", "noexcept", "not", "not_eq", "nullptr", "operator", "or", "or_eq", "private", "protected", "public", "register", "reinterpret_cast", "requires", "return", "short", "signed", "sizeof", "static", "static_assert", "static_cast", "struct", "switch", "template", "this", "thread_local", "throw", "true", "try", "typedef", "typeid", "typename", "union", "unsigned", "using", "virtual", "void", "volatile", "wchar_t", "while", "xor", "xor_eq", "std", "string", "numeric_limits",
+    // The qualified libstdc++ <string> include chain also exposes these global names.
+    "WEOF", "wint_t"
+  ]),
   c: new Set([
     "auto", "break", "case", "char", "const", "continue", "default", "do", "double", "else", "enum", "extern",
     "float", "for", "goto", "if", "inline", "int", "long", "register", "restrict", "return", "short", "signed",
@@ -125,7 +131,8 @@ export function validateTargetIdentifier(language, name, role, location) {
 
   if (!identifierPatterns[language].test(name) || reservedWords[language].has(reservedName) ||
     language == "python" && name.normalize("NFKC") != name ||
-    language == "c" && !isCIdentifier(name)) {
+    language == "c" && !isCIdentifier(name) ||
+    language == "cpp" && !isCppIdentifier(name)) {
     unsupportedCapability(language, `${role} identifier '${name}'`, location)
   }
 }
@@ -161,4 +168,13 @@ export function validateTargetBindingIdentifier(language, name, role, location) 
   if (invalidTypeScriptBinding || invalidPhpVariable || invalidRubyBinding) {
     unsupportedCapability(language, `${role} identifier '${name}'`, location)
   }
+}
+
+/**
+ * Protects C++ keywords, the actual included C library names/macros and the scaffold namespace.
+ * @param {string} name - Caller scalar binding or function name.
+ * @returns {boolean} Whether a canonical C++20 translation unit can represent the name.
+ */
+export function isCppIdentifier(name) {
+  return isCIdentifier(name) && !name.includes("__") && !reservedWords.cpp.has(name)
 }

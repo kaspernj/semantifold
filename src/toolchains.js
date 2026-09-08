@@ -20,6 +20,7 @@ export const canonicalToolchains = deepFreeze({
   python: definition("python3", "SEMANTIFOLD_PYTHON", ["--version"], /^Python 3\./u),
   dotnet: definition("dotnet", "SEMANTIFOLD_DOTNET", ["--version"], /^10\./u),
   go: definition("go", "SEMANTIFOLD_GO", ["version"], /^go version go1\.26\.\d+ linux\/amd64$/u),
+  clangpp: definition("clang++", "SEMANTIFOLD_CLANGPP", ["--version"], /^Ubuntu clang version 21\.1\.8 [^\n]+\nTarget: x86_64-pc-linux-gnu\n/u),
   clang: definition("clang", "SEMANTIFOLD_CLANG", ["--version"], /^Ubuntu clang version 21\.1\.8 [^\n]+\nTarget: x86_64-pc-linux-gnu\n/u)
 })
 

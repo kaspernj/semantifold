@@ -1,8 +1,9 @@
 // @ts-check
 
 import {generateCProgram} from "../backends/c.js"
-import {CExpressionPlanner} from "../backends/c-ordered-expressions.js"
-import {maximumCSourceLength, validateCGraph} from "../backends/c-validation.js"
+import {OrderedExpressionPlanner} from "../backends/ordered-expressions.js"
+import {maximumCSourceLength} from "../backends/c-validation.js"
+import {validateNativeGraph} from "../backends/native-validation.js"
 import {isCIdentifier} from "../backends/identifiers.js"
 import {parseCst} from "./c-parser.js"
 import {missingType, parseFailure, SemantifoldDiagnostic, unsupportedSyntax} from "../diagnostic.js"
@@ -522,7 +523,7 @@ export class CReader {
     const module = {kind: /** @type {const} */ ("Module"), location: this.location(root), functions: definitions.slice(0, -1).map((node) => this.function(node)),
       entryPoint: this.main(definitions[definitions.length - 1])}
 
-    if (this.generated) validateCGraph(module)
+    if (this.generated) validateNativeGraph(module)
     const validated = validateParsedModule(module, "c")
 
     this.validatePrintTypes(validated)
@@ -541,7 +542,7 @@ export class CReader {
    * @returns {void}
    */
   validatePrintTypes(module) {
-    const planner = new CExpressionPlanner(module)
+    const planner = new OrderedExpressionPlanner(module)
     /**
      * Checks one lexical block with its visible scalar bindings.
      * @param {import("../semantic/types.js").Block} block - Semantic block.

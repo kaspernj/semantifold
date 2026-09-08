@@ -6,7 +6,7 @@ import {canonicalToolchains, discoverCanonicalToolchain, languageCapabilities, S
 
 describe("C registry and canonical Clang toolchain", () => {
   it("registers C independently with complete multi-artifact native acceptance roles", () => {
-    expect(supportedLanguages.at(-1)).toEqual("c")
+    expect(supportedLanguages.indexOf("c")).toEqual(8)
     expect(languageCapabilities.find(({id}) => id == "c")).toMatchObject({
       acceptance: {stages: ["parse", "generate", "compile", "link", "execute"], toolchains: ["clang"]},
       artifactMultiplicity: "multiple", id: "c", mapping: {binaryRanges: false, richText: true, sourceMapV3: true},
