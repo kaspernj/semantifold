@@ -4,6 +4,7 @@ import {unsupportedCapability} from "../diagnostic.js"
 
 /** @type {Record<import("../semantic/types.js").SemanticLanguage, RegExp>} */
 const identifierPatterns = {
+  rust: /^[A-Za-z_][A-Za-z0-9_]*$/u,
   cpp: /^[A-Za-z][A-Za-z0-9_]*$/u,
   c: /^[A-Za-z][A-Za-z0-9_]*$/u,
   csharp: /^[A-Za-z_][A-Za-z0-9_]*$/u,
@@ -18,6 +19,12 @@ const identifierPatterns = {
 
 /** @type {Record<import("../semantic/types.js").SemanticLanguage, Set<string>>} */
 const reservedWords = {
+  rust: new Set([
+    "as", "async", "await", "break", "const", "continue", "crate", "dyn", "else", "enum", "extern", "false", "fn", "for", "if", "impl", "in",
+    "let", "loop", "match", "mod", "move", "mut", "pub", "ref", "return", "self", "Self", "static", "struct", "super", "trait", "true", "type",
+    "unsafe", "use", "where", "while", "abstract", "become", "box", "do", "final", "macro", "override", "priv", "typeof", "unsized", "virtual",
+    "yield", "try", "union", "_", "main", "String", "std", "i64", "bool"
+  ]),
   cpp: new Set([
     "alignas", "alignof", "and", "and_eq", "asm", "auto", "bitand", "bitor", "bool", "break", "case", "catch", "char", "char8_t", "char16_t", "char32_t", "class", "compl", "concept", "const", "consteval", "constexpr", "constinit", "const_cast", "continue", "co_await", "co_return", "co_yield", "decltype", "default", "delete", "do", "double", "dynamic_cast", "else", "enum", "explicit", "export", "extern", "false", "float", "for", "friend", "goto", "if", "inline", "int", "long", "mutable", "namespace", "new", "noexcept", "not", "not_eq", "nullptr", "operator", "or", "or_eq", "private", "protected", "public", "register", "reinterpret_cast", "requires", "return", "short", "signed", "sizeof", "static", "static_assert", "static_cast", "struct", "switch", "template", "this", "thread_local", "throw", "true", "try", "typedef", "typeid", "typename", "union", "unsigned", "using", "virtual", "void", "volatile", "wchar_t", "while", "xor", "xor_eq", "std", "string", "numeric_limits",
     // The qualified libstdc++ <string> include chain also exposes these global names.
@@ -132,6 +139,7 @@ export function validateTargetIdentifier(language, name, role, location) {
   if (!identifierPatterns[language].test(name) || reservedWords[language].has(reservedName) ||
     language == "python" && name.normalize("NFKC") != name ||
     language == "c" && !isCIdentifier(name) ||
+    language == "rust" && !isRustIdentifier(name) ||
     language == "cpp" && !isCppIdentifier(name)) {
     unsupportedCapability(language, `${role} identifier '${name}'`, location)
   }
@@ -177,4 +185,13 @@ export function validateTargetBindingIdentifier(language, name, role, location) 
  */
 export function isCppIdentifier(name) {
   return isCIdentifier(name) && !name.includes("__") && !reservedWords.cpp.has(name)
+}
+
+/**
+ * Protects the edition-2021 scalar, entry and exact helper environment in both directions.
+ * @param {string} name - Caller-owned function or binding name.
+ * @returns {boolean} Whether ordinary Rust syntax can represent the name safely.
+ */
+export function isRustIdentifier(name) {
+  return identifierPatterns.rust.test(name) && !reservedWords.rust.has(name) && !name.startsWith("semantifold_")
 }

@@ -21,7 +21,9 @@ export const canonicalToolchains = deepFreeze({
   dotnet: definition("dotnet", "SEMANTIFOLD_DOTNET", ["--version"], /^10\./u),
   go: definition("go", "SEMANTIFOLD_GO", ["version"], /^go version go1\.26\.\d+ linux\/amd64$/u),
   clangpp: definition("clang++", "SEMANTIFOLD_CLANGPP", ["--version"], /^Ubuntu clang version 21\.1\.8 [^\n]+\nTarget: x86_64-pc-linux-gnu\n/u),
-  clang: definition("clang", "SEMANTIFOLD_CLANG", ["--version"], /^Ubuntu clang version 21\.1\.8 [^\n]+\nTarget: x86_64-pc-linux-gnu\n/u)
+  clang: definition("clang", "SEMANTIFOLD_CLANG", ["--version"], /^Ubuntu clang version 21\.1\.8 [^\n]+\nTarget: x86_64-pc-linux-gnu\n/u),
+  rustc: definition("rustc", "SEMANTIFOLD_RUSTC", ["--version", "--verbose"], /^rustc 1\.98\.1 \(48a229cea 2026-09-01\)\nbinary: rustc\ncommit-hash: 48a229ceaefd4985c50990b14116b6d856af0985\ncommit-date: 2026-09-01\nhost: x86_64-unknown-linux-gnu\nrelease: 1\.98\.1\nLLVM version: 22\.1\.8$/u),
+  cargo: definition("cargo", "SEMANTIFOLD_CARGO", ["--version", "--verbose"], /^cargo 1\.98\.1 \(797e8a9bc 2026-08-05\)\nrelease: 1\.98\.1\ncommit-hash: 797e8a9bca276c1c9f9f738d2a20f484fa4eea9d\ncommit-date: 2026-08-05\nhost: x86_64-unknown-linux-gnu\n/u)
 })
 
 /**

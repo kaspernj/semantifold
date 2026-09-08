@@ -2,14 +2,34 @@
 
 import assert from "node:assert/strict"
 import {execFile} from "node:child_process"
-import {mkdir, mkdtemp, readFile, readdir, rm, writeFile} from "node:fs/promises"
+import {appendFile, copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile} from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import {fileURLToPath} from "node:url"
 import {promisify} from "node:util"
 import {describe, expect, it} from "@velocious/testing"
+import {consumerSource, typeConsumerSource} from "./support/packed-consumer.js"
 
-const executeFile = promisify(execFile)
+const rawExecuteFile = promisify(execFile)
+const executeFile = async (executable, args, options = {}) => {
+  const record = async (result, status) => {
+    if (!process.env.SEMANTIFOLD_PACK_EVIDENCE) return
+    await mkdir(process.env.SEMANTIFOLD_PACK_EVIDENCE, {recursive: true})
+    await appendFile(path.join(process.env.SEMANTIFOLD_PACK_EVIDENCE, "commands.jsonl"), JSON.stringify({executable, arguments: args,
+      cwd: options.cwd, status, stdout: Buffer.isBuffer(result.stdout) ? {bytes: result.stdout.length} : result.stdout,
+      stderr: Buffer.isBuffer(result.stderr) ? {bytes: result.stderr.length} : result.stderr}) + "\n")
+  }
+  let result
+
+  try {
+    result = await rawExecuteFile(executable, args, options)
+  } catch (error) {
+    await record(error, error.code)
+    throw error
+  }
+  await record(result, 0)
+  return result
+}
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url))
 const internalPackageName = "semantifold-tree-sitter-legacy-internal"
 const retiredPackageName = "@kaspernj/semantifold-tree-sitter-legacy"
@@ -17,8 +37,11 @@ const modernTreeSitterRoot = "node_modules/tree-sitter"
 const internalPackageRoot = `node_modules/${internalPackageName}`
 const legacyTreeSitterRoot = `${internalPackageRoot}/node_modules/tree-sitter`
 const cGrammarRoot = `${internalPackageRoot}/node_modules/tree-sitter-c`
+const rustGrammarRoot = `${internalPackageRoot}/node_modules/tree-sitter-rust`
 const cppGrammarRoot = `${internalPackageRoot}/node_modules/tree-sitter-cpp`
 const requiredPackedFiles = [
+  `${rustGrammarRoot}/LICENSE`, `${rustGrammarRoot}/package.json`, `${rustGrammarRoot}/binding.gyp`,
+  `${rustGrammarRoot}/bindings/node/index.d.ts`, `${rustGrammarRoot}/src/parser.c`, `${rustGrammarRoot}/src/scanner.c`,
   `${cppGrammarRoot}/LICENSE`,
   `${cppGrammarRoot}/binding.gyp`,
   `${cppGrammarRoot}/package.json`,
@@ -43,6 +66,9 @@ const requiredPackedFiles = [
   `${cGrammarRoot}/src/parser.c`
 ]
 const requiredPrebuilds = [
+  ...platformPrebuilds(rustGrammarRoot, "tree-sitter-rust", [
+    "darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-arm64", "win32-x64"
+  ]),
   ...platformPrebuilds(cppGrammarRoot, "tree-sitter-cpp", [
     "darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-arm64", "win32-x64"
   ]),
@@ -132,6 +158,14 @@ describe("packed Semantifold legacy Tree-sitter boundary", () => {
       expect(packedFiles.some((filename) => /node_modules\/[^/]+\/build\/(?:Debug|Release)\//u.test(filename))).toBeFalse()
       const tarball = path.join(packDirectory, packResult.filename)
 
+      if (process.env.SEMANTIFOLD_PACK_EVIDENCE) {
+        await mkdir(process.env.SEMANTIFOLD_PACK_EVIDENCE, {recursive: true})
+        await copyFile(tarball, path.join(process.env.SEMANTIFOLD_PACK_EVIDENCE, packResult.filename))
+        await writeFile(path.join(process.env.SEMANTIFOLD_PACK_EVIDENCE, "pack-result.json"), JSON.stringify(packResult, null, 2) + "\n")
+        await writeFile(path.join(process.env.SEMANTIFOLD_PACK_EVIDENCE, "consumer.mjs"), consumerSource)
+        await writeFile(path.join(process.env.SEMANTIFOLD_PACK_EVIDENCE, "type-consumer.mts"), typeConsumerSource)
+      }
+
       for (const filename of packedFiles.filter((filename) => filename.startsWith(`${internalPackageRoot}/`) &&
         !filename.startsWith(`${internalPackageRoot}/node_modules/`))) {
         const relative = filename.slice(internalPackageRoot.length + 1)
@@ -168,6 +202,12 @@ describe("packed Semantifold legacy Tree-sitter boundary", () => {
       expect(effective["install-links"]).toBeFalse()
       expect(Object.keys(effective).some((name) => name.endsWith(":registry"))).toBeFalse()
       for (const command of ["install", "ci"]) {
+        if (command == "ci") {
+          const cleanCache = path.join(temporaryRoot, "npm-ci-cache")
+
+          await mkdir(cleanCache)
+          consumerEnvironment.npm_config_cache = cleanCache
+        }
         const installed = await executeFile("npm", [command], {
           cwd: consumerDirectory, env: consumerEnvironment, maxBuffer: 20 * 1024 * 1024
         })
@@ -187,11 +227,12 @@ describe("packed Semantifold legacy Tree-sitter boundary", () => {
         expect(internalPackage.dependencies["tree-sitter"].version).toEqual("0.21.1")
         expect(internalPackage.dependencies["tree-sitter-c"].version).toEqual("0.23.2")
         expect(internalPackage.dependencies["tree-sitter-cpp"].version).toEqual("0.23.4")
+        expect(internalPackage.dependencies["tree-sitter-rust"].version).toEqual("0.23.1")
         expect(semantifold.dependencies[retiredPackageName]).toEqual(undefined)
         const installedLock = JSON.parse(await readFile(path.join(consumerDirectory, "package-lock.json"), "utf8"))
         const installedPackagePaths = Object.keys(installedLock.packages)
 
-        for (const packageRoot of [modernTreeSitterRoot, internalPackageRoot, legacyTreeSitterRoot, cGrammarRoot, cppGrammarRoot]) {
+        for (const packageRoot of [modernTreeSitterRoot, internalPackageRoot, legacyTreeSitterRoot, cGrammarRoot, cppGrammarRoot, rustGrammarRoot]) {
           const entry = installedLock.packages[`node_modules/semantifold/${packageRoot}`]
 
           expect(entry.inBundle).toBeTrue()
@@ -205,7 +246,18 @@ describe("packed Semantifold legacy Tree-sitter boundary", () => {
         })
         const proof = JSON.parse(executed.stdout)
 
+        if (process.env.SEMANTIFOLD_PACK_EVIDENCE) {
+          await copyFile(path.join(consumerDirectory, "rust-command-results.json"),
+            path.join(process.env.SEMANTIFOLD_PACK_EVIDENCE, command + "-rust-command-results.json"))
+        }
+
         expect(proof).toEqual({
+          rustGrammarVersion: "0.23.1",
+          rustGrammarIsInternal: true,
+          rustSnapshotIsPlainFrozenData: true,
+          rustRoundTrip: true,
+          rustNativeModes: ["debug", "release"],
+          rustArtifactsStable: true,
           cppGrammarVersion: "0.23.4",
           cppGrammarIsInternal: true,
           cppSnapshotIsPlainFrozenData: true,
@@ -310,107 +362,3 @@ function alternateNpmEnvironment(alternateConfig) {
     NoDe_PaTh: "/synthetic/unused/modules"
   }
 }
-
-const typeConsumerSource = `
-import {generateArtifactSet, parse, supportedLanguages} from "semantifold"
-
-const parser: typeof parse = parse
-const languages: readonly string[] = supportedLanguages
-const cModule = parse({language: "c", filename: "program.c", source: ""})
-const cArtifacts = generateArtifactSet({language: "c", module: cModule})
-
-void parser
-void languages
-void cArtifacts
-const cppModule = parse({language: "cpp", filename: "program.cpp", source: ""})
-const cppArtifacts = generateArtifactSet({language: "cpp", module: cppModule})
-void cppArtifacts
-`
-
-const consumerSource = `
-import assert from "node:assert/strict"
-import {readFile, realpath} from "node:fs/promises"
-import {createRequire} from "node:module"
-import path from "node:path"
-import {fileURLToPath, pathToFileURL} from "node:url"
-import * as semantifold from "semantifold"
-
-const internalPackageName = "${internalPackageName}"
-const retiredPackageName = "${retiredPackageName}"
-const consumerRequire = createRequire(import.meta.url)
-const semantifoldEntry = fileURLToPath(import.meta.resolve("semantifold"))
-const semantifoldDirectory = path.dirname(path.dirname(semantifoldEntry))
-const semantifoldRequire = createRequire(semantifoldEntry)
-const internalEntry = semantifoldRequire.resolve(internalPackageName)
-const internalDirectory = path.dirname(path.dirname(internalEntry))
-const internalRequire = createRequire(internalEntry)
-const modernRuntimePath = semantifoldRequire.resolve("tree-sitter")
-const legacyRuntimePath = internalRequire.resolve("tree-sitter")
-const cppGrammarPath = internalRequire.resolve("tree-sitter-cpp")
-const cppGrammar = JSON.parse(await readFile(internalRequire.resolve("tree-sitter-cpp/package.json"), "utf8"))
-const cGrammarPath = internalRequire.resolve("tree-sitter-c")
-const goGrammarPath = semantifoldRequire.resolve("tree-sitter-go/bindings/node/index.js")
-const modernRuntime = JSON.parse(await readFile(semantifoldRequire.resolve("tree-sitter/package.json"), "utf8"))
-const legacyRuntime = JSON.parse(await readFile(internalRequire.resolve("tree-sitter/package.json"), "utf8"))
-const cGrammar = JSON.parse(await readFile(internalRequire.resolve("tree-sitter-c/package.json"), "utf8"))
-const internalManifest = JSON.parse(await readFile(path.join(internalDirectory, "package.json"), "utf8"))
-
-for (const filename of [semantifoldEntry, internalEntry, modernRuntimePath, legacyRuntimePath, cGrammarPath, cppGrammarPath]) {
-  assert.ok((await realpath(filename)).startsWith(path.join(process.cwd(), "node_modules") + path.sep))
-}
-const {parseCst} = await import(pathToFileURL(internalEntry).href)
-const {default: Parser} = await import(pathToFileURL(modernRuntimePath).href)
-const {default: GoLanguage} = await import(pathToFileURL(goGrammarPath).href)
-const goParser = new Parser()
-
-goParser.setLanguage(GoLanguage)
-const goTree = goParser.parse("package main\\nfunc main() {}\\n")
-const cSnapshot = parseCst("/* 😀 */\\r\\nint main(void) { return 0; }\\r\\n")
-
-function isPlainFrozenData(value) {
-  if (value == null || ["boolean", "number", "string"].includes(typeof value)) return true
-  if (typeof value != "object" || !Object.isFrozen(value)) return false
-  if (!Array.isArray(value) && Object.getPrototypeOf(value) !== Object.prototype) return false
-  return Reflect.ownKeys(value).every((key) => typeof key == "string" && isPlainFrozenData(value[key]))
-}
-
-const cppSnapshot = parseCst("std::string copy(std::string a, std::string b) { return a; }", "cpp")
-assert.equal(cppSnapshot.language, "cpp")
-assert.equal(cppSnapshot.root.hasError, false)
-assert.equal(goTree.rootNode.hasError, false)
-assert.equal(cSnapshot.root.hasError, false)
-assert.equal(cSnapshot.root.endIndex, "/* 😀 */\\r\\nint main(void) { return 0; }\\r\\n".length)
-assert.deepEqual(JSON.parse(JSON.stringify(cSnapshot)), cSnapshot)
-const semanticC = semantifold.parse({language: "c", filename: "program.c", source:
-  '#include "semantifold_runtime.h"\\nstatic int64_t add(int64_t left, int64_t right) { return left + right; }\\n' +
-  'int main(void) { semantifold_print_integer(add(1, 2)); semantifold_cleanup(); return 0; }\\n'})
-const cArtifacts = semantifold.generateArtifactSet({language: "c", module: semanticC})
-assert.deepEqual(cArtifacts.artifacts.map(({path: artifactPath}) => artifactPath), ["program.c", "semantifold_runtime.h"])
-assert.equal(semantifold.parse({language: "c", filename: "program.c", source: cArtifacts.artifacts[0].content}).functions[0].name, "add")
-const cppArtifact = semantifold.generateArtifact({language: "cpp", module: semanticC})
-const cppModule = semantifold.parse({language: "cpp", filename: "program.cpp", source: cppArtifact.code})
-assert.equal(cppModule.functions[0].name, "add")
-assert.equal(semantifold.generate({language: "cpp", module: cppModule}), cppArtifact.code)
-assert.throws(() => consumerRequire.resolve(internalPackageName), {code: "MODULE_NOT_FOUND"})
-assert.throws(() => semantifoldRequire.resolve(retiredPackageName), {code: "MODULE_NOT_FOUND"})
-process.stdout.write(JSON.stringify({
-  cppGrammarVersion: cppGrammar.version,
-  cppGrammarIsInternal: cppGrammarPath.startsWith(internalDirectory + path.sep),
-  cppSnapshotIsPlainFrozenData: isPlainFrozenData(cppSnapshot),
-  cppRoundTrip: true,
-  cGrammarVersion: cGrammar.version,
-  cRoot: cSnapshot.root.type,
-  grammarIsInternal: cGrammarPath.startsWith(internalDirectory + path.sep),
-  goRoot: goTree.rootNode.type,
-  internalPackageIsNotConsumerDependency: true,
-  internalPackageIsPrivate: internalManifest.private === true && internalManifest.exports === undefined,
-  legacyRuntimeIsInternal: legacyRuntimePath.startsWith(internalDirectory + path.sep),
-  legacyRuntimeVersion: legacyRuntime.version,
-  modernRuntimeIsBundled: modernRuntimePath.startsWith(semantifoldDirectory + path.sep),
-  modernRuntimeVersion: modernRuntime.version,
-  pathsAreDistinct: modernRuntimePath !== legacyRuntimePath,
-  retiredPackageIsAbsent: true,
-  rootApiIsPrivate: !("parseCst" in semantifold),
-  snapshotIsPlainFrozenData: isPlainFrozenData(cSnapshot)
-}))
-`
