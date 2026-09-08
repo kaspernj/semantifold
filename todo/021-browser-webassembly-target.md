@@ -1,6 +1,6 @@
 # 021 — Browser-oriented WebAssembly target
 
-- Status: `todo`
+- Status: `in progress`; implementation, rebuilt external acceptance, focused regressions, and local gates pass; coordinator review/CI/merge pending
 - Phase/priority: Phase P / P1 (non-blocking)
 - Dependencies: [015-language-expansion-foundation.md](015-language-expansion-foundation.md)
 
@@ -23,26 +23,26 @@ Add WebAssembly as a first-class binary target with deterministic browser execut
 - Lower every `StringConcat`, including parameter-dependent concatenation, to a private checked bump allocation. Add operand lengths and the scratch cursor with overflow-safe unsigned `i32` arithmetic, reject a result beyond the arena, copy left bytes then right bytes, and return the new `(pointer, length)` without a terminator. There is no general-purpose/user-visible allocator, `free`, host allocation helper, shared memory, table, reference type, mutable exported global, DOM import, WASI, or component-model binding.
 - Scratch values live until the outer `run` returns, so strings returned across nested calls cannot dangle; no function-frame pop reclaims them. On each successful `run`, reset the cursor and call-depth counter to their ABI constants. Reject reentrant `run` in the loader and with an internal active guard. A trap poisons that instance, and the loader must not invoke it again; repeated successful invocations start from a clean arena.
 - Before encoding, perform a path-sensitive worst-case byte/allocation analysis from `run`: literal lengths are exact, concatenation adds lengths and allocation bytes, sequential expressions/calls add allocation demand, conditionals take the maximum reachable branch, and call arguments substitute their computed bounds. Unroll direct or mutual recursion only to the ABI call-depth limit and reject arithmetic overflow, an unprovable bound, or a bound above the scratch capacity with located `UNSUPPORTED_CAPABILITY`. At runtime, increment/check depth before every semantic call and trap before the 65th active call. These published resource limits are fail-loud backend constraints, not permission to truncate strings, grow memory, call JavaScript for concatenation, or return a partial result.
-- The JavaScript loader captures the instantiated exported memory, bounds-checks every string pointer/length with overflow-safe arithmetic, decodes with fatal UTF-8, renders integer `bigint` as exact base-10 text, and appends exact lines to a caller-supplied text sink. It must not coerce malformed ABI values.
+- The JavaScript loader captures the instantiated exported memory, bounds-checks every string pointer/length with overflow-safe arithmetic, decodes with fatal UTF-8 while preserving a leading U+FEFF as string data, renders integer `bigint` as exact base-10 text, and appends exact lines to a caller-supplied text sink. It must not coerce malformed ABI values.
 - `run` performs the semantic entry point exactly once per explicit non-reentrant call. Instantiation has no semantic side effects; no Wasm start section silently runs user code.
 
 ## Binary backend and browser artifacts
 
 - Implement a small deterministic encoder directly from already validated IR to the pinned core binary format. It is a backend encoder, not a source parser. Do not shell out to WAT as the production generation path or bundle a compiler archive.
-- Emit an ordered artifact set: `program.wasm` (`application/wasm`), `program.wasm.map`, `semantifold-loader.mjs`, and `index.html`. The HTML is a deterministic acceptance harness with no remote scripts, bundler, framework, eval, inline user code, or network dependency.
-- The loader requires an `application/wasm` response. It uses `WebAssembly.instantiateStreaming` when that API is available and an explicit `arrayBuffer`/`WebAssembly.instantiate` compatibility path only when streaming is unavailable; a bad MIME response fails instead of selecting the fallback. It never falls back to JavaScript execution of semantic operations.
+- Emit an ordered artifact set: `program.wasm` (`application/wasm`), `program.wasm.map`, `semantifold-loader.mjs`, and `index.html`. The HTML is a deterministic acceptance harness with no remote scripts, bundler, framework, JavaScript eval, inline user code, or network dependency. Its CSP grants only same-origin modules and Chromium's narrow Wasm-compilation source.
+- The loader requires an `application/wasm` response. It starts `WebAssembly.instantiateStreaming` immediately when that API is available while reading a response clone in parallel for ABI inspection and locking host import behavior until inspection succeeds. It uses an explicit `arrayBuffer`/`WebAssembly.instantiate` compatibility path only when streaming is unavailable; a bad MIME response fails instead of selecting the fallback. It never falls back to JavaScript execution of semantic operations.
 - Validate the complete IR, ABI limits, section ordering/indexes, stack typing, branch structure, names, memory layout, import/export set, and artifact paths before returning any artifact.
 
 ## Provenance and source maps
 
-- Record rich half-open byte ranges for module header, sections, function bodies/instructions, immediates, data segments, and custom sections. Semantic instructions trace to original nodes/operators/symbols; encoding lengths and ABI scaffolding are explicit synthetic ranges.
+- Record rich half-open byte ranges for module header, sections, function bodies/instructions, immediates, data segments, and custom sections. Semantic bytes use exact parser-owned `operator`, `name`, `callee`, and `literal` ranges when available; name lengths, encoding framing, temporary locals, and ABI scaffolding are explicit synthetic ranges.
 - Emit Source Map v3 with generated line `0` and generated column equal to the zero-based `.wasm` module byte offset, per the WebAssembly tool convention, plus a `sourceMappingURL` custom section referring to `program.wasm.map` by relative URL. Any one-based line shown to a person is presentation metadata outside the encoded map.
 - Loader/HTML text have their own text mappings. The external map is interoperable but cannot replace the richer byte provenance. Repeated generation must produce byte-identical module/map/glue/harness artifacts.
 
 ## Diagnostics, rejections, and no-approximation rules
 
-- Unsupported IR, unprovable/excessive string allocation, out-of-range values, excessive memory/module sizes, invalid ABI names/types, or stack/control shapes raise `UNSUPPORTED_CAPABILITY` at original semantic locations before bytes are exposed.
-- Loader failures distinguish fetch/MIME, compile, instantiate/import, memory bounds/UTF-8, invocation/trap, and timeout stages, retain the original error as cause where safe, and never convert a trap into a semantic return or partial success.
+- Unsupported IR, cyclic/excessively nested semantic graphs, unprovable/excessive string allocation, out-of-range values in any function or branch, excessive memory/module sizes, invalid ABI names/types, or stack/control shapes raise `UNSUPPORTED_CAPABILITY` at original semantic locations before bytes are exposed.
+- Loader failures distinguish fetch/MIME, compile, instantiate/import, memory bounds/UTF-8, invocation/trap, and timeout stages, retain the original error as cause where safe, and never convert a trap into a semantic return or partial success. Deadline aborts remain timeout failures through body and instantiation phases; unrelated aborts retain their phase; valid modules with unsupported ABI value types are instantiate/import failures while malformed bytes remain compile failures.
 - Do not implement strings as JavaScript indexes, booleans as truthy arbitrary integers, integers as lossy JS numbers, print by DOM access from Wasm, exceptions through traps, or unsupported semantic operations through JavaScript glue.
 
 ## Deterministic tests, validator, and browser acceptance
@@ -69,3 +69,9 @@ Document that Wasm is target-only, the ABI version, exact imports/exports, memor
 ## Non-goals
 
 WAT or Wasm input, WASI, component model, GC/reference types, threads/shared memory/atomics, SIMD, exceptions, tail calls, multiple memories, memory growth, DOM APIs, filesystem/network imports, package managers/bundlers, direct Rust/C compilation to Wasm, plugin loading, or general browser application generation.
+
+## Implementation delivery record — 2026-09-08
+
+The candidate directly encodes deterministic core Wasm for the complete Tasks 001–004 IR and returns `program.wasm`, `program.wasm.map`, `semantifold-loader.mjs`, and `index.html` with `semantifold.browser.v1` metadata. The eight affected focused files pass 106 tests sequentially. Correction regressions cover exact token byte provenance, malformed-graph bounds, module-wide known-i64 overflow, streaming startup and guarded imports, leading U+FEFF output, `$` identifiers, timeout-stage retention, and valid unsupported ABI value types. Node's standard WebAssembly API executes all canonical fixtures and boundary cases in process; the external acceptance additionally invokes real configured Node, WABT 1.0.36, and Chrome/Chromium 152.0.7977.82 without skips or semantic fallback.
+
+The rebuilt canonical lane contains the checked-in WABT and Chrome pins, completed fresh `npm ci`, and passes the mandatory local HTTP browser runtime proof under CSP. The trailing Chrome package output and incidental launcher diagnostics are normalized without broadening the pinned version contract. Lint, strict typecheck, build, high-severity audit, both dependency listings, pack dry-run, and diff checks pass. This remains an uncommitted local candidate; independent review, exact-head TensorBuzz, merge, and post-merge verification remain coordinator-owned before the task can be marked delivered.

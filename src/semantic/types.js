@@ -1,6 +1,8 @@
 // @ts-check
 
 /** @typedef {"php" | "ruby" | "javascript" | "typescript" | "java" | "python" | "csharp" | "go" | "c" | "cpp" | "rust"} SemanticLanguage */
+/** @typedef {SemanticLanguage | "wasm"} BackendLanguage */
+/** @typedef {SemanticLanguage | "html"} GeneratedTextLanguage */
 /** @typedef {"integer" | "boolean" | "string"} SemanticTypeName */
 /** @typedef {"IntegerNegate" | "BooleanNot"} SemanticUnaryOperation */
 /** @typedef {"IntegerAdd" | "IntegerSubtract" | "IntegerMultiply" | "BooleanAnd" | "BooleanOr" | "IntegerEqual" | "IntegerNotEqual" | "BooleanEqual" | "BooleanNotEqual" | "StringEqual" | "StringNotEqual" | "IntegerLessThan" | "IntegerLessThanOrEqual" | "IntegerGreaterThan" | "IntegerGreaterThanOrEqual" | "StringConcat"} SemanticBinaryOperation */
@@ -173,7 +175,7 @@
 /**
  * @typedef GeneratedSource
  * @property {string} filename - Output filename.
- * @property {SemanticLanguage} language - Output language.
+ * @property {GeneratedTextLanguage} language - Output text language.
  * @property {string} content - Exact generated LF source.
  */
 
@@ -240,6 +242,7 @@
  * @property {string} target - Stable language or target ID.
  * @property {string} entry - Path of the sole declared entry artifact.
  * @property {readonly GeneratedSetArtifact[]} artifacts - Deterministic artifact order.
+ * @property {Readonly<Record<string, unknown>>} [metadata] - Detached target-specific JSON metadata.
  */
 
 /**
@@ -248,8 +251,8 @@
  * @property {string} command - Documented canonical command.
  * @property {string} executable - Exact absolute executable path.
  * @property {"override" | "canonical"} source - Resolution route.
- * @property {string} version - First captured version line.
- * @property {string} versionOutput - Complete captured version output.
+ * @property {string} version - First selected-stream version line.
+ * @property {string} versionOutput - Complete normalized stdout, or normalized stderr when stdout is empty.
  * @property {readonly string[]} versionArguments - Exact version argument array.
  */
 

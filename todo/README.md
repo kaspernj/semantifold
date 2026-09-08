@@ -4,7 +4,7 @@
 
 This folder is Semantifold's durable, dependency-ordered implementation backlog and delivered design record. The released baseline is `semantifold@0.2.0` / `v0.2.0` at merged `master` commit `e41d66fb40db783df9d84069567f15bcaeef4a41`; repository and external evidence is recorded in [SOURCES.md](SOURCES.md).
 
-Tasks 001–004, 015–018, and 024 are delivered. The coordinator attests that C PR20 is merged at `8efbcab36078265765aad35ba38052dc187a7979`, with its post-merge native smoke passing 17/17. Task019's CPP implementation and bounded review corrections pass local acceptance; coordinator correction verification, exact-head CI and merge remain pending. Semantifold currently models safe integer, Boolean, and Unicode string scalars; explicitly typed locals and assignment; typed unary/binary expressions; ordered lexical blocks; nested strict-Boolean conditionals; explicit returns; two-argument direct calls; and entry-point printing. PHP, Ruby, JavaScript with JSDoc, TypeScript, Java, strictly annotated Python, canonical C#, bounded Go, bounded C and bounded C++ are implemented as frontends and source backends with real-runtime and provenance/source-map coverage. Task 015 adds the shared role registry, generated artifact sets, byte provenance, parser qualification policy, and fail-loud staged toolchain acceptance. The language tasks preserve the Tasks 001–004 subset; CPP adds one C++20 `program.cpp` with owned string values. Tasks 005–014, 020–023, and 025–037 remain roadmap work.
+Tasks 001–004, 015–018, and 024 are delivered. The coordinator attests that C PR20 is merged at `8efbcab36078265765aad35ba38052dc187a7979`, with its post-merge native smoke passing 17/17. Tasks019–021 have local implementation records with coordinator delivery still pending. Task021's target-only browser Wasm candidate passes rebuilt real WABT, Node, and local-HTTP Chrome acceptance plus its focused regressions and repository gates. Semantifold currently models safe integer, Boolean, and Unicode string scalars; explicitly typed locals and assignment; typed unary/binary expressions; ordered lexical blocks; nested strict-Boolean conditionals; explicit returns; two-argument direct calls; and entry-point printing. Eleven languages implement frontend/source-backend roles for this IR, while browser Wasm is target-only. Tasks 005–014, 022–023, and 025–037 remain roadmap work.
 
 The immediate priority is a bounded language-baseline expansion against this small stable IR. That exposes registration, parser, artifact, toolchain, ownership, and diagnostic flaws before collections, optionals, records, modules, errors, and generics multiply the work. It does not mean every platform, legacy bridge, or later language must block semantic progress.
 
@@ -120,7 +120,7 @@ Phase S is planned to implement the [standard-library portability design](../doc
 
 ### Phase P — non-blocking deployment and later-language lanes
 
-- [021 — Browser-oriented WebAssembly target](021-browser-webassembly-target.md)
+- [021 — Browser-oriented WebAssembly target](021-browser-webassembly-target.md) — local real-browser acceptance passed; coordinator delivery pending
 - [026 — Apple/iOS application artifact target](026-apple-ios-application-target.md)
 - [027 — Objective-C interoperability bridge](027-objective-c-interoperability.md)
 - [028 — Kotlin/Android application artifact target](028-android-application-target.md)
@@ -149,7 +149,7 @@ Legend: **implemented** describes the baseline, **core** gates Task 025, **later
 | Rust | core 020 | core Cargo project 020 | manifest, lockfile, `.rs` | qualified Tree-sitter Rust | Tasks 001–004 |
 | Swift | core 022 | core native text 022 | `.swift` | qualified Swift grammar + `swiftc` | Tasks 001–004 |
 | Kotlin/JVM | core 023 | core JVM text 023 | `.kt` (runnable JAR acceptance) | qualified Kotlin grammar + `kotlinc` | Tasks 001–004 |
-| Browser WebAssembly | none | later binary/browser 021 | `.wasm`, map, loader, HTML | internal encoder + validator/browser | Tasks 001–004 |
+| Browser WebAssembly | none | implemented binary/browser 021; local acceptance passed | `.wasm`, map, loader, HTML | direct encoder + WABT 1.0.36 + Node 24 + Chrome 152 | Tasks 001–004 |
 | Apple/iOS | Ruby and any registered project frontend | later application target 026 | Swift/Xcode-compatible app project | Swift/Xcode/iOS Simulator | Task 010 project to UI shell |
 | Objective-C | none | later interop bridge 027 | `.m` host + generated Swift interface | Clang/Xcode interoperability | bounded legacy host bridge |
 | Android | any registered project frontend | later application target 028 | Kotlin/Gradle Android app | Android SDK/emulator | Task 010 project to UI shell |
@@ -240,7 +240,7 @@ Dependencies in task files are authoritative. Existing IDs remain stable; numeri
 | [012](012-type-parameters-and-generics.md) | 3 | P3 | Generics | 005, 006, 009 |
 | [013](013-five-language-compatibility-acceptance.md) | 1 | P1 legacy | Original-five compatibility | 001–008 |
 | [014](014-ordered-map-iteration.md) | 2 | P2 | Ordered maps | 006, 008 |
-| [021](021-browser-webassembly-target.md) | P | P1 | Browser Wasm binary target | 015 |
+| [021](021-browser-webassembly-target.md) | local acceptance passed (P) | P1 | Browser Wasm binary target; coordinator review/CI/merge pending | 015 |
 | [026](026-apple-ios-application-target.md) | P | P1 | Swift/Xcode iOS application artifacts | 010, 022 |
 | [027](027-objective-c-interoperability.md) | P | P2 | Objective-C legacy-host bridge | 005, 026 |
 | [028](028-android-application-target.md) | P | P1 | Kotlin Android application artifacts | 010, 023 |

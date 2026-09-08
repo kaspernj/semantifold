@@ -97,6 +97,44 @@ describe("generated artifact sets", () => {
     expect(Object.isFrozen(set.artifacts)).toBeTrue()
   })
 
+  it("detaches and freezes optional target-specific JSON metadata while rejecting non-JSON values", () => {
+    const metadata = {abi: "demo.v1", limits: {depth: 64}, names: ["run"]}
+    const specialKeys = JSON.parse('{"__proto__":{"safe":true},"constructor":"metadata"}')
+    const artifact = {
+      content: "entry\n",
+      contentKind: "text",
+      mediaType: "text/plain",
+      ownership: "generated",
+      path: "entry.txt",
+      provenance: synthetic(),
+      role: "entry"
+    }
+    const set = createGeneratedArtifactSet({artifacts: [artifact], metadata, target: "demo"})
+
+    metadata.limits.depth = 1
+    metadata.names[0] = "changed"
+    expect(set.metadata).toEqual({abi: "demo.v1", limits: {depth: 64}, names: ["run"]})
+    expect(Object.isFrozen(set.metadata)).toBeTrue()
+    expect(Object.isFrozen(set.metadata.limits)).toBeTrue()
+    expect(Object.isFrozen(set.metadata.names)).toBeTrue()
+
+    const specialSet = createGeneratedArtifactSet({artifacts: [artifact], metadata: specialKeys, target: "demo"})
+
+    expect(Object.keys(specialSet.metadata)).toEqual(["__proto__", "constructor"])
+    expect(Object.hasOwn(specialSet.metadata, "__proto__")).toBeTrue()
+    expect(specialSet.metadata.__proto__).toEqual({safe: true})
+    expect(specialSet.metadata.constructor).toEqual("metadata")
+
+    const cycle = {}
+    const sparse = ["value"]
+
+    cycle.self = cycle
+    Reflect.deleteProperty(sparse, "0")
+    for (const invalid of [{value: undefined}, {value: 1n}, {value: Number.NaN}, {value: sparse}, cycle]) {
+      expectInvalid(() => createGeneratedArtifactSet({artifacts: [artifact], metadata: invalid, target: "demo"}))
+    }
+  })
+
   it("keeps validated binary bytes immutable through the public artifact boundary", () => {
     const set = createGeneratedArtifactSet({
       artifacts: [{

@@ -23,7 +23,9 @@ export const canonicalToolchains = deepFreeze({
   clangpp: definition("clang++", "SEMANTIFOLD_CLANGPP", ["--version"], /^Ubuntu clang version 21\.1\.8 [^\n]+\nTarget: x86_64-pc-linux-gnu\n/u),
   clang: definition("clang", "SEMANTIFOLD_CLANG", ["--version"], /^Ubuntu clang version 21\.1\.8 [^\n]+\nTarget: x86_64-pc-linux-gnu\n/u),
   rustc: definition("rustc", "SEMANTIFOLD_RUSTC", ["--version", "--verbose"], /^rustc 1\.98\.1 \(48a229cea 2026-09-01\)\nbinary: rustc\ncommit-hash: 48a229ceaefd4985c50990b14116b6d856af0985\ncommit-date: 2026-09-01\nhost: x86_64-unknown-linux-gnu\nrelease: 1\.98\.1\nLLVM version: 22\.1\.8$/u),
-  cargo: definition("cargo", "SEMANTIFOLD_CARGO", ["--version", "--verbose"], /^cargo 1\.98\.1 \(797e8a9bc 2026-08-05\)\nrelease: 1\.98\.1\ncommit-hash: 797e8a9bca276c1c9f9f738d2a20f484fa4eea9d\ncommit-date: 2026-08-05\nhost: x86_64-unknown-linux-gnu\n/u)
+  cargo: definition("cargo", "SEMANTIFOLD_CARGO", ["--version", "--verbose"], /^cargo 1\.98\.1 \(797e8a9bc 2026-08-05\)\nrelease: 1\.98\.1\ncommit-hash: 797e8a9bca276c1c9f9f738d2a20f484fa4eea9d\ncommit-date: 2026-08-05\nhost: x86_64-unknown-linux-gnu\n/u),
+  "wasm-validate": definition("wasm-validate", "SEMANTIFOLD_WASM_VALIDATE", ["--version"], /^1\.0\.36$/u),
+  chromium: definition("chromium", "SEMANTIFOLD_CHROMIUM", ["--version"], /^Google Chrome 152\.0\.7977\.82$/u)
 })
 
 /**
@@ -70,7 +72,7 @@ export async function discoverCanonicalToolchain(id, options = {}) {
  * @param {Readonly<Record<string, string | undefined>>} [input.environment] - Explicit discovery environment.
  * @param {string} input.id - Toolchain ID.
  * @param {string} [input.override] - Configured absolute executable path.
- * @param {RegExp} [input.supportedVersion] - Full captured-output version policy.
+ * @param {RegExp} [input.supportedVersion] - Full selected-stream version policy.
  * @param {number} [input.timeoutMs] - Version command timeout.
  * @param {string[]} input.versionArguments - Exact version argument array.
  * @returns {Promise<import("./semantic/types.js").DiscoveredToolchain>} Discovered tool.
@@ -134,7 +136,9 @@ export async function discoverToolchain(input) {
   }
 
   const {stderr, stdout} = result
-  const versionOutput = [stdout, stderr].filter((value) => value.length > 0).join("\n").trim()
+  const normalizedStdout = stdout.trim()
+  const normalizedStderr = stderr.trim()
+  const versionOutput = normalizedStdout.length > 0 ? normalizedStdout : normalizedStderr
   const version = versionOutput.split(/\r?\n/u)[0] ?? ""
 
   if (version.length == 0) {

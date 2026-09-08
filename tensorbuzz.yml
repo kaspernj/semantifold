@@ -9,6 +9,12 @@ before_install:
   - sudo ln --symbolic --force /usr/local/go/bin/gofmt /usr/local/bin/gofmt
   - sudo apt-get update
   - sudo apt-get install --yes --no-install-recommends php-cli python3 ruby default-jdk-headless dotnet-sdk-10.0 ca-certificates curl gnupg g++-13 xz-utils build-essential
+  - curl --fail --silent --show-error --location https://archive.ubuntu.com/ubuntu/pool/universe/w/wabt/wabt_1.0.36+dfsg+~cs1.0.36-2ubuntu1_amd64.deb --output /tmp/wabt_1.0.36+dfsg+~cs1.0.36-2ubuntu1_amd64.deb
+  - printf '%s  %s\n' 'febaa4935e2982d83b21c75938773f226fa8bf22145f6a3bee25da9e98b0273b' '/tmp/wabt_1.0.36+dfsg+~cs1.0.36-2ubuntu1_amd64.deb' | sha256sum --check -
+  - curl --fail --silent --show-error --location https://dl.google.com/linux/chrome/deb/pool/main/g/google-chrome-stable/google-chrome-stable_152.0.7977.82-1_amd64.deb --output /tmp/google-chrome-stable_152.0.7977.82-1_amd64.deb
+  - printf '%s  %s\n' '4d25e4a028c78a7ae910683551c2f234792cc5595e7e3e34939f599342ada446' '/tmp/google-chrome-stable_152.0.7977.82-1_amd64.deb' | sha256sum --check -
+  - sudo apt-get install --yes --no-install-recommends /tmp/wabt_1.0.36+dfsg+~cs1.0.36-2ubuntu1_amd64.deb /tmp/google-chrome-stable_152.0.7977.82-1_amd64.deb
+  - sudo ln --symbolic /usr/bin/google-chrome-stable /usr/local/bin/chromium
   - |
     sudo sh -eu <<'RUST_TOOLCHAIN'
     test "$(dpkg --print-architecture)" = "amd64"
@@ -72,6 +78,11 @@ before_install:
   - test -n "$(go env GOROOT)"
   - test -x "$(go env GOROOT)/bin/gofmt"
   - test "$(readlink -f "$(command -v gofmt)")" = "$(readlink -f "$(go env GOROOT)/bin/gofmt")"
+  - wasm-validate --version
+  - test "$(wasm-validate --version)" = "1.0.36"
+  - chromium --version
+  - test "$(chromium --version | sed 's/ $//')" = "Google Chrome 152.0.7977.82"
+  - chromium --headless=new --no-sandbox --disable-gpu --dump-dom about:blank > /tmp/semantifold-chromium-probe.html
 before_script:
   - npm ci
 environment:
@@ -84,6 +95,8 @@ environment:
   SEMANTIFOLD_CLANGPP: /usr/bin/clang++-21
   SEMANTIFOLD_RUSTC: /usr/local/bin/rustc
   SEMANTIFOLD_CARGO: /usr/local/bin/cargo
+  SEMANTIFOLD_WASM_VALIDATE: /usr/bin/wasm-validate
+  SEMANTIFOLD_CHROMIUM: /usr/local/bin/chromium
 builds:
   quality:
     name: Quality and package

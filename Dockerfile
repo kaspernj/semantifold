@@ -29,6 +29,7 @@ RUN apt-get update \
     python3 \
     ripgrep \
     ruby \
+    wabt=1.0.36+dfsg+~cs1.0.36-2ubuntu1 \
     xz-utils \
   && install -d -m 0755 /etc/apt/keyrings \
   && curl --fail --silent --show-error --location \
@@ -61,6 +62,20 @@ RUN apt-get update \
   && test -n "$(go env GOROOT)" \
   && test -x "$(go env GOROOT)/bin/gofmt" \
   && test "$(readlink -f "$(command -v gofmt)")" = "$(readlink -f "$(go env GOROOT)/bin/gofmt")" \
+  && rm -rf /var/lib/apt/lists/*
+
+RUN test "$(dpkg --print-architecture)" = "amd64" \
+  && curl --fail --silent --show-error --location \
+    "https://dl.google.com/linux/chrome/deb/pool/main/g/google-chrome-stable/google-chrome-stable_152.0.7977.82-1_amd64.deb" \
+    --output "/tmp/google-chrome-stable_152.0.7977.82-1_amd64.deb" \
+  && echo "4d25e4a028c78a7ae910683551c2f234792cc5595e7e3e34939f599342ada446  /tmp/google-chrome-stable_152.0.7977.82-1_amd64.deb" | sha256sum --check - \
+  && apt-get update \
+  && apt-get install --yes --no-install-recommends "/tmp/google-chrome-stable_152.0.7977.82-1_amd64.deb" \
+  && ln --symbolic /usr/bin/google-chrome-stable /usr/local/bin/chromium \
+  && test "$(wasm-validate --version)" = "1.0.36" \
+  && test "$(chromium --version | sed 's/ $//')" = "Google Chrome 152.0.7977.82" \
+  && chromium --headless=new --no-sandbox --disable-gpu --dump-dom about:blank > /tmp/semantifold-chromium-probe.html \
+  && rm -f "/tmp/google-chrome-stable_152.0.7977.82-1_amd64.deb" /tmp/semantifold-chromium-probe.html \
   && rm -rf /var/lib/apt/lists/*
 
 RUN test "$(dpkg --print-architecture)" = "amd64" \

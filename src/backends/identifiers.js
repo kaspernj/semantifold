@@ -2,7 +2,7 @@
 
 import {unsupportedCapability} from "../diagnostic.js"
 
-/** @type {Record<import("../semantic/types.js").SemanticLanguage, RegExp>} */
+/** @type {Record<import("../semantic/types.js").BackendLanguage, RegExp>} */
 const identifierPatterns = {
   rust: /^[A-Za-z_][A-Za-z0-9_]*$/u,
   cpp: /^[A-Za-z][A-Za-z0-9_]*$/u,
@@ -14,10 +14,11 @@ const identifierPatterns = {
   php: /^[A-Za-z_][A-Za-z0-9_]*$/u,
   python: /^(?:_|\p{XID_Start})(?:_|\p{XID_Continue})*$/u,
   ruby: /^[a-z_][A-Za-z0-9_]*$/u,
-  typescript: /^[A-Za-z_$][A-Za-z0-9_$]*$/u
+  typescript: /^[A-Za-z_$][A-Za-z0-9_$]*$/u,
+  wasm: /^(?:[$_]|\p{XID_Start})(?:[$_]|\p{XID_Continue})*$/u
 }
 
-/** @type {Record<import("../semantic/types.js").SemanticLanguage, Set<string>>} */
+/** @type {Record<import("../semantic/types.js").BackendLanguage, Set<string>>} */
 const reservedWords = {
   rust: new Set([
     "as", "async", "await", "break", "const", "continue", "crate", "dyn", "else", "enum", "extern", "false", "fn", "for", "if", "impl", "in",
@@ -115,7 +116,8 @@ const reservedWords = {
     "override", "package", "private", "protected", "public", "readonly", "require", "return", "satisfies", "set",
     "static", "string", "super", "switch", "symbol", "this", "throw", "true", "try", "type", "typeof", "undefined",
     "unique", "unknown", "using", "var", "void", "while", "with", "yield"
-  ])
+  ]),
+  wasm: new Set()
 }
 
 const phpInvalidParameterBindings = new Set([
@@ -125,7 +127,7 @@ const phpInvalidAssignedBindings = new Set(["GLOBALS", "this"])
 
 /**
  * Validates an identifier against the target backend's deliberately narrow lexical contract.
- * @param {import("../semantic/types.js").SemanticLanguage} language - Target language.
+ * @param {import("../semantic/types.js").BackendLanguage} language - Target language.
  * @param {unknown} name - Candidate semantic identifier.
  * @param {string} role - Identifier role for diagnostics.
  * @param {import("../semantic/types.js").SourceLocation | undefined} location - Originating location.
@@ -158,7 +160,7 @@ export function isCIdentifier(name) {
 
 /**
  * Validates a binding identifier against target restrictions beyond general identifier syntax.
- * @param {import("../semantic/types.js").SemanticLanguage} language - Target language.
+ * @param {import("../semantic/types.js").BackendLanguage} language - Target language.
  * @param {unknown} name - Candidate semantic identifier.
  * @param {string} role - Binding role for diagnostics.
  * @param {import("../semantic/types.js").SourceLocation | undefined} location - Originating location.

@@ -514,7 +514,7 @@ export function composeSourceMaps(outer, inner) {
  * @param {object} generated - Generated program.
  * @param {string} generated.content - Exact generated content.
  * @param {string} generated.filename - Generated filename.
- * @param {import("./semantic/types.js").SemanticLanguage} generated.language - Generated language.
+ * @param {import("./semantic/types.js").GeneratedTextLanguage} generated.language - Generated text language.
  * @param {{filename: string, content: string, language?: import("./semantic/types.js").SemanticLanguage}[]} [generated.sources] - Exact source content overrides.
  * @returns {import("./semantic/types.js").SemantifoldMapping} Imported rich map.
  */
@@ -712,7 +712,7 @@ export function validateMapping(value) {
   const spans = mapping.spans
 
   if (!generated || typeof generated != "object" || typeof Reflect.get(generated, "filename") != "string" ||
-    typeof Reflect.get(generated, "content") != "string" || !isLanguage(Reflect.get(generated, "language")) ||
+    typeof Reflect.get(generated, "content") != "string" || !isGeneratedLanguage(Reflect.get(generated, "language")) ||
     !Array.isArray(mapping.sources) ||
     !Array.isArray(mapping.nodes) || !Array.isArray(mapping.symbols) || !Array.isArray(spans)) {
     throw new TypeError("Malformed SemantifoldMapping v1 envelope.")
@@ -728,7 +728,7 @@ export function validateMapping(value) {
   for (const source of mapping.sources) {
     if (!source || typeof source != "object" || typeof source.id != "string" || source.id.length == 0 || sourceIds.has(source.id) ||
       typeof source.filename != "string" || source.filename.length == 0 || source.content !== null && typeof source.content != "string" ||
-      source.language !== null && !isLanguage(source.language)) {
+      source.language !== null && !isSemanticLanguage(source.language)) {
       throw new TypeError("Malformed or duplicate SemantifoldMapping source.")
     }
     sourceIds.add(source.id)
@@ -1099,13 +1099,22 @@ function validPoint(value) {
 }
 
 /**
- * Tests a supported semantic language value.
+ * Tests a supported semantic source-language value.
  * @param {unknown} value - Candidate language.
  * @returns {value is import("./semantic/types.js").SemanticLanguage} Whether supported.
  */
-function isLanguage(value) {
+function isSemanticLanguage(value) {
   return value == "php" || value == "ruby" || value == "javascript" || value == "typescript" || value == "java" ||
     value == "python" || value == "csharp" || value == "go" || value == "c" || value == "cpp" || value == "rust"
+}
+
+/**
+ * Tests a supported generated text language value.
+ * @param {unknown} value - Candidate language.
+ * @returns {value is import("./semantic/types.js").GeneratedTextLanguage} Whether supported.
+ */
+function isGeneratedLanguage(value) {
+  return value == "html" || isSemanticLanguage(value)
 }
 
 /**

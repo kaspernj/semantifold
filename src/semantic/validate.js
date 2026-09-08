@@ -39,7 +39,7 @@ export function validateParsedModule(module, language) {
 /**
  * Validates scalar types and bindings for a caller-supplied semantic module before emission.
  * @param {import("./types.js").SemanticModule} module - Semantic module.
- * @param {import("./types.js").SemanticLanguage} language - Backend language.
+ * @param {import("./types.js").BackendLanguage} language - Backend language or binary target.
  * @returns {void}
  */
 export function validateBackendTypes(module, language) {

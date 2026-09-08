@@ -9,6 +9,7 @@ import {parse as parseYaml} from "yaml"
 const {DockerfileParser} = DockerfileAst
 const matchingGofmtReadback = 'test "$(readlink -f "$(command -v gofmt)")" = ' +
   '"$(readlink -f "$(go env GOROOT)/bin/gofmt")"'
+const chromiumVersionProbe = `test "$(chromium --version | sed 's/ $//')" = "Google Chrome 152.0.7977.82"`
 const providerPackages = Object.freeze([
   "opencode-ai", "@openai/codex", "@anthropic-ai/claude-code", "@moonshot-ai/kimi-code"
 ])
@@ -168,6 +169,12 @@ describe("repository delivery contracts", () => {
     assert.match(beforeInstall, /test -n "\$\(go env GOROOT\)"/u)
     assert.match(beforeInstall, /test -x "\$\(go env GOROOT\)\/bin\/gofmt"/u)
     assert.ok(beforeInstall.includes(matchingGofmtReadback))
+    assert.match(beforeInstall, /wabt(?:=|_)1\.0\.36\+dfsg\+~cs1\.0\.36-2ubuntu1/u)
+    assert.match(beforeInstall, /google-chrome-stable_152\.0\.7977\.82-1_amd64\.deb/u)
+    assert.match(beforeInstall, /4d25e4a028c78a7ae910683551c2f234792cc5595e7e3e34939f599342ada446/u)
+    expect(config.environment.SEMANTIFOLD_WASM_VALIDATE).toEqual("/usr/bin/wasm-validate")
+    expect(config.environment.SEMANTIFOLD_CHROMIUM).toEqual("/usr/local/bin/chromium")
+    for (const probe of ["wasm-validate --version", chromiumVersionProbe]) assert.ok(config.before_install.includes(probe), probe)
     assert.ok(buildCommands.includes("npm run lint"))
     assert.ok(buildCommands.includes("npm run typecheck"))
     assert.ok(buildCommands.includes("npm run build"))
@@ -218,6 +225,10 @@ describe("repository delivery contracts", () => {
     assert.match(runs, /test -n "\$\(go env GOROOT\)"/u)
     assert.match(runs, /test -x "\$\(go env GOROOT\)\/bin\/gofmt"/u)
     assert.ok(runs.includes(matchingGofmtReadback))
+    assert.match(runs, /wabt=1\.0\.36\+dfsg\+~cs1\.0\.36-2ubuntu1(?:\s|\\)/u)
+    assert.match(runs, /google-chrome-stable_152\.0\.7977\.82-1_amd64\.deb/u)
+    assert.match(runs, /4d25e4a028c78a7ae910683551c2f234792cc5595e7e3e34939f599342ada446/u)
+    for (const probe of ["wasm-validate --version", chromiumVersionProbe]) assert.ok(runs.includes(probe), probe)
     assert.ok(instructions.some((instruction) => instruction.getKeyword() == "USER" && instruction.getArgumentsContent() == "dev"))
     assert.ok(instructions.some((instruction) => instruction.getKeyword() == "WORKDIR" && instruction.getArgumentsContent() == "/home/dev/semantifold"))
   })

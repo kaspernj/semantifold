@@ -11,6 +11,7 @@ import {generatePhp} from "./backends/php.js"
 import {generatePython} from "./backends/python.js"
 import {generateRuby} from "./backends/ruby.js"
 import {generateTypeScript} from "./backends/typescript.js"
+import {generateBrowserWasm} from "./backends/wasm.js"
 import {parseJava} from "./frontends/java.js"
 import {parseCSharp} from "./frontends/csharp.js"
 import {parseGo} from "./frontends/go.js"
@@ -153,7 +154,7 @@ export function createLanguageRegistry(candidateRecords) {
     const hasApplicationBackend = typeof candidate.applicationBackend == "function"
     const hasBackend = hasTextBackend || hasBinaryBackend || hasApplicationBackend
 
-    if ((mapping.richText || mapping.sourceMapV3) && !hasTextBackend ||
+    if ((mapping.richText || mapping.sourceMapV3 || mapping.binaryRanges) && !hasBackend ||
       mapping.sourceMapV3 && !mapping.richText ||
       mapping.binaryRanges && !hasBinaryBackend && !hasApplicationBackend) {
       invalidRegistry(`Registry record '${id}' declares mapping support without its required backend role.`, id)
@@ -370,7 +371,18 @@ const records = [
     acceptance: {stages: ["parse", "generate", "compile", "validate", "execute"], toolchains: ["rustc", "cargo"]},
     artifactMultiplicity: "multiple",
     defaultFilename: "src/main.rs", frontend: parseRust, id: "rust", mediaType: "text/x-rust", textBackend: generateRustProject
-  })
+  }),
+  {
+    acceptance: {stages: ["generate", "validate", "instantiate", "execute"], toolchains: ["wasm-validate", "node", "chromium"]},
+    applicationBackend: generateBrowserWasm,
+    artifactMultiplicity: "multiple",
+    binaryBackend: generateBrowserWasm,
+    defaultFilename: "program.wasm",
+    id: "wasm",
+    mapping: {binaryRanges: true, richText: true, sourceMapV3: true},
+    mediaType: "application/wasm",
+    roundTrip: false
+  }
 ]
 
 export const languageRegistry = createLanguageRegistry(records)
