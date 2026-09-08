@@ -112,6 +112,7 @@ describe("packed Semantifold legacy Tree-sitter boundary", () => {
       await writeFile(globalConfig, "")
       await writeFile(alternateConfig, "registry=https://global.invalid/\n@types:registry=https://scoped.invalid/\n")
       await writeFile(`${alternateConfig}.user`, "registry=https://user.invalid/\n")
+      const sourceManifest = JSON.parse(await readFile(path.join(repositoryRoot, "package.json"), "utf8"))
       const packed = await executeFile("npm", [
         "pack", "--pack-destination", packDirectory, "--json"
       ], {cwd: repositoryRoot, maxBuffer: 20 * 1024 * 1024})
@@ -119,7 +120,7 @@ describe("packed Semantifold legacy Tree-sitter boundary", () => {
       const packedFiles = packResult.files.map(({path: filename}) => filename)
       const bundledPackages = new Set(packResult.bundled)
 
-      expect({name: packResult.name, version: packResult.version}).toEqual({name: "semantifold", version: "0.2.0"})
+      expect({name: packResult.name, version: packResult.version}).toEqual({name: "semantifold", version: sourceManifest.version})
       for (const packageName of [internalPackageName, "node-addon-api", "node-gyp-build", "tree-sitter"]) {
         expect(bundledPackages.has(packageName)).toBeTrue()
       }
@@ -180,7 +181,7 @@ describe("packed Semantifold legacy Tree-sitter boundary", () => {
         const internalPackage = semantifold.dependencies[internalPackageName]
 
         expect(dependencyTree.problems).toEqual(undefined)
-        expect(semantifold.version).toEqual("0.2.0")
+        expect(semantifold.version).toEqual(sourceManifest.version)
         expect(semantifold.dependencies["tree-sitter"].version).toEqual("0.25.1")
         expect(internalPackage.version).toEqual("0.1.0")
         expect(internalPackage.dependencies["tree-sitter"].version).toEqual("0.21.1")

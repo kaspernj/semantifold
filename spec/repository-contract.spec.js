@@ -38,7 +38,9 @@ describe("repository delivery contracts", () => {
     const buildCommands = Object.values(tensorbuzz.builds).flatMap((build) => build.script)
 
     expect(rootManifest.workspaces).toEqual(["packages/tree-sitter-legacy"])
-    expect(rootManifest.version).toEqual("0.2.0")
+    assert.match(rootManifest.version, /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u)
+    expect(lockfile.version).toEqual(rootManifest.version)
+    expect(lockfile.packages[""].version).toEqual(rootManifest.version)
     expect(rootManifest.dependencies[internalLegacyPackage]).toEqual("file:packages/tree-sitter-legacy/runtime")
     expect(rootManifest.acceptDependencies).toEqual({[internalLegacyPackage]: "0.1.0"})
     expect(rootManifest.devDependencies[workspaceManifest.name]).toEqual("0.1.0")

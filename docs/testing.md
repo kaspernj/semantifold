@@ -147,3 +147,7 @@ npx velocious-test spec/tree-sitter-legacy-packed-consumer.spec.js
 ```
 
 Each native spec executes O0/O2, ordinary and ASan/UBSan/leak profiles, with byte/stdout/stderr/status assertions and fresh-directory cleanup. The original-five crossing spec invokes real PHP, Ruby, Node, tsc, javac and java; none may silently skip. The packed consumer proves ordinary install and clean npm ci with fresh cache, empty configs, default install-links=false, both bundled runtime paths, CPP and C frozen data, modern Go loading, and public CPP parse/generate/reparse/types.
+
+## Release-version package verification
+
+Repository delivery checks validate a stable SemVer root version and require both lockfile version entries to match it. Packed-consumer checks compare the packed and installed package versions with the source manifest, rather than pinning a historical release. When validating a release candidate, run `npx velocious-test spec/repository-contract.spec.js spec/tree-sitter-legacy-packed-consumer.spec.js` on the actual candidate version; all existing runtime isolation, ordinary install/ci, and strict TypeScript checks remain mandatory.
