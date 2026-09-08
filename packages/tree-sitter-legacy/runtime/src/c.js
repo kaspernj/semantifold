@@ -2,6 +2,7 @@
 
 import Parser from "tree-sitter"
 import CLanguage from "tree-sitter-c"
+import CppLanguage from "tree-sitter-cpp"
 
 /** @typedef {Readonly<{row: number, column: number}>} CstPosition */
 /** @typedef {Readonly<{field: string | null, node: CstNode}>} CstChild */
@@ -24,27 +25,29 @@ import CLanguage from "tree-sitter-c"
  * @typedef {Readonly<{
  *   schema: "semantifold.parser-cst",
  *   version: 1,
- *   language: "c",
+ *   language: "c" | "cpp",
  *   root: CstNode
  * }>} CstSnapshot
  */
 
 /**
- * Parses C source with the package-owned legacy Tree-sitter runtime.
- * @param {string} source - Caller-owned C source text.
+ * Parses the explicitly selected official grammar with the isolated legacy runtime.
+ * @param {string} source - Caller-owned source text.
+ * @param {"c" | "cpp"} [language] - Exact grammar identity; existing callers select C by default.
  * @returns {CstSnapshot} Recursively frozen parser-neutral CST data.
  */
-export function parseCst(source) {
+export function parseCst(source, language = "c") {
+  if (language != "c" && language != "cpp") throw new Error(`Unsupported private parser language: ${language}`)
   const parser = new Parser()
 
-  parser.setLanguage(CLanguage)
+  parser.setLanguage(language == "cpp" ? CppLanguage : CLanguage)
   const tree = parser.parse(source)
   const convertIndex = createIndexConverter(source, tree.rootNode.endIndex)
   const lineStarts = createLineStarts(source)
   const root = snapshotNode(tree.rootNode, convertIndex, lineStarts)
 
   parser.reset()
-  return Object.freeze({language: "c", root, schema: "semantifold.parser-cst", version: 1})
+  return Object.freeze({language, root, schema: "semantifold.parser-cst", version: 1})
 }
 
 /**

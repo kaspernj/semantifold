@@ -60,6 +60,7 @@ describe("repository delivery contracts", () => {
       "@types/node": "^24.3.0",
       "tree-sitter": "0.21.1",
       "tree-sitter-c": "0.23.2",
+      "tree-sitter-cpp": "0.23.4",
       typescript: "^7.0.0"
     })
     expect(workspaceConfig.compilerOptions.rootDir).toEqual("runtime/src")
@@ -69,7 +70,7 @@ describe("repository delivery contracts", () => {
     expect(internalManifest.main).toEqual("./src/c.js")
     expect(internalManifest.publishConfig).toEqual(undefined)
     expect(internalManifest.files).toEqual(["src/c.js", "LICENSE", "README.md"])
-    expect(internalManifest.dependencies).toEqual({"tree-sitter": "0.21.1", "tree-sitter-c": "0.23.2"})
+    expect(internalManifest.dependencies).toEqual({"tree-sitter": "0.21.1", "tree-sitter-c": "0.23.2", "tree-sitter-cpp": "0.23.4"})
     expect(internalManifest.bundleDependencies).toEqual(undefined)
     expect(lockfile.packages[`node_modules/${workspaceManifest.name}`]).toEqual({
       link: true, resolved: "packages/tree-sitter-legacy"
@@ -84,6 +85,7 @@ describe("repository delivery contracts", () => {
     expect(lockfile.packages["node_modules/tree-sitter"].inBundle).toBeTrue()
     expect(lockfile.packages[`node_modules/${internalLegacyPackage}/node_modules/tree-sitter`].version).toEqual("0.21.1")
     expect(lockfile.packages[`node_modules/${internalLegacyPackage}/node_modules/tree-sitter-c`].version).toEqual("0.23.2")
+    expect(lockfile.packages[`node_modules/${internalLegacyPackage}/node_modules/tree-sitter-cpp`].version).toEqual("0.23.4")
     expect(buildCommands.includes("npm ls --all")).toBeTrue()
     expect(buildCommands.filter((command) => command == rootPack)).toEqual([rootPack])
     expect(buildCommands.some((command) => command.includes("--workspace") && command.includes("npm pack"))).toBeFalse()
@@ -174,7 +176,13 @@ describe("repository delivery contracts", () => {
     assert.ok(buildCommands.includes("npm audit --audit-level=high"))
     assert.ok(buildCommands.includes("npm ls --omit=dev --all"))
     assert.ok(buildCommands.includes("npm pack --dry-run --json"))
-    expect(config.builds.end_to_end.name).toEqual("Nine-language end-to-end tests with C O0/O2 and sanitizers")
+    expect(config.environment.SEMANTIFOLD_CLANGPP).toEqual("/usr/bin/clang++-21")
+    assert.match(beforeInstall, /(?:^|\s)g\+\+-13(?:\s|$)/u)
+    for (const probe of ["clang++-21 --version", 'test "$(clang++-21 -dumpversion)" = "21.1.8"',
+      'test -r "$(clang++-21 -print-file-name=libstdc++.so)"', "dpkg-query -W libstdc++-13-dev"]) {
+      assert.ok(config.before_install.includes(probe), probe)
+    }
+    expect(config.builds.end_to_end.name).toEqual("Ten-language end-to-end tests with C and CPP O0/O2 and sanitizers")
     await assert.rejects(access(new URL("../.github/workflows", import.meta.url)))
   })
 
@@ -196,8 +204,10 @@ describe("repository delivery contracts", () => {
     assert.match(runs, /default-jdk-headless/u)
     assert.match(runs, /dotnet-sdk-10\.0/u)
     assert.match(runs, /golang-go/u)
-    for (const pin of ["clang=1:21.1.6-71", "clang-21=1:21.1.8-6ubuntu1", "libclang-rt-21-dev=1:21.1.8-6ubuntu1"]) assert.ok(runs.includes(pin))
+    for (const pin of ["clang=1:21.1.6-71", "clang-21=1:21.1.8-6ubuntu1", "libclang-rt-21-dev=1:21.1.8-6ubuntu1", "libstdc++-15-dev=15.2.0-16ubuntu1"]) assert.ok(runs.includes(pin))
     for (const probe of ["clang --version", "clang -dumpmachine", "clang -print-resource-dir"]) assert.ok(runs.includes(probe))
+    for (const probe of ["clang++-21 --version", 'test "$(clang++-21 -dumpversion)" = "21.1.8"',
+      'test -r "$(clang++-21 -print-file-name=libstdc++.so)"']) assert.ok(runs.includes(probe))
     assert.match(runs, /node_24\.x/u)
     assert.match(runs, /dotnet --info/u)
     assert.match(runs, /test "\$\(dotnet --version \| cut -d\. -f1\)" = "10"/u)

@@ -161,3 +161,7 @@ Validation constructs source line starts once, verifies ranges in linear passes,
 The feature is source-compatible and additive: `generate()` bytes are characterized for both existing fixture profiles, legacy semantic modules remain valid, and existing `location` fields are unchanged. Parsed modules now serialize an additional enumerable `provenance` property, so consumers that compare or persist entire module JSON should consciously include or omit it.
 
 Semantifold is pre-1.0. The recommended release is a minor bump from `0.1.x` to `0.2.0`, with no npm publication as part of this implementation. A future incompatible provenance or mapping representation must use a new schema version rather than reinterpret version 1.
+
+## CPP text provenance
+
+The `cpp` lane emits one `program.cpp` with deterministic rich and Source Map v3 data. Original CPP operator/callee/type/consumer tokens remain mapped through exact ordered-region reconstruction. Inline runtime support, prototypes, temporary declarations/uses, discards, paired markers and short-circuit control are synthetic ranges related to original semantic occurrences. The six-digit occurrence namespace is shared with C’s planning algorithm; CPP marker language and CST validation are independent. No header or map artifact is added. See [CPP semantics and bounds](cpp.md).

@@ -2,9 +2,10 @@
 
 import {unsupportedCapability} from "../diagnostic.js"
 import {finalizeMapping, toSourceMapV3} from "../mapping.js"
-import {CExpressionPlanner, cStatementSignature} from "./c-ordered-expressions.js"
+import {statementSignature, planNativeModule} from "./ordered-expressions.js"
 import {cRuntimeHeader} from "./c-runtime.js"
-import {maximumCSourceLength, validateCGraph, validateCMemory} from "./c-validation.js"
+import {maximumCSourceLength, validateCMemory} from "./c-validation.js"
+import {validateNativeGraph} from "./native-validation.js"
 import {emitScalarType} from "./scalars.js"
 import {validateBackendModule} from "./shared.js"
 import {SourceWriter} from "./writer.js"
@@ -13,8 +14,8 @@ import {SourceWriter} from "./writer.js"
 /** @typedef {import("../semantic/types.js").SemanticNode} SemanticNode */
 /** @typedef {import("../semantic/types.js").Statement} Statement */
 /** @typedef {import("../semantic/types.js").Block} Block */
-/** @typedef {import("./c-ordered-expressions.js").PlannedValue} PlannedValue */
-/** @typedef {import("./c-ordered-expressions.js").PlannedStep} PlannedStep */
+/** @typedef {import("./ordered-expressions.js").PlannedValue} PlannedValue */
+/** @typedef {import("./ordered-expressions.js").PlannedStep} PlannedStep */
 /** @typedef {{id: string, steps: PlannedStep[], value: PlannedValue}} StatementPlan */
 
 const binaryTokens = new Map([
@@ -32,12 +33,12 @@ const binaryTokens = new Map([
  * @returns {{artifacts: import("../semantic/types.js").GeneratedSetArtifact[], target: string}} Complete candidate.
  */
 export function generateCProgram({filename, mapDirective, module, sourceMapFilename, sources}) {
-  validateCGraph(module)
+  validateNativeGraph(module)
   validateBackendModule(module, "c")
   validateCMemory(module)
   if (filename !== undefined && filename != "program.c") unsupportedCapability("c", "artifact filename other than program.c", module.location)
   if (mapDirective !== undefined || sourceMapFilename !== undefined) unsupportedCapability("c", "source-map filename or directive option", module.location)
-  const plans = planModule(module)
+  const plans = planNativeModule(module)
 
   new CEmitter(undefined, plans, module.location).program(module)
   const writer = new SourceWriter({filename: "program.c", language: "c", module, sources})
@@ -60,50 +61,6 @@ export function generateCProgram({filename, mapDirective, module, sourceMapFilen
     content: cRuntimeHeader, contentKind: "text", mediaType: "text/x-c", ownership: "generated", path: "semantifold_runtime.h",
     provenance: {kind: "synthetic", reason: "Canonical C17 scalar helpers and module-lifetime immutable UTF-8 arena.", relatedOrigins}, role: "support"
   }]}
-}
-
-/**
- * Plans every occurrence before constructing a writer or exposing either artifact.
- * @param {SemanticModule} module - Validated module.
- * @returns {Map<string, StatementPlan>} Plans indexed by semantic occurrence path.
- */
-function planModule(module) {
-  const planner = new CExpressionPlanner(module)
-  /** @type {Map<string, StatementPlan>} */
-  const plans = new Map()
-
-  /**
-   * Plans one lexical block with independent branch environments.
-   * @param {Block} block - Semantic block.
-   * @param {string} path - Occurrence path.
-   * @param {Map<string, import("../semantic/types.js").SemanticTypeName>} inherited - Visible types.
-   * @returns {void}
-   */
-  function visit(block, path, inherited) {
-    const bindings = new Map(inherited)
-
-    block.statements.forEach((statement, index) => {
-      const statementPath = `${path}/statements/${index}`
-      const field = statement.kind == "IfStatement" ? "condition" : statement.kind == "LocalDeclaration" ? "initializer" : "expression"
-      const expression = statement.kind == "IfStatement" ? statement.condition : statement.kind == "LocalDeclaration" ? statement.initializer : statement.expression
-      /** @type {PlannedStep[]} */
-      const steps = []
-      const value = planner.plan(expression, `${statementPath}/${field}`, bindings, steps)
-
-      if (plans.size >= 999999) unsupportedCapability("c", "ordered statement limit", statement.location)
-      plans.set(statementPath, {id: String(plans.size + 1).padStart(6, "0"), steps, value})
-      if (statement.kind == "LocalDeclaration") bindings.set(statement.name, statement.type.name)
-      if (statement.kind == "IfStatement") {
-        visit(statement.consequent, `${statementPath}/consequent`, bindings)
-        if (statement.alternate) visit(statement.alternate, `${statementPath}/alternate`, bindings)
-      }
-    })
-  }
-
-  module.functions.forEach((declaration, index) => visit(declaration.body, `/functions/${index}/body`,
-    new Map(declaration.parameters.map((parameter) => [parameter.name, parameter.type.name]))))
-  visit(module.entryPoint.body, "/entryPoint/body", new Map())
-  return plans
 }
 
 /** Writes only target syntax from validated semantic occurrences and private plans. */
@@ -220,7 +177,7 @@ class CEmitter {
 
     if (!plan) throw new Error("Missing validated C statement plan.")
     const marker = `semantifold:ordered-expression:c:v1`
-    const signature = cStatementSignature(statement)
+    const signature = statementSignature(statement)
 
     this.synthetic(`${indent}/* ${marker} begin ${plan.id} ${signature} */\n`, statement, path)
     this.steps(plan.steps, indent)

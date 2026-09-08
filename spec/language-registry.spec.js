@@ -13,7 +13,7 @@ import {createLanguageRegistry} from "../src/language-registry.js"
 
 const originalFive = ["php", "ruby", "javascript", "typescript", "java"]
 const originalSix = [...originalFive, "python"]
-const allLanguages = [...originalSix, "csharp", "go", "c"]
+const allLanguages = [...originalSix, "csharp", "go", "c", "cpp"]
 
 describe("language role registry", () => {
   it("derives stable immutable public discovery from the dispatch registry", () => {

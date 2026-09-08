@@ -15,6 +15,7 @@ RUN apt-get update \
     clang=1:21.1.6-71 \
     clang-21=1:21.1.8-6ubuntu1 \
     libclang-rt-21-dev=1:21.1.8-6ubuntu1 \
+    libstdc++-15-dev=15.2.0-16ubuntu1 \
     curl \
     default-jdk-headless \
     dotnet-sdk-10.0 \
@@ -41,6 +42,9 @@ RUN apt-get update \
   && clang --version \
   && clang -dumpmachine \
   && clang -print-resource-dir \
+  && clang++-21 --version \
+  && test "$(clang++-21 -dumpversion)" = "21.1.8" \
+  && test -r "$(clang++-21 -print-file-name=libstdc++.so)" \
   && php --version \
   && python3 --version \
   && ruby --version \

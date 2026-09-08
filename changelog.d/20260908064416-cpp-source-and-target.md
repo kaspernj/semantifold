@@ -1,0 +1,3 @@
+Add independent `cpp` source/target support for the existing scalar, local, operator and conditional semantics. Generate one mapped `program.cpp` using C++20, owned UTF-8 `std::string`, checked signed-64 arithmetic and byte-counted output. Reuse the C occurrence planner through a shared backend owner while independently validating CPP ordered regions and exact scaffolding.
+
+Qualify official `tree-sitter-cpp@0.23.4` inside the existing private bundled Tree-sitter 0.21.1 boundary. Add Clang21 C++ discovery, O0/O2 and sanitizer lifetime/order/bounds coverage, original-five crossings, frozen parser/packed-consumer proofs and explicit frontend/target rejection profiles. No public parser export, semantic IR expansion, new package distribution or release is introduced.

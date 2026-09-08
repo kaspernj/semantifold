@@ -29,7 +29,7 @@ All Tree-sitter languages use the official `tree-sitter` Node binding. The langu
 | 016 | Python | official [`tree-sitter/tree-sitter-python`](https://github.com/tree-sitter/tree-sitter-python) grammar package | blocked until the exact release record above passes |
 | 017 | C# | official [`tree-sitter/tree-sitter-c-sharp`](https://github.com/tree-sitter/tree-sitter-c-sharp) grammar package | passed for exact `tree-sitter-c-sharp@0.23.5`; see the checked-in record below |
 | 018 | C | official [`tree-sitter/tree-sitter-c`](https://github.com/tree-sitter/tree-sitter-c) grammar package | legacy pair qualified inside the bundled root distribution below; source/target work remains blocked until that packaging correction is reviewed, green, merged, and verified |
-| 019 | C++ | official [`tree-sitter/tree-sitter-cpp`](https://github.com/tree-sitter/tree-sitter-cpp) grammar package | blocked until the exact release record above passes |
+| 019 | C++ | official [`tree-sitter/tree-sitter-cpp`](https://github.com/tree-sitter/tree-sitter-cpp) grammar package | exact 0.23.4 qualified with the existing isolated 0.21.1 runtime; see Task 019 record below |
 | 020 | Rust | official [`tree-sitter/tree-sitter-rust`](https://github.com/tree-sitter/tree-sitter-rust) grammar package | blocked until the exact release record above passes |
 | 022 | Swift | community [`alex-pinkus/tree-sitter-swift`](https://github.com/alex-pinkus/tree-sitter-swift) candidate plus differential `swiftc` checks | candidate only; blocked until exact release and differential record pass |
 | 023 | Kotlin/JVM | community [`fwcd/tree-sitter-kotlin`](https://github.com/fwcd/tree-sitter-kotlin) candidate plus differential `kotlinc` checks | candidate only; blocked until exact release and differential record pass |
@@ -161,3 +161,59 @@ The accepted Go corpus is `spec/fixtures/{program.go,scalars/program.go,locals/p
 ## Task 018 C integration
 
 The C frontend consumes the unchanged frozen parser-neutral legacy boundary qualified above. It adds no native dependency, archive, copied parser, workspace identity, consumer flag or override. Complete C child/field/token traversal, recovery rejection, exact generated-region reconstruction and full canonical-CST comparison are covered by `spec/c-frontend-validation.spec.js` and `spec/c-ordered-expressions.spec.js`. The five checked-in `program.c` fixture profiles pass generated-source round trips and original-five bidirectional execution. Unicode/NUL, every operation/consumer, eager/short-circuit effects and arena/fatal paths run through real separate Clang compile/link/native execution at O0/O2, ordinary and sanitized. The ordinary packed-root consumer now additionally exercises public C parse/generate/reparse and C API typing after both default install and clean npm ci; it preserves the existing credential-free configuration and cache proof. This is implementation regression coverage, not another packaging review. See [C semantics and scaffolds](c.md), [toolchain qualification](testing.md) and [the delivery record](../todo/018-c-source-and-target.md).
+
+## Task 019 C++ grammar qualification — 2026-09-08
+
+This record precedes the dependency manifest change. The official C++ grammar is selected explicitly inside the existing private runtime; the C grammar is not a C++ parser. The root distribution and both existing Tree-sitter versions remain unchanged.
+
+| Evidence | Qualified result |
+| --- | --- |
+| Official npm release | `tree-sitter-cpp@0.23.4`, registry URL `https://registry.npmjs.org/tree-sitter-cpp/-/tree-sitter-cpp-0.23.4.tgz`, integrity `sha512-qR5qUDyhZ5jJ6V8/umiBxokRbe89bCGmcq/dk94wI4kN86qfdV8k0GHIUEKaqWgcu42wKal5E97LKpLeVW8sKw==`. Latest registry tag at qualification was 0.23.4. |
+| Upstream identity and license | Official [tree-sitter/tree-sitter-cpp](https://github.com/tree-sitter/tree-sitter-cpp/tree/v0.23.4), tag `v0.23.4` and npm gitHead both `f41e1a044c8a84ea9fa8577fdd2eab92ec96de02`; MIT license present in the registry package. `git ls-remote` verified the tag. |
+| Ordinary peer graph | Optional peer `tree-sitter@^0.21.1`, grammar ABI 14; exact existing binding 0.21.1 accepts ABI 13–14. Grammar dependency `tree-sitter-c@^0.23.1` dedupes to the existing exact 0.23.2. Clean install and `npm ls --all` resolved these three packages plus node-addon-api 8.9.2 and node-gyp-build 4.8.4, without overrides, force, peer bypass, aliases or a third runtime. |
+| Node and supply chain | Node v24.18.1, npm 11.16.0, Linux x64 as UID1000. Fresh run-local package/cache, empty user/global npm configuration, explicit public registry, inherited npm configuration/token variables removed. Ordinary exact installation succeeded with zero vulnerabilities. `npm audit signatures` verified five registry signatures and one attestation. |
+| Native and typed API | Actual ESM import, `new Parser()`, `setLanguage(CPP)`, parse and exhaustive `child(index)` / `fieldNameForChild(index)` traversal passed beside C in the same process. The declaration's `setLanguage` returns void and fields are nullable; a strict NodeNext typed consumer passed without casts or skipLibCheck, using the repository's Node types. The grammar includes typed `nodeTypeInfo`. |
+| Corpus and coordinates | Five source probes traversed 390 named/anonymous/comment nodes, including qualified scalar types, initialized const/mutable locals, assignment, returns, calls, literals, typed operators, nested/fallthrough branches and main. CPP uses `condition_clause`, independently of C's shape. Astral comment plus CRLF put the next definition at UTF-16 index 10 / UTF-8 byte 12, row 1 column 0. Comments remain explicit extras. |
+| Malformed input and limits | Missing brace and operand produce missing nodes; malformed parameters/string produce ERROR nodes; all four propagate hasError. CPP rejects the same source through the C grammar while CPP accepts it. The binding accepts 32767 UTF-16 units and throws at 32768; adapters must preflight this limit. |
+| Lifecycle and packaged inputs | Only install lifecycle is `node-gyp-build`; no runtime network downloader. Dry-run registry pack reports 27 files, 3,208,986 compressed / 42,392,814 unpacked bytes, including MIT license, declarations, grammar source, native source fallback, Darwin/Linux/Windows x64/arm64 prebuilds and upstream WASM. Only Linux x64 native loading was executed. No archive, vendored grammar/binary or additional publication identity is added to this repository. |
+
+Reproduce in an empty temporary package using Node24 and credential-free public npm configuration:
+
+```sh
+npm init -y
+npm install --save-exact tree-sitter@0.21.1 tree-sitter-c@0.23.2 tree-sitter-cpp@0.23.4
+npm ls --all
+npm audit signatures
+npm pack tree-sitter-cpp@0.23.4 --dry-run --json
+node --input-type=module - <<'JS'
+import Parser from 'tree-sitter'
+import CPP from 'tree-sitter-cpp'
+const parser = new Parser()
+parser.setLanguage(CPP)
+const source = '/* 😀 */\r\nstd::string copy(std::string a, std::string b) { return a; }\n'
+const root = parser.parse(source).rootNode
+function visit(node) {
+  if (node.hasError || node.isError || node.isMissing) throw new Error(node.type)
+  for (let i = 0; i < node.childCount; i++) {
+    console.log(node.fieldNameForChild(i), node.child(i).type)
+    visit(node.child(i))
+  }
+}
+visit(root)
+console.log(root.namedChildren[1].startIndex, root.namedChildren[1].startPosition)
+JS
+```
+
+The complete initial corpus, source SHA-256 values, typed consumer, tree/ABI/package inventory and command logs are retained in the Task019 implementation run's `qualification/` and `evidence/` directories. The repository's private-boundary and CPP behavior specs retain executable regression coverage. Grammar qualification does not claim frontend/backend acceptance, packed-consumer success or CI completion.
+
+The initial qualification corpus is now retained verbatim in the repository (these hashes were recorded before dependency edits):
+
+| Corpus path | SHA-256 |
+| --- | --- |
+| `spec/fixtures/cpp-qualification/corpus-1.cpp` | `6e5763ff158809f0c750011765421c688978e755598cf1c738bd6e9863ccb6e5` |
+| `spec/fixtures/cpp-qualification/corpus-2.cpp` | `0a57ddb7fa84e7f1522452f520898d8e3d99ced6857e85b00d4e6dd327c15835` |
+| `spec/fixtures/cpp-qualification/corpus-3.cpp` | `b9be8da90243dbd9bdcebe3ee9569f2933ba24ddae38b342220183f6c72cf3e7` |
+| `spec/fixtures/cpp-qualification/corpus-4.cpp` | `ec88c7a47a7167b0ad4d2d07744e8d71404551b91a9db927c8d476f6de23a110` |
+| `spec/fixtures/cpp-qualification/corpus-5.cpp` | `a7524580af4881083d2fbf95f9a7b9f940320c2d2c35d3b188094598cca27f59` |
+
+Reproduce exhaustive frozen-edge traversal, coordinate and recovery checks with `npx velocious-test spec/cpp-parser-qualification.spec.js`. The generated Tasks001–004 fixtures are independently accepted by `spec/cpp-cross-language-acceptance.spec.js`; the small grammar probes above qualify CST coverage, not semantic acceptance or native compilation of a complete supported program.

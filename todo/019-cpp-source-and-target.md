@@ -1,6 +1,6 @@
 # 019 — C++ source and target support
 
-- Status: `todo`
+- Status: `implemented locally; review corrections verified locally; coordinator verification / exact-head CI / merge pending`
 - Phase/priority: Phase L1 / P0
 - Dependencies: [015-language-expansion-foundation.md](015-language-expansion-foundation.md), [018-c-source-and-target.md](018-c-source-and-target.md)
 
@@ -59,3 +59,25 @@ Document why C++ is not the C lane, selected standard/toolchain/standard-library
 ## Non-goals
 
 C compatibility mode, templates/concepts/generics, overload resolution, classes/records, references/pointers, custom allocators, exception semantics, RAII as semantic behavior, STL containers, ranges/iterators, modules/headers, coroutines, RTTI, undefined behavior, ABI interoperability, or user build systems.
+
+## Local implementation record — 2026-09-08
+
+Task019 is implemented on `feature/cpp-source-target`, based on unchanged HEAD `8efbcab36078265765aad35ba38052dc187a7979`. The initial delivery recorded local acceptance only; the correction record below supersedes its pending-review state. No commit, push, PR mutation, tag, release or publication was performed.
+
+The independent `cpp` frontend consumes official `tree-sitter-cpp@0.23.4` through the existing private frozen CST boundary. [The reproducible qualification](../docs/parser-qualification.md#task-019-c-grammar-qualification--2026-09-08) records ordinary npm resolution with exact Tree-sitter 0.21.1 and C 0.23.2, upstream identity, integrity, MIT license, ABI 14, strict typed API, Node24 loading, 390-node corpus traversal, UTF-16 coordinates, recovery and the 32,767-unit input limit. The single root distribution bundles the grammar; there is no new package identity or public adapter export.
+
+Generation produces only `program.cpp` using the [C++20/Clang21/libstdc++ profile](../docs/cpp.md). Owned strings preserve UTF-8/NUL bytes and value copies; checked signed-64 operations exit 70 on dynamic overflow. The shared backend-only `ordered-expressions.js` planner retains C's occurrence algorithm and diagnostics. CPP independently validates complete versioned CPP CST regions, then reconstructs equivalent semantics with rich/v3 provenance. Semantic IR and the stdlib architecture are unchanged.
+
+Local acceptance passed **256 distinct focused tests**, including **43 CPP tests** across nine files. Native acceptance exercised O0/O2 both ordinarily and under ASan/UBSan/leak detection; it covered every distinguishable C expression consumer, short-circuit path, value-copy/return path, signed extrema and four overflow operations. Five CPP fixture profiles execute into the original five targets, reparse/execute as CPP, and receive representative original-five source crossings. C regression coverage includes its 17 native tests, parser/backend rejection, ordered regions, ownership, provenance and crossings.
+
+The private build/typecheck, normal `npm ci` payload refresh and consistency gate, credential-free packed-consumer proof (2/2), root lint/typecheck/build, audit (zero vulnerabilities), both complete dependency listings, package dry run and diff check pass. Tests ran through named focused files; no local full suite, shard or directory selection ran. TensorBuzz now installs the CPP Noble prerequisites using the existing signed Clang21 route and selects `SEMANTIFOLD_CLANGPP=/usr/bin/clang++-21`; the Noble CPP executions and full suite await coordinator CI.
+
+Detailed plan, initial grammar qualification, original failing and passing TDD logs, command exits/counts, and final path inventory are in `/home/dev/.threadwire/semantifold/task019-cpp-20260908T061555Z-implementation/implementation-result.json`. Continuation handle: `01a07fa8-fdf8-7800-b7eb-688ee231874d`. The initial missing-lane tests and subsequent string-operator, literal-width, CST-depth, artifact-option and native compilation corrections have retained RED/GREEN evidence; added characterization coverage is not presented as previously failing behavior.
+
+## Bounded review corrections — 2026-09-08
+
+The one independent source review is complete. Its three material findings are corrected: Go's exact discovery assertion includes CPP while preserving Go's position and roles; CPP reserves the actual `<string>` header names `WEOF`/`wint_t` before artifacts; raw CR/LF in ordinary string-content nodes receives a located rejection. Clang reproduced both header collisions and the raw-CR parser/compiler mismatch before the production corrections. Escaped CR/LF, Unicode/NUL, supported source whitespace, ordinary CPP names and C's distinct include environment pass real native preservation tests.
+
+The correction pass passed 129 focused tests across 16 explicitly named files, including mandatory O0/O2 sanitizer profiles, C native preservation (17/17) and the ordinary credential-free packed consumer (2/2). Lint, root/private typechecks and builds, audit (zero vulnerabilities), dependency listings, package dry run and diff check pass. No private runtime, dependency, architecture, other todo implementation or graph-depth behavior changed. No additional review or local aggregate suite ran. The coordinator previously verified 24 Noble native executions for the initial candidate; correction verification and exact-head CI/merge remain coordinator-owned.
+
+Per-finding RED/GREEN commands, native compiler diagnostics, all final gate logs and complete current changed-path hashes are retained in `/home/dev/.threadwire/semantifold/task019-cpp-review-repair-20260908T071616Z-repair/repair-result.json`.
