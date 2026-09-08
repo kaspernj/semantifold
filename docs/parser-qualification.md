@@ -30,7 +30,7 @@ All Tree-sitter languages use the official `tree-sitter` Node binding. The langu
 | 017 | C# | official [`tree-sitter/tree-sitter-c-sharp`](https://github.com/tree-sitter/tree-sitter-c-sharp) grammar package | passed for exact `tree-sitter-c-sharp@0.23.5`; see the checked-in record below |
 | 018 | C | official [`tree-sitter/tree-sitter-c`](https://github.com/tree-sitter/tree-sitter-c) grammar package | legacy pair qualified inside the bundled root distribution below; source/target work remains blocked until that packaging correction is reviewed, green, merged, and verified |
 | 019 | C++ | official [`tree-sitter/tree-sitter-cpp`](https://github.com/tree-sitter/tree-sitter-cpp) grammar package | exact 0.23.4 qualified with the existing isolated 0.21.1 runtime; see Task 019 record below |
-| 020 | Rust | official [`tree-sitter/tree-sitter-rust`](https://github.com/tree-sitter/tree-sitter-rust) grammar package | blocked until the exact release record above passes |
+| 020 | Rust | official [`tree-sitter/tree-sitter-rust`](https://github.com/tree-sitter/tree-sitter-rust) grammar package | exact 0.23.1 grammar qualified below and integrated in the existing private 0.21.1 runtime |
 | 022 | Swift | community [`alex-pinkus/tree-sitter-swift`](https://github.com/alex-pinkus/tree-sitter-swift) candidate plus differential `swiftc` checks | candidate only; blocked until exact release and differential record pass |
 | 023 | Kotlin/JVM | community [`fwcd/tree-sitter-kotlin`](https://github.com/fwcd/tree-sitter-kotlin) candidate plus differential `kotlinc` checks | candidate only; blocked until exact release and differential record pass |
 | 024 | Go | official [`tree-sitter/tree-sitter-go`](https://github.com/tree-sitter/tree-sitter-go) grammar package | passed for exact `tree-sitter-go@0.25.0`; see the checked-in record below |
@@ -217,3 +217,43 @@ The initial qualification corpus is now retained verbatim in the repository (the
 | `spec/fixtures/cpp-qualification/corpus-5.cpp` | `a7524580af4881083d2fbf95f9a7b9f940320c2d2c35d3b188094598cca27f59` |
 
 Reproduce exhaustive frozen-edge traversal, coordinate and recovery checks with `npx velocious-test spec/cpp-parser-qualification.spec.js`. The generated Tasks001–004 fixtures are independently accepted by `spec/cpp-cross-language-acceptance.spec.js`; the small grammar probes above qualify CST coverage, not semantic acceptance or native compilation of a complete supported program.
+
+## Task 020 Rust grammar qualification — 2026-09-08
+
+This record precedes all Rust dependency edits. Qualification ran in an isolated scratch package on the canonical Ubuntu 26.04 container as UID/GID 1000:1000, Node v24.18.1 and npm 11.16.0. No repository manifest, lockfile, installed dependency payload, parser boundary or public language registry was changed. That historical grammar gate completed before integration; the subsequent qualified compiler and product contracts are recorded in [Rust](rust.md).
+
+| Evidence | Qualified result |
+| --- | --- |
+| Official registry release | `tree-sitter-rust@0.23.1`, `https://registry.npmjs.org/tree-sitter-rust/-/tree-sitter-rust-0.23.1.tgz`, integrity `sha512-wrMptzUAfbl3DbNrldZveyNM2CWmRw2VvEo2j/855qQbMMz4dlCF+TBwRN/1FL1S6cYvAEAJaCMesGqhocFJhQ==`. The scratch lock matches registry integrity and resolved identity exactly. |
+| Official upstream | [tree-sitter/tree-sitter-rust](https://github.com/tree-sitter/tree-sitter-rust/tree/v0.23.1), lightweight tag `v0.23.1` and npm gitHead both `48eef06e8d806413d9a617f4a3f4d3168c4e5918`. `git ls-remote` returned the tag directly at that commit. Installed LICENSE, grammar, parser/scanner C sources, binding.gyp and Node JavaScript/declaration files matched those seven upstream files byte-for-byte. |
+| License and signatures | MIT, with the license retained in the registry package. Fresh `npm audit signatures` verified six package signatures and one attestation across the installed graph. The Rust grammar advertises a registry signature, no npm attestation; its upstream identity and source bytes were therefore checked independently. |
+| Ordinary isolated graph | Exact Tree-sitter 0.21.1, C 0.23.2, CPP 0.23.4 and Rust 0.23.1 coexist, with node-addon-api 8.9.2 and node-gyp-build 4.8.4. Rust's peer `^0.21.1` is satisfied without override, force, alias, peer bypass or third runtime. Fresh ordinary install and `npm ls --all` passed. Empty user/global configs, fresh cache, public registry and removal of inherited npm configuration/token variables produced default `install-links=false`. |
+| ABI and actual Node API | Grammar ABI 14; the existing binding accepts ABI 13–14. Real ESM import, `setLanguage`, parse, every `child(index)` and `fieldNameForChild(index)` edge passed. Rust provides 273 node-type metadata entries. A strict NodeNext TypeScript consumer passed without casts or skipLibCheck. The binding declaration says absent fields are null, but native calls return undefined; the existing frozen schema already normalizes either absence to null. |
+| Lifecycle and package audit | Native packages declare only `install: node-gyp-build`; the relevant load/install JavaScript has no downloader. npm 11.16.0 reported unapproved install-script notices; actual loading used shipped Linux x64 prebuilds successfully. Source fallback was inspected, not compiled. The dry-run package inventory contains 27 files, 1,295,963 compressed / 14,096,588 unpacked bytes, including MIT license, declarations, native source fallback, platform prebuilds and upstream WASM. No parser archive, binary or vendored source entered this repository. |
+| Complete corpus | The seven checked-in probes below cover Tasks 001–004, all 18 typed operations' source shapes, exact typed free functions and main, initialized mutable/immutable locals, assignment, returns, braced nested/fallthrough/empty branches, direct and nested calls, `String::from`, clones, concatenation borrowing and exact print macro payloads. The support probe includes the candidate overflow methods, tuple/flag locals, exit calls and lint attributes strictly as proposed private support. Those shapes do not authorize arbitrary user tuples, attributes, macros or references. |
+| Traversal and rejection visibility | The accepted probes, six malformed samples and 15 excluded-syntax samples traversed 2,638 nodes (1,450 named / 1,188 anonymous), six extras, three ERROR nodes and three missing nodes. Every ordered child, field, token, node text and index boundary was recorded, including every nested macro token tree. The excluded samples retain references/lifetimes/pointers, patterns, traits/impl/types, modules/use, unsafe/extern, async/closures, const/static, match/loops/ranges/casts/indexing, turbofish, Result/Option/question-mark, panic/assert/unwrap/expect and custom macros for later fail-closed frontend validation. |
+| Coordinates and bounds | Every node boundary round-tripped through the existing UTF-8-byte-to-UTF-16 converter and independently matched native UTF-16 row/column coordinates. `/* 😀 */` plus CRLF places the next definition at UTF-16 10, UTF-8 12, native row 1 / column 0, semantic line 2 / column 1. Raw astral/BMP text, NUL/control/Unicode escapes and nested comments remain visible. Parsing succeeds at 32,767 UTF-16 units and throws `Invalid argument` at 32,768. |
+| Isolation and compiler status | One Node process parsed legacy Rust/C/CPP alongside modern Tree-sitter 0.25.1 / Go successfully. This is an official grammar, so no community-grammar compiler exception applies. At the initial grammar gate rustc/Cargo were absent. Subsequent coordinator no-cache builds qualified Rust/Cargo 1.98.1 on Ubuntu 26.04 and actual TensorBuzz Ubuntu 24.04 (11 crates/93 commands each, network disabled). Public integration now uses that pair and the exact Cargo-generated manifest/lock bytes; focused source/target, compiler differential and local cold-package tests are recorded in [Rust](rust.md). |
+
+| Corpus path | SHA-256 |
+| --- | --- |
+| `spec/fixtures/rust-qualification/base.rs` | `2388b7b1829e00300a7052141936800e5267cb61dba4ca910322434085618236` |
+| `spec/fixtures/rust-qualification/scalars.rs` | `690c59fec3f1f89b1c9ead6698b4395f87a062b98ed5ba4bfa5cc43b212254bb` |
+| `spec/fixtures/rust-qualification/locals.rs` | `9a7c52db338d0edaba8ecdc533c219b04dcbd05eb330c8e4c3c5ab822c788f2b` |
+| `spec/fixtures/rust-qualification/operators.rs` | `f039dc4c11a9f443dacd4a97d877411c49aaf3d7ff88d44147da3ae03fa899f2` |
+| `spec/fixtures/rust-qualification/statements.rs` | `415ef2ea7504108b518483e5c488ffc6c2f71b37bbc5da5e7058f5462f2a7743` |
+| `spec/fixtures/rust-qualification/scaffolds.rs` | `c4b71afd1cb30ec44161cea0dacfa74933110951096a24ac02e7978077e07dd4` |
+| `spec/fixtures/rust-qualification/coordinates.rs` | `57b2a3d893b987c9ca1751f56380039e20f6ca79880c364172dc4f56c5f66822` |
+
+Reproduce the supply-chain gate in an empty scratch package with credential-free public npm configuration:
+
+```sh
+npm install --save-exact tree-sitter@0.21.1 tree-sitter-c@0.23.2 tree-sitter-cpp@0.23.4 tree-sitter-rust@0.23.1
+npm config get install-links
+npm ls --all
+npm audit signatures
+npm pack tree-sitter-rust@0.23.1 --dry-run --json
+git ls-remote https://github.com/tree-sitter/tree-sitter-rust.git refs/tags/v0.23.1 'refs/tags/v0.23.1^{}'
+```
+
+The complete reproducible probe, typed consumer, fresh npm configuration, source comparisons, tree inventories and raw command results are retained under `/home/dev/.threadwire/semantifold/task020-20260908T091900Z-evidence/parser-probe` and its parent evidence directory. `probe.mjs`, `supply-chain.mjs` and `typed-api.mts` are qualification programs outside the shipped package. The first probe correctly failed its assumption that the native field API returned null; the corrected probe records the actual undefined result and the existing schema normalization. That investigation failure is not a production RED test. Focused public Rust specs subsequently recorded RED before runtime integration, source/backend behavior, ownership, tool discovery and generated-depth fixes. The original probe inventories remain unchanged; public integration preserves the same frozen schema and typed Node boundary.

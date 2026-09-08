@@ -5,6 +5,7 @@ import {SemantifoldDiagnostic, unsupportedRole} from "./diagnostic.js"
 import {generateJava} from "./backends/java.js"
 import {generateCSharpProject} from "./backends/csharp.js"
 import {generateGoModule} from "./backends/go.js"
+import {generateRustProject} from "./backends/rust.js"
 import {generateJavaScript} from "./backends/javascript.js"
 import {generatePhp} from "./backends/php.js"
 import {generatePython} from "./backends/python.js"
@@ -13,6 +14,7 @@ import {generateTypeScript} from "./backends/typescript.js"
 import {parseJava} from "./frontends/java.js"
 import {parseCSharp} from "./frontends/csharp.js"
 import {parseGo} from "./frontends/go.js"
+import {parseRust} from "./frontends/rust.js"
 import {parseCpp} from "./frontends/cpp.js"
 import {generateCpp} from "./backends/cpp.js"
 import {parseC} from "./frontends/c.js"
@@ -363,6 +365,11 @@ const records = [
   language({
     acceptance: {stages: ["parse", "generate", "compile", "link", "execute"], toolchains: ["clangpp"]},
     defaultFilename: "program.cpp", frontend: parseCpp, id: "cpp", mediaType: "text/x-c++src", textBackend: generateCpp
+  }),
+  language({
+    acceptance: {stages: ["parse", "generate", "compile", "validate", "execute"], toolchains: ["rustc", "cargo"]},
+    artifactMultiplicity: "multiple",
+    defaultFilename: "src/main.rs", frontend: parseRust, id: "rust", mediaType: "text/x-rust", textBackend: generateRustProject
   })
 ]
 

@@ -29,6 +29,7 @@ RUN apt-get update \
     python3 \
     ripgrep \
     ruby \
+    xz-utils \
   && install -d -m 0755 /etc/apt/keyrings \
   && curl --fail --silent --show-error --location \
     https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
@@ -62,6 +63,39 @@ RUN apt-get update \
   && test "$(readlink -f "$(command -v gofmt)")" = "$(readlink -f "$(go env GOROOT)/bin/gofmt")" \
   && rm -rf /var/lib/apt/lists/*
 
+RUN test "$(dpkg --print-architecture)" = "amd64" \
+  && install -d -m 0755 /tmp/semantifold-rust \
+  && cd /tmp/semantifold-rust \
+  && curl --fail --silent --show-error --location \
+    https://static.rust-lang.org/dist/2026-09-03/rustc-1.98.1-x86_64-unknown-linux-gnu.tar.xz \
+    --output rustc-1.98.1-x86_64-unknown-linux-gnu.tar.xz \
+  && echo 'e974f036b28565f37c0f3bd92ddefa809bee16c04f9dcf07b9ed96e05aaaf7c4  rustc-1.98.1-x86_64-unknown-linux-gnu.tar.xz' | sha256sum --check - \
+  && curl --fail --silent --show-error --location \
+    https://static.rust-lang.org/dist/2026-09-03/rust-std-1.98.1-x86_64-unknown-linux-gnu.tar.xz \
+    --output rust-std-1.98.1-x86_64-unknown-linux-gnu.tar.xz \
+  && echo 'fa3ff450172a16c026944030230c5069947af93c728d9179971d44e5e0cfb561  rust-std-1.98.1-x86_64-unknown-linux-gnu.tar.xz' | sha256sum --check - \
+  && curl --fail --silent --show-error --location \
+    https://static.rust-lang.org/dist/2026-09-03/cargo-1.98.1-x86_64-unknown-linux-gnu.tar.xz \
+    --output cargo-1.98.1-x86_64-unknown-linux-gnu.tar.xz \
+  && echo 'ea1de9f9e23107d97ee2b41a72c552f34064a593da503789218387aee59f3ba4  cargo-1.98.1-x86_64-unknown-linux-gnu.tar.xz' | sha256sum --check - \
+  && for component in rustc rust-std cargo; do \
+    tar -xJf "${component}-1.98.1-x86_64-unknown-linux-gnu.tar.xz" \
+    && "./${component}-1.98.1-x86_64-unknown-linux-gnu/install.sh" --prefix=/opt/rust-1.98.1 --disable-ldconfig \
+    || exit 1; \
+  done \
+  && ln --symbolic /opt/rust-1.98.1/bin/rustc /usr/local/bin/rustc \
+  && ln --symbolic /opt/rust-1.98.1/bin/cargo /usr/local/bin/cargo \
+  && rustc --version --verbose \
+  && cargo --version --verbose \
+  && test "$(rustc --version)" = 'rustc 1.98.1 (48a229cea 2026-09-01)' \
+  && test "$(cargo --version)" = 'cargo 1.98.1 (797e8a9bc 2026-08-05)' \
+  && test "$(rustc --print sysroot)" = '/opt/rust-1.98.1' \
+  && test "$(rustc --version --verbose | sed -n 's/^host: //p')" = 'x86_64-unknown-linux-gnu' \
+  && test "$(cargo --version --verbose | sed -n 's/^host: //p')" = 'x86_64-unknown-linux-gnu' \
+  && test "$(rustc --version --verbose | sed -n 's/^commit-hash: //p')" = '48a229ceaefd4985c50990b14116b6d856af0985' \
+  && test "$(cargo --version --verbose | sed -n 's/^commit-hash: //p')" = '797e8a9bca276c1c9f9f738d2a20f484fa4eea9d' \
+  && rm -rf /tmp/semantifold-rust
+
 RUN test "$(id -u ubuntu)" = "1000" \
   && test "$(id -g ubuntu)" = "1000" \
   && usermod --login dev --home /home/dev --move-home ubuntu \
@@ -84,10 +118,6 @@ WORKDIR /home/dev/semantifold
 RUN command -v opencode \
   && opencode --version \
   && command -v codex \
-  && codex --version \
-  && command -v claude \
-  && claude --version \
-  && command -v kimi \
-  && kimi --version
+  && codex --version
 
 CMD ["sleep", "infinity"]

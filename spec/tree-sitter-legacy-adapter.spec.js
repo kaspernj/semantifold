@@ -64,7 +64,7 @@ describe("legacy Tree-sitter adapter", () => {
     ), "utf8")
     const declarationsWithoutComments = declarations.replace(/\/\*[\s\S]*?\*\//gu, "")
 
-    expect(declarations).toContain('export declare function parseCst(source: string, language?: "c" | "cpp"): CstSnapshot')
+    expect(declarations).toContain('export declare function parseCst(source: string, language?: "c" | "cpp" | "rust"): CstSnapshot')
     expect(declarationsWithoutComments).not.toMatch(
       /(?:from|import\()["']tree-sitter|SyntaxNode|\bParser\b|\bTree\b|\bLanguage\b/u
     )

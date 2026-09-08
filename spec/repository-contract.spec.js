@@ -12,12 +12,7 @@ const matchingGofmtReadback = 'test "$(readlink -f "$(command -v gofmt)")" = ' +
 const providerPackages = Object.freeze([
   "opencode-ai", "@openai/codex", "@anthropic-ai/claude-code", "@moonshot-ai/kimi-code"
 ])
-const providerExecutables = /** @type {Readonly<Record<string, string>>} */ (Object.freeze({
-  "@anthropic-ai/claude-code": "claude",
-  "@moonshot-ai/kimi-code": "kimi",
-  "@openai/codex": "codex",
-  "opencode-ai": "opencode"
-}))
+const activeProviderExecutables = Object.freeze(["codex", "opencode"])
 const internalLegacyPackage = "semantifold-tree-sitter-legacy-internal"
 const retiredLegacyPackage = "@kaspernj/semantifold-tree-sitter-legacy"
 
@@ -63,6 +58,7 @@ describe("repository delivery contracts", () => {
       "tree-sitter": "0.21.1",
       "tree-sitter-c": "0.23.2",
       "tree-sitter-cpp": "0.23.4",
+      "tree-sitter-rust": "0.23.1",
       typescript: "^7.0.0"
     })
     expect(workspaceConfig.compilerOptions.rootDir).toEqual("runtime/src")
@@ -72,7 +68,7 @@ describe("repository delivery contracts", () => {
     expect(internalManifest.main).toEqual("./src/c.js")
     expect(internalManifest.publishConfig).toEqual(undefined)
     expect(internalManifest.files).toEqual(["src/c.js", "LICENSE", "README.md"])
-    expect(internalManifest.dependencies).toEqual({"tree-sitter": "0.21.1", "tree-sitter-c": "0.23.2", "tree-sitter-cpp": "0.23.4"})
+    expect(internalManifest.dependencies).toEqual({"tree-sitter": "0.21.1", "tree-sitter-c": "0.23.2", "tree-sitter-cpp": "0.23.4", "tree-sitter-rust": "0.23.1"})
     expect(internalManifest.bundleDependencies).toEqual(undefined)
     expect(lockfile.packages[`node_modules/${workspaceManifest.name}`]).toEqual({
       link: true, resolved: "packages/tree-sitter-legacy"
@@ -88,6 +84,7 @@ describe("repository delivery contracts", () => {
     expect(lockfile.packages[`node_modules/${internalLegacyPackage}/node_modules/tree-sitter`].version).toEqual("0.21.1")
     expect(lockfile.packages[`node_modules/${internalLegacyPackage}/node_modules/tree-sitter-c`].version).toEqual("0.23.2")
     expect(lockfile.packages[`node_modules/${internalLegacyPackage}/node_modules/tree-sitter-cpp`].version).toEqual("0.23.4")
+    expect(lockfile.packages[`node_modules/${internalLegacyPackage}/node_modules/tree-sitter-rust`].version).toEqual("0.23.1")
     expect(buildCommands.includes("npm ls --all")).toBeTrue()
     expect(buildCommands.filter((command) => command == rootPack)).toEqual([rootPack])
     expect(buildCommands.some((command) => command.includes("--workspace") && command.includes("npm pack"))).toBeFalse()
@@ -184,7 +181,7 @@ describe("repository delivery contracts", () => {
       'test -r "$(clang++-21 -print-file-name=libstdc++.so)"', "dpkg-query -W libstdc++-13-dev"]) {
       assert.ok(config.before_install.includes(probe), probe)
     }
-    expect(config.builds.end_to_end.name).toEqual("Ten-language end-to-end tests with C and CPP O0/O2 and sanitizers")
+    expect(config.builds.end_to_end.name).toEqual("Eleven-language tests with Rust debug/release and C/CPP O0/O2 sanitizers")
     await assert.rejects(access(new URL("../.github/workflows", import.meta.url)))
   })
 
@@ -225,7 +222,7 @@ describe("repository delivery contracts", () => {
     assert.ok(instructions.some((instruction) => instruction.getKeyword() == "WORKDIR" && instruction.getArgumentsContent() == "/home/dev/semantifold"))
   })
 
-  it("installs and documents the four native provider CLIs before probing them as the development user", async () => {
+  it("installs four native provider CLIs and probes only active routes as the development user", async () => {
     const [source, packageJson, packageLock, repositoryInstructions] = await Promise.all([
       readFile(new URL("../Dockerfile", import.meta.url), "utf8"),
       readFile(new URL("../package.json", import.meta.url), "utf8").then(JSON.parse),
@@ -259,11 +256,11 @@ describe("repository delivery contracts", () => {
       instruction.getKeyword() == "USER" && instruction.getArgumentsContent() == "dev")
     const homeIndex = instructions.findIndex((instruction) =>
       instruction.getKeyword() == "ENV" && instruction.getArgumentsContent() == "HOME=/home/dev")
-    const probe = runs.find(({arguments: command}) => providerPackages.every((packageName) => {
-      const executable = providerExecutables[packageName]
+    const probe = runs.find(({arguments: command}) => activeProviderExecutables.every((executable) =>
+      command.includes(`command -v ${executable}`) && command.includes(`${executable} --version`)))
 
-      return command.includes(`command -v ${executable}`) && command.includes(`${executable} --version`)
-    }))
+    assert.doesNotMatch(runs.map(({arguments: command}) => command).join("\n"),
+      /command -v (?:claude|kimi)|\b(?:claude|kimi) --version/u)
 
     assert.ok(identity)
     for (const command of [
