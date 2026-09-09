@@ -1,5 +1,25 @@
 # Testing
 
+## Task 025 core expanded-language acceptance
+
+Task 025 uses two data-driven focused specs instead of duplicating the eight owning language suites. `spec/core-language-baseline-acceptance.spec.js` normalizes all five Tasks 001–004 profiles for Python, C#, C, C++, Rust, Swift, Kotlin/JVM, and Go; generates, reparses, and really executes one operator round trip per language; runs the eleven-path spanning matrix documented in [language support](language-support.md#task-025-core-expanded-language-acceptance); checks deterministic artifact bytes/mappings/provenance; and asserts the public registry contract. Its ordered program checks eager left-before-right calls and both short-circuit sides. C and C++ run the exact ordered-region source at O0/O2 with and without sanitizers, Rust runs debug/release, and Swift runs debug/`-O`.
+
+`spec/core-language-baseline-diagnostics.spec.js` is the shared fail-loud corpus. It checks located frontend rejection for parser recovery, missing types, truthiness, mixed numeric/Boolean equality, overflow, dynamic calls, reflection, exceptions, and concurrency. Every expanded backend rejects illegal names, malformed Tasks 001–004 IR, Task 005 arity, and unsupported roles; every bounded expanded backend also rejects compile-time-known overflow transactionally. Unknown IDs remain `UNSUPPORTED_LANGUAGE`. The focused Swift frontend spec separately locks the parser-backed trailing-call additive normalization found by this acceptance gate.
+
+Run these files one at a time. Tool discovery must resolve the exact identities documented by the owning language tasks; overrides name existing executables and never install or download a compiler:
+
+```sh
+export LANG=C.UTF-8 LC_ALL=C.UTF-8
+export SEMANTIFOLD_CLANG=/usr/bin/clang-21
+export SEMANTIFOLD_CLANGPP=/usr/bin/clang++-21
+export SEMANTIFOLD_KOTLINC=/opt/kotlinc/bin/kotlinc
+npx velocious-test spec/core-language-baseline-diagnostics.spec.js
+npx velocious-test spec/core-language-baseline-acceptance.spec.js
+npx velocious-test spec/swift-frontend-validation.spec.js
+```
+
+The required real tools are Python 3.14.x, .NET SDK 10, Clang/Clang++ 21.1.8 for x86_64 Linux, Rust/Cargo 1.98.1, Swift 6.3.3 for x86_64 Linux, Kotlin 2.4.20 with OpenJDK 25.0.4, and Go 1.26.x for Linux/amd64. Generated inputs are dependency-free and use isolated temporary directories and offline/local modes where the owning toolchain requires them. Missing, mismatched, non-executable, or unavailable commands fail; no test skips or fetches a replacement. Task 025 does not run Wasm, mobile, Objective-C, Dart/Flutter, Zig, Tasks 005+, benchmarks, or an all-pairs matrix.
+
 ## Task 021 browser WebAssembly qualification
 
 Browser Wasm has three mandatory real execution lanes. Every canonical Tasks 001–004 fixture is encoded directly, validated by WABT `wasm-validate` 1.0.36, instantiated/executed by the configured Node 24 command using the standard WebAssembly API, and loaded by Chrome/Chromium 152.0.7977.82 from a materialized loopback HTTP directory. Missing tools, unsupported versions, bad MIME, CSP failure, browser timeout, nonzero exit, or output mismatch fail without a skip. The production backend never invokes WABT and the tests never compile WAT.

@@ -291,7 +291,7 @@ class SwiftReader {
   }
 
   /**
-   * Converts a direct semantic call, including the grammar's qualified negated-call shape.
+   * Converts a direct semantic call, including qualified negated-call and trailing-call binary shapes.
    * @param {import("tree-sitter").SyntaxNode} node - Call node.
    * @returns {import("../semantic/types.js").Expression} Semantic expression.
    */
@@ -300,14 +300,38 @@ class SwiftReader {
     const parts = this.parts(node)
 
     if (node.type != "call_expression" || parts.length != 2) this.fail(node, "direct call shape")
+    const target = parts[0]
     const suffix = parts[1]
+
+    if (binaryNodeOperators.has(target.type)) {
+      const right = this.field(target, "rhs")
+      const callLocation = locationFromOffsets(this.filename, this.source,
+        bindingIndexToUtf16Offset(this.source, right.startIndex), bindingIndexToUtf16Offset(this.source, suffix.endIndex))
+
+      if (right.type != "simple_identifier") this.fail(node, "trailing direct call shape")
+      this.shape(node, [target, suffix])
+
+      return this.binary(target, undefined, location, this.callParts(right, suffix, callLocation))
+    }
+
+    return this.callParts(target, suffix, location)
+  }
+
+  /**
+   * Converts one direct call from its parser target and suffix.
+   * @param {import("tree-sitter").SyntaxNode} target - Direct call target.
+   * @param {import("tree-sitter").SyntaxNode} suffix - Argument suffix.
+   * @param {import("../semantic/types.js").SourceLocation} location - Complete call location.
+   * @returns {import("../semantic/types.js").Expression} Semantic call or prefixed call.
+   */
+  callParts(target, suffix, location) {
     const argumentNodes = this.arguments(suffix)
-    let nameNode = parts[0]
+    let nameNode = target
     /** @type {import("tree-sitter").SyntaxNode | undefined} */
     let unaryOperator
 
     if (["!", "-"].includes(nameNode.text)) {
-      if (argumentNodes.length != 1) this.fail(node, "parenthesized unary expression shape")
+      if (argumentNodes.length != 1) this.fail(target, "parenthesized unary expression shape")
       const expression = this.expression(argumentNodes[0])
 
       return /** @type {import("../semantic/types.js").Expression} */ (/** @type {unknown} */ (withAdaptedOperation(withParserRanges({
@@ -328,7 +352,7 @@ class SwiftReader {
     const helperOperation = this.helpers.has(name) ? helperOperations.get(name) : undefined
 
     if (helperOperation) {
-      if (unaryOperator || argumentNodes.length != 2) this.fail(node, "Swift scalar equality helper shape")
+      if (unaryOperator || argumentNodes.length != 2) this.fail(target, "Swift scalar equality helper shape")
       return /** @type {import("../semantic/types.js").Expression} */ (withAdaptedOperation(withParserRanges({
         kind: "BinaryExpression", left: this.expression(argumentNodes[0]), location, right: this.expression(argumentNodes[1])
       }, {operator: this.location(nameNode)}), helperOperation))
@@ -426,9 +450,10 @@ class SwiftReader {
    * @param {import("tree-sitter").SyntaxNode} node - Binary node.
    * @param {import("../semantic/types.js").Expression} [leftExpression] - Adapted left operand.
    * @param {import("../semantic/types.js").SourceLocation} [location] - Adapted expression range.
+   * @param {import("../semantic/types.js").Expression} [rightExpression] - Adapted trailing-call right operand.
    * @returns {import("../semantic/types.js").Expression} Semantic expression.
    */
-  binary(node, leftExpression, location = this.location(node)) {
+  binary(node, leftExpression, location = this.location(node), rightExpression) {
     const acceptedOperators = binaryNodeOperators.get(node.type)
     const left = this.field(node, "lhs")
     const operator = this.field(node, "op")
@@ -438,7 +463,7 @@ class SwiftReader {
     this.shape(node, [left, operator, right])
     if (!acceptedOperators?.has(operator.text) || !operation) this.fail(operator, "unsupported binary operator")
     const expression = /** @type {import("../semantic/types.js").Expression} */ (/** @type {unknown} */ (withAdaptedOperation(withParserRanges({
-      kind: "BinaryExpression", left: leftExpression ?? this.expression(left), location, right: this.expression(right)
+      kind: "BinaryExpression", left: leftExpression ?? this.expression(left), location, right: rightExpression ?? this.expression(right)
     }, {operator: this.location(operator)}), /** @type {import("../semantic/operators.js").AdaptedOperation} */ (operation))))
 
     if (["==", "!="].includes(operator.text)) this.nativeEqualityOperators.set(expression, operator)

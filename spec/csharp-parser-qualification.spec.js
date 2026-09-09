@@ -8,7 +8,7 @@ import Parser from "tree-sitter"
 import CSharpLanguage from "tree-sitter-c-sharp/bindings/node/index.js"
 
 const fixtures = [
-  ["fixtures/Program.cs", "5ca661d09dff2d775094df99b40e5c5604796c9bff4c32c1da11fa1b4c564a00"],
+  ["fixtures/Program.cs", "a395bda51d7cd7713165da2d4477127f5d9c0b8ceef0cb7094d7baa9c37518b6"],
   ["fixtures/scalars/Program.cs", "9cefd6d01c5855480629829489945f2f43338b84879c7a26043963151a8439da"],
   ["fixtures/locals/Program.cs", "ee775fea59ee812212ce325152e4e4cb79c20e699aba081bf39cc698b324444d"],
   ["fixtures/operators/Program.cs", "7137f4acc88dbdc1d0bafd6bb8eb57bed9386daf3e6b11c6fbae3831abceae18"],
