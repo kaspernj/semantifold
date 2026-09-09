@@ -29,7 +29,7 @@ export async function executeSwift(module, options = {}) {
 export async function executeSwiftArtifacts(set, {label = "program", swiftc} = {}) {
   const compiler = swiftc ?? await discoverCanonicalToolchain("swiftc")
   const directory = await mkdtemp(path.join(os.tmpdir(), "semantifold-swift-"))
-  const compilerPath = [path.dirname(compiler.executable), ...(process.env.PATH ?? "").split(path.delimiter)]
+  const compilerPath = [path.dirname(compiler.executable), "/usr/bin", ...(process.env.PATH ?? "").split(path.delimiter)]
   const environment = deterministicEnvironment({PATH: [...new Set(compilerPath.filter((entry) => entry.length > 0))].join(path.delimiter)})
   const commands = []
   const invoke = (stage, arguments_) => {
