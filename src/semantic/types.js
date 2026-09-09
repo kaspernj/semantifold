@@ -1,7 +1,8 @@
 // @ts-check
 
-/** @typedef {"php" | "ruby" | "javascript" | "typescript" | "java" | "python" | "csharp" | "go" | "c" | "cpp" | "rust"} SemanticLanguage */
-/** @typedef {SemanticLanguage | "wasm"} BackendLanguage */
+/** @typedef {"php" | "ruby" | "javascript" | "typescript" | "java" | "python" | "csharp" | "go" | "c" | "cpp" | "rust" | "swift"} SemanticLanguage */
+/** @typedef {SemanticLanguage} TextBackendLanguage */
+/** @typedef {TextBackendLanguage | "wasm"} BackendLanguage */
 /** @typedef {SemanticLanguage | "html"} GeneratedTextLanguage */
 /** @typedef {"integer" | "boolean" | "string"} SemanticTypeName */
 /** @typedef {"IntegerNegate" | "BooleanNot"} SemanticUnaryOperation */

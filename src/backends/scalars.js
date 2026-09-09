@@ -1,7 +1,8 @@
 // @ts-check
 
-/** @type {Readonly<Record<import("../semantic/types.js").SemanticLanguage, Readonly<Record<import("../semantic/types.js").SemanticTypeName, string>>>>} */
+/** @type {Readonly<Record<import("../semantic/types.js").TextBackendLanguage, Readonly<Record<import("../semantic/types.js").SemanticTypeName, string>>>>} */
 const targetScalarTypes = Object.freeze({
+  swift: Object.freeze({boolean: "Bool", integer: "Int64", string: "String"}),
   rust: Object.freeze({boolean: "bool", integer: "i64", string: "String"}),
   cpp: Object.freeze({boolean: "bool", integer: "std::int64_t", string: "std::string"}),
   c: Object.freeze({boolean: "bool", integer: "int64_t", string: "SemantifoldString"}),
@@ -17,7 +18,7 @@ const targetScalarTypes = Object.freeze({
 
 /**
  * Emits one target-language scalar type spelling.
- * @param {import("../semantic/types.js").SemanticLanguage} language - Target language.
+ * @param {import("../semantic/types.js").TextBackendLanguage} language - Target language.
  * @param {import("../semantic/types.js").TypeReference} type - Semantic scalar type.
  * @returns {string} Target type spelling.
  */
@@ -27,11 +28,12 @@ export function emitScalarType(language, type) {
 
 /**
  * Emits a safely escaped target-language string literal.
- * @param {import("../semantic/types.js").SemanticLanguage} language - Target language.
+ * @param {import("../semantic/types.js").TextBackendLanguage} language - Target language.
  * @param {string} value - Valid Unicode scalar string.
  * @returns {string} Target string literal.
  */
 export function emitStringLiteral(language, value) {
+  if (language == "swift") return emitSwiftString(value)
   if (language == "php") return emitPhpString(value)
   if (language == "ruby") return emitRubyString(value)
   if (language == "java") return emitJavaString(value)
@@ -43,6 +45,30 @@ export function emitStringLiteral(language, value) {
   const escapedLineSeparators = literal.replaceAll("\u2028", "\\u2028").replaceAll("\u2029", "\\u2029")
 
   return language == "csharp" ? escapedLineSeparators.replaceAll("\u0085", "\\u0085") : escapedLineSeparators
+}
+
+/**
+ * Emits one noninterpolated Swift string over Unicode scalar values.
+ * @param {string} value - Valid Unicode scalar string.
+ * @returns {string} Swift string literal.
+ */
+function emitSwiftString(value) {
+  let emitted = "\""
+
+  for (const character of value) {
+    const codePoint = /** @type {number} */ (character.codePointAt(0))
+
+    if (character == "\"") emitted += "\\\""
+    else if (character == "\\") emitted += "\\\\"
+    else if (character == "\n") emitted += "\\n"
+    else if (character == "\r") emitted += "\\r"
+    else if (character == "\t") emitted += "\\t"
+    else if (codePoint < 32 || codePoint == 127 || codePoint == 0x85 || codePoint == 0x2028 || codePoint == 0x2029) {
+      emitted += `\\u{${codePoint.toString(16)}}`
+    } else emitted += character
+  }
+
+  return `${emitted}"`
 }
 
 /**

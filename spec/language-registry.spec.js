@@ -13,7 +13,7 @@ import {createLanguageRegistry} from "../src/language-registry.js"
 
 const originalFive = ["php", "ruby", "javascript", "typescript", "java"]
 const originalSix = [...originalFive, "python"]
-const allLanguages = [...originalSix, "csharp", "go", "c", "cpp", "rust"]
+const allLanguages = [...originalSix, "csharp", "go", "c", "cpp", "rust", "swift"]
 const allTargets = [...allLanguages, "wasm"]
 
 describe("language role registry", () => {

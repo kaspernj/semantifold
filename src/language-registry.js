@@ -6,6 +6,7 @@ import {generateJava} from "./backends/java.js"
 import {generateCSharpProject} from "./backends/csharp.js"
 import {generateGoModule} from "./backends/go.js"
 import {generateRustProject} from "./backends/rust.js"
+import {generateSwift} from "./backends/swift.js"
 import {generateJavaScript} from "./backends/javascript.js"
 import {generatePhp} from "./backends/php.js"
 import {generatePython} from "./backends/python.js"
@@ -16,6 +17,7 @@ import {parseJava} from "./frontends/java.js"
 import {parseCSharp} from "./frontends/csharp.js"
 import {parseGo} from "./frontends/go.js"
 import {parseRust} from "./frontends/rust.js"
+import {parseSwift} from "./frontends/swift.js"
 import {parseCpp} from "./frontends/cpp.js"
 import {generateCpp} from "./backends/cpp.js"
 import {parseC} from "./frontends/c.js"
@@ -372,6 +374,8 @@ const records = [
     artifactMultiplicity: "multiple",
     defaultFilename: "src/main.rs", frontend: parseRust, id: "rust", mediaType: "text/x-rust", textBackend: generateRustProject
   }),
+  language({acceptance: {stages: ["parse", "generate", "compile", "execute"], toolchains: ["swiftc"]},
+    defaultFilename: "program.swift", frontend: parseSwift, id: "swift", mediaType: "text/x-swift", textBackend: generateSwift}),
   {
     acceptance: {stages: ["generate", "validate", "instantiate", "execute"], toolchains: ["wasm-validate", "node", "chromium"]},
     applicationBackend: generateBrowserWasm,

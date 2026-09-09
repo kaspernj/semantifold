@@ -8,7 +8,7 @@ before_install:
   - sudo ln --symbolic --force /usr/local/go/bin/go /usr/local/bin/go
   - sudo ln --symbolic --force /usr/local/go/bin/gofmt /usr/local/bin/gofmt
   - sudo apt-get update
-  - sudo apt-get install --yes --no-install-recommends php-cli python3 ruby default-jdk-headless dotnet-sdk-10.0 ca-certificates curl gnupg g++-13 xz-utils build-essential
+  - sudo apt-get install --yes --no-install-recommends php-cli python3 ruby default-jdk-headless dotnet-sdk-10.0 ca-certificates curl gnupg g++-13 xz-utils build-essential libncurses6 libxml2-dev
   - curl --fail --silent --show-error --location https://archive.ubuntu.com/ubuntu/pool/universe/w/wabt/wabt_1.0.36+dfsg+~cs1.0.36-2ubuntu1_amd64.deb --output /tmp/wabt_1.0.36+dfsg+~cs1.0.36-2ubuntu1_amd64.deb
   - printf '%s  %s\n' 'febaa4935e2982d83b21c75938773f226fa8bf22145f6a3bee25da9e98b0273b' '/tmp/wabt_1.0.36+dfsg+~cs1.0.36-2ubuntu1_amd64.deb' | sha256sum --check -
   - curl --fail --silent --show-error --location https://dl.google.com/linux/chrome/deb/pool/main/g/google-chrome-stable/google-chrome-stable_152.0.7977.82-1_amd64.deb --output /tmp/google-chrome-stable_152.0.7977.82-1_amd64.deb
@@ -20,11 +20,11 @@ before_install:
     test "$(dpkg --print-architecture)" = "amd64"
     install -d -m 0755 /tmp/semantifold-rust
     cd /tmp/semantifold-rust
-    curl --fail --silent --show-error --location https://static.rust-lang.org/dist/2026-09-03/rustc-1.98.1-x86_64-unknown-linux-gnu.tar.xz --output rustc-1.98.1-x86_64-unknown-linux-gnu.tar.xz
+    curl --fail --silent --show-error --location --retry 5 --retry-delay 5 --retry-all-errors https://static.rust-lang.org/dist/2026-09-03/rustc-1.98.1-x86_64-unknown-linux-gnu.tar.xz --output rustc-1.98.1-x86_64-unknown-linux-gnu.tar.xz
     echo 'e974f036b28565f37c0f3bd92ddefa809bee16c04f9dcf07b9ed96e05aaaf7c4  rustc-1.98.1-x86_64-unknown-linux-gnu.tar.xz' | sha256sum --check -
-    curl --fail --silent --show-error --location https://static.rust-lang.org/dist/2026-09-03/rust-std-1.98.1-x86_64-unknown-linux-gnu.tar.xz --output rust-std-1.98.1-x86_64-unknown-linux-gnu.tar.xz
+    curl --fail --silent --show-error --location --retry 5 --retry-delay 5 --retry-all-errors https://static.rust-lang.org/dist/2026-09-03/rust-std-1.98.1-x86_64-unknown-linux-gnu.tar.xz --output rust-std-1.98.1-x86_64-unknown-linux-gnu.tar.xz
     echo 'fa3ff450172a16c026944030230c5069947af93c728d9179971d44e5e0cfb561  rust-std-1.98.1-x86_64-unknown-linux-gnu.tar.xz' | sha256sum --check -
-    curl --fail --silent --show-error --location https://static.rust-lang.org/dist/2026-09-03/cargo-1.98.1-x86_64-unknown-linux-gnu.tar.xz --output cargo-1.98.1-x86_64-unknown-linux-gnu.tar.xz
+    curl --fail --silent --show-error --location --retry 5 --retry-delay 5 --retry-all-errors https://static.rust-lang.org/dist/2026-09-03/cargo-1.98.1-x86_64-unknown-linux-gnu.tar.xz --output cargo-1.98.1-x86_64-unknown-linux-gnu.tar.xz
     echo 'ea1de9f9e23107d97ee2b41a72c552f34064a593da503789218387aee59f3ba4  cargo-1.98.1-x86_64-unknown-linux-gnu.tar.xz' | sha256sum --check -
     for component in rustc rust-std cargo; do
       tar -xJf "${component}-1.98.1-x86_64-unknown-linux-gnu.tar.xz"
@@ -43,6 +43,38 @@ before_install:
     test "$(cargo --version --verbose | sed -n 's/^commit-hash: //p')" = '797e8a9bca276c1c9f9f738d2a20f484fa4eea9d'
     rm -rf /tmp/semantifold-rust
     RUST_TOOLCHAIN
+  - |
+    sudo sh -eu <<'SWIFT_TOOLCHAIN'
+    SWIFT_KEY=/tmp/release-key-swift-6.x.asc
+    SWIFT_ARCHIVE=/tmp/swift-6.3.3-RELEASE-ubuntu24.04.tar.gz
+    SWIFT_SIGNATURE="$SWIFT_ARCHIVE.sig"
+    SWIFT_PROBE=/tmp/semantifold-swift-smoke.swift
+    SWIFT_DEBUG=/tmp/semantifold-swift-smoke-debug
+    SWIFT_OPTIMIZED=/tmp/semantifold-swift-smoke-optimized
+    GNUPGHOME="$(mktemp -d)"
+    export GNUPGHOME
+    trap 'rm -rf "$GNUPGHOME" "$SWIFT_KEY" "$SWIFT_ARCHIVE" "$SWIFT_SIGNATURE" "$SWIFT_PROBE" "$SWIFT_DEBUG" "$SWIFT_OPTIMIZED"' EXIT
+    curl --fail --silent --show-error --location --compressed https://swift.org/keys/release-key-swift-6.x.asc --output "$SWIFT_KEY"
+    printf '%s  %s\n' 'e8090b06c98b598e968193749db403c06f40c4186771ed87d916081c43de2f5b' "$SWIFT_KEY" | sha256sum --check -
+    gpg --batch --homedir "$GNUPGHOME" --import "$SWIFT_KEY"
+    test "$(gpg --batch --homedir "$GNUPGHOME" --with-colons --list-keys | awk -F: '$1 == "fpr" { print $10 }' | wc -l)" = 1
+    test "$(gpg --batch --homedir "$GNUPGHOME" --with-colons --list-keys | awk -F: '$1 == "fpr" { print $10 }')" = 52BB7E3DE28A71BE22EC05FFEF80A866B47A981F
+    curl --fail --silent --show-error --location https://download.swift.org/swift-6.3.3-release/ubuntu2404/swift-6.3.3-RELEASE/swift-6.3.3-RELEASE-ubuntu24.04.tar.gz --output "$SWIFT_ARCHIVE"
+    curl --fail --silent --show-error --location https://download.swift.org/swift-6.3.3-release/ubuntu2404/swift-6.3.3-RELEASE/swift-6.3.3-RELEASE-ubuntu24.04.tar.gz.sig --output "$SWIFT_SIGNATURE"
+    gpg --batch --homedir "$GNUPGHOME" --verify "$SWIFT_SIGNATURE" "$SWIFT_ARCHIVE"
+    printf '%s  %s\n' 'da8272a5fddccd65b1529ed0e52e04526e2eadd4237d58d6220efeb973c6cd19' "$SWIFT_ARCHIVE" | sha256sum --check -
+    tar -xzf "$SWIFT_ARCHIVE" -C /opt
+    export PATH="/opt/swift-6.3.3-RELEASE-ubuntu24.04/usr/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    test "$(command -v clang)" = "/opt/swift-6.3.3-RELEASE-ubuntu24.04/usr/bin/clang"
+    /opt/swift-6.3.3-RELEASE-ubuntu24.04/usr/bin/swiftc --version
+    test "$(/opt/swift-6.3.3-RELEASE-ubuntu24.04/usr/bin/swiftc --version | sed -n '1p')" = 'Swift version 6.3.3 (swift-6.3.3-RELEASE)'
+    test "$(/opt/swift-6.3.3-RELEASE-ubuntu24.04/usr/bin/swiftc --version | sed -n '2p')" = 'Target: x86_64-unknown-linux-gnu'
+    printf '%s\n' 'print(5)' > "$SWIFT_PROBE"
+    /opt/swift-6.3.3-RELEASE-ubuntu24.04/usr/bin/swiftc -warnings-as-errors "$SWIFT_PROBE" -o "$SWIFT_DEBUG"
+    test "$("$SWIFT_DEBUG")" = 5
+    /opt/swift-6.3.3-RELEASE-ubuntu24.04/usr/bin/swiftc -warnings-as-errors -O "$SWIFT_PROBE" -o "$SWIFT_OPTIMIZED"
+    test "$("$SWIFT_OPTIMIZED")" = 5
+    SWIFT_TOOLCHAIN
   - curl --fail --silent --show-error --location https://apt.llvm.org/llvm-snapshot.gpg.key --output /tmp/semantifold-llvm.asc
   - printf '%s  %s\n' '8b2a587ffd672c4687e7581dad4b2f6c1bb2ad6b480cd9771ba2ff48e0b8c75d' '/tmp/semantifold-llvm.asc' | sha256sum --check -
   - sudo install -D -m 0644 /tmp/semantifold-llvm.asc /etc/apt/keyrings/llvm.asc
@@ -91,6 +123,7 @@ environment:
   SEMANTIFOLD_PYTHON: /usr/bin/python3
   SEMANTIFOLD_DOTNET: /usr/bin/dotnet
   SEMANTIFOLD_GO: /usr/local/bin/go
+  SEMANTIFOLD_SWIFTC: /opt/swift-6.3.3-RELEASE-ubuntu24.04/usr/bin/swiftc
   SEMANTIFOLD_CLANG: /usr/bin/clang-21
   SEMANTIFOLD_CLANGPP: /usr/bin/clang++-21
   SEMANTIFOLD_RUSTC: /usr/local/bin/rustc
@@ -109,6 +142,6 @@ builds:
       - npm ls --all
       - npm pack --dry-run --json
   end_to_end:
-    name: Eleven-language tests with Rust debug/release and C/CPP O0/O2 sanitizers
+    name: Twelve-language tests with Rust debug/release and C/CPP O0/O2 sanitizers
     script:
       - LANG=C.UTF-8 LC_ALL=C.UTF-8 npm test

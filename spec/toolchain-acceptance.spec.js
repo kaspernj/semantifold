@@ -1321,7 +1321,7 @@ printf 'executed\n'
     const java = await discoverCanonicalToolchain("java")
     const python = await discoverCanonicalToolchain("python")
 
-    expect(Object.keys(canonicalToolchains)).toEqual(["php", "ruby", "node", "tsc", "javac", "java", "python", "dotnet", "go", "clangpp", "clang", "rustc", "cargo", "wasm-validate", "chromium"])
+    expect(Object.keys(canonicalToolchains)).toEqual(["php", "ruby", "node", "tsc", "javac", "java", "python", "dotnet", "go", "clangpp", "clang", "rustc", "cargo", "swiftc", "wasm-validate", "chromium"])
     await runProgram("php", "program.php", "<?php\necho \"ok\\n\";\n", [{arguments: ["program.php"], stage: "execute", tool: php}])
     await runProgram("ruby", "program.rb", "puts \"ok\"\n", [{arguments: ["program.rb"], stage: "execute", tool: ruby}])
     await runProgram("javascript", "program.js", "console.log(\"ok\")\n", [{arguments: ["program.js"], stage: "execute", tool: node}])

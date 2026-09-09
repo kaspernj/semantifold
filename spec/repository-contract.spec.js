@@ -10,6 +10,10 @@ const {DockerfileParser} = DockerfileAst
 const matchingGofmtReadback = 'test "$(readlink -f "$(command -v gofmt)")" = ' +
   '"$(readlink -f "$(go env GOROOT)/bin/gofmt")"'
 const chromiumVersionProbe = `test "$(chromium --version | sed 's/ $//')" = "Google Chrome 152.0.7977.82"`
+const swiftKeyUrl = "https://swift.org/keys/release-key-swift-6.x.asc"
+const swiftArchiveUrl = "https://download.swift.org/swift-6.3.3-release/ubuntu2404/swift-6.3.3-RELEASE/swift-6.3.3-RELEASE-ubuntu24.04.tar.gz"
+const swiftExecutable = "/opt/swift-6.3.3-RELEASE-ubuntu24.04/usr/bin/swiftc"
+const swiftToolchainPath = "/opt/swift-6.3.3-RELEASE-ubuntu24.04/usr/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 const providerPackages = Object.freeze([
   "opencode-ai", "@openai/codex", "@anthropic-ai/claude-code", "@moonshot-ai/kimi-code"
 ])
@@ -141,6 +145,8 @@ describe("repository delivery contracts", () => {
     expect(config.environment.SEMANTIFOLD_PYTHON).toEqual("/usr/bin/python3")
     expect(config.environment.SEMANTIFOLD_DOTNET).toEqual("/usr/bin/dotnet")
     expect(config.environment.SEMANTIFOLD_GO).toEqual("/usr/local/bin/go")
+    expect(config.environment.SEMANTIFOLD_SWIFTC).toEqual(swiftExecutable)
+    expect(config.environment.PATH).toEqual(undefined)
     expect(config.environment.SEMANTIFOLD_CLANG).toEqual("/usr/bin/clang-21")
     for (const pin of ["clang-21=1:21.1.8~++20251221032922+2078da43e25a-1~exp1~20251221153059.70", "libclang-rt-21-dev=1:21.1.8~++20251221032922+2078da43e25a-1~exp1~20251221153059.70"]) assert.ok(beforeInstall.includes(pin))
     for (const probe of ["clang-21 --version", "clang-21 -dumpmachine", "clang-21 -print-resource-dir",
@@ -150,6 +156,36 @@ describe("repository delivery contracts", () => {
     assert.deepEqual(config.before_install.filter((command) => goCommands.includes(command)), goCommands)
     assert.match(beforeInstall, /php-cli python3 ruby default-jdk-headless/u)
     assert.match(beforeInstall, /dotnet-sdk-10\.0/u)
+    assert.match(beforeInstall, /libncurses6/u)
+    assert.match(beforeInstall, /libxml2-dev/u)
+    assert.ok(beforeInstall.includes(swiftKeyUrl))
+    assert.ok(beforeInstall.includes(swiftArchiveUrl))
+    assert.ok(beforeInstall.includes(swiftArchiveUrl + ".sig"))
+    for (const value of ["e8090b06c98b598e968193749db403c06f40c4186771ed87d916081c43de2f5b",
+      "52BB7E3DE28A71BE22EC05FFEF80A866B47A981F", "da8272a5fddccd65b1529ed0e52e04526e2eadd4237d58d6220efeb973c6cd19"]) {
+      assert.ok(beforeInstall.includes(value), value)
+    }
+    assert.match(beforeInstall, /curl .*--compressed.*release-key-swift-6\.x\.asc/u)
+    assert.match(beforeInstall, /GNUPGHOME=.*mktemp -d/u)
+    assert.match(beforeInstall, /gpg .*--verify .*SWIFT_SIGNATURE/u)
+    assert.match(beforeInstall, /tar -xzf .*SWIFT_ARCHIVE/u)
+    assert.ok(beforeInstall.includes(`export PATH="${swiftToolchainPath}"`))
+    assert.ok(beforeInstall.includes('test "$(command -v clang)" = "/opt/swift-6.3.3-RELEASE-ubuntu24.04/usr/bin/clang"'))
+    for (const probe of [`${swiftExecutable} --version`,
+      `test "$(${swiftExecutable} --version | sed -n '1p')" = 'Swift version 6.3.3 (swift-6.3.3-RELEASE)'`,
+      `test "$(${swiftExecutable} --version | sed -n '2p')" = 'Target: x86_64-unknown-linux-gnu'`]) {
+      assert.ok(beforeInstall.includes(probe), probe)
+    }
+    for (const command of [
+      `${swiftExecutable} -warnings-as-errors "$SWIFT_PROBE" -o "$SWIFT_DEBUG"`,
+      'test "$("$SWIFT_DEBUG")" = 5',
+      `${swiftExecutable} -warnings-as-errors -O "$SWIFT_PROBE" -o "$SWIFT_OPTIMIZED"`,
+      'test "$("$SWIFT_OPTIMIZED")" = 5'
+    ]) assert.ok(beforeInstall.includes(command), command)
+    assert.doesNotMatch(beforeInstall, /ln --symbolic .*swiftc \/usr\/bin\/swiftc/u)
+    assert.match(beforeInstall, /Swift version 6\.3\.3 \(swift-6\.3\.3-RELEASE\)/u)
+    assert.match(beforeInstall, /x86_64-unknown-linux-gnu/u)
+    assert.match(beforeInstall, /rm -rf .*GNUPGHOME/u)
     assert.doesNotMatch(beforeInstall, /(?:^|\s)golang-go(?:\s|$)/u)
     assert.match(beforeInstall, /tar .* -C \/usr\/local/u)
     assert.match(beforeInstall, /node --version/u)
@@ -188,7 +224,7 @@ describe("repository delivery contracts", () => {
       'test -r "$(clang++-21 -print-file-name=libstdc++.so)"', "dpkg-query -W libstdc++-13-dev"]) {
       assert.ok(config.before_install.includes(probe), probe)
     }
-    expect(config.builds.end_to_end.name).toEqual("Eleven-language tests with Rust debug/release and C/CPP O0/O2 sanitizers")
+    expect(config.builds.end_to_end.name).toEqual("Twelve-language tests with Rust debug/release and C/CPP O0/O2 sanitizers")
     await assert.rejects(access(new URL("../.github/workflows", import.meta.url)))
   })
 
@@ -197,12 +233,18 @@ describe("repository delivery contracts", () => {
     const dockerfile = DockerfileParser.parse(source)
     const instructions = dockerfile.getInstructions()
     const keywords = instructions.map((instruction) => instruction.getKeyword())
-    const from = instructions.find((instruction) => instruction.getKeyword() == "FROM")
+    const from = instructions.filter((instruction) => instruction.getKeyword() == "FROM")
+    const copies = instructions.filter((instruction) => instruction.getKeyword() == "COPY")
     const runs = instructions.filter((instruction) => instruction.getKeyword() == "RUN")
       .map((instruction) => instruction.getArgumentsContent()).join("\n")
 
-    assert.equal(from?.getArgumentsContent(), "ubuntu:26.04@sha256:3131b4cc82a783df6c9df078f86e01819a13594b865c2cad47bd1bca2b7063bb")
-    assert.equal(keywords.includes("COPY"), false)
+    assert.equal(from.at(-1)?.getArgumentsContent(), "ubuntu:26.04@sha256:3131b4cc82a783df6c9df078f86e01819a13594b865c2cad47bd1bca2b7063bb")
+    assert.deepEqual(from.slice(0, -1).map((instruction) => instruction.getArgumentsContent()), [
+      "swift:6.3.3-noble@sha256:56ef1be2c1ca36f4c52440357dc1fcdfdb5e113587134fcadeef57c225c71b54 AS swift-toolchain"
+    ])
+    assert.ok(copies.length > 0)
+    for (const copy of copies) expect(copy.getFlags().map((flag) => [flag.getName(), flag.getValue()]))
+      .toEqual([["from", "swift-toolchain"]])
     assert.equal(keywords.includes("ADD"), false)
     assert.match(runs, /php-cli/u)
     assert.match(runs, /python3/u)
@@ -229,6 +271,8 @@ describe("repository delivery contracts", () => {
     assert.match(runs, /google-chrome-stable_152\.0\.7977\.82-1_amd64\.deb/u)
     assert.match(runs, /4d25e4a028c78a7ae910683551c2f234792cc5595e7e3e34939f599342ada446/u)
     for (const probe of ["wasm-validate --version", chromiumVersionProbe]) assert.ok(runs.includes(probe), probe)
+    assert.match(runs, /Swift version 6\.3\.3 \(swift-6\.3\.3-RELEASE\)/u)
+    assert.match(runs, /x86_64-unknown-linux-gnu/u)
     assert.ok(instructions.some((instruction) => instruction.getKeyword() == "USER" && instruction.getArgumentsContent() == "dev"))
     assert.ok(instructions.some((instruction) => instruction.getKeyword() == "WORKDIR" && instruction.getArgumentsContent() == "/home/dev/semantifold"))
   })
