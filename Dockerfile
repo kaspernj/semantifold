@@ -87,6 +87,7 @@ RUN install -d -m 0755 /tmp/semantifold-kotlin \
   && jar -xf kotlin-compiler-2.4.20.zip \
   && rm -rf /opt/kotlinc \
   && mv kotlinc /opt/kotlinc \
+  && chmod 0755 /opt/kotlinc/bin/kotlinc \
   && KOTLIN_VERSION_OUTPUT="$(/opt/kotlinc/bin/kotlinc -version 2>&1)" \
   && printf '%s\n' "$KOTLIN_VERSION_OUTPUT" \
   && printf '%s\n' "$KOTLIN_VERSION_OUTPUT" | grep --extended-regexp --quiet '^info: kotlinc-jvm 2\.4\.20 \(JRE 25\.0\.4\+7-1-(24|26)\.04-Ubuntu\)$' \
