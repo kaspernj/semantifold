@@ -35,14 +35,14 @@ const internalPackageName = "semantifold-tree-sitter-legacy-internal"
 const retiredPackageName = "@kaspernj/semantifold-tree-sitter-legacy"
 const modernTreeSitterRoot = "node_modules/tree-sitter"
 const kotlinGrammarRoot = "node_modules/tree-sitter-kotlin"
+const kotlinGrammarCommit = "57c35ad1a80ccd2a0ebd8fffe852f0d13a20acd0"
+const kotlinGrammarSource = `https://github.com/kaspernj/tree-sitter-kotlin/archive/${kotlinGrammarCommit}.tar.gz`
 const internalPackageRoot = `node_modules/${internalPackageName}`
 const legacyTreeSitterRoot = `${internalPackageRoot}/node_modules/tree-sitter`
 const cGrammarRoot = `${internalPackageRoot}/node_modules/tree-sitter-c`
 const rustGrammarRoot = `${internalPackageRoot}/node_modules/tree-sitter-rust`
 const cppGrammarRoot = `${internalPackageRoot}/node_modules/tree-sitter-cpp`
 const requiredPackedFiles = [
-  `${kotlinGrammarRoot}/LICENSE`, `${kotlinGrammarRoot}/package.json`, `${kotlinGrammarRoot}/binding.gyp`,
-  `${kotlinGrammarRoot}/bindings/node/index.d.ts`, `${kotlinGrammarRoot}/src/parser.c`, `${kotlinGrammarRoot}/src/scanner.c`,
   `${rustGrammarRoot}/LICENSE`, `${rustGrammarRoot}/package.json`, `${rustGrammarRoot}/binding.gyp`,
   `${rustGrammarRoot}/bindings/node/index.d.ts`, `${rustGrammarRoot}/src/parser.c`, `${rustGrammarRoot}/src/scanner.c`,
   `${cppGrammarRoot}/LICENSE`,
@@ -126,7 +126,7 @@ describe("packed Semantifold legacy Tree-sitter boundary", () => {
     }
   })
 
-  it("installs both bundled runtimes from one root tarball and exposes only frozen data", async () => {
+  it("installs both bundled runtimes and the HTTPS Kotlin grammar with only frozen legacy data", async () => {
     const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "semantifold-packed-consumer-"))
     const packDirectory = path.join(temporaryRoot, "pack")
     const consumerDirectory = path.join(temporaryRoot, "consumer")
@@ -150,13 +150,15 @@ describe("packed Semantifold legacy Tree-sitter boundary", () => {
       const bundledPackages = new Set(packResult.bundled)
 
       expect({name: packResult.name, version: packResult.version}).toEqual({name: "semantifold", version: sourceManifest.version})
-      for (const packageName of [internalPackageName, "node-addon-api", "node-gyp-build", "tree-sitter", "tree-sitter-kotlin"]) {
+      for (const packageName of [internalPackageName, "node-addon-api", "node-gyp-build", "tree-sitter"]) {
         expect(bundledPackages.has(packageName)).toBeTrue()
       }
+      expect(bundledPackages.has("tree-sitter-kotlin")).toBeFalse()
       for (const filename of [...requiredPackedFiles, ...requiredPrebuilds]) {
         expect(packedFiles.includes(filename)).toBeTrue()
       }
       expect(packedFiles.some((filename) => filename.startsWith("packages/tree-sitter-legacy/"))).toBeFalse()
+      expect(packedFiles.some((filename) => filename.startsWith(`${kotlinGrammarRoot}/`))).toBeFalse()
       expect(packedFiles.includes(".npmrc")).toBeFalse()
       expect(packedFiles.some((filename) => /node_modules\/[^/]+\/build\/(?:Debug|Release)\//u.test(filename))).toBeFalse()
       const tarball = path.join(packDirectory, packResult.filename)
@@ -236,14 +238,23 @@ describe("packed Semantifold legacy Tree-sitter boundary", () => {
         const installedLock = JSON.parse(await readFile(path.join(consumerDirectory, "package-lock.json"), "utf8"))
         const installedPackagePaths = Object.keys(installedLock.packages)
 
-        for (const packageRoot of [modernTreeSitterRoot, kotlinGrammarRoot, internalPackageRoot, legacyTreeSitterRoot, cGrammarRoot,
-          cppGrammarRoot, rustGrammarRoot]) {
+        for (const packageRoot of [modernTreeSitterRoot, internalPackageRoot, legacyTreeSitterRoot, cGrammarRoot, cppGrammarRoot,
+          rustGrammarRoot]) {
           const entry = installedLock.packages[`node_modules/semantifold/${packageRoot}`]
 
           expect(entry.inBundle).toBeTrue()
           expect(entry.link).toEqual(undefined)
           expect(entry.resolved).toEqual(undefined)
         }
+        const kotlinEntries = Object.entries(installedLock.packages).filter(([filename]) =>
+          filename == kotlinGrammarRoot || filename.endsWith(`/${kotlinGrammarRoot}`))
+
+        expect(kotlinEntries.length).toEqual(1)
+        const kotlinEntry = kotlinEntries[0][1]
+
+        expect(kotlinEntry.inBundle).toEqual(undefined)
+        expect(kotlinEntry.resolved).toEqual(kotlinGrammarSource)
+        expect(kotlinEntry.integrity).toMatch(/^sha512-/u)
         expect(installedPackagePaths.some((filename) => filename.includes(retiredPackageName))).toBeFalse()
         expect(JSON.stringify(installedLock)).not.toMatch(/git\+ssh/u)
         expect(installedPackagePaths.some((filename) => filename.includes("packages/tree-sitter-legacy"))).toBeFalse()
@@ -277,7 +288,7 @@ describe("packed Semantifold legacy Tree-sitter boundary", () => {
           grammarIsInternal: true,
           goRoot: "source_file",
           kotlinGrammarVersion: "0.4.0",
-          kotlinGrammarIsBundled: true,
+          kotlinGrammarIsInstalled: true,
           kotlinJavaVersion: 'openjdk version "25.0.4" 2026-07-21',
           kotlinRoundTrip: true,
           kotlinRuntimeOutput: "3\n",

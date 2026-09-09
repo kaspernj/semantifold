@@ -1,0 +1,1 @@
+Fixed the Kotlin grammar trust boundary to use an integrity-locked full-SHA HTTPS archive without expanding root `acceptDependencies`, and made Kotlin/JVM bootstrap validation accept only the qualified Ubuntu 24.04 or 26.04 JRE packaging suffix while retaining exact Kotlin and JDK versions.

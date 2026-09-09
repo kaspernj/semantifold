@@ -7,8 +7,8 @@ import {describe, expect, it} from "@velocious/testing"
 import Parser from "tree-sitter"
 import KotlinLanguage from "tree-sitter-kotlin"
 
-const dependency = "git+https://github.com/kaspernj/tree-sitter-kotlin.git#v0.4.0-semantifold.1"
 const commit = "57c35ad1a80ccd2a0ebd8fffe852f0d13a20acd0"
+const dependency = `https://github.com/kaspernj/tree-sitter-kotlin/archive/${commit}.tar.gz`
 const fixtures = [
   ["fixtures/program.kt", "b843c4672a3175fe75297f3692003cec0131eaee39e65ba1867f61e6184b0f05"],
   ["fixtures/scalars/program.kt", "42fd2c427a31d3d0b9427faf7781a7e7604399c370701203d06d2d54ceaea7f5"],
@@ -38,7 +38,7 @@ function descendants(root) {
 }
 
 describe("qualified Tree-sitter Kotlin fork route", () => {
-  it("pins the immutable public HTTPS Git tag and install-safe native grammar", async () => {
+  it("pins the immutable public HTTPS source archive and install-safe native grammar", async () => {
     const [binding, grammar, manifest, lockfile, parserSource, scannerSource, bindingSource, declarations, nativeBinding] = await Promise.all([
       readFile(new URL("../node_modules/tree-sitter/package.json", import.meta.url), "utf8").then(JSON.parse),
       readFile(new URL("../node_modules/tree-sitter-kotlin/package.json", import.meta.url), "utf8").then(JSON.parse),
@@ -57,7 +57,9 @@ describe("qualified Tree-sitter Kotlin fork route", () => {
     expect({license: grammar.license, version: grammar.version}).toEqual({license: "MIT", version: "0.4.0"})
     expect(grammar.peerDependencies["tree-sitter"]).toEqual("^0.25.1")
     expect(manifest.dependencies["tree-sitter-kotlin"]).toEqual(dependency)
-    expect(locked.resolved).toEqual(`git+https://github.com/kaspernj/tree-sitter-kotlin.git#${commit}`)
+    expect(locked.resolved).toEqual(dependency)
+    expect(locked.integrity).toMatch(/^sha512-/u)
+    expect(locked.inBundle).toEqual(undefined)
     expect(JSON.stringify(lockfile)).not.toMatch(/git\+ssh|tree-sitter-cli/u)
     expect(JSON.stringify(grammar.scripts)).not.toMatch(/https?:|curl|wget|fetch/u)
     expect(parserSource).toMatch(/#define LANGUAGE_VERSION 14/u)

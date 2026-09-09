@@ -20,6 +20,8 @@ const providerPackages = Object.freeze([
 const activeProviderExecutables = Object.freeze(["codex", "opencode"])
 const internalLegacyPackage = "semantifold-tree-sitter-legacy-internal"
 const retiredLegacyPackage = "@kaspernj/semantifold-tree-sitter-legacy"
+const kotlinGrammarCommit = "57c35ad1a80ccd2a0ebd8fffe852f0d13a20acd0"
+const kotlinGrammarSource = `https://github.com/kaspernj/tree-sitter-kotlin/archive/${kotlinGrammarCommit}.tar.gz`
 
 describe("repository delivery contracts", () => {
   it("owns and bundles the private legacy Tree-sitter workspace in the root package", async () => {
@@ -42,10 +44,11 @@ describe("repository delivery contracts", () => {
     expect(lockfile.version).toEqual(rootManifest.version)
     expect(lockfile.packages[""].version).toEqual(rootManifest.version)
     expect(rootManifest.dependencies[internalLegacyPackage]).toEqual("file:packages/tree-sitter-legacy/runtime")
-    expect(rootManifest.acceptDependencies).toEqual({[internalLegacyPackage]: "0.1.0", "tree-sitter-kotlin": "0.4.0"})
+    expect(rootManifest.acceptDependencies).toEqual({[internalLegacyPackage]: "0.1.0"})
     expect(rootManifest.devDependencies[workspaceManifest.name]).toEqual("0.1.0")
     expect(rootManifest.devDependencies[retiredLegacyPackage]).toEqual(undefined)
-    expect(rootManifest.bundleDependencies).toEqual([internalLegacyPackage, "tree-sitter", "tree-sitter-kotlin"])
+    expect(rootManifest.bundleDependencies).toEqual([internalLegacyPackage, "tree-sitter"])
+    expect(rootManifest.dependencies["tree-sitter-kotlin"]).toEqual(kotlinGrammarSource)
     expect(rootManifest.files.includes("packages/**")).toBeFalse()
     expect(rootManifest.exports).toEqual({
       ".": {import: "./build/index.js", types: "./build/index.d.ts"}
@@ -86,6 +89,9 @@ describe("repository delivery contracts", () => {
     expect(lockfile.packages[`node_modules/${internalLegacyPackage}`].link).toEqual(undefined)
     expect(lockfile.packages["node_modules/tree-sitter"].version).toEqual("0.25.1")
     expect(lockfile.packages["node_modules/tree-sitter"].inBundle).toBeTrue()
+    expect(lockfile.packages["node_modules/tree-sitter-kotlin"].resolved).toEqual(kotlinGrammarSource)
+    expect(lockfile.packages["node_modules/tree-sitter-kotlin"].integrity).toMatch(/^sha512-/u)
+    expect(lockfile.packages["node_modules/tree-sitter-kotlin"].inBundle).toEqual(undefined)
     expect(lockfile.packages[`node_modules/${internalLegacyPackage}/node_modules/tree-sitter`].version).toEqual("0.21.1")
     expect(lockfile.packages[`node_modules/${internalLegacyPackage}/node_modules/tree-sitter-c`].version).toEqual("0.23.2")
     expect(lockfile.packages[`node_modules/${internalLegacyPackage}/node_modules/tree-sitter-cpp`].version).toEqual("0.23.4")

@@ -60,10 +60,11 @@ const modernRuntime = JSON.parse(await readFile(semantifoldRequire.resolve("tree
 const legacyRuntime = JSON.parse(await readFile(internalRequire.resolve("tree-sitter/package.json"), "utf8"))
 const cGrammar = JSON.parse(await readFile(internalRequire.resolve("tree-sitter-c/package.json"), "utf8"))
 const internalManifest = JSON.parse(await readFile(path.join(internalDirectory, "package.json"), "utf8"))
+const consumerModules = path.join(process.cwd(), "node_modules") + path.sep
 
 for (const filename of [semantifoldEntry, internalEntry, modernRuntimePath, legacyRuntimePath, cGrammarPath, cppGrammarPath,
   rustGrammarPath, kotlinGrammarPath]) {
-  assert.ok((await realpath(filename)).startsWith(path.join(process.cwd(), "node_modules") + path.sep))
+  assert.ok((await realpath(filename)).startsWith(consumerModules))
 }
 const {parseCst} = await import(pathToFileURL(internalEntry).href)
 const {default: Parser} = await import(pathToFileURL(modernRuntimePath).href)
@@ -200,7 +201,7 @@ process.stdout.write(JSON.stringify({
   kotlinCompilerVersion: kotlinc.version,
   kotlinJavaVersion: java.version,
   kotlinGrammarVersion: kotlinGrammar.version,
-  kotlinGrammarIsBundled: kotlinGrammarPath.startsWith(semantifoldDirectory + path.sep),
+  kotlinGrammarIsInstalled: (await realpath(kotlinGrammarPath)).startsWith(consumerModules),
   kotlinRoundTrip: true,
   kotlinRuntimeOutput: "3\\n",
   internalPackageIsNotConsumerDependency: true,

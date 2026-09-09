@@ -86,7 +86,9 @@ RUN install -d -m 0755 /tmp/semantifold-kotlin \
   && cd /tmp/semantifold-kotlin \
   && jar -xf kotlin-compiler-2.4.20.zip \
   && mv kotlinc /opt/kotlinc \
-  && test "$(/opt/kotlinc/bin/kotlinc -version 2>&1)" = 'info: kotlinc-jvm 2.4.20 (JRE 25.0.4+7-1-26.04-Ubuntu)' \
+  && KOTLIN_VERSION_OUTPUT="$(/opt/kotlinc/bin/kotlinc -version 2>&1)" \
+  && printf '%s\n' "$KOTLIN_VERSION_OUTPUT" \
+  && printf '%s\n' "$KOTLIN_VERSION_OUTPUT" | grep --extended-regexp --quiet '^info: kotlinc-jvm 2\.4\.20 \(JRE 25\.0\.4\+7-1-(24|26)\.04-Ubuntu\)$' \
   && test "$(java -version 2>&1 | sed -n '1p')" = 'openjdk version "25.0.4" 2026-07-21' \
   && rm -rf /tmp/semantifold-kotlin
 

@@ -17,7 +17,7 @@ Add Kotlin/JVM as a first-class frontend and JVM textual backend for exactly Tas
 
 ## Frontend strategy
 
-- Qualify a pinned community `tree-sitter-kotlin` package under Task 015 for provenance/license, Node 24/grammar ABI, packaged parser, typed access, recovery nodes, UTF-16 spans, profile coverage, and differential agreement with the supported `kotlinc` parser. The implemented route is the immutable HTTPS Git tag `v0.4.0-semantifold.1`, not the insufficient registry candidate.
+- Qualify a pinned community `tree-sitter-kotlin` package under Task 015 for provenance/license, Node 24/grammar ABI, packaged parser, typed access, recovery nodes, UTF-16 spans, profile coverage, and differential agreement with the supported `kotlinc` parser. The implemented route is the full-SHA HTTPS source archive for commit `57c35ad1a80ccd2a0ebd8fffe852f0d13a20acd0` (tagged `v0.4.0-semantifold.1`), not the insufficient registry candidate.
 - If that candidate cannot pass, block and amend the parser decision. Compiler output or source scanning is not a fallback AST.
 - Exhaustively consume file, declaration, modifier, type, statement, expression, operator, annotation, and trivia children. Reject parser error/missing/recovery nodes, implicit constructs, imports/packages outside the canonical artifact shell, and every unmodeled child.
 
@@ -51,9 +51,9 @@ Document Kotlin/JVM-only scope, compiler/JDK discovery and version pins, artifac
 
 ## Implementation acceptance record — 2026-09-09
 
-The exact HTTPS grammar tag, ABI14 Node24 CST qualification, strict frontend, mapped `Program.kt` backend, Kotlin2.4.20/JVM25 metadata, checked safe-integer helpers, and base-specific exact Ubuntu OpenJDK25 identities pass locally. Real `kotlinc`/`java` execution covers original and regenerated five-profile fixtures, scalar-sequence equality, eager operand and argument order, short-circuiting, safe-range overflow, and JVM `Long` overflow.
+The exact HTTPS grammar archive, ABI14 Node24 CST qualification, strict frontend, mapped `Program.kt` backend, Kotlin2.4.20/JVM25 metadata, checked safe-integer helpers, and base-specific exact Ubuntu OpenJDK25 identities pass locally. Real `kotlinc`/`java` execution covers original and regenerated five-profile fixtures, scalar-sequence equality, eager operand and argument order, short-circuiting, safe-range overflow, and JVM `Long` overflow.
 
-The seven Kotlin-focused files pass 41 assertions. Changed adjacent registry, public API, repository, and aggregate-toolchain files pass 54 assertions; the runtime-consistency and credential-free packed-consumer files pass 4. Lint, root/private typecheck and build, zero-vulnerability audit, production/full dependency listings, package dry run, and diff checks pass. The tarball bundles the exact Kotlin grammar and repeats strict API typing, parse/generate/reparse, exact Java25 discovery, real runnable-JAR execution, ordinary install, and clean `npm ci` without SSH or credentials.
+The explicitly named Kotlin, adjacent registry/public API/repository/toolchain, runtime-consistency, and credential-free packed-consumer files pass locally. Lint, root/private typecheck and build, zero-vulnerability audit, production/full dependency listings, package dry run, and diff checks pass. The tarball retains the exact Kotlin grammar as an integrity-locked full-SHA HTTPS dependency and repeats strict API typing, parse/generate/reparse, exact Java25 discovery, real runnable-JAR execution, ordinary install, and clean `npm ci` without Git, SSH, or credentials.
 
 No local implementation blocker remains. A nested no-cache Docker build is unavailable in this environment; independent review, exact-head TensorBuzz CI, merge, and post-merge verification remain coordinator-owned delivery gates. This record claims no CI result, merge, release, tag, or publication.
 
