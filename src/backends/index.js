@@ -85,6 +85,10 @@ export function generateArtifactSource({language, filename, mapDirective = "none
 
   const mapping = finalizeMapping(writer.finish())
 
+  if (language == "swift") {
+    languageRegistry.resolve("swift", "frontend", module.location)({filename, source: mapping.generated.content})
+  }
+
   return {
     code: mapping.generated.content,
     filename,

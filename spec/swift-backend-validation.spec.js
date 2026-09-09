@@ -138,4 +138,18 @@ describe("Swift transactional single-file backend", () => {
       assert.throws(() => generateArtifact({language: "swift", module: moduleFrom(), ...options}), failure)
     }
   })
+
+  it("rejects an emitted Swift CST that exceeds the frontend traversal limit before returning an artifact", () => {
+    const module = moduleFrom()
+    let expression = {kind: "IntegerLiteral", location: module.location, value: 1}
+
+    for (let index = 0; index < 300; index += 1) {
+      expression = {kind: "BinaryExpression", left: expression, location: module.location, operation: "IntegerAdd", right: {
+        kind: "IntegerLiteral", location: module.location, value: 1}, type: "integer"}
+    }
+    module.functions[0].body.statements[0].expression = expression
+    assert.throws(() => generateArtifactSet({language: "swift", module}), error =>
+      error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_SYNTAX" && error.language == "swift" &&
+      error.message.includes("CST exceeds the 512-level traversal limit"))
+  })
 })
