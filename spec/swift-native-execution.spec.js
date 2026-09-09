@@ -2,8 +2,9 @@
 
 import assert from "node:assert/strict"
 import {readFile} from "node:fs/promises"
+import path from "node:path"
 import {describe, expect, it} from "@velocious/testing"
-import {generate, parse, SemantifoldDiagnostic} from "../index.js"
+import {discoverCanonicalToolchain, generate, parse, SemantifoldDiagnostic} from "../index.js"
 import {executeSwift, executeSwiftArtifacts, swiftProfiles, swiftSourceArtifacts} from "./support/swift-toolchain.js"
 
 describe("Swift real debug and optimized native execution", () => {
@@ -42,6 +43,24 @@ describe("Swift real debug and optimized native execution", () => {
     for (const mode of native.modes) expect(mode.stdout).toEqual("true\n")
     assert.throws(() => parse({language: "swift", filename: "native-equality.swift", source}), error =>
       error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_SYNTAX" && error.language == "swift")
+  })
+
+  it("executes with an absolute selected compiler when ambient PATH omits its companion-tool directory", async () => {
+    const compiler = await discoverCanonicalToolchain("swiftc")
+    const originalPath = process.env.PATH
+    const compilerDirectory = path.dirname(compiler.executable)
+    const ambientPath = "/nonexistent"
+
+    process.env.PATH = ambientPath
+    try {
+      expect(process.env.PATH.split(path.delimiter)).not.toContain(compilerDirectory)
+      const result = await executeSwiftArtifacts(swiftSourceArtifacts("print(5)\n"), {label: "absolute-compiler-companion-path", swiftc: compiler})
+
+      for (const mode of result.modes) expect(mode.stdout).toEqual("5\n")
+    } finally {
+      if (originalPath === undefined) delete process.env.PATH
+      else process.env.PATH = originalPath
+    }
   })
 
   it("keeps an unassigned mutable TypeScript local mutable and warning-clean in Swift", async () => {

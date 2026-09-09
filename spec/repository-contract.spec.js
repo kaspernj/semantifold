@@ -146,7 +146,7 @@ describe("repository delivery contracts", () => {
     expect(config.environment.SEMANTIFOLD_DOTNET).toEqual("/usr/bin/dotnet")
     expect(config.environment.SEMANTIFOLD_GO).toEqual("/usr/local/bin/go")
     expect(config.environment.SEMANTIFOLD_SWIFTC).toEqual(swiftExecutable)
-    expect(config.environment.PATH).toEqual(swiftToolchainPath)
+    expect(config.environment.PATH).toEqual(undefined)
     expect(config.environment.SEMANTIFOLD_CLANG).toEqual("/usr/bin/clang-21")
     for (const pin of ["clang-21=1:21.1.8~++20251221032922+2078da43e25a-1~exp1~20251221153059.70", "libclang-rt-21-dev=1:21.1.8~++20251221032922+2078da43e25a-1~exp1~20251221153059.70"]) assert.ok(beforeInstall.includes(pin))
     for (const probe of ["clang-21 --version", "clang-21 -dumpmachine", "clang-21 -print-resource-dir",

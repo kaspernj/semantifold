@@ -124,7 +124,6 @@ environment:
   SEMANTIFOLD_DOTNET: /usr/bin/dotnet
   SEMANTIFOLD_GO: /usr/local/bin/go
   SEMANTIFOLD_SWIFTC: /opt/swift-6.3.3-RELEASE-ubuntu24.04/usr/bin/swiftc
-  PATH: /opt/swift-6.3.3-RELEASE-ubuntu24.04/usr/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
   SEMANTIFOLD_CLANG: /usr/bin/clang-21
   SEMANTIFOLD_CLANGPP: /usr/bin/clang++-21
   SEMANTIFOLD_RUSTC: /usr/local/bin/rustc
