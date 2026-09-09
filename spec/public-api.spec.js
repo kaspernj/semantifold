@@ -36,7 +36,7 @@ import {
 
 describe("public API", () => {
   it("exports immutable language discovery and the parser, generator, and diagnostic API", () => {
-    expect(supportedLanguages).toEqual(["php", "ruby", "javascript", "typescript", "java", "python", "csharp", "go", "c", "cpp", "rust"])
+    expect(supportedLanguages).toEqual(["php", "ruby", "javascript", "typescript", "java", "python", "csharp", "go", "c", "cpp", "rust", "swift"])
     expect(Object.isFrozen(supportedLanguages)).toBeTrue()
     expect(typeof parse).toEqual("function")
     expect(typeof generate).toEqual("function")

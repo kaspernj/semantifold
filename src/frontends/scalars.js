@@ -15,6 +15,7 @@ function sourceTypeMap(entries) {
 
 /** @type {Readonly<Record<import("../semantic/types.js").SemanticLanguage, Map<string, import("../semantic/types.js").SemanticTypeName>>>} */
 const sourceScalarTypes = Object.freeze({
+  swift: sourceTypeMap([["Int64", "integer"], ["Bool", "boolean"], ["String", "string"]]),
   rust: sourceTypeMap([["i64", "integer"], ["bool", "boolean"], ["String", "string"]]),
   cpp: sourceTypeMap([["std::int64_t", "integer"], ["bool", "boolean"], ["std::string", "string"]]),
   c: sourceTypeMap([["int64_t", "integer"], ["bool", "boolean"], ["SemantifoldString", "string"]]),

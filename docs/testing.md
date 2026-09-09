@@ -120,6 +120,7 @@ Task 024 adds configured Go 1.26.x discovery restricted to Linux/amd64; the patc
 | `go` | `go` | `SEMANTIFOLD_GO` | Go 1.26.x, Linux/amd64 |
 | `rustc` | `rustc` | `SEMANTIFOLD_RUSTC` | exact 1.98.1 compiler commit, Linux x86-64 |
 | `cargo` | `cargo` | `SEMANTIFOLD_CARGO` | exact matching 1.98.1 Cargo commit, Linux x86-64 |
+| `swiftc` | `swiftc` | `SEMANTIFOLD_SWIFTC` | exact Swift 6.3.3 release, x86_64-unknown-linux-gnu |
 | `clangpp` | `clang++` | `SEMANTIFOLD_CLANGPP` | Ubuntu Clang 21.1.8, x86_64-pc-linux-gnu, C++20/libstdc++ ABI1 |
 | `clang` | `clang` | `SEMANTIFOLD_CLANG` | Ubuntu Clang 21.1.8, x86_64-pc-linux-gnu |
 | `wasm-validate` | `wasm-validate` | `SEMANTIFOLD_WASM_VALIDATE` | WABT 1.0.36 |
@@ -203,3 +204,25 @@ Native tests materialize fresh Cargo crates and empty Cargo homes, use the disco
 The packed-consumer test installs the single root tarball, retains only plain frozen native-boundary data, checks all three private grammars alongside modern Go, and repeats strict public TypeScript and offline Rust execution after ordinary install and clean ci. Each phase uses a separate fresh npm cache, empty user/global configs, explicit public registry, and removal of inherited npm configuration/token variables case-insensitively; default install-links remains false. Running inside the canonical lane proves cleaned-environment behavior only. The coordinator must exercise the prepared consumer inputs in a disposable environment with no source/home/auth mounts for external credential-free acceptance.
 
 Required local gates remain runtime consistency, focused named specs, lint, root/workspace strict typecheck and build, high-severity audit, production/all dependency listings, pack dry-run and diff check. TensorBuzz alone owns full/native aggregate discovery for the exact candidate head. Review, external package boundary, CI, merge and post-merge evidence remain coordinator-owned.
+
+## Task022 Swift acceptance
+
+Swift generation returns exactly one mapped `program.swift`. Focused frontend/backend specs cover all five Tasks001–004 fixtures, parser recovery, excluded syntax, malformed IR, target identifiers, compile-time-known signed-64-bit overflow, deterministic artifacts, rich/V3 provenance, exact helper validation, generated reparse, every Swift-to-original-five runtime route, and one original-five-to-Swift route per profile. Original-five execution invokes real PHP, Ruby, Node, TypeScript/Node, and Java compiler/runtime commands; unavailable tools fail.
+
+The compiler lane discovers only exact Swift 6.3.3 release for `x86_64-unknown-linux-gnu`. For every differential fixture it independently materializes the original and regenerated `program.swift`, runs `swiftc -warnings-as-errors -typecheck program.swift`, then separately compiles and executes debug and `-O` binaries. Both modes require status zero, empty stderr, exact decoded stdout and exact UTF-8 bytes; source bytes must remain unchanged and cleanup is mandatory. Exact Unicode-scalar string comparison is exercised with canonically equivalent but scalar-distinct text. No test installs or downloads Swift.
+
+Run the changed Swift files individually:
+
+```sh
+npx velocious-test spec/swift-parser-qualification.spec.js
+npx velocious-test spec/swift-frontend-validation.spec.js
+npx velocious-test spec/swift-backend-validation.spec.js
+npx velocious-test spec/swift-cross-language-acceptance.spec.js
+npx velocious-test spec/swift-registry-toolchain.spec.js
+npx velocious-test spec/swift-docker-contract.spec.js
+npx velocious-test spec/swift-native-execution.spec.js
+npx velocious-test spec/language-registry.spec.js
+npx velocious-test spec/repository-contract.spec.js
+```
+
+The Dockerfile selects `swift:6.3.3-noble@sha256:56ef1be2c1ca36f4c52440357dc1fcdfdb5e113587134fcadeef57c225c71b54` (Linux/amd64 child `sha256:4e0fc24f0f93a5cf9a91bfcf182534bbc0571d70d757389c04ff1f616c1c460f`) as an immutable extraction stage and preserves the final pinned Ubuntu26.04 base. A no-cache image build passed after adding `libncurses6` and `libxml2-dev`; exact Swift 6.3.3 x86_64 typechecked original and generated five-profile artifacts and `spec/swift-native-execution.spec.js` passed 6/6 in debug and `-O`. TensorBuzz now provisions the same signed Swift archive and sets `SEMANTIFOLD_SWIFTC=/opt/swift-6.3.3-RELEASE-ubuntu24.04/usr/bin/swiftc`. The independent review completed with this bounded correction; exact-head TensorBuzz CI, merge, and post-merge verification remain coordinator-owned delivery gates.

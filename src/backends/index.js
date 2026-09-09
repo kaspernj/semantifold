@@ -38,11 +38,14 @@ export function generateArtifactSource({language, filename, mapDirective = "none
   if (record.artifactMultiplicity != "single") unsupportedRole(language, "single-text backend", module?.location)
   if (filename === undefined) filename = record.defaultFilename
   if (sourceMapFilename === undefined) sourceMapFilename = `${filename}.map`
-  if (language == "cpp") validateNativeGraph(module, "cpp")
-  validateBackendModule(module, language)
+  if (language == "cpp" || language == "swift") validateNativeGraph(module, language)
+  validateBackendModule(module, /** @type {import("../semantic/types.js").BackendLanguage} */ (language))
 
   if (language == "cpp" && (mapDirective != "none" || sourceMapFilename != "program.cpp.map")) {
     unsupportedCapability(language, "CPP map directive or alternate source-map filename", module.location)
+  }
+  if (language == "swift" && (mapDirective != "none" || sourceMapFilename != "program.swift.map")) {
+    unsupportedCapability(language, "Swift map directive or alternate source-map filename", module.location)
   }
 
   if (!isValidFilenameMetadata(filename)) {
@@ -52,6 +55,7 @@ export function generateArtifactSource({language, filename, mapDirective = "none
     throw new TypeError("Source map filename must be a non-empty single-line string.")
   }
   if (language == "cpp" && filename != "program.cpp") unsupportedCapability(language, "artifact filename other than program.cpp", module.location)
+  if (language == "swift" && filename != "program.swift") unsupportedCapability(language, "artifact filename other than program.swift", module.location)
   if (language == "java" && filename.split(/[\\/]/u).at(-1) != "Main.java") {
     unsupportedCapability(language, "artifact filename basename other than Main.java", module.location)
   }

@@ -4,6 +4,7 @@ import {unsupportedCapability} from "../diagnostic.js"
 
 /** @type {Record<import("../semantic/types.js").BackendLanguage, RegExp>} */
 const identifierPatterns = {
+  swift: /^(?:_|\p{XID_Start})(?:_|\p{XID_Continue})*$/u,
   rust: /^[A-Za-z_][A-Za-z0-9_]*$/u,
   cpp: /^[A-Za-z][A-Za-z0-9_]*$/u,
   c: /^[A-Za-z][A-Za-z0-9_]*$/u,
@@ -20,6 +21,17 @@ const identifierPatterns = {
 
 /** @type {Record<import("../semantic/types.js").BackendLanguage, Set<string>>} */
 const reservedWords = {
+  swift: new Set([
+    "Any", "Self", "Type", "Protocol", "actor", "any", "as", "associatedtype", "associativity", "async", "await", "borrowing",
+    "break", "case", "catch", "class", "consume", "consuming", "continue", "convenience", "copy", "default", "defer", "deinit",
+    "didSet", "distributed", "do", "dynamic", "else", "enum", "extension", "fallthrough", "false", "fileprivate", "final", "for",
+    "func", "get", "guard", "if", "import", "in", "indirect", "infix", "init", "inout", "internal", "is", "isolated", "lazy",
+    "let", "macro", "mutating", "nil", "nonisolated", "nonmutating", "open", "operator", "optional", "override", "package",
+    "postfix", "precedence", "precedencegroup", "prefix", "private", "protocol", "public", "repeat", "required", "rethrows", "return",
+    "safe", "self", "sending", "set", "some", "static", "struct", "subscript", "super", "switch", "throws", "true", "try",
+    "typealias", "unowned", "unsafe", "var", "weak", "where", "while", "willSet", "yield", "_", "Bool", "Int", "Int64", "String",
+    "Swift", "main", "print"
+  ]),
   rust: new Set([
     "as", "async", "await", "break", "const", "continue", "crate", "dyn", "else", "enum", "extern", "false", "fn", "for", "if", "impl", "in",
     "let", "loop", "match", "mod", "move", "mut", "pub", "ref", "return", "self", "Self", "static", "struct", "super", "trait", "true", "type",
@@ -142,7 +154,8 @@ export function validateTargetIdentifier(language, name, role, location) {
     language == "python" && name.normalize("NFKC") != name ||
     language == "c" && !isCIdentifier(name) ||
     language == "rust" && !isRustIdentifier(name) ||
-    language == "cpp" && !isCppIdentifier(name)) {
+    language == "cpp" && !isCppIdentifier(name) ||
+    language == "swift" && (!isSwiftIdentifier(name) || name.normalize("NFC") != name)) {
     unsupportedCapability(language, `${role} identifier '${name}'`, location)
   }
 }
@@ -196,4 +209,13 @@ export function isCppIdentifier(name) {
  */
 export function isRustIdentifier(name) {
   return identifierPatterns.rust.test(name) && !reservedWords.rust.has(name) && !name.startsWith("semantifold_")
+}
+
+/**
+ * Protects Swift keywords, scalar names, entry plumbing, and target-only helper names.
+ * @param {string} name - Caller-owned function or binding name.
+ * @returns {boolean} Whether ordinary unescaped Swift syntax can preserve the name.
+ */
+export function isSwiftIdentifier(name) {
+  return identifierPatterns.swift.test(name) && !reservedWords.swift.has(name) && !name.startsWith("semantifold_")
 }

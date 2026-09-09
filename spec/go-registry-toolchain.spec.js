@@ -19,7 +19,7 @@ const execute = promisify(execFile)
 
 describe("Go registry and toolchain", () => {
   it("retains Go's registry position as a round-trip multi-artifact text language", () => {
-    expect(supportedLanguages).toEqual(["php", "ruby", "javascript", "typescript", "java", "python", "csharp", "go", "c", "cpp", "rust"])
+    expect(supportedLanguages).toEqual(["php", "ruby", "javascript", "typescript", "java", "python", "csharp", "go", "c", "cpp", "rust", "swift"])
     expect(supportedLanguages[7]).toEqual("go")
     expect(languageCapabilities.find(({id}) => id == "go")).toEqual({
       acceptance: {stages: ["parse", "generate", "compile", "validate", "execute"], toolchains: ["go"]},

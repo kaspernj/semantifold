@@ -1,11 +1,21 @@
 # Source-independent development image for Semantifold's canonical `dev` service.
 # Project source and npm dependencies arrive through the /home/dev bind mount.
+# The pinned multi-architecture image resolves to linux/amd64 manifest
+# sha256:4e0fc24f0f93a5cf9a91bfcf182534bbc0571d70d757389c04ff1f616c1c460f.
+FROM swift:6.3.3-noble@sha256:56ef1be2c1ca36f4c52440357dc1fcdfdb5e113587134fcadeef57c225c71b54 AS swift-toolchain
+
+RUN test "$(swiftc --version | sed -n '1p')" = "Swift version 6.3.3 (swift-6.3.3-RELEASE)" \
+  && test "$(swiftc --version | sed -n 's/^Target: //p')" = "x86_64-unknown-linux-gnu"
+
 FROM ubuntu:26.04@sha256:3131b4cc82a783df6c9df078f86e01819a13594b865c2cad47bd1bca2b7063bb
 
 ARG NODEJS_VERSION=24.18.1-1nodesource1
 ARG NODESOURCE_KEY_SHA256=b42e0321dabdc24e892115da705cf061167eac12a317f23d329862d0aa0a271d
 
 ENV DEBIAN_FRONTEND=noninteractive
+
+COPY --from=swift-toolchain /usr/bin/swift* /usr/bin/
+COPY --from=swift-toolchain /usr/lib/swift /usr/lib/swift
 
 RUN apt-get update \
   && apt-get install --yes --no-install-recommends \
@@ -15,7 +25,9 @@ RUN apt-get update \
     clang=1:21.1.6-71 \
     clang-21=1:21.1.8-6ubuntu1 \
     libclang-rt-21-dev=1:21.1.8-6ubuntu1 \
+    libncurses6 \
     libstdc++-15-dev=15.2.0-16ubuntu1 \
+    libxml2-dev \
     curl \
     default-jdk-headless \
     dotnet-sdk-10.0 \
@@ -110,6 +122,10 @@ RUN test "$(dpkg --print-architecture)" = "amd64" \
   && test "$(rustc --version --verbose | sed -n 's/^commit-hash: //p')" = '48a229ceaefd4985c50990b14116b6d856af0985' \
   && test "$(cargo --version --verbose | sed -n 's/^commit-hash: //p')" = '797e8a9bca276c1c9f9f738d2a20f484fa4eea9d' \
   && rm -rf /tmp/semantifold-rust
+
+RUN swiftc --version \
+  && test "$(swiftc --version | sed -n '1p')" = "Swift version 6.3.3 (swift-6.3.3-RELEASE)" \
+  && test "$(swiftc --version | sed -n 's/^Target: //p')" = "x86_64-unknown-linux-gnu"
 
 RUN test "$(id -u ubuntu)" = "1000" \
   && test "$(id -g ubuntu)" = "1000" \

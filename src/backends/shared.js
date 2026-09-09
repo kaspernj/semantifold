@@ -245,8 +245,8 @@ function validateExpression(expression, language, ownerLocation, allowJavaNegate
     if (language == "java" && !validNegatedMinimumOperand && (candidate.value < -2147483648 || candidate.value > 2147483647)) {
       unsupportedCapability(language, "integer literal outside signed 32-bit int range", location)
     }
-    if ((language == "csharp" || language == "go" || language == "c" || language == "cpp" || language == "rust") && candidate.value < 0 ||
-      (language == "c" || language == "cpp" || language == "rust") && Object.is(candidate.value, -0)) {
+    if ((language == "csharp" || language == "go" || language == "c" || language == "cpp" || language == "rust" || language == "swift") && candidate.value < 0 ||
+      (language == "c" || language == "cpp" || language == "rust" || language == "swift") && Object.is(candidate.value, -0)) {
       unsupportedCapability(language, "negative integer literal without semantic negation", location)
     }
     return
@@ -297,9 +297,11 @@ function validateKnownTargetInteger(expression, language, location) {
   if (language == "java" && value !== undefined && (value < -2147483648n || value > 2147483647n)) {
     unsupportedCapability(language, "compile-time-known integer operation outside signed 32-bit int range", location)
   }
-  if ((language == "csharp" || language == "go" || language == "c" || language == "cpp" || language == "rust" || language == "wasm") && value !== undefined &&
+  if ((language == "csharp" || language == "go" || language == "c" || language == "cpp" || language == "rust" || language == "swift" || language == "wasm") && value !== undefined &&
     (value < -9223372036854775808n || value > 9223372036854775807n)) {
-    unsupportedCapability(language, `compile-time-known integer operation outside signed 64-bit ${language == "wasm" ? "i64" : "long"} range`, location)
+    const scalar = language == "wasm" ? "i64" : language == "swift" ? "Int64" : "long"
+
+    unsupportedCapability(language, `compile-time-known integer operation outside signed 64-bit ${scalar} range`, location)
   }
 }
 
@@ -333,7 +335,7 @@ function knownIntegerValue(expression) {
  * @param {import("./writer.js").SourceWriter} writer - Source-aware writer.
  * @param {import("../semantic/types.js").Expression} expression - Semantic expression.
  * @param {string} path - Exact JSON Pointer for this expression occurrence.
- * @param {import("../semantic/types.js").SemanticLanguage} language - Target language.
+ * @param {import("../semantic/types.js").TextBackendLanguage} language - Target language.
  * @param {(name: string) => string} emitIdentifier - Identifier formatter.
  * @returns {void}
  */
@@ -416,6 +418,18 @@ export function emitExpression(writer, expression, path, language, emitIdentifie
     emitExpression(writer, expression.right, `${path}/right`, language, emitIdentifier)
     writer.mapped(")", {mappingKind: "anchor", node: expression, path})
     writer.mapped(")", {mappingKind: "anchor", node: expression, path})
+    return
+  }
+
+  if (language == "swift" && (expression.operation == "StringEqual" || expression.operation == "StringNotEqual")) {
+    writer.mapped(expression.operation == "StringEqual" ? "semantifold_string_equal" : "semantifold_string_not_equal", {
+      mappingKind: "exact", node: expression, path, role: "operator"
+    })
+    writer.synthetic("(", "Swift scalar-equality helper call", [expression], [path])
+    emitExpression(writer, expression.left, `${path}/left`, language, emitIdentifier)
+    writer.synthetic(", ", "Swift scalar-equality argument separator", [expression], [path])
+    emitExpression(writer, expression.right, `${path}/right`, language, emitIdentifier)
+    writer.synthetic(")", "Swift scalar-equality helper call", [expression], [path])
     return
   }
 

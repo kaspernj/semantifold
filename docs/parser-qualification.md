@@ -16,7 +16,7 @@ The owning task must add a checked-in table row containing all of the following 
 | parser behavior | Comment visibility plus explicit missing/error/recovery-node and malformed-input results |
 | Task 001–004 corpus | Every required declaration, block, statement, expression, type, identifier, literal, and call node; complete named/unnamed child traversal |
 | differential result | Official compiler command/version and acceptance comparison for community grammars; discrepancies enumerated |
-| repository audit | Proof that no generated archive, Git URL/tarball dependency, postinstall download, runtime fetch, or vendored parser binary entered the repository |
+| repository audit | Proof that no unqualified archive, mutable Git dependency, postinstall download, runtime fetch, or vendored parser binary entered the repository; an explicit parser-route amendment must identify any immutable source-archive exception |
 
 The record includes the exact corpus commands and hashes/paths, the installed dependency tree, and the tool output needed to reproduce the result. Any failure blocks that language task. It does not permit a source-text fallback, ignored recovery node, unrecorded parser substitution, runtime download, or softened test.
 
@@ -31,13 +31,13 @@ All Tree-sitter languages use the official `tree-sitter` Node binding. The langu
 | 018 | C | official [`tree-sitter/tree-sitter-c`](https://github.com/tree-sitter/tree-sitter-c) grammar package | legacy pair qualified inside the bundled root distribution below; source/target work remains blocked until that packaging correction is reviewed, green, merged, and verified |
 | 019 | C++ | official [`tree-sitter/tree-sitter-cpp`](https://github.com/tree-sitter/tree-sitter-cpp) grammar package | exact 0.23.4 qualified with the existing isolated 0.21.1 runtime; see Task 019 record below |
 | 020 | Rust | official [`tree-sitter/tree-sitter-rust`](https://github.com/tree-sitter/tree-sitter-rust) grammar package | exact 0.23.1 grammar qualified below and integrated in the existing private 0.21.1 runtime |
-| 022 | Swift | community [`alex-pinkus/tree-sitter-swift`](https://github.com/alex-pinkus/tree-sitter-swift) candidate plus differential `swiftc` checks | candidate only; blocked until exact release and differential record pass |
+| 022 | Swift | community grammar through the exact Semantifold packaging fork plus differential `swiftc` checks | Node/package/CST qualification and rebuilt-image Swift 6.3.3 compiler differential passed locally at merge commit `2a4515bb1d2d075c4c72a3466fbccb75f5269caf`; delivery gates remain separate |
 | 023 | Kotlin/JVM | community [`fwcd/tree-sitter-kotlin`](https://github.com/fwcd/tree-sitter-kotlin) candidate plus differential `kotlinc` checks | candidate only; blocked until exact release and differential record pass |
 | 024 | Go | official [`tree-sitter/tree-sitter-go`](https://github.com/tree-sitter/tree-sitter-go) grammar package | passed for exact `tree-sitter-go@0.25.0`; see the checked-in record below |
 | 029 | Dart | candidate selected and qualified by Task 029 | intentionally deferred |
 | 031 | Zig | candidate selected and qualified by Task 031 | intentionally deferred |
 
-Swift or Kotlin qualification failure leaves Task 022 or 023 blocked until its roadmap/source decision is explicitly revised. Parser archives produced by CI or release pages are not an alternative dependency route.
+Swift or Kotlin qualification failure leaves Task 022 or 023 blocked until its roadmap/source decision is explicitly revised. Parser archives produced by CI or release pages are not an alternative dependency route. Task022 records one narrow amendment: the registry's Swift 0.7.1 package lacks the required install-safe Node24 contract, so Semantifold uses a full-SHA GitHub source archive from its public packaging fork rather than a generated release asset or mutable Git reference.
 
 ## Task 016 Python qualification
 
@@ -257,3 +257,19 @@ git ls-remote https://github.com/tree-sitter/tree-sitter-rust.git refs/tags/v0.2
 ```
 
 The complete reproducible probe, typed consumer, fresh npm configuration, source comparisons, tree inventories and raw command results are retained under `/home/dev/.threadwire/semantifold/task020-20260908T091900Z-evidence/parser-probe` and its parent evidence directory. `probe.mjs`, `supply-chain.mjs` and `typed-api.mts` are qualification programs outside the shipped package. The first probe correctly failed its assumption that the native field API returned null; the corrected probe records the actual undefined result and the existing schema normalization. That investigation failure is not a production RED test. Focused public Rust specs subsequently recorded RED before runtime integration, source/backend behavior, ownership, tool discovery and generated-depth fixes. The original probe inventories remain unchanged; public integration preserves the same frozen schema and typed Node boundary.
+
+## Task 022 Swift grammar qualification — 2026-09-09
+
+The upstream community 0.7.1 grammar was retained, but its registry artifact did not provide the complete install-safe modern Node binding required by this repository. The parser route was therefore amended to the public Semantifold packaging fork at one immutable merge commit. This is a source archive identified by full SHA, not a mutable Git dependency, CI artifact, release-page archive, vendored parser, or runtime download.
+
+| Evidence | Qualified result |
+| --- | --- |
+| Distribution and integrity | Manifest URL `https://github.com/kaspernj/tree-sitter-swift/archive/2a4515bb1d2d075c4c72a3466fbccb75f5269caf.tar.gz`; root lock integrity `sha512-MoaFzZrwF8mYIiKbTcU4lUpIOXLz9NAuKZKUcM4xOYOgGIbQuP+jdeX5428pz0l7p8ggfiDeoY+yAv2krt4MRg==`. The installed package retains name/version `tree-sitter-swift@0.7.1`. |
+| Upstream and fork identity | Community upstream `alex-pinkus/tree-sitter-swift` 0.7.1 grammar; public packaging fork `kaspernj/tree-sitter-swift`, merge commit `2a4515bb1d2d075c4c72a3466fbccb75f5269caf`, human tag `v0.7.1-semantifold.1`. The full-SHA archive is the sole installation identity. |
+| License and lifecycle | MIT license retained. The package uses only `node-gyp-build`; package scripts contain no URL, fetch, curl, or wget route. No parser archive, generated source, native module, or `node_modules` payload is checked into Semantifold. |
+| ABI, payload, and typing | Grammar ABI 14 with peer `tree-sitter@^0.25.1`, satisfied by exact root 0.25.1. The package exposes `bindings/node/index.d.ts` and `nodeTypeInfo`; shipped inputs include `src/parser.c` (18,224,272 bytes), `src/scanner.c` (29,892 bytes), declaration (452 bytes), and loaded Linux x64 native binding (3,370,896 bytes). |
+| Node24 loading and CST | On Node24, ESM import, `Parser#setLanguage`, and deterministic exhaustive `child(index)` traversal pass. The five fixtures cover functions, unlabeled parameters, scalar annotations/literals, initialized `let`/`var`, assignment, calls, print, returns, every typed operator, and nested/one-armed/fallthrough conditionals. |
+| Recovery and coordinates | Malformed operands, braces, parameters, and strings expose propagated error, explicit error, or missing nodes. Conditional compilation and directive-bearing comments remain visible. Astral/CRLF probes distinguish UTF-8 bytes from binding indexes; every boundary is verified through the shared converter before one-based UTF-16 locations are emitted. Lone surrogates reject before parser adaptation. |
+| Compiler differential | Exact Swift 6.3.3 release for target `x86_64-unknown-linux-gnu` typechecked the original and generated five-profile corpus and ran generated artifacts in debug and `-O` modes after the canonical-image rebuild. |
+
+The accepted fixture hashes, in base/scalars/locals/operators/statements order, are `6b5548a722da3a94a7f26bf0590e6a7811c8b13b242dae328007471eac2fa075`, `5bc1fd210fb93ebf26abc7ed9d10c9d5c531d3d1c94e134b4215afa0ebc88a45`, `86bf2e710b19c1aeee55a65004e05af8cfde93fa4431408a606b30a22ed4d9f8`, `98a757c6c97a319e4a340beda099a826d3da6dda75917deb17a2dedc2224bb63`, and `abbf5a47fbebf3bee95fbdc06de23d22ca910cc3db5d423cd5fd556ceab2e936`. Run `npx velocious-test spec/swift-parser-qualification.spec.js` for the retained package/CST proof and `npx velocious-test spec/swift-native-execution.spec.js` for the compiler boundary.

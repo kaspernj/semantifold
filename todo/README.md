@@ -4,7 +4,7 @@
 
 This folder is Semantifold's durable, dependency-ordered implementation backlog and delivered design record. The released baseline is `semantifold@0.2.0` / `v0.2.0` at merged `master` commit `e41d66fb40db783df9d84069567f15bcaeef4a41`; repository and external evidence is recorded in [SOURCES.md](SOURCES.md).
 
-Tasks 001–004, 015–018, and 024 are delivered. The coordinator attests that C PR20 is merged at `8efbcab36078265765aad35ba38052dc187a7979`, with its post-merge native smoke passing 17/17. Tasks019–021 have local implementation records with coordinator delivery still pending. Task021's target-only browser Wasm candidate passes rebuilt real WABT, Node, and local-HTTP Chrome acceptance plus its focused regressions and repository gates. Semantifold currently models safe integer, Boolean, and Unicode string scalars; explicitly typed locals and assignment; typed unary/binary expressions; ordered lexical blocks; nested strict-Boolean conditionals; explicit returns; two-argument direct calls; and entry-point printing. Eleven languages implement frontend/source-backend roles for this IR, while browser Wasm is target-only. Tasks 005–014, 022–023, and 025–037 remain roadmap work.
+Tasks 001–004, 015–018, and 024 are delivered. The coordinator attests that C PR20 is merged at `8efbcab36078265765aad35ba38052dc187a7979`, with its post-merge native smoke passing 17/17. Tasks019–022 have local implementation records with coordinator delivery still pending. Task021's target-only browser Wasm candidate passes rebuilt real WABT, Node, and local-HTTP Chrome acceptance plus its focused regressions and repository gates. Task022's Swift parser/frontend/backend and exact toolchain/image contracts passed rebuilt Swift6.3.3 debug/optimized local acceptance and its one bounded independent-review correction. Exact-head TensorBuzz CI, merge, and post-merge verification remain delivery gates. Semantifold currently models safe integer, Boolean, and Unicode string scalars; explicitly typed locals and assignment; typed unary/binary expressions; ordered lexical blocks; nested strict-Boolean conditionals; explicit returns; two-argument direct calls; and entry-point printing. Twelve languages implement frontend/source-backend roles for this IR, while browser Wasm is target-only. Tasks 005–014, 023, and 025–037 remain roadmap work.
 
 The immediate priority is a bounded language-baseline expansion against this small stable IR. That exposes registration, parser, artifact, toolchain, ownership, and diagnostic flaws before collections, optionals, records, modules, errors, and generics multiply the work. It does not mean every platform, legacy bridge, or later language must block semantic progress.
 
@@ -74,7 +74,7 @@ Task019 adds the tenth frontend and one deterministic `program.cpp`, using quali
 - [018 — C source and target support](018-c-source-and-target.md) — delivered
 - [019 — C++ source and target support](019-cpp-source-and-target.md) — local acceptance passed; coordinator delivery pending
 - [020 — Rust source and target support](020-rust-source-and-target.md)
-- [022 — Swift source and target support](022-swift-source-and-target.md)
+- [022 — Swift source and target support](022-swift-source-and-target.md) — local acceptance passed; coordinator delivery pending
 - [023 — Kotlin/JVM source and target support](023-kotlin-source-and-target.md)
 - [025 — Core expanded-language baseline acceptance](025-core-language-baseline-acceptance.md)
 
@@ -147,7 +147,7 @@ Legend: **implemented** describes the baseline, **core** gates Task 025, **later
 | C | implemented 018 | implemented native text project 018 | `program.c`, `semantifold_runtime.h` | bundled private Tree-sitter C; Clang 21.1.8/C17 | Tasks 001–004 |
 | C++ | implemented locally 019 | implemented native text 019; coordinator delivery pending | `program.cpp` | private Tree-sitter CPP 0.23.4; Clang 21.1.8/C++20/libstdc++ | Tasks 001–004 |
 | Rust | core 020 | core Cargo project 020 | manifest, lockfile, `.rs` | qualified Tree-sitter Rust | Tasks 001–004 |
-| Swift | core 022 | core native text 022 | `.swift` | qualified Swift grammar + `swiftc` | Tasks 001–004 |
+| Swift | implemented locally 022 | implemented native text 022; coordinator delivery pending | `.swift` | qualified Swift grammar + `swiftc` | Tasks 001–004 |
 | Kotlin/JVM | core 023 | core JVM text 023 | `.kt` (runnable JAR acceptance) | qualified Kotlin grammar + `kotlinc` | Tasks 001–004 |
 | Browser WebAssembly | none | implemented binary/browser 021; local acceptance passed | `.wasm`, map, loader, HTML | direct encoder + WABT 1.0.36 + Node 24 + Chrome 152 | Tasks 001–004 |
 | Apple/iOS | Ruby and any registered project frontend | later application target 026 | Swift/Xcode-compatible app project | Swift/Xcode/iOS Simulator | Task 010 project to UI shell |
@@ -227,7 +227,7 @@ Dependencies in task files are authoritative. Existing IDs remain stable; numeri
 | [018](018-c-source-and-target.md) | delivered (L1) | — | C frontend/backend/ownership | 015 |
 | [019](019-cpp-source-and-target.md) | local acceptance passed (L1) | P0 | C++ frontend/backend/value boundaries; review corrections accepted locally, coordinator verification/CI/merge pending | 015, 018 |
 | [020](020-rust-source-and-target.md) | L1 | P0 | Rust frontend/backend/crate | 015 |
-| [022](022-swift-source-and-target.md) | L1 | P0 | Swift frontend/backend | 015 |
+| [022](022-swift-source-and-target.md) | local acceptance passed (L1) | P0 | Swift frontend/backend; review/CI/merge pending | 015 |
 | [023](023-kotlin-source-and-target.md) | L1 | P0 | Kotlin/JVM frontend/backend | 015 |
 | [025](025-core-language-baseline-acceptance.md) | L1 | P0 gate | Spanning Tasks 001–004 acceptance | 016–020, 022–024 |
 | [005](005-general-function-signatures-and-calls.md) | 1 | P1 | Required arity/void/direct calls | 001, 004, 025 |

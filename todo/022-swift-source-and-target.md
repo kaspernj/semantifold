@@ -1,6 +1,6 @@
 # 022 — Swift source and target support
 
-- Status: `todo`
+- Status: `implemented locally; independent review complete with bounded correction; exact-head TensorBuzz CI / merge / post-merge verification pending`
 - Phase/priority: Phase L1 / P0
 - Dependencies: [015-language-expansion-foundation.md](015-language-expansion-foundation.md)
 
@@ -48,6 +48,14 @@ Document the exact Swift profile, supported compiler versions/discovery, artifac
 - Swift is truthfully registered as both frontend and text backend for Tasks 001–004 only.
 - The parser candidate passes Task 015 qualification, and parser/compiler differential fixtures reveal no accepted-tree ambiguity.
 - Generated Swift reparses equivalently and passes deterministic real-compiler/runtime, diagnostics, cross-language, provenance, and repository gates.
+
+## Implementation acceptance record — 2026-09-09
+
+The canonical image passed a no-cache build after adding `libncurses6` and `libxml2-dev`. Exact Swift 6.3.3 for `x86_64-unknown-linux-gnu` typechecked the original and generated five-profile corpus, then compiled and executed generated artifacts in debug and `-O`; `spec/swift-native-execution.spec.js` passed 6/6.
+
+The named Swift/registry/repository focused acceptance passed 62 assertions, with lint and typecheck green. Existing `tree-sitter-legacy-install-consistency` and packed-consumer specs each passed 2/2. A credential-isolated Swift `npm pack` consumer loaded built `build/index.js`, retained full-SHA HTTPS/SRI grammar identity without Git, SSH, or CLI dependency, and produced `5\n` in both debug and optimized execution.
+
+This local implementation acceptance and the independent review's one bounded correction are complete. TensorBuzz CI for the exact candidate head, merge, and post-merge verification remain coordinator-owned delivery gates. This record claims no PR mutation, CI result, merge, release, or publication.
 
 ## Non-goals
 
