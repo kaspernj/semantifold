@@ -20,11 +20,11 @@ before_install:
     test "$(dpkg --print-architecture)" = "amd64"
     install -d -m 0755 /tmp/semantifold-rust
     cd /tmp/semantifold-rust
-    curl --fail --silent --show-error --location https://static.rust-lang.org/dist/2026-09-03/rustc-1.98.1-x86_64-unknown-linux-gnu.tar.xz --output rustc-1.98.1-x86_64-unknown-linux-gnu.tar.xz
+    curl --fail --silent --show-error --location --retry 5 --retry-delay 5 --retry-all-errors https://static.rust-lang.org/dist/2026-09-03/rustc-1.98.1-x86_64-unknown-linux-gnu.tar.xz --output rustc-1.98.1-x86_64-unknown-linux-gnu.tar.xz
     echo 'e974f036b28565f37c0f3bd92ddefa809bee16c04f9dcf07b9ed96e05aaaf7c4  rustc-1.98.1-x86_64-unknown-linux-gnu.tar.xz' | sha256sum --check -
-    curl --fail --silent --show-error --location https://static.rust-lang.org/dist/2026-09-03/rust-std-1.98.1-x86_64-unknown-linux-gnu.tar.xz --output rust-std-1.98.1-x86_64-unknown-linux-gnu.tar.xz
+    curl --fail --silent --show-error --location --retry 5 --retry-delay 5 --retry-all-errors https://static.rust-lang.org/dist/2026-09-03/rust-std-1.98.1-x86_64-unknown-linux-gnu.tar.xz --output rust-std-1.98.1-x86_64-unknown-linux-gnu.tar.xz
     echo 'fa3ff450172a16c026944030230c5069947af93c728d9179971d44e5e0cfb561  rust-std-1.98.1-x86_64-unknown-linux-gnu.tar.xz' | sha256sum --check -
-    curl --fail --silent --show-error --location https://static.rust-lang.org/dist/2026-09-03/cargo-1.98.1-x86_64-unknown-linux-gnu.tar.xz --output cargo-1.98.1-x86_64-unknown-linux-gnu.tar.xz
+    curl --fail --silent --show-error --location --retry 5 --retry-delay 5 --retry-all-errors https://static.rust-lang.org/dist/2026-09-03/cargo-1.98.1-x86_64-unknown-linux-gnu.tar.xz --output cargo-1.98.1-x86_64-unknown-linux-gnu.tar.xz
     echo 'ea1de9f9e23107d97ee2b41a72c552f34064a593da503789218387aee59f3ba4  cargo-1.98.1-x86_64-unknown-linux-gnu.tar.xz' | sha256sum --check -
     for component in rustc rust-std cargo; do
       tar -xJf "${component}-1.98.1-x86_64-unknown-linux-gnu.tar.xz"
