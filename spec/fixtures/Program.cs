@@ -6,7 +6,14 @@ internal static class Program
 {
     private static long difference(long left, long right)
     {
-        return checked(left - right);
+        if (left > right)
+        {
+            return checked(left - right);
+        }
+        else
+        {
+            return checked(right - left);
+        }
     }
 
     private static void Main()

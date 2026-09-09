@@ -1,6 +1,6 @@
 # 025 — Core expanded-language baseline acceptance
 
-- Status: `todo`
+- Status: `implemented and accepted locally; coordinator review / exact-head TensorBuzz CI / merge / post-merge verification pending`
 - Phase/priority: Phase L1 / P0 gate
 - Dependencies: [016-python-source-and-target.md](016-python-source-and-target.md), [017-csharp-source-and-target.md](017-csharp-source-and-target.md), [018-c-source-and-target.md](018-c-source-and-target.md), [019-cpp-source-and-target.md](019-cpp-source-and-target.md), [020-rust-source-and-target.md](020-rust-source-and-target.md), [022-swift-source-and-target.md](022-swift-source-and-target.md), [023-kotlin-source-and-target.md](023-kotlin-source-and-target.md), [024-go-source-and-target.md](024-go-source-and-target.md)
 
@@ -45,6 +45,14 @@ Update language-support/capability and testing documentation with the core cohor
 - Every dependency task is complete and every language passes normalization, backend execution, same-language round trip, and the selected spanning crossings for Tasks 001–004.
 - All real toolchain, diagnostic, rejection, deterministic artifact, and provenance assertions pass with truthful registry discovery.
 - Task 005 and Task 007 may rely on one verified small IR without inheriting Browser Wasm, mobile app, Objective-C, Dart/Flutter, or Zig as prerequisites.
+
+## Implementation delivery record — 2026-09-09
+
+- Added one data-driven core acceptance spec for the eight expanded languages and one shared fail-loud diagnostic spec. Existing per-language fixtures and real-toolchain helpers remain the source of language-specific behavior; C# and Go helper logic was extracted for reuse rather than duplicated.
+- The initial RED found that the C# base fixture alone represented signed subtraction instead of the shared conditional absolute-difference meaning. Correcting that fixture established the common five-profile corpus without widening semantic IR. A later real ordered-expression RED found that generated Swift `piece(…) + piece(…)` reparsed through the qualified grammar as a trailing-call additive CST shape; the frontend now consumes that parser shape directly, with a focused regression and no source-text fallback.
+- Local GREEN evidence is `7/7` core baseline acceptance, `4/4` shared diagnostics, `16/16` Swift frontend validation, `3/3` C# parser qualification, `5/5` C# frontend validation, `4/4` C# cross-language acceptance, and `5/5` Go cross-language acceptance. The core run used Python 3.14.4, .NET SDK 10.0.112, Clang/Clang++ 21.1.8, Rust/Cargo 1.98.1, Swift 6.3.3, Kotlin 2.4.20 on Java 25.0.4, and Go 1.26.0; unavailable tools remain failures.
+- Repository gates passed locally: legacy-runtime consistency and ESLint, root/workspace strict typecheck (through `npm run lint`), root/workspace build, high-severity audit with zero vulnerabilities, production and complete dependency listings, package dry-run, and `git diff --check`. No aggregate suite, shard, Wasm/mobile/later-language lane, compiler download, external review, CI, publication, or remote mutation was run.
+- Coordinator-owned independent review, TensorBuzz for the exact candidate head, merge, and post-merge acceptance remain outstanding. This local record does not claim them.
 
 ## Non-goals
 

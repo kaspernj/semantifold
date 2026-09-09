@@ -1,0 +1,1 @@
+Prove the Tasks 001–004 baseline across Python, C#, C, C++, Rust, Swift, Kotlin/JVM, and Go with bounded real-toolchain, round-trip, cross-family, deterministic-artifact, provenance, ordering, registry, and fail-loud acceptance coverage. Normalize Swift's qualified trailing-call additive CST shape without a source-text fallback.

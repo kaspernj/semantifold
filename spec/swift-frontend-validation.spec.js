@@ -65,6 +65,23 @@ describe("Swift strict source profile", () => {
     }
   })
 
+  it("normalizes the qualified grammar's trailing direct-call additive shape", () => {
+    const swift = String.raw`func piece(_ left: String, _ right: String) -> String {
+  return left + right
+}
+
+print(piece("left", "é\0") + piece("right", "😀"))
+`
+    const typescript = String.raw`function piece(left: string, right: string): string {
+  return left + right
+}
+
+console.log(piece("left", "é\u0000") + piece("right", "😀"))
+`
+
+    expect(meaning(read(swift))).toEqual(meaning(parse({filename: "program.ts", language: "typescript", source: typescript})))
+  })
+
   it("rejects ordinary Swift String equality while retaining integer and Boolean equality", () => {
     for (const operator of ["==", "!="]) {
       const source = `func same(_ left: String, _ right: String) -> Bool {\n  return left ${operator} right\n}\n\nprint(same("é", "e\\u{301}"))\n`

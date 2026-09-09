@@ -23,6 +23,16 @@ The immutable registry is authoritative for both dispatch and discovery:
 
 `languageCapabilities` exposes all fourteen records as frozen data. A role is not inferred from another role: browser Wasm has binary/application backends without a frontend, text backend, source round trip, or general interoperability role. `supportedLanguages` is the derived list of thirteen records with both frontend and text generation. C#, Go, and C return two text artifacts; Rust returns three; Wasm returns one binary and three text artifacts. Their callers use `generateArtifactSet()`; the legacy single-artifact APIs reject them with `UNSUPPORTED_ROLE`.
 
+## Task 025 core expanded-language acceptance
+
+Python, C#, C, C++, Rust, Swift, Kotlin/JVM, and Go share one data-driven Tasks 001–004 acceptance gate. Their five base/scalar/local/operator/statement fixtures normalize to the same location-neutral semantic corpus; the pre-existing `select`/`choose` spelling difference is treated as a reserved-word adaptation only, not different behavior. Each backend generates, reparses, and runs the complete operator profile through its real registered toolchain. Python and Swift emit one source file; C++ emits one source file; C# and C emit two-file projects; Rust emits `Cargo.toml`, `Cargo.lock`, and `src/main.rs`; Kotlin emits mapped `Program.kt` with runnable-JAR metadata; and Go emits `go.mod` plus `main.go`.
+
+The bounded crossing set is deliberately eleven paths: Python statements to Rust, C# operators to C++, C locals to Kotlin, then PHP to Python, Ruby to C#, JavaScript to C, TypeScript to C++, Java to Rust, PHP to Swift, Ruby to Kotlin, and JavaScript to Go. This proves dynamic-to-native, managed-to-native, native-to-managed, and every original-five-to-expanded-backend route without promising an all-pairs matrix. It is separate from Task 013, which remains the historical original-five acceptance gate for later Tasks 005–008.
+
+Repeated artifact generation checks ordered paths, byte identity, rich mappings, Source Map v3, exact/synthetic spans, and source-filename provenance. Boundary safe integers, Unicode and NUL strings, and permitted non-ASCII identifiers are included. A nested marker program proves eager operands evaluate left before right and Boolean operators short-circuit on all eight backends. C and C++ additionally require their exact versioned ordered-expression regions and real Clang O0/O2 runs both with and without ASan/UBSan/leak instrumentation; Rust runs debug/release and Swift runs debug/`-O`.
+
+The shared negative corpus covers parser recovery, missing types, truthiness, mixed numeric/Boolean equality, unsafe literals, dynamic calls, reflection, exceptions, concurrency, illegal target names, malformed caller IR, later-arity IR, bounded-target overflow, unsupported roles, and unknown languages. Diagnostics retain code, language, filename, and parser-backed range, and artifact generation remains transactional. Task 025 adds no semantic nodes or capabilities: Wasm, application platforms, Objective-C, Dart/Flutter, Zig, Tasks 005+, compiler installation, benchmarks, and quadratic crossings remain outside the gate.
+
 ## Implemented subset
 
 | Language | Exact frontend scalar types | Generated entry point |

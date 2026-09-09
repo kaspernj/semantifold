@@ -8,6 +8,7 @@ import path from "node:path"
 import {promisify} from "node:util"
 import {describe, expect, it} from "@velocious/testing"
 import {discoverCanonicalToolchain, generate, generateArtifactSet, parse, runAcceptanceStages} from "../index.js"
+import {dotnetEnvironment, executeCSharp} from "./support/csharp-toolchain.js"
 
 const executeFile = promisify(execFile)
 const originalFive = ["php", "ruby", "javascript", "typescript", "java"]
@@ -16,7 +17,7 @@ const filenames = new Map([
   ["typescript", "program.ts"], ["java", "Main.java"]
 ])
 const fixtureProfiles = [
-  ["", "-5\n"],
+  ["", "5\n"],
   ["scalars/", "yes\n"],
   ["locals/", "yes\n"],
   ["operators/", "typed:operators\n"],
@@ -135,28 +136,6 @@ async function executeGenerated(language, module) {
   return result.stages.at(-1)?.stdout ?? ""
 }
 
-/** @param {import("../src/semantic/types.js").SemanticModule} module */
-async function executeCSharp(module) {
-  const dotnet = await discoverCanonicalToolchain("dotnet")
-  const packages = await mkdtemp(path.join(os.tmpdir(), "semantifold-nuget-"))
-
-  try {
-    return await runAcceptanceStages({
-      artifacts: generateArtifactSet({language: "csharp", module}),
-      environment: dotnetEnvironment(packages),
-      stages: [
-        {arguments: ["restore", "Semantifold.csproj", "--source", ".", "--no-cache", "--force", "--disable-parallel", "--nologo"], stage: "restore", tool: dotnet},
-        {arguments: ["build", "Semantifold.csproj", "--configuration", "Release", "--no-restore", "--nologo", "--warnaserror"], stage: "compile", tool: dotnet},
-        {arguments: ["exec", "bin/Release/net10.0/Semantifold.dll"], stage: "execute", tool: dotnet}
-      ],
-      target: "csharp",
-      timeoutMs: 30_000
-    })
-  } finally {
-    await rm(packages, {force: true, recursive: true})
-  }
-}
-
 /** @param {import("../src/semantic/types.js").GeneratedArtifactSet} set */
 async function buildManagedOutputs(set) {
   const directory = await mkdtemp(path.join(os.tmpdir(), "semantifold-csharp-build-"))
@@ -186,19 +165,5 @@ async function buildManagedOutputs(set) {
     return outputs
   } finally {
     await rm(directory, {force: true, recursive: true})
-  }
-}
-
-/** @param {string} packages */
-function dotnetEnvironment(packages) {
-  return {
-    DOTNET_CLI_TELEMETRY_OPTOUT: "1",
-    DOTNET_NOLOGO: "1",
-    DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "1",
-    DOTNET_SYSTEM_GLOBALIZATION_INVARIANT: "1",
-    LC_ALL: "C.UTF-8",
-    NUGET_PACKAGES: packages,
-    PATH: process.env.PATH,
-    TZ: "UTC"
   }
 }
