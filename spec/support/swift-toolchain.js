@@ -33,9 +33,10 @@ export async function executeSwiftArtifacts(set, {label = "program", swiftc} = {
   const environment = deterministicEnvironment({PATH: [...new Set(compilerPath.filter((entry) => entry.length > 0))].join(path.delimiter)})
   const commands = []
   const invoke = (stage, arguments_) => {
-    const output = spawnSync(compiler.executable, arguments_, {cwd: directory, env: environment, encoding: "utf8",
+    const compilerArguments = ["--driver-mode=swiftc", ...arguments_]
+    const output = spawnSync(compiler.executable, compilerArguments, {cwd: directory, env: environment, encoding: "utf8",
       maxBuffer: 1024 * 1024, timeout: 30_000, killSignal: "SIGKILL"})
-    const result = {stage, executable: compiler.executable, arguments: arguments_, stdout: output.stdout, stderr: output.stderr,
+    const result = {stage, executable: compiler.executable, arguments: compilerArguments, stdout: output.stdout, stderr: output.stderr,
       status: output.status, signal: output.signal}
 
     commands.push(result)

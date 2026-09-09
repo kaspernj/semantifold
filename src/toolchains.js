@@ -24,7 +24,7 @@ export const canonicalToolchains = deepFreeze({
   clang: definition("clang", "SEMANTIFOLD_CLANG", ["--version"], /^Ubuntu clang version 21\.1\.8 [^\n]+\nTarget: x86_64-pc-linux-gnu\n/u),
   rustc: definition("rustc", "SEMANTIFOLD_RUSTC", ["--version", "--verbose"], /^rustc 1\.98\.1 \(48a229cea 2026-09-01\)\nbinary: rustc\ncommit-hash: 48a229ceaefd4985c50990b14116b6d856af0985\ncommit-date: 2026-09-01\nhost: x86_64-unknown-linux-gnu\nrelease: 1\.98\.1\nLLVM version: 22\.1\.8$/u),
   cargo: definition("cargo", "SEMANTIFOLD_CARGO", ["--version", "--verbose"], /^cargo 1\.98\.1 \(797e8a9bc 2026-08-05\)\nrelease: 1\.98\.1\ncommit-hash: 797e8a9bca276c1c9f9f738d2a20f484fa4eea9d\ncommit-date: 2026-08-05\nhost: x86_64-unknown-linux-gnu\n/u),
-  swiftc: definition("swiftc", "SEMANTIFOLD_SWIFTC", ["--version"], /^Swift version 6\.3\.3 \(swift-6\.3\.3-RELEASE\)\nTarget: x86_64-unknown-linux-gnu$/u),
+  swiftc: definition("swiftc", "SEMANTIFOLD_SWIFTC", ["--driver-mode=swiftc", "--version"], /^Swift version 6\.3\.3 \(swift-6\.3\.3-RELEASE\)\nTarget: x86_64-unknown-linux-gnu$/u),
   "wasm-validate": definition("wasm-validate", "SEMANTIFOLD_WASM_VALIDATE", ["--version"], /^1\.0\.36$/u),
   chromium: definition("chromium", "SEMANTIFOLD_CHROMIUM", ["--version"], /^Google Chrome 152\.0\.7977\.82$/u)
 })

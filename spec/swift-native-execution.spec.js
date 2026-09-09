@@ -56,6 +56,7 @@ describe("Swift real debug and optimized native execution", () => {
       expect(process.env.PATH.split(path.delimiter)).not.toContain(compilerDirectory)
       const result = await executeSwiftArtifacts(swiftSourceArtifacts("print(5)\n"), {label: "absolute-compiler-companion-path", swiftc: compiler})
 
+      for (const command of result.commands) expect(command.arguments[0]).toEqual("--driver-mode=swiftc")
       for (const mode of result.modes) expect(mode.stdout).toEqual("5\n")
     } finally {
       if (originalPath === undefined) delete process.env.PATH

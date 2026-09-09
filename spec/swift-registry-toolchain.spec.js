@@ -1,7 +1,7 @@
 // @ts-check
 
 import assert from "node:assert/strict"
-import {chmod, mkdtemp, rm, writeFile} from "node:fs/promises"
+import {chmod, mkdtemp, rm, symlink, writeFile} from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import {describe, expect, it} from "@velocious/testing"
@@ -17,7 +17,32 @@ describe("Swift registration and exact compiler identity", () => {
       mapping: {richText: true, sourceMapV3: true, binaryRanges: false}
     })
     expect(canonicalToolchains.swiftc).toMatchObject({canonicalCommand: "swiftc", overrideEnvironmentVariable: "SEMANTIFOLD_SWIFTC",
-      versionArguments: ["--version"]})
+      versionArguments: ["--driver-mode=swiftc", "--version"]})
+  })
+
+  it("preserves swiftc mode after resolving a multi-call compiler symlink", async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), "semantifold-swift-driver-"))
+
+    try {
+      const driver = path.join(directory, "swift-driver")
+      const compiler = path.join(directory, "swiftc")
+
+      await writeFile(driver, `#!/bin/sh
+if [ "$1" != "--driver-mode=swiftc" ] || [ "$2" != "--version" ] || [ "$#" -ne 2 ]; then
+  printf 'invalid Swift driver invocation\n' >&2
+  exit 64
+fi
+printf '%s\n' 'Swift version 6.3.3 (swift-6.3.3-RELEASE)' 'Target: x86_64-unknown-linux-gnu'
+`)
+      await chmod(driver, 0o755)
+      await symlink(driver, compiler)
+      const tool = await discoverCanonicalToolchain("swiftc", {override: compiler})
+
+      expect(tool.executable).toEqual(driver)
+      expect(tool.versionArguments).toEqual(["--driver-mode=swiftc", "--version"])
+    } finally {
+      await rm(directory, {recursive: true, force: true})
+    }
   })
 
   it("accepts only exact Swift 6.3.3 on the Linux x86-64 target and fails loudly when absent", async () => {

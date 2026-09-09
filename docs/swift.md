@@ -37,7 +37,7 @@ Swift version 6.3.3 (swift-6.3.3-RELEASE)
 Target: x86_64-unknown-linux-gnu
 ```
 
-Discovery uses canonical command `/usr/bin/swiftc` after image construction or absolute override `SEMANTIFOLD_SWIFTC`. Missing, ambiguous, non-executable, wrong-release, development-snapshot, or foreign-target tools fail loudly. No generation or test downloads a compiler.
+Discovery uses canonical command `/usr/bin/swiftc` after image construction or absolute override `SEMANTIFOLD_SWIFTC`. Because discovery retains the executable's exact resolved identity, version and compilation invocations explicitly pass `--driver-mode=swiftc`; this preserves compiler mode when an installed `swiftc` is a symlink to the multi-call `swift-driver`. Missing, ambiguous, non-executable, wrong-release, development-snapshot, or foreign-target tools fail loudly. No generation or test downloads a compiler.
 
 The Dockerfile selects official image `swift:6.3.3-noble@sha256:56ef1be2c1ca36f4c52440357dc1fcdfdb5e113587134fcadeef57c225c71b54`; its Linux/amd64 child manifest is `sha256:4e0fc24f0f93a5cf9a91bfcf182534bbc0571d70d757389c04ff1f616c1c460f`. A source stage probes the identity and copies only Swift executable/resource paths into the unchanged final `ubuntu:26.04@sha256:3131b4cc82a783df6c9df078f86e01819a13594b865c2cad47bd1bca2b7063bb` stage. It does not copy project source or replace the final `/usr` tree wholesale.
 
