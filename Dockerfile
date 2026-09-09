@@ -85,6 +85,7 @@ RUN install -d -m 0755 /tmp/semantifold-kotlin \
   && echo '59e9ca74c7904ef2c122b12114937673ccce68de820a663f0ed66ccf8799e0b7  /tmp/semantifold-kotlin/kotlin-compiler-2.4.20.zip' | sha256sum --check - \
   && cd /tmp/semantifold-kotlin \
   && jar -xf kotlin-compiler-2.4.20.zip \
+  && rm -rf /opt/kotlinc \
   && mv kotlinc /opt/kotlinc \
   && KOTLIN_VERSION_OUTPUT="$(/opt/kotlinc/bin/kotlinc -version 2>&1)" \
   && printf '%s\n' "$KOTLIN_VERSION_OUTPUT" \
