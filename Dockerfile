@@ -29,7 +29,7 @@ RUN apt-get update \
     libstdc++-15-dev=15.2.0-16ubuntu1 \
     libxml2-dev \
     curl \
-    default-jdk-headless \
+    openjdk-25-jdk-headless=25.0.4+7-1~26.04 \
     dotnet-sdk-10.0 \
     git \
     gh \
@@ -75,6 +75,24 @@ RUN apt-get update \
   && test -x "$(go env GOROOT)/bin/gofmt" \
   && test "$(readlink -f "$(command -v gofmt)")" = "$(readlink -f "$(go env GOROOT)/bin/gofmt")" \
   && rm -rf /var/lib/apt/lists/*
+
+ENV SEMANTIFOLD_KOTLINC=/opt/kotlinc/bin/kotlinc
+
+RUN install -d -m 0755 /tmp/semantifold-kotlin \
+  && curl --fail --silent --show-error --location \
+    https://github.com/JetBrains/kotlin/releases/download/v2.4.20/kotlin-compiler-2.4.20.zip \
+    --output /tmp/semantifold-kotlin/kotlin-compiler-2.4.20.zip \
+  && echo '59e9ca74c7904ef2c122b12114937673ccce68de820a663f0ed66ccf8799e0b7  /tmp/semantifold-kotlin/kotlin-compiler-2.4.20.zip' | sha256sum --check - \
+  && cd /tmp/semantifold-kotlin \
+  && jar -xf kotlin-compiler-2.4.20.zip \
+  && rm -rf /opt/kotlinc \
+  && mv kotlinc /opt/kotlinc \
+  && chmod 0755 /opt/kotlinc/bin/kotlinc \
+  && KOTLIN_VERSION_OUTPUT="$(/opt/kotlinc/bin/kotlinc -version 2>&1)" \
+  && printf '%s\n' "$KOTLIN_VERSION_OUTPUT" \
+  && printf '%s\n' "$KOTLIN_VERSION_OUTPUT" | grep --extended-regexp --quiet '^info: kotlinc-jvm 2\.4\.20 \(JRE 25\.0\.4\+7-1-(24|26)\.04-Ubuntu\)$' \
+  && test "$(java -version 2>&1 | sed -n '1p')" = 'openjdk version "25.0.4" 2026-07-21' \
+  && rm -rf /tmp/semantifold-kotlin
 
 RUN test "$(dpkg --print-architecture)" = "amd64" \
   && curl --fail --silent --show-error --location \

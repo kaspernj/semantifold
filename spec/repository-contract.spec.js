@@ -20,6 +20,8 @@ const providerPackages = Object.freeze([
 const activeProviderExecutables = Object.freeze(["codex", "opencode"])
 const internalLegacyPackage = "semantifold-tree-sitter-legacy-internal"
 const retiredLegacyPackage = "@kaspernj/semantifold-tree-sitter-legacy"
+const kotlinGrammarCommit = "57c35ad1a80ccd2a0ebd8fffe852f0d13a20acd0"
+const kotlinGrammarSource = `https://github.com/kaspernj/tree-sitter-kotlin/archive/${kotlinGrammarCommit}.tar.gz`
 
 describe("repository delivery contracts", () => {
   it("owns and bundles the private legacy Tree-sitter workspace in the root package", async () => {
@@ -46,6 +48,7 @@ describe("repository delivery contracts", () => {
     expect(rootManifest.devDependencies[workspaceManifest.name]).toEqual("0.1.0")
     expect(rootManifest.devDependencies[retiredLegacyPackage]).toEqual(undefined)
     expect(rootManifest.bundleDependencies).toEqual([internalLegacyPackage, "tree-sitter"])
+    expect(rootManifest.dependencies["tree-sitter-kotlin"]).toEqual(kotlinGrammarSource)
     expect(rootManifest.files.includes("packages/**")).toBeFalse()
     expect(rootManifest.exports).toEqual({
       ".": {import: "./build/index.js", types: "./build/index.d.ts"}
@@ -86,6 +89,9 @@ describe("repository delivery contracts", () => {
     expect(lockfile.packages[`node_modules/${internalLegacyPackage}`].link).toEqual(undefined)
     expect(lockfile.packages["node_modules/tree-sitter"].version).toEqual("0.25.1")
     expect(lockfile.packages["node_modules/tree-sitter"].inBundle).toBeTrue()
+    expect(lockfile.packages["node_modules/tree-sitter-kotlin"].resolved).toEqual(kotlinGrammarSource)
+    expect(lockfile.packages["node_modules/tree-sitter-kotlin"].integrity).toMatch(/^sha512-/u)
+    expect(lockfile.packages["node_modules/tree-sitter-kotlin"].inBundle).toEqual(undefined)
     expect(lockfile.packages[`node_modules/${internalLegacyPackage}/node_modules/tree-sitter`].version).toEqual("0.21.1")
     expect(lockfile.packages[`node_modules/${internalLegacyPackage}/node_modules/tree-sitter-c`].version).toEqual("0.23.2")
     expect(lockfile.packages[`node_modules/${internalLegacyPackage}/node_modules/tree-sitter-cpp`].version).toEqual("0.23.4")
@@ -145,6 +151,7 @@ describe("repository delivery contracts", () => {
     expect(config.environment.SEMANTIFOLD_PYTHON).toEqual("/usr/bin/python3")
     expect(config.environment.SEMANTIFOLD_DOTNET).toEqual("/usr/bin/dotnet")
     expect(config.environment.SEMANTIFOLD_GO).toEqual("/usr/local/bin/go")
+    expect(config.environment.SEMANTIFOLD_KOTLINC).toEqual("/opt/kotlinc/bin/kotlinc")
     expect(config.environment.SEMANTIFOLD_SWIFTC).toEqual(swiftExecutable)
     expect(config.environment.PATH).toEqual(undefined)
     expect(config.environment.SEMANTIFOLD_CLANG).toEqual("/usr/bin/clang-21")
@@ -154,7 +161,7 @@ describe("repository delivery contracts", () => {
       'test -r "$(clang-21 -print-resource-dir)/lib/linux/libclang_rt.asan-x86_64.a"',
       'test -r "$(clang-21 -print-resource-dir)/lib/linux/libclang_rt.ubsan_standalone-x86_64.a"']) assert.ok(config.before_install.includes(probe), probe)
     assert.deepEqual(config.before_install.filter((command) => goCommands.includes(command)), goCommands)
-    assert.match(beforeInstall, /php-cli python3 ruby default-jdk-headless/u)
+    assert.match(beforeInstall, /php-cli python3 ruby openjdk-25-jdk-headless=25\.0\.4\+7-1~24\.04/u)
     assert.match(beforeInstall, /dotnet-sdk-10\.0/u)
     assert.match(beforeInstall, /libncurses6/u)
     assert.match(beforeInstall, /libxml2-dev/u)
@@ -224,7 +231,7 @@ describe("repository delivery contracts", () => {
       'test -r "$(clang++-21 -print-file-name=libstdc++.so)"', "dpkg-query -W libstdc++-13-dev"]) {
       assert.ok(config.before_install.includes(probe), probe)
     }
-    expect(config.builds.end_to_end.name).toEqual("Twelve-language tests with Rust debug/release and C/CPP O0/O2 sanitizers")
+    expect(config.builds.end_to_end.name).toEqual("Thirteen-language tests with Kotlin/JVM, Rust debug/release and C/CPP O0/O2 sanitizers")
     await assert.rejects(access(new URL("../.github/workflows", import.meta.url)))
   })
 
@@ -249,7 +256,7 @@ describe("repository delivery contracts", () => {
     assert.match(runs, /php-cli/u)
     assert.match(runs, /python3/u)
     assert.match(runs, /ruby/u)
-    assert.match(runs, /default-jdk-headless/u)
+    assert.match(runs, /openjdk-25-jdk-headless=25\.0\.4\+7-1~26\.04/u)
     assert.match(runs, /dotnet-sdk-10\.0/u)
     assert.match(runs, /golang-go/u)
     for (const pin of ["clang=1:21.1.6-71", "clang-21=1:21.1.8-6ubuntu1", "libclang-rt-21-dev=1:21.1.8-6ubuntu1", "libstdc++-15-dev=15.2.0-16ubuntu1"]) assert.ok(runs.includes(pin))

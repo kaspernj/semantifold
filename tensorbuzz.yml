@@ -8,7 +8,25 @@ before_install:
   - sudo ln --symbolic --force /usr/local/go/bin/go /usr/local/bin/go
   - sudo ln --symbolic --force /usr/local/go/bin/gofmt /usr/local/bin/gofmt
   - sudo apt-get update
-  - sudo apt-get install --yes --no-install-recommends php-cli python3 ruby default-jdk-headless dotnet-sdk-10.0 ca-certificates curl gnupg g++-13 xz-utils build-essential libncurses6 libxml2-dev
+  - sudo apt-get install --yes --no-install-recommends php-cli python3 ruby openjdk-25-jdk-headless=25.0.4+7-1~24.04 dotnet-sdk-10.0 ca-certificates curl gnupg g++-13 xz-utils build-essential libncurses6 libxml2-dev
+  - |
+    sudo sh -eu <<'KOTLIN_TOOLCHAIN'
+    KOTLIN_ROOT=/tmp/semantifold-kotlin
+    KOTLIN_ARCHIVE="$KOTLIN_ROOT/kotlin-compiler-2.4.20.zip"
+    install -d -m 0755 "$KOTLIN_ROOT"
+    curl --fail --silent --show-error --location --retry 5 --retry-delay 5 --retry-all-errors https://github.com/JetBrains/kotlin/releases/download/v2.4.20/kotlin-compiler-2.4.20.zip --output "$KOTLIN_ARCHIVE"
+    printf '%s  %s\n' '59e9ca74c7904ef2c122b12114937673ccce68de820a663f0ed66ccf8799e0b7' "$KOTLIN_ARCHIVE" | sha256sum --check -
+    cd "$KOTLIN_ROOT"
+    jar -xf "$KOTLIN_ARCHIVE"
+    rm -rf /opt/kotlinc
+    mv kotlinc /opt/kotlinc
+    chmod 0755 /opt/kotlinc/bin/kotlinc
+    KOTLIN_VERSION_OUTPUT="$(/opt/kotlinc/bin/kotlinc -version 2>&1)"
+    printf '%s\n' "$KOTLIN_VERSION_OUTPUT"
+    printf '%s\n' "$KOTLIN_VERSION_OUTPUT" | grep --extended-regexp --quiet '^info: kotlinc-jvm 2\.4\.20 \(JRE 25\.0\.4\+7-1-(24|26)\.04-Ubuntu\)$'
+    test "$(java -version 2>&1 | sed -n '1p')" = 'openjdk version "25.0.4" 2026-07-21'
+    rm -rf "$KOTLIN_ROOT"
+    KOTLIN_TOOLCHAIN
   - curl --fail --silent --show-error --location https://archive.ubuntu.com/ubuntu/pool/universe/w/wabt/wabt_1.0.36+dfsg+~cs1.0.36-2ubuntu1_amd64.deb --output /tmp/wabt_1.0.36+dfsg+~cs1.0.36-2ubuntu1_amd64.deb
   - printf '%s  %s\n' 'febaa4935e2982d83b21c75938773f226fa8bf22145f6a3bee25da9e98b0273b' '/tmp/wabt_1.0.36+dfsg+~cs1.0.36-2ubuntu1_amd64.deb' | sha256sum --check -
   - curl --fail --silent --show-error --location https://dl.google.com/linux/chrome/deb/pool/main/g/google-chrome-stable/google-chrome-stable_152.0.7977.82-1_amd64.deb --output /tmp/google-chrome-stable_152.0.7977.82-1_amd64.deb
@@ -120,6 +138,7 @@ before_script:
 environment:
   NODE_ENV: test
   SEMANTIFOLD_NODE: /usr/local/bin/node
+  SEMANTIFOLD_KOTLINC: /opt/kotlinc/bin/kotlinc
   SEMANTIFOLD_PYTHON: /usr/bin/python3
   SEMANTIFOLD_DOTNET: /usr/bin/dotnet
   SEMANTIFOLD_GO: /usr/local/bin/go
@@ -142,6 +161,6 @@ builds:
       - npm ls --all
       - npm pack --dry-run --json
   end_to_end:
-    name: Twelve-language tests with Rust debug/release and C/CPP O0/O2 sanitizers
+    name: Thirteen-language tests with Kotlin/JVM, Rust debug/release and C/CPP O0/O2 sanitizers
     script:
       - LANG=C.UTF-8 LC_ALL=C.UTF-8 npm test

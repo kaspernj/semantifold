@@ -5,6 +5,7 @@ import {generateArtifactSource, generateSource} from "./src/backends/index.js"
 import {createGeneratedArtifactSet as constructArtifactSet} from "./src/artifacts.js"
 import {SemantifoldDiagnostic} from "./src/diagnostic.js"
 import {languageRegistry} from "./src/language-registry.js"
+import {kotlinArtifactMetadata} from "./src/backends/kotlin.js"
 
 const artifactBackendRoles = new Set(["text", "binary", "application"])
 
@@ -157,6 +158,7 @@ export function generateArtifactSet(input) {
 
     return constructArtifactSet({
       artifacts,
+      ...(language == "kotlin" ? {metadata: kotlinArtifactMetadata} : {}),
       target: language
     })
   }

@@ -10,7 +10,7 @@ const semanticEdges = new Set(["functions", "entryPoint", "body", "parameters", 
 /**
  * Bounds a native occurrence plan and rejects cycles before recursive shared validation.
  * @param {unknown} module - Untrusted backend request.
- * @param {"c" | "cpp" | "rust" | "swift" | "wasm"} [language] - Backend diagnostic language.
+ * @param {"c" | "cpp" | "kotlin" | "rust" | "swift" | "wasm"} [language] - Backend diagnostic language.
  * @returns {void}
  */
 export function validateNativeGraph(module, language = "c") {

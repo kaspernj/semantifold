@@ -1,0 +1,1 @@
+Added first-class Kotlin/JVM source and deterministic `Program.kt` target support for the Tasks001–004 scalar subset, including a qualified immutable Tree-sitter grammar, checked safe-integer helpers, rich mappings, an exact Kotlin 2.4.20/OpenJDK 25 runnable-JAR contract, bidirectional original-five execution, and credential-free packed-consumer coverage.

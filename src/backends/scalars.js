@@ -9,6 +9,7 @@ const targetScalarTypes = Object.freeze({
   csharp: Object.freeze({boolean: "bool", integer: "long", string: "string"}),
   go: Object.freeze({boolean: "bool", integer: "int64", string: "string"}),
   java: Object.freeze({boolean: "boolean", integer: "int", string: "String"}),
+  kotlin: Object.freeze({boolean: "Boolean", integer: "Long", string: "String"}),
   javascript: Object.freeze({boolean: "boolean", integer: "number", string: "string"}),
   php: Object.freeze({boolean: "bool", integer: "int", string: "string"}),
   python: Object.freeze({boolean: "bool", integer: "int", string: "str"}),
@@ -37,6 +38,7 @@ export function emitStringLiteral(language, value) {
   if (language == "php") return emitPhpString(value)
   if (language == "ruby") return emitRubyString(value)
   if (language == "java") return emitJavaString(value)
+  if (language == "kotlin") return emitKotlinString(value)
 
   const literal = JSON.stringify(value)
 
@@ -148,6 +150,31 @@ function emitJavaString(value) {
     else if (codePoint !== undefined && (codePoint < 32 || codePoint == 127)) {
       emitted += `\\${codePoint.toString(8).padStart(3, "0")}`
     } else emitted += character
+  }
+
+  return `${emitted}"`
+}
+
+/**
+ * Emits an ordinary noninterpolated Kotlin string over Unicode scalar values.
+ * @param {string} value - Valid Unicode scalar string.
+ * @returns {string} Kotlin string literal.
+ */
+function emitKotlinString(value) {
+  let emitted = "\""
+
+  for (const character of value) {
+    const codePoint = /** @type {number} */ (character.codePointAt(0))
+
+    if (character == "\"") emitted += "\\\""
+    else if (character == "\\") emitted += "\\\\"
+    else if (character == "$") emitted += "\\$"
+    else if (character == "\b") emitted += "\\b"
+    else if (character == "\t") emitted += "\\t"
+    else if (character == "\n") emitted += "\\n"
+    else if (character == "\r") emitted += "\\r"
+    else if (codePoint < 32 || codePoint == 127) emitted += `\\u${codePoint.toString(16).padStart(4, "0")}`
+    else emitted += character
   }
 
   return `${emitted}"`
