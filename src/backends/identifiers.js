@@ -4,6 +4,7 @@ import {unsupportedCapability} from "../diagnostic.js"
 
 /** @type {Record<import("../semantic/types.js").BackendLanguage, RegExp>} */
 const identifierPatterns = {
+  kotlin: /^(?:_|\p{L})(?:_|\p{L}|\p{Nd})*$/u,
   swift: /^(?:_|\p{XID_Start})(?:_|\p{XID_Continue})*$/u,
   rust: /^[A-Za-z_][A-Za-z0-9_]*$/u,
   cpp: /^[A-Za-z][A-Za-z0-9_]*$/u,
@@ -21,6 +22,11 @@ const identifierPatterns = {
 
 /** @type {Record<import("../semantic/types.js").BackendLanguage, Set<string>>} */
 const reservedWords = {
+  kotlin: new Set([
+    "as", "break", "class", "continue", "do", "else", "false", "for", "fun", "if", "in", "interface", "is", "null",
+    "object", "package", "return", "super", "this", "throw", "true", "try", "typealias", "typeof", "val", "var", "when",
+    "while", "_", "main", "println", "Long", "Boolean", "String", "Math", "ArithmeticException"
+  ]),
   swift: new Set([
     "Any", "Self", "Type", "Protocol", "actor", "any", "as", "associatedtype", "associativity", "async", "await", "borrowing",
     "break", "case", "catch", "class", "consume", "consuming", "continue", "convenience", "copy", "default", "defer", "deinit",
@@ -155,7 +161,8 @@ export function validateTargetIdentifier(language, name, role, location) {
     language == "c" && !isCIdentifier(name) ||
     language == "rust" && !isRustIdentifier(name) ||
     language == "cpp" && !isCppIdentifier(name) ||
-    language == "swift" && (!isSwiftIdentifier(name) || name.normalize("NFC") != name)) {
+    language == "swift" && (!isSwiftIdentifier(name) || name.normalize("NFC") != name) ||
+    language == "kotlin" && (!isKotlinIdentifier(name) || name.normalize("NFC") != name)) {
     unsupportedCapability(language, `${role} identifier '${name}'`, location)
   }
 }
@@ -218,4 +225,14 @@ export function isRustIdentifier(name) {
  */
 export function isSwiftIdentifier(name) {
   return identifierPatterns.swift.test(name) && !reservedWords.swift.has(name) && !name.startsWith("semantifold_")
+}
+
+/**
+ * Protects Kotlin keywords, JVM scalar/scaffold names, and target-only helper names.
+ * @param {string} name - Caller-owned function or binding name.
+ * @returns {boolean} Whether ordinary unescaped Kotlin syntax can preserve the name.
+ */
+export function isKotlinIdentifier(name) {
+  return identifierPatterns.kotlin.test(name) && !reservedWords.kotlin.has(name) && !name.startsWith("semantifold_") &&
+    !name.startsWith("SEMANTIFOLD_")
 }

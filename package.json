@@ -61,15 +61,18 @@
     "tree-sitter": "0.25.1",
     "tree-sitter-c-sharp": "0.23.5",
     "tree-sitter-go": "0.25.0",
+    "tree-sitter-kotlin": "git+https://github.com/kaspernj/tree-sitter-kotlin.git#v0.4.0-semantifold.1",
     "tree-sitter-python": "0.25.0",
     "tree-sitter-swift": "https://github.com/kaspernj/tree-sitter-swift/archive/2a4515bb1d2d075c4c72a3466fbccb75f5269caf.tar.gz"
   },
   "bundleDependencies": [
     "semantifold-tree-sitter-legacy-internal",
-    "tree-sitter"
+    "tree-sitter",
+    "tree-sitter-kotlin"
   ],
   "acceptDependencies": {
-    "semantifold-tree-sitter-legacy-internal": "0.1.0"
+    "semantifold-tree-sitter-legacy-internal": "0.1.0",
+    "tree-sitter-kotlin": "0.4.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

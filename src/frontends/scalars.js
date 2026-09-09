@@ -38,6 +38,11 @@ const sourceScalarTypes = Object.freeze({
     ["String", "string"],
     ["java.lang.String", "string"]
   ]),
+  kotlin: sourceTypeMap([
+    ["Long", "integer"],
+    ["Boolean", "boolean"],
+    ["String", "string"]
+  ]),
   javascript: sourceTypeMap([
     ["number", "integer"],
     ["boolean", "boolean"],

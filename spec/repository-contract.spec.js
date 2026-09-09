@@ -42,10 +42,10 @@ describe("repository delivery contracts", () => {
     expect(lockfile.version).toEqual(rootManifest.version)
     expect(lockfile.packages[""].version).toEqual(rootManifest.version)
     expect(rootManifest.dependencies[internalLegacyPackage]).toEqual("file:packages/tree-sitter-legacy/runtime")
-    expect(rootManifest.acceptDependencies).toEqual({[internalLegacyPackage]: "0.1.0"})
+    expect(rootManifest.acceptDependencies).toEqual({[internalLegacyPackage]: "0.1.0", "tree-sitter-kotlin": "0.4.0"})
     expect(rootManifest.devDependencies[workspaceManifest.name]).toEqual("0.1.0")
     expect(rootManifest.devDependencies[retiredLegacyPackage]).toEqual(undefined)
-    expect(rootManifest.bundleDependencies).toEqual([internalLegacyPackage, "tree-sitter"])
+    expect(rootManifest.bundleDependencies).toEqual([internalLegacyPackage, "tree-sitter", "tree-sitter-kotlin"])
     expect(rootManifest.files.includes("packages/**")).toBeFalse()
     expect(rootManifest.exports).toEqual({
       ".": {import: "./build/index.js", types: "./build/index.d.ts"}
@@ -145,6 +145,7 @@ describe("repository delivery contracts", () => {
     expect(config.environment.SEMANTIFOLD_PYTHON).toEqual("/usr/bin/python3")
     expect(config.environment.SEMANTIFOLD_DOTNET).toEqual("/usr/bin/dotnet")
     expect(config.environment.SEMANTIFOLD_GO).toEqual("/usr/local/bin/go")
+    expect(config.environment.SEMANTIFOLD_KOTLINC).toEqual("/opt/kotlinc/bin/kotlinc")
     expect(config.environment.SEMANTIFOLD_SWIFTC).toEqual(swiftExecutable)
     expect(config.environment.PATH).toEqual(undefined)
     expect(config.environment.SEMANTIFOLD_CLANG).toEqual("/usr/bin/clang-21")
@@ -154,7 +155,7 @@ describe("repository delivery contracts", () => {
       'test -r "$(clang-21 -print-resource-dir)/lib/linux/libclang_rt.asan-x86_64.a"',
       'test -r "$(clang-21 -print-resource-dir)/lib/linux/libclang_rt.ubsan_standalone-x86_64.a"']) assert.ok(config.before_install.includes(probe), probe)
     assert.deepEqual(config.before_install.filter((command) => goCommands.includes(command)), goCommands)
-    assert.match(beforeInstall, /php-cli python3 ruby default-jdk-headless/u)
+    assert.match(beforeInstall, /php-cli python3 ruby openjdk-25-jdk-headless=25\.0\.4\+7-1~24\.04/u)
     assert.match(beforeInstall, /dotnet-sdk-10\.0/u)
     assert.match(beforeInstall, /libncurses6/u)
     assert.match(beforeInstall, /libxml2-dev/u)
@@ -224,7 +225,7 @@ describe("repository delivery contracts", () => {
       'test -r "$(clang++-21 -print-file-name=libstdc++.so)"', "dpkg-query -W libstdc++-13-dev"]) {
       assert.ok(config.before_install.includes(probe), probe)
     }
-    expect(config.builds.end_to_end.name).toEqual("Twelve-language tests with Rust debug/release and C/CPP O0/O2 sanitizers")
+    expect(config.builds.end_to_end.name).toEqual("Thirteen-language tests with Kotlin/JVM, Rust debug/release and C/CPP O0/O2 sanitizers")
     await assert.rejects(access(new URL("../.github/workflows", import.meta.url)))
   })
 
@@ -249,7 +250,7 @@ describe("repository delivery contracts", () => {
     assert.match(runs, /php-cli/u)
     assert.match(runs, /python3/u)
     assert.match(runs, /ruby/u)
-    assert.match(runs, /default-jdk-headless/u)
+    assert.match(runs, /openjdk-25-jdk-headless=25\.0\.4\+7-1~26\.04/u)
     assert.match(runs, /dotnet-sdk-10\.0/u)
     assert.match(runs, /golang-go/u)
     for (const pin of ["clang=1:21.1.6-71", "clang-21=1:21.1.8-6ubuntu1", "libclang-rt-21-dev=1:21.1.8-6ubuntu1", "libstdc++-15-dev=15.2.0-16ubuntu1"]) assert.ok(runs.includes(pin))

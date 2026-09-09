@@ -245,8 +245,8 @@ function validateExpression(expression, language, ownerLocation, allowJavaNegate
     if (language == "java" && !validNegatedMinimumOperand && (candidate.value < -2147483648 || candidate.value > 2147483647)) {
       unsupportedCapability(language, "integer literal outside signed 32-bit int range", location)
     }
-    if ((language == "csharp" || language == "go" || language == "c" || language == "cpp" || language == "rust" || language == "swift") && candidate.value < 0 ||
-      (language == "c" || language == "cpp" || language == "rust" || language == "swift") && Object.is(candidate.value, -0)) {
+    if ((language == "csharp" || language == "go" || language == "c" || language == "cpp" || language == "kotlin" || language == "rust" || language == "swift") && candidate.value < 0 ||
+      (language == "c" || language == "cpp" || language == "kotlin" || language == "rust" || language == "swift") && Object.is(candidate.value, -0)) {
       unsupportedCapability(language, "negative integer literal without semantic negation", location)
     }
     return
@@ -303,6 +303,10 @@ function validateKnownTargetInteger(expression, language, location) {
 
     unsupportedCapability(language, `compile-time-known integer operation outside signed 64-bit ${scalar} range`, location)
   }
+  if (language == "kotlin" && value !== undefined &&
+    (value < -BigInt(Number.MAX_SAFE_INTEGER) || value > BigInt(Number.MAX_SAFE_INTEGER))) {
+    unsupportedCapability(language, "compile-time-known integer operation outside the Semantifold safe-integer range", location)
+  }
 }
 
 /**
@@ -345,7 +349,7 @@ export function emitExpression(writer, expression, path, language, emitIdentifie
     return
   }
   if (expression.kind == "IntegerLiteral") {
-    const spelling = language == "csharp" ? `${expression.value}L` : String(expression.value)
+    const spelling = language == "csharp" || language == "kotlin" ? `${expression.value}L` : String(expression.value)
 
     writer.mapped(spelling, {mappingKind: "exact", node: expression, path, role: "literal"})
     return
@@ -372,6 +376,12 @@ export function emitExpression(writer, expression, path, language, emitIdentifie
   }
 
   if (expression.kind == "UnaryExpression") {
+    if (language == "kotlin" && expression.operation == "IntegerNegate") {
+      emitKotlinIntegerHelper(writer, expression, path, "semantifold_integer_negate", [
+        [expression.operand, `${path}/operand`]
+      ])
+      return
+    }
     if (language == "csharp" && expression.operation == "IntegerNegate") {
       writer.mapped("checked(", {mappingKind: "anchor", node: expression, path})
       writer.mapped("-", {mappingKind: "exact", node: expression, path, role: "operator"})
@@ -385,6 +395,16 @@ export function emitExpression(writer, expression, path, language, emitIdentifie
     })
     emitExpression(writer, expression.operand, `${path}/operand`, language, emitIdentifier)
     writer.mapped(")", {mappingKind: "anchor", node: expression, path})
+    return
+  }
+
+  if (language == "kotlin" && ["IntegerAdd", "IntegerSubtract", "IntegerMultiply"].includes(expression.operation)) {
+    const helper = expression.operation == "IntegerAdd" ? "semantifold_integer_add" :
+      expression.operation == "IntegerSubtract" ? "semantifold_integer_subtract" : "semantifold_integer_multiply"
+
+    emitKotlinIntegerHelper(writer, expression, path, helper, [
+      [expression.left, `${path}/left`], [expression.right, `${path}/right`]
+    ])
     return
   }
 
@@ -445,6 +465,33 @@ export function emitExpression(writer, expression, path, language, emitIdentifie
   writer.synthetic(" ", "operator spacing", [expression], [path])
   emitExpression(writer, expression.right, `${path}/right`, language, emitIdentifier)
   writer.mapped(")", {mappingKind: "anchor", node: expression, path})
+}
+
+/**
+ * Emits a Kotlin checked-integer helper while preserving the semantic operator range.
+ * @param {import("./writer.js").SourceWriter} writer - Source-aware writer.
+ * @param {import("../semantic/types.js").UnaryExpression | import("../semantic/types.js").BinaryExpression} expression - Operation.
+ * @param {string} path - Operation path.
+ * @param {string} helper - Exact target helper.
+ * @param {[import("../semantic/types.js").Expression, string][]} operands - Ordered operands and paths.
+ */
+function emitKotlinIntegerHelper(writer, expression, path, helper, operands) {
+  writer.mapped(helper, {mappingKind: "exact", node: expression, path, role: "operator"})
+  writer.synthetic("(", "Kotlin checked-integer helper call", [expression], [path])
+  operands.forEach(([operand, operandPath], index) => {
+    if (index) writer.synthetic(", ", "Kotlin checked-integer argument separator", [expression], [path])
+    emitExpression(writer, operand, operandPath, "kotlin", identityIdentifier)
+  })
+  writer.synthetic(")", "Kotlin checked-integer helper call", [expression], [path])
+}
+
+/**
+ * Preserves a Kotlin identifier spelling.
+ * @param {string} name - Identifier spelling.
+ * @returns {string} Unchanged spelling.
+ */
+function identityIdentifier(name) {
+  return name
 }
 
 /**

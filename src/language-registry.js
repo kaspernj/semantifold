@@ -3,6 +3,7 @@
 import {isDenseArray} from "./array.js"
 import {SemantifoldDiagnostic, unsupportedRole} from "./diagnostic.js"
 import {generateJava} from "./backends/java.js"
+import {generateKotlin} from "./backends/kotlin.js"
 import {generateCSharpProject} from "./backends/csharp.js"
 import {generateGoModule} from "./backends/go.js"
 import {generateRustProject} from "./backends/rust.js"
@@ -14,6 +15,7 @@ import {generateRuby} from "./backends/ruby.js"
 import {generateTypeScript} from "./backends/typescript.js"
 import {generateBrowserWasm} from "./backends/wasm.js"
 import {parseJava} from "./frontends/java.js"
+import {parseKotlin} from "./frontends/kotlin.js"
 import {parseCSharp} from "./frontends/csharp.js"
 import {parseGo} from "./frontends/go.js"
 import {parseRust} from "./frontends/rust.js"
@@ -272,6 +274,12 @@ const typeScriptFrontend = ({filename, source}) => parseJavaScriptTypeScript({fi
 const javaFrontend = ({filename, source}) => parseJava({filename, source})
 
 /**
+ * Kotlin registry frontend wrapper.
+ * @type {Frontend}
+ */
+const kotlinFrontend = ({filename, source}) => parseKotlin({filename, source})
+
+/**
  * Python registry frontend wrapper.
  * @type {Frontend}
  */
@@ -329,6 +337,14 @@ const records = [
     id: "java",
     mediaType: "text/x-java-source",
     textBackend: generateJava
+  }),
+  language({
+    acceptance: {stages: ["parse", "generate", "compile", "execute"], toolchains: ["kotlinc", "java25"]},
+    defaultFilename: "Program.kt",
+    frontend: kotlinFrontend,
+    id: "kotlin",
+    mediaType: "text/x-kotlin",
+    textBackend: generateKotlin
   }),
   language({
     acceptance: {stages: ["parse", "generate", "compile", "execute"], toolchains: ["python"]},

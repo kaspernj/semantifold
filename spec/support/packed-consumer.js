@@ -20,6 +20,10 @@ void cppArtifacts
 const rustModule = parse({language: "rust", filename: "src/main.rs", source: "fn main() {}"})
 const rustArtifacts = generateArtifactSet({language: "rust", module: rustModule})
 void rustArtifacts
+const kotlinModule = parse({language: "kotlin", filename: "Program.kt", source:
+  "fun add(left: Long, right: Long): Long { return left + right }\\nfun main() { println(add(1, 2)) }\\n"})
+const kotlinArtifacts = generateArtifactSet({language: "kotlin", module: kotlinModule})
+void kotlinArtifacts
 `
 
 export const consumerSource = `
@@ -50,12 +54,15 @@ const cppGrammarPath = internalRequire.resolve("tree-sitter-cpp")
 const cppGrammar = JSON.parse(await readFile(internalRequire.resolve("tree-sitter-cpp/package.json"), "utf8"))
 const cGrammarPath = internalRequire.resolve("tree-sitter-c")
 const goGrammarPath = semantifoldRequire.resolve("tree-sitter-go/bindings/node/index.js")
+const kotlinGrammarPath = semantifoldRequire.resolve("tree-sitter-kotlin")
+const kotlinGrammar = JSON.parse(await readFile(semantifoldRequire.resolve("tree-sitter-kotlin/package.json"), "utf8"))
 const modernRuntime = JSON.parse(await readFile(semantifoldRequire.resolve("tree-sitter/package.json"), "utf8"))
 const legacyRuntime = JSON.parse(await readFile(internalRequire.resolve("tree-sitter/package.json"), "utf8"))
 const cGrammar = JSON.parse(await readFile(internalRequire.resolve("tree-sitter-c/package.json"), "utf8"))
 const internalManifest = JSON.parse(await readFile(path.join(internalDirectory, "package.json"), "utf8"))
 
-for (const filename of [semantifoldEntry, internalEntry, modernRuntimePath, legacyRuntimePath, cGrammarPath, cppGrammarPath, rustGrammarPath]) {
+for (const filename of [semantifoldEntry, internalEntry, modernRuntimePath, legacyRuntimePath, cGrammarPath, cppGrammarPath,
+  rustGrammarPath, kotlinGrammarPath]) {
   assert.ok((await realpath(filename)).startsWith(path.join(process.cwd(), "node_modules") + path.sep))
 }
 const {parseCst} = await import(pathToFileURL(internalEntry).href)
@@ -140,6 +147,41 @@ try {
   await writeFile("rust-command-results.json", JSON.stringify({tools: {rustc, cargo}, commands: nativeProof, artifacts: rustArtifacts, hashes}, null, 2) + "\\n")
   await rm(crate, {recursive: true, force: true})
 }
+const kotlinArtifacts = semantifold.generateArtifactSet({language: "kotlin", module: semanticC})
+assert.deepEqual(kotlinArtifacts.artifacts.map(({path: artifactPath}) => artifactPath), ["Program.kt"])
+assert.equal(kotlinArtifacts.metadata.compiler.version, "2.4.20")
+assert.deepEqual(semantifold.generateArtifactSet({language: "kotlin", module: semanticC}), kotlinArtifacts)
+const kotlinModule = semantifold.parse({language: "kotlin", filename: "Program.kt", source: kotlinArtifacts.artifacts[0].content})
+assert.equal(kotlinModule.functions[0].name, "add")
+assert.equal(semantifold.generateArtifactSet({language: "kotlin", module: kotlinModule}).artifacts[0].content,
+  kotlinArtifacts.artifacts[0].content)
+const kotlinc = await semantifold.discoverCanonicalToolchain("kotlinc")
+const java = await semantifold.discoverCanonicalToolchain("java25")
+const kotlinDirectory = await mkdtemp(path.join(os.tmpdir(), "semantifold-packed-kotlin-"))
+const kotlinCommands = []
+try {
+  await writeFile(path.join(kotlinDirectory, "Program.kt"), kotlinArtifacts.artifacts[0].content)
+  const kotlinEnvironment = {PATH: process.env.PATH, LANG: "C.UTF-8", LC_ALL: "C.UTF-8"}
+  const invokeKotlin = (executable, args) => {
+    const result = spawnSync(executable, args, {cwd: kotlinDirectory, env: kotlinEnvironment, encoding: "utf8", timeout: 30000,
+      maxBuffer: 1048576})
+    kotlinCommands.push({executable, arguments: args, stdout: result.stdout, stderr: result.stderr, status: result.status,
+      signal: result.signal})
+    if (result.error) throw result.error
+    assert.equal(result.status, 0, JSON.stringify(kotlinCommands.at(-1)))
+    assert.equal(result.signal, null)
+    return result
+  }
+  invokeKotlin(kotlinc.executable, ["-language-version", "2.4", "-api-version", "2.4", "-jvm-target", "25", "-Werror",
+    "-include-runtime", "Program.kt", "-d", "Program.jar"])
+  const kotlinRun = invokeKotlin(java.executable, ["-jar", "Program.jar"])
+  assert.equal(kotlinRun.stdout, "3\\n")
+  assert.equal(kotlinRun.stderr, "")
+} finally {
+  await writeFile("kotlin-command-results.json", JSON.stringify({tools: {kotlinc, java}, commands: kotlinCommands,
+    artifacts: kotlinArtifacts}, null, 2) + "\\n")
+  await rm(kotlinDirectory, {recursive: true, force: true})
+}
 process.stdout.write(JSON.stringify({
   rustGrammarVersion: rustGrammar.version,
   rustGrammarIsInternal: rustGrammarPath.startsWith(internalDirectory + path.sep),
@@ -155,6 +197,12 @@ process.stdout.write(JSON.stringify({
   cRoot: cSnapshot.root.type,
   grammarIsInternal: cGrammarPath.startsWith(internalDirectory + path.sep),
   goRoot: goTree.rootNode.type,
+  kotlinCompilerVersion: kotlinc.version,
+  kotlinJavaVersion: java.version,
+  kotlinGrammarVersion: kotlinGrammar.version,
+  kotlinGrammarIsBundled: kotlinGrammarPath.startsWith(semantifoldDirectory + path.sep),
+  kotlinRoundTrip: true,
+  kotlinRuntimeOutput: "3\\n",
   internalPackageIsNotConsumerDependency: true,
   internalPackageIsPrivate: internalManifest.private === true && internalManifest.exports === undefined,
   legacyRuntimeIsInternal: legacyRuntimePath.startsWith(internalDirectory + path.sep),

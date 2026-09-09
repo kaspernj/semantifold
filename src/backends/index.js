@@ -38,7 +38,7 @@ export function generateArtifactSource({language, filename, mapDirective = "none
   if (record.artifactMultiplicity != "single") unsupportedRole(language, "single-text backend", module?.location)
   if (filename === undefined) filename = record.defaultFilename
   if (sourceMapFilename === undefined) sourceMapFilename = `${filename}.map`
-  if (language == "cpp" || language == "swift") validateNativeGraph(module, language)
+  if (language == "cpp" || language == "kotlin" || language == "swift") validateNativeGraph(module, language)
   validateBackendModule(module, /** @type {import("../semantic/types.js").BackendLanguage} */ (language))
 
   if (language == "cpp" && (mapDirective != "none" || sourceMapFilename != "program.cpp.map")) {
@@ -46,6 +46,9 @@ export function generateArtifactSource({language, filename, mapDirective = "none
   }
   if (language == "swift" && (mapDirective != "none" || sourceMapFilename != "program.swift.map")) {
     unsupportedCapability(language, "Swift map directive or alternate source-map filename", module.location)
+  }
+  if (language == "kotlin" && (mapDirective != "none" || sourceMapFilename != "Program.kt.map")) {
+    unsupportedCapability(language, "Kotlin map directive or alternate source-map filename", module.location)
   }
 
   if (!isValidFilenameMetadata(filename)) {
@@ -56,6 +59,7 @@ export function generateArtifactSource({language, filename, mapDirective = "none
   }
   if (language == "cpp" && filename != "program.cpp") unsupportedCapability(language, "artifact filename other than program.cpp", module.location)
   if (language == "swift" && filename != "program.swift") unsupportedCapability(language, "artifact filename other than program.swift", module.location)
+  if (language == "kotlin" && filename != "Program.kt") unsupportedCapability(language, "artifact filename other than Program.kt", module.location)
   if (language == "java" && filename.split(/[\\/]/u).at(-1) != "Main.java") {
     unsupportedCapability(language, "artifact filename basename other than Main.java", module.location)
   }
@@ -85,8 +89,8 @@ export function generateArtifactSource({language, filename, mapDirective = "none
 
   const mapping = finalizeMapping(writer.finish())
 
-  if (language == "swift") {
-    languageRegistry.resolve("swift", "frontend", module.location)({filename, source: mapping.generated.content})
+  if (language == "swift" || language == "kotlin") {
+    languageRegistry.resolve(language, "frontend", module.location)({filename, source: mapping.generated.content})
   }
 
   return {

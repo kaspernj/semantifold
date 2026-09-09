@@ -33,12 +33,12 @@ Registry metadata observed on 2026-09-04 identifies the following candidates. Th
 | [`tree-sitter-rust`](https://registry.npmjs.org/tree-sitter-rust/0.24.0) | `0.24.0` | official `tree-sitter/tree-sitter-rust`, MIT |
 | [`tree-sitter-go`](https://registry.npmjs.org/tree-sitter-go/0.25.0) | `0.25.0` | official `tree-sitter/tree-sitter-go`, MIT |
 
-Swift, Kotlin, Dart, and Zig do not currently have grammars in the official `tree-sitter` organization. Registry metadata observed on 2026-09-04 supplies candidates, not selections:
+Swift, Kotlin, Dart, and Zig do not currently have grammars in the official `tree-sitter` organization. Registry metadata observed on 2026-09-04 supplied the initial candidates; Tasks022 and 023 subsequently selected the exact public packaging forks recorded below:
 
 | Candidate package | Observed latest | Qualification concern |
 | --- | --- | --- |
 | [`tree-sitter-swift`](https://github.com/kaspernj/tree-sitter-swift/tree/2a4515bb1d2d075c4c72a3466fbccb75f5269caf) | `0.7.1` grammar, fork tag `v0.7.1-semantifold.1` | MIT packaging fork selected by Task022 amendment; Node/CST qualification and exact Swift6.3.3 rebuilt-image differential passed locally |
-| [`tree-sitter-kotlin`](https://registry.npmjs.org/tree-sitter-kotlin/0.3.8) | `0.3.8` | community `fwcd/tree-sitter-kotlin`, MIT; verify current Kotlin grammar and compiler differential coverage |
+| [`tree-sitter-kotlin`](https://github.com/kaspernj/tree-sitter-kotlin/tree/57c35ad1a80ccd2a0ebd8fffe852f0d13a20acd0) | `0.4.0` grammar, fork tag `v0.4.0-semantifold.1` | MIT packaging fork selected by Task023 amendment; ABI14 Node/CST, package, packed-consumer, and exact Kotlin2.4.20/JVM25 differential pass locally |
 | [`tree-sitter-dart`](https://registry.npmjs.org/tree-sitter-dart/1.0.0) | `1.0.0` | registry metadata does not by itself establish suitable upstream provenance, maintenance, or current Dart coverage |
 | [`@tree-sitter-grammars/tree-sitter-zig`](https://registry.npmjs.org/%40tree-sitter-grammars%2Ftree-sitter-zig/1.1.2) | `1.1.2` | community grammar package, MIT; verify supported Zig release and maintenance |
 
@@ -62,15 +62,17 @@ Resolved versions come from `package-lock.json`; manifest ranges come from `pack
 | `tree-sitter-c-sharp` | `0.23.5` | `0.23.5` | [official tag](https://github.com/tree-sitter/tree-sitter-c-sharp/tree/v0.23.5), [exact registry record](https://registry.npmjs.org/tree-sitter-c-sharp/0.23.5), [qualification record](../docs/parser-qualification.md#task-017-c-qualification) |
 | `tree-sitter-go` | `0.25.0` | `0.25.0` | [official tag](https://github.com/tree-sitter/tree-sitter-go/tree/v0.25.0), [exact registry record](https://registry.npmjs.org/tree-sitter-go/0.25.0), [qualification record](../docs/parser-qualification.md#task-024-go-qualification) |
 | `tree-sitter-swift` | full-SHA HTTPS source archive | `0.7.1` | [fork commit](https://github.com/kaspernj/tree-sitter-swift/tree/2a4515bb1d2d075c4c72a3466fbccb75f5269caf), tag `v0.7.1-semantifold.1`, [qualification record](../docs/parser-qualification.md#task-022-swift-grammar-qualification--2026-09-09) |
+| `tree-sitter-kotlin` | immutable HTTPS Git tag | `0.4.0` at `57c35ad1a80ccd2a0ebd8fffe852f0d13a20acd0` | [fork commit](https://github.com/kaspernj/tree-sitter-kotlin/tree/57c35ad1a80ccd2a0ebd8fffe852f0d13a20acd0), tag `v0.4.0-semantifold.1`, [qualification record](../docs/parser-qualification.md#task-023-kotlinjvm-grammar-qualification---2026-09-09) |
 | TypeScript compiler | `^7.0.0` | `7.0.2` | [exact registry record](https://registry.npmjs.org/typescript/7.0.2), [compiler options](https://www.typescriptlang.org/docs/handbook/compiler-options.html) |
 | Node.js | Docker/TensorBuzz exact | `24.18.1` | `Dockerfile`, `tensorbuzz.yml` |
 | PHP CLI | Ubuntu package, not exact-pinned | locally observed `8.5.4` | `Dockerfile`, `tensorbuzz.yml` |
 | Ruby | Ubuntu package, not exact-pinned | locally observed `3.3.8` | `Dockerfile`, `tensorbuzz.yml` |
-| Java compiler/runtime | Ubuntu default JDK, not exact-pinned | locally observed OpenJDK `25.0.4` | `Dockerfile`, `tensorbuzz.yml` |
+| Java compiler/runtime | exact Ubuntu base-specific `openjdk-25-jdk-headless` builds | OpenJDK `25.0.4+7`; `25.0.4+7-1~26.04` development and `25.0.4+7-1~24.04` TensorBuzz | `Dockerfile`, `tensorbuzz.yml`, shared Java and exact Kotlin/JVM `java25` execution |
 | Python compiler/runtime | Ubuntu `python3`, not exact-pinned | locally observed Python `3.14.4` | `Dockerfile`, `tensorbuzz.yml`, configured `SEMANTIFOLD_PYTHON` discovery |
 | .NET SDK/runtime | Ubuntu `dotnet-sdk-10.0`, rolling maintained patch | SDK `10.0.111`, runtime/targeting packs `10.0.11`, RID `ubuntu.26.04-x64` | `Dockerfile`, `tensorbuzz.yml`, configured `SEMANTIFOLD_DOTNET` discovery and native Task 017 acceptance |
 | Go compiler/toolchain | Ubuntu `golang-go`, rolling Go 1.26 patch | `go1.26.0 linux/amd64`, GOROOT `/usr/lib/go-1.26` | `Dockerfile`, `tensorbuzz.yml`, configured `SEMANTIFOLD_GO` discovery, GOROOT-bound `gofmt`, and native Task 024 qualification |
 | Swift compiler/toolchain | exact official Docker image | `Swift version 6.3.3 (swift-6.3.3-RELEASE)`, target `x86_64-unknown-linux-gnu` | immutable `swift:6.3.3-noble` digest in `Dockerfile`, configured `SEMANTIFOLD_SWIFTC` discovery; rebuilt native qualification passed locally |
+| Kotlin compiler/toolchain | exact official JetBrains compiler ZIP | Kotlin/JVM 2.4.20 on exact Ubuntu24.04/26.04 OpenJDK25.0.4+7 package identities | checksum-qualified Kotlin2.4.20 archive in `Dockerfile`/`tensorbuzz.yml`, configured `SEMANTIFOLD_KOTLINC` discovery, JVM25 native qualification |
 
 Parser evidence note: Babel documents attached comments, offsets/locations, TypeScript syntax plugins, and its AST deviations. Prism's JavaScript API exposes a parse result containing a typed AST, comments, errors, warnings, and node locations. `php-parser` 3.7.0 documents positional ASTs and extracted documentation. Lezer documents compact concrete syntax trees and error recovery/error nodes; Semantifold must continue rejecting a `⚠` node rather than treating a recovered tree as valid. Inspection of the installed `@lezer/java@1.1.3` grammar confirmed nodes for locals, assignments, arrays, field access, calls, loops, packages/imports, classes, type parameters, and try/throw, but no Java record-declaration grammar; Task 009 therefore uses a conventional final-class mapping for Java.
 
