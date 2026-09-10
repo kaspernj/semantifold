@@ -209,7 +209,11 @@ function convertExpression(node, filename, source) {
     }, {callee: prismLocation(node.messageLoc ?? node.location, filename, source)})
   }
   if (node instanceof CallNode && node.receiver) {
-    return unsupportedSyntax("ruby", "receiver call", nodeLocation(node.receiver, filename, source))
+    const unsupportedLocation = !node.callOperatorLoc && node.messageLoc && node.arguments_?.arguments_.length == 1
+      ? prismLocation(node.messageLoc, filename, source)
+      : nodeLocation(node.receiver, filename, source)
+
+    return unsupportedSyntax("ruby", node.constructor.name, unsupportedLocation)
   }
 
   return unsupportedSyntax("ruby", node.constructor.name, location)
