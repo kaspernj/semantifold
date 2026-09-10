@@ -421,6 +421,7 @@ function convertStatement(node, comments, visible, filename, source) {
   if (node instanceof IfNode) return convertIf(node, comments, visible, filename, source)
   if (node instanceof LocalVariableWriteNode) return convertLocalStatement(node, comments, visible, filename, source)
   if (node instanceof CallNode) {
+    if (node.block) return unsupportedSyntax("ruby", "call block", nodeLocation(node.block, filename, source))
     if (!node.receiver && node.name == "puts") return convertPrint(node, filename, source)
 
     return {

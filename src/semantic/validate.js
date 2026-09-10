@@ -504,12 +504,17 @@ function validateResolution(actual, expected, location, fail) {
 
   if (candidate.kind != "ResolvedFunctionSignature" || typeof candidate.declarationId != "string" ||
     !Array.isArray(candidate.parameterTypes) ||
-    candidate.parameterTypes.some((type) => !isScalarTypeName(type)) ||
     !isFunctionReturnTypeName(candidate.returnType) ||
     candidate.declarationId != expected.declarationId ||
-    candidate.returnType != expected.returnType || candidate.parameterTypes.length != expected.parameterTypes.length ||
-    candidate.parameterTypes.some((type, index) => type != expected.parameterTypes[index])) {
+    candidate.returnType != expected.returnType || candidate.parameterTypes.length != expected.parameterTypes.length) {
     fail("TYPE_MISMATCH", "Call resolution does not match its declaration signature.", location)
+  }
+  for (let index = 0; index < candidate.parameterTypes.length; index++) {
+    const type = candidate.parameterTypes[index]
+
+    if (!Object.hasOwn(candidate.parameterTypes, index) || !isScalarTypeName(type) || type != expected.parameterTypes[index]) {
+      fail("TYPE_MISMATCH", "Call resolution does not match its declaration signature.", location)
+    }
   }
 }
 

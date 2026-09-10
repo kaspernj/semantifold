@@ -109,7 +109,7 @@ function validateScaffoldingNames(module, language) {
   ]) :
     language == "java" ? new Set(["main"]) :
     ["javascript", "typescript"].includes(language) ? new Set(["console"]) :
-    language == "ruby" ? new Set(["puts"]) : new Set()
+    language == "ruby" ? new Set(["puts", "send", "public_send", "__send__"]) : new Set()
 
   for (const statement of allStatements(module.entryPoint.body)) {
     if (statement.kind == "LocalDeclaration" && ownedEntryNames.has(statement.name)) {

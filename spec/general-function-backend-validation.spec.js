@@ -62,6 +62,11 @@ describe("general function backend validation", () => {
       (module) => {
         /** @type {import("../src/semantic/types.js").ExpressionStatement} */ (
           module.entryPoint.body.statements[0]
+        ).expression.resolution.parameterTypes = new Array(1)
+      },
+      (module) => {
+        /** @type {import("../src/semantic/types.js").ExpressionStatement} */ (
+          module.entryPoint.body.statements[0]
         ).expression.resolution.returnType = "integer"
       },
       (module) => {
@@ -140,5 +145,26 @@ describe("general function backend validation", () => {
 
     java.functions[0].name = "main"
     assert.throws(() => generate({language: "java", module: java}), backendFailure("java"))
+  })
+
+  it("rejects every Ruby dynamic-dispatch spelling as a target function conflict", () => {
+    for (const name of ["send", "public_send", "__send__"]) {
+      for (const api of [generate, generateArtifact, generateArtifactSet]) {
+        const module = parse({
+          filename: "program.ts",
+          language: "typescript",
+          source: "function callable(): number { return 1 }\nconsole.log(callable())\n"
+        })
+        const call = /** @type {import("../src/semantic/types.js").CallExpression} */ (
+          /** @type {import("../src/semantic/types.js").PrintStatement} */ (
+            module.entryPoint.body.statements[0]
+          ).expression
+        )
+
+        module.functions[0].name = name
+        call.callee = name
+        assert.throws(() => api({language: "ruby", module}), backendFailure("ruby"), name)
+      }
+    }
   })
 })

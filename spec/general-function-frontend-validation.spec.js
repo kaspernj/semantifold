@@ -49,6 +49,22 @@ ${members}
 `
 
 describe("general function frontend exclusions", () => {
+  it("rejects a block attached to Ruby puts at the unmodeled call subtree", () => {
+    const source = `# @return [void]
+def ping()
+  return
+end
+puts("x") { ping() }
+`
+
+    assert.throws(
+      () => parse({filename: "blocked.rb", language: "ruby", source}),
+      (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_SYNTAX" &&
+        error.language == "ruby" && error.location?.filename == "blocked.rb" &&
+        error.location.start.offset >= source.indexOf("{")
+    )
+  })
+
   it("rejects every excluded Ruby parameter, receiver, dispatch, block, and return form", () => {
     const cases = [
       rubyFunction("value = 1"),
