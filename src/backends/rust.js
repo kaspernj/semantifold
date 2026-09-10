@@ -223,7 +223,7 @@ class RustEmitter {
       this.synthetic("(", statement, path)
       this.expression(statement.expression, `${path}/expression`, bindings, true, depth + 4)
       this.synthetic(")", statement, path)
-    } else {
+    } else if (statement.kind == "IfStatement") {
       this.mapped("if", statement, path)
       this.synthetic(" ", statement, path)
       this.expression(statement.condition, `${path}/condition`, bindings, true, depth + 3)
@@ -238,6 +238,8 @@ class RustEmitter {
       }
       this.synthetic("\n", statement, path)
       return
+    } else {
+      throw new TypeError("Unsupported Rust statement reached emission.")
     }
     this.synthetic(";\n", statement, path)
   }

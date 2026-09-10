@@ -83,13 +83,14 @@ function validateBlockShape(block, detail, fail) {
   }
 
   for (const statement of block.statements) {
-    if (!["AssignmentStatement", "ExpressionStatement", "IfStatement", "LocalDeclaration", "PrintStatement", "ReturnStatement"].includes(statement.kind)) {
+    if (!["AssignmentStatement", "BreakStatement", "ContinueStatement", "ExpressionStatement", "ForEachStatement", "IfStatement", "LocalDeclaration", "PrintStatement", "ReturnStatement"].includes(statement.kind)) {
       fail(`${detail} statement ${statement.kind}`, statement.location)
     }
     if (statement.kind == "IfStatement") {
       validateBlockShape(statement.consequent, "if consequent", fail)
       if (statement.alternate) validateBlockShape(statement.alternate, "if alternate", fail)
     }
+    if (statement.kind == "ForEachStatement") validateBlockShape(statement.body, "for-each body", fail)
   }
 }
 
@@ -160,9 +161,10 @@ function validateFunction(declaration, functions, fail, normalizeOperations) {
  * @param {Map<string, import("./types.js").FunctionDeclaration>} functions - Function signatures.
  * @param {SemanticFail} fail - Diagnostic callback.
  * @param {boolean} normalizeOperations - Whether to replace transient frontend operation intent.
- * @returns {boolean} Whether every path through the block returns.
+ * @param {number} [loopDepth] - Number of active semantic loops.
+ * @returns {boolean} Whether every path through the block completes abruptly.
  */
-function validateBlock(block, scope, returnType, functions, fail, normalizeOperations) {
+function validateBlock(block, scope, returnType, functions, fail, normalizeOperations, loopDepth = 0) {
   let alwaysReturns = false
 
   for (const statement of block.statements) {
@@ -220,6 +222,15 @@ function validateBlock(block, scope, returnType, functions, fail, normalizeOpera
       }
       continue
     }
+    if (statement.kind == "BreakStatement" || statement.kind == "ContinueStatement") {
+      if (loopDepth == 0) {
+        const control = statement.kind == "BreakStatement" ? "break" : "continue"
+
+        fail(`ILLEGAL_${control.toUpperCase()}_CONTEXT`, `${control[0].toUpperCase()}${control.slice(1)} statement outside a loop.`, statement.location)
+      }
+      alwaysReturns = true
+      continue
+    }
     if (statement.kind == "ReturnStatement") {
       if (!returnType) fail("ILLEGAL_RETURN_CONTEXT", "Return statement outside a function.", statement.location)
       if (isVoidType(returnType)) {
@@ -259,7 +270,7 @@ function validateBlock(block, scope, returnType, functions, fail, normalizeOpera
       const alternateScope = createScope(scope, statement.alternate?.statements ?? [])
       applyPresenceNarrowing(statement.condition, scope, consequentScope, true)
       applyPresenceNarrowing(statement.condition, scope, alternateScope, false)
-      const consequentReturns = validateBlock(statement.consequent, consequentScope, returnType, functions, fail, normalizeOperations)
+      const consequentReturns = validateBlock(statement.consequent, consequentScope, returnType, functions, fail, normalizeOperations, loopDepth)
       const consequentKnownValues = visibleBindings.map((binding) => binding.knownValue)
 
       visibleBindings.forEach((binding, index) => {
@@ -268,7 +279,7 @@ function validateBlock(block, scope, returnType, functions, fail, normalizeOpera
       let alternateReturns = false
 
       if (statement.alternate) {
-        alternateReturns = validateBlock(statement.alternate, alternateScope, returnType, functions, fail, normalizeOperations)
+        alternateReturns = validateBlock(statement.alternate, alternateScope, returnType, functions, fail, normalizeOperations, loopDepth)
       }
       const alternateKnownValues = visibleBindings.map((binding) => binding.knownValue)
 
@@ -293,6 +304,43 @@ function validateBlock(block, scope, returnType, functions, fail, normalizeOpera
         if (visibleSet.has(binding)) scope.presenceProofs.add(binding)
       }
       alwaysReturns = consequentReturns && alternateReturns
+      continue
+    }
+    if (statement.kind == "ForEachStatement") {
+      const listType = inferValueExpressionType(statement.list, scope, functions, fail, normalizeOperations, "an iteration collection")
+
+      if (listType.kind != "ListType") {
+        fail("TYPE_MISMATCH", `Iteration collection type ${typeDescription(listType)}; expected list.`, statement.list.location)
+      }
+      if (!statement.valueBinding || statement.valueBinding.kind != "ValueBinding") {
+        fail("TYPE_MISMATCH", "Iteration requires one typed value binding.", statement.location)
+      }
+      if (statement.valueBinding.mutable !== false) {
+        fail("TYPE_MISMATCH", "Iteration binding must be immutable.", statement.valueBinding.location ?? statement.location)
+      }
+      const bindingType = validateValueTypeReference(statement.valueBinding.type, statement.valueBinding.location, fail)
+
+      if (!sameType(bindingType, listType.elementType)) {
+        fail("TYPE_MISMATCH", `Iteration binding type ${typeDescription(bindingType)}; expected ${typeDescription(listType.elementType)}.`,
+          typeLocation(statement.valueBinding.type, statement.valueBinding.location))
+      }
+      const visibleBindings = bindingsVisibleFrom(scope)
+      const initialKnownValues = visibleBindings.map((binding) => binding.knownValue)
+      const loopScope = createScope(scope, statement.body.statements)
+
+      declareBinding(statement.valueBinding.name, {
+        knownValue: undefined,
+        mutable: false,
+        type: bindingType
+      }, statement.valueBinding.location, loopScope, fail)
+      validateBlock(statement.body, loopScope, returnType, functions, fail, normalizeOperations, loopDepth + 1)
+      visibleBindings.forEach((binding, index) => {
+        if (binding.knownValue !== initialKnownValues[index]) binding.knownValue = undefined
+      })
+      const continuingProofs = new Set([...scope.presenceProofs].filter((binding) => loopScope.presenceProofs.has(binding)))
+
+      scope.presenceProofs.clear()
+      for (const binding of continuingProofs) scope.presenceProofs.add(binding)
       continue
     }
 

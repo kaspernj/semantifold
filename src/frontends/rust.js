@@ -519,7 +519,10 @@ class RustReader {
     }
 
     for (const statement of block.statements) {
-      const expression = statement.kind == "IfStatement" ? statement.condition : statement.kind == "LocalDeclaration" ? statement.initializer : statement.expression
+      const expression = statement.kind == "IfStatement" ? statement.condition :
+        statement.kind == "LocalDeclaration" ? statement.initializer :
+          statement.kind == "AssignmentStatement" || statement.kind == "ExpressionStatement" || statement.kind == "PrintStatement" ? statement.expression :
+            statement.kind == "ReturnStatement" ? statement.expression : undefined
 
       if (!expression) throw new Error("Validated Rust source contained a bare return.")
       visit(expression)
@@ -593,7 +596,10 @@ class RustReader {
     const moved = new Set(inheritedMoved)
 
     for (const statement of block.statements) {
-      const expression = statement.kind == "IfStatement" ? statement.condition : statement.kind == "LocalDeclaration" ? statement.initializer : statement.expression
+      const expression = statement.kind == "IfStatement" ? statement.condition :
+        statement.kind == "LocalDeclaration" ? statement.initializer :
+          statement.kind == "AssignmentStatement" || statement.kind == "ExpressionStatement" || statement.kind == "PrintStatement" ? statement.expression :
+            statement.kind == "ReturnStatement" ? statement.expression : undefined
 
       if (!expression) throw new Error("Validated Rust source contained a bare return.")
       this.ownershipExpression(expression, bindings, moved, new Set())

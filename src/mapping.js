@@ -763,7 +763,7 @@ export function validateMapping(value) {
 
   for (const symbol of mapping.symbols) {
     if (!symbol || typeof symbol != "object" || typeof symbol.id != "string" || symbol.id.length == 0 || symbolIds.has(symbol.id) ||
-      typeof symbol.name != "string" || symbol.name.length == 0 || !["function", "parameter", "local"].includes(symbol.kind) ||
+      typeof symbol.name != "string" || symbol.name.length == 0 || !["function", "parameter", "local", "iteration"].includes(symbol.kind) ||
       !nodeIds.has(symbol.declarationNodeId) || !Array.isArray(symbol.references) ||
       symbol.semanticDeclarationId !== undefined && (symbol.kind != "function" ||
         typeof symbol.semanticDeclarationId != "string" || !/^function:[0-9]+$/u.test(symbol.semanticDeclarationId))) {

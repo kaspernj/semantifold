@@ -8,7 +8,7 @@ import {withAdaptedOperation} from "../semantic/operators.js"
 import {withParserRanges} from "../semantic/provenance.js"
 import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
 import {requireSourceReturnType, requireSourceScalarType} from "./scalars.js"
-import {documentedValueType, optionalType} from "./types.js"
+import {documentedValueType, iterationBindingType, optionalType} from "./types.js"
 const parser = new PhpParser.Engine({
   ast: {withPositions: true},
   parser: {extractDoc: true, suppressErrors: false}
@@ -554,6 +554,18 @@ function convertLocalStatement(node, filename, source, context) {
 function convertStatement(node, filename, source, context) {
   if (node.kind == "return") return convertReturn(node, filename, source, context)
   if (node.kind == "if") return convertIf(/** @type {import("php-parser").If} */ (node), filename, source, context)
+  if (node.kind == "foreach") return convertForEach(/** @type {import("php-parser").Foreach} */ (node), filename, source, context)
+  if (node.kind == "break" || node.kind == "continue") {
+    const control = /** @type {import("php-parser").Break | import("php-parser").Continue} */ (node)
+
+    if (control.level) return unsupportedSyntax("php", `${node.kind} level`, nodeLocation(node, filename, source))
+    const location = tokenLocation(node.kind, node.loc?.start.offset ?? 0, node.loc?.end.offset ?? source.length, filename, source)
+
+    return withParserRanges({
+      kind: /** @type {"BreakStatement" | "ContinueStatement"} */ (node.kind == "break" ? "BreakStatement" : "ContinueStatement"),
+      location
+    }, {keyword: location})
+  }
   if (node.kind == "echo") return convertPrint(/** @type {import("php-parser").Echo} */ (node), filename, source, context)
   if (node.kind == "expressionstatement") {
     const expression = /** @type {import("php-parser").ExpressionStatement} */ (node).expression
@@ -572,6 +584,55 @@ function convertStatement(node, filename, source, context) {
   }
 
   return unsupportedSyntax("php", node.kind, nodeLocation(node, filename, source))
+}
+
+/**
+ * Converts exact block-form PHP `foreach ($list as $value)`.
+ * @param {import("php-parser").Foreach} node - PHP foreach node.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @param {PhpConversionContext} context - Typed conversion context.
+ * @returns {import("../semantic/types.js").ForEachStatement} Semantic loop.
+ */
+function convertForEach(node, filename, source, context) {
+  const location = nodeLocation(node, filename, source)
+
+  if (node.shortForm) return unsupportedSyntax("php", "alternative foreach syntax", location)
+  if (node.key) return unsupportedSyntax("php", "foreach key binding", nodeLocation(node.key, filename, source))
+  if (node.value.kind != "variable") return unsupportedSyntax("php", "foreach destructuring", nodeLocation(node.value, filename, source))
+  const variable = /** @type {import("php-parser").Variable} */ (node.value)
+
+  if (Reflect.get(variable, "byref") === true) return unsupportedSyntax("php", "by-reference foreach", nodeLocation(variable, filename, source))
+  if (typeof variable.name != "string" || variable.curly) return unsupportedSyntax("php", "dynamic foreach binding", nodeLocation(variable, filename, source))
+  if (!node.body || node.body.kind != "block") {
+    return unsupportedSyntax("php", "foreach without block body", node.body ? nodeLocation(node.body, filename, source) : location)
+  }
+  const body = /** @type {import("php-parser").Block} */ (node.body)
+  const collectionType = knownExpressionType(node.source, context)
+
+  if (!collectionType || collectionType.kind != "ListType" && collectionType.kind != "MapType") {
+    return missingType("php", "Iteration collection", nodeLocation(node.source, filename, source))
+  }
+  const bindingLocation = nodeLocation(variable, filename, source)
+  const inferredType = collectionType.kind == "ListType" ? collectionType.elementType : collectionType.valueType
+  const bindingType = iterationBindingType(inferredType, bindingLocation)
+  const valueBinding = withParserRanges({
+    kind: /** @type {const} */ ("ValueBinding"),
+    location: bindingLocation,
+    mutable: /** @type {const} */ (false),
+    name: variable.name,
+    type: bindingType
+  }, {name: bindingLocation})
+  const bodyContext = {...context, bindings: new Map(context.bindings)}
+
+  bodyContext.bindings.set(variable.name, bindingType)
+  return withParserRanges({
+    body: convertBlock(body, filename, source, bodyContext),
+    kind: /** @type {const} */ ("ForEachStatement"),
+    list: convertExpression(node.source, filename, source, context),
+    location,
+    valueBinding
+  }, {operator: tokenLocation("foreach", node.loc?.start.offset ?? 0, node.source.loc?.start.offset ?? source.length, filename, source)})
 }
 
 /**

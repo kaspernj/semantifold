@@ -105,20 +105,23 @@ export function createLanguageRegistry(candidateRecords) {
     const featuresCandidate = candidate.features ?? {
       generalFunctionsAndCalls: false,
       immutableCollections: false,
-      optionalValues: false
+      optionalValues: false,
+      orderedListIteration: false
     }
 
     if (!isPlainObject(featuresCandidate) ||
-      Object.keys(featuresCandidate).sort().join(",") != "generalFunctionsAndCalls,immutableCollections,optionalValues" ||
+      Object.keys(featuresCandidate).sort().join(",") != "generalFunctionsAndCalls,immutableCollections,optionalValues,orderedListIteration" ||
       typeof featuresCandidate.generalFunctionsAndCalls != "boolean" ||
       typeof featuresCandidate.immutableCollections != "boolean" ||
-      typeof featuresCandidate.optionalValues != "boolean") {
+      typeof featuresCandidate.optionalValues != "boolean" ||
+      typeof featuresCandidate.orderedListIteration != "boolean") {
       invalidRegistry(`Registry record '${id}' has an invalid feature declaration.`, id)
     }
     const features = deepFreeze(/** @type {import("./semantic/types.js").LanguageFeatureCapabilities} */ ({
       generalFunctionsAndCalls: featuresCandidate.generalFunctionsAndCalls,
       immutableCollections: featuresCandidate.immutableCollections,
-      optionalValues: featuresCandidate.optionalValues
+      optionalValues: featuresCandidate.optionalValues,
+      orderedListIteration: featuresCandidate.orderedListIteration
     }))
     const mappingCandidate = candidate.mapping
 
@@ -419,7 +422,7 @@ const records = [
     artifactMultiplicity: "multiple",
     binaryBackend: generateBrowserWasm,
     defaultFilename: "program.wasm",
-    features: {generalFunctionsAndCalls: false, immutableCollections: false, optionalValues: false},
+    features: {generalFunctionsAndCalls: false, immutableCollections: false, optionalValues: false, orderedListIteration: false},
     id: "wasm",
     mapping: {binaryRanges: true, richText: true, sourceMapV3: true},
     mediaType: "application/wasm",
@@ -445,7 +448,8 @@ function language(values) {
     features: {
       generalFunctionsAndCalls: ["php", "ruby", "javascript", "typescript", "java"].includes(String(values.id)),
       immutableCollections: ["php", "ruby", "javascript", "typescript", "java"].includes(String(values.id)),
-      optionalValues: ["php", "ruby", "javascript", "typescript", "java"].includes(String(values.id))
+      optionalValues: ["php", "ruby", "javascript", "typescript", "java"].includes(String(values.id)),
+      orderedListIteration: ["php", "ruby", "javascript", "typescript", "java"].includes(String(values.id))
     },
     mapping: {binaryRanges: false, richText: true, sourceMapV3: true},
     roundTrip: true,

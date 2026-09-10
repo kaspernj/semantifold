@@ -4,6 +4,9 @@ import {
   AndNode,
   ArrayNode,
   AssocNode,
+  BlockNode,
+  BlockParametersNode,
+  BreakNode,
   CallNode,
   DefNode,
   ElseNode,
@@ -14,12 +17,15 @@ import {
   InterpolatedStringNode,
   LocalVariableReadNode,
   LocalVariableWriteNode,
+  NextNode,
   NilNode,
   OrNode,
   ParenthesesNode,
   ProgramNode,
   RequiredParameterNode,
+  RedoNode,
   ReturnNode,
+  RetryNode,
   StatementsNode,
   StringNode,
   TrueNode,
@@ -32,10 +38,10 @@ import {withAdaptedOperation} from "../semantic/operators.js"
 import {withParserRanges} from "../semantic/provenance.js"
 import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
 import {requireSourceReturnType} from "./scalars.js"
-import {documentedValueType} from "./types.js"
+import {documentedValueType, iterationBindingType} from "./types.js"
 const parsePrism = await loadPrism()
 /** @typedef {{name: string, nameLocation: import("../semantic/types.js").SourceLocation, parameters: import("../semantic/types.js").Parameter[], returnType: import("../semantic/types.js").SemanticFunctionReturnType, location: import("../semantic/types.js").SourceLocation}} RubyFunctionSignature */
-/** @typedef {{bindings: Map<string, import("../semantic/types.js").SemanticValueType>, functions: Map<string, RubyFunctionSignature>, returnType?: import("../semantic/types.js").SemanticFunctionReturnType}} RubyConversionContext */
+/** @typedef {{bindings: Map<string, import("../semantic/types.js").SemanticValueType>, functions: Map<string, RubyFunctionSignature>, loopDepth?: number, returnType?: import("../semantic/types.js").SemanticFunctionReturnType}} RubyConversionContext */
 const rubyBinaryOperations = new Map([
   ["+", "Add"],
   ["-", "Subtract"],
@@ -632,11 +638,23 @@ function convertLocalStatement(node, comments, context, filename, source) {
  * @returns {import("../semantic/types.js").Statement} Semantic statement.
  */
 function convertStatement(node, comments, context, filename, source) {
-  if (node instanceof ReturnNode) return convertReturn(node, filename, source, context)
+  if (node instanceof ReturnNode) {
+    if ((context.loopDepth ?? 0) > 0) return unsupportedSyntax("ruby", "nonlocal return from each block", nodeLocation(node, filename, source))
+    return convertReturn(node, filename, source, context)
+  }
   if (node instanceof IfNode || node instanceof UnlessNode) return convertIf(node, comments, context, filename, source)
   if (node instanceof LocalVariableWriteNode) return convertLocalStatement(node, comments, context, filename, source)
+  if (node instanceof BreakNode || node instanceof NextNode) {
+    if (node.arguments_) return unsupportedSyntax("ruby", `${node instanceof BreakNode ? "break" : "next"} value`, nodeLocation(node.arguments_, filename, source))
+    const location = prismLocation(node.keywordLoc, filename, source)
+
+    return withParserRanges({
+      kind: /** @type {"BreakStatement" | "ContinueStatement"} */ (node instanceof BreakNode ? "BreakStatement" : "ContinueStatement"),
+      location
+    }, {keyword: location})
+  }
   if (node instanceof CallNode) {
-    if (node.block) return unsupportedSyntax("ruby", "call block", nodeLocation(node.block, filename, source))
+    if (node.block) return convertForEach(node, comments, context, filename, source)
     if (!node.receiver && node.name == "puts") return convertPrint(node, filename, source, context)
 
     return {
@@ -647,6 +665,103 @@ function convertStatement(node, comments, context, filename, source) {
   }
 
   return unsupportedSyntax("ruby", node.constructor.name, nodeLocation(node, filename, source))
+}
+
+/**
+ * Converts exact resolved-list `.each do |value| ... end` syntax.
+ * @param {CallNode} node - Prism call with a block.
+ * @param {import("@ruby/prism/src/deserialize.js").Comment[]} comments - Prism comments.
+ * @param {RubyConversionContext} context - Typed lexical context.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @returns {import("../semantic/types.js").ForEachStatement} Semantic loop.
+ */
+function convertForEach(node, comments, context, filename, source) {
+  const location = nodeLocation(node, filename, source)
+  const block = node.block
+
+  if (!(block instanceof BlockNode)) return unsupportedSyntax("ruby", "call block", block ? nodeLocation(block, filename, source) : location)
+  if (!node.receiver || node.name != "each" || node.arguments_ || !node.callOperatorLoc || !node.messageLoc) {
+    return unsupportedSyntax("ruby", "arbitrary call block", nodeLocation(block, filename, source))
+  }
+  if (slicePrismSource(source, block.openingLoc.startOffset, block.openingLoc.startOffset + block.openingLoc.length) != "do") {
+    return unsupportedSyntax("ruby", "non-do each block", prismLocation(block.openingLoc, filename, source))
+  }
+  const excluded = findRubyDescendant(block.body, (candidate) =>
+    candidate instanceof RedoNode || candidate instanceof RetryNode || candidate instanceof ReturnNode)
+
+  if (excluded) {
+    const detail = excluded instanceof ReturnNode ? "nonlocal return from each block" :
+      excluded instanceof RedoNode ? "redo in each block" : "retry in each block"
+
+    return unsupportedSyntax("ruby", detail, nodeLocation(excluded, filename, source))
+  }
+  if (!(block.parameters instanceof BlockParametersNode) || block.parameters.locals.length > 0 ||
+    !block.parameters.parameters) {
+    return unsupportedSyntax("ruby", "each block parameters", block.parameters
+      ? nodeLocation(block.parameters, filename, source)
+      : nodeLocation(block, filename, source))
+  }
+  const parameters = block.parameters.parameters
+  const unsupportedParameter = parameters.requireds.length != 1
+    ? parameters.requireds[1] ?? parameters.requireds[0] ?? block.parameters
+    : parameters.requireds[0] instanceof RequiredParameterNode && parameters.optionals.length == 0 && !parameters.rest &&
+        parameters.posts.length == 0 && parameters.keywords.length == 0 && !parameters.keywordRest && !parameters.block
+      ? undefined
+      : parameters.optionals[0] ?? parameters.rest ?? parameters.posts[0] ?? parameters.keywords[0] ??
+        parameters.keywordRest ?? parameters.block ?? parameters.requireds[0]
+
+  if (unsupportedParameter) return unsupportedSyntax("ruby", "each block parameter arity or shape", nodeLocation(unsupportedParameter, filename, source))
+  const parameter = /** @type {RequiredParameterNode} */ (parameters.requireds[0])
+  const collectionType = knownExpressionType(node.receiver, context)
+
+  if (!collectionType || collectionType.kind != "ListType" && collectionType.kind != "MapType") {
+    return missingType("ruby", "Iteration collection", nodeLocation(node.receiver, filename, source))
+  }
+  const bindingLocation = nodeLocation(parameter, filename, source)
+  const inferredType = collectionType.kind == "ListType" ? collectionType.elementType : collectionType.valueType
+  const bindingType = iterationBindingType(inferredType, bindingLocation)
+  const valueBinding = withParserRanges({
+    kind: /** @type {const} */ ("ValueBinding"),
+    location: bindingLocation,
+    mutable: /** @type {const} */ (false),
+    name: parameter.name,
+    type: bindingType
+  }, {name: bindingLocation})
+  const bodyContext = {...context, bindings: new Map(context.bindings), loopDepth: (context.loopDepth ?? 0) + 1}
+
+  bodyContext.bindings.set(parameter.name, bindingType)
+  return withParserRanges({
+    body: convertBlock(
+      block.body instanceof StatementsNode ? block.body : null,
+      comments,
+      bodyContext,
+      filename,
+      source,
+      nodeLocation(block, filename, source)
+    ),
+    kind: /** @type {const} */ ("ForEachStatement"),
+    list: convertExpression(node.receiver, filename, source, context),
+    location,
+    valueBinding
+  }, {operator: prismLocation(node.messageLoc, filename, source)})
+}
+
+/**
+ * Finds the first parser descendant matching one excluded block construct.
+ * @param {import("@ruby/prism").Node | null} node - Parser subtree.
+ * @param {(node: import("@ruby/prism").Node) => boolean} predicate - Exclusion predicate.
+ * @returns {import("@ruby/prism").Node | undefined} First source-ordered match.
+ */
+function findRubyDescendant(node, predicate) {
+  if (!node) return undefined
+  if (predicate(node)) return node
+  for (const child of node.compactChildNodes()) {
+    const match = findRubyDescendant(child, predicate)
+
+    if (match) return match
+  }
+  return undefined
 }
 
 /**

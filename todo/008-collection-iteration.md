@@ -1,6 +1,6 @@
 # 008 — Ordered list iteration
 
-- Status: `todo`
+- Status: `implemented`
 - Phase/priority: Phase 1 / P1
 - Dependencies: [002-local-declarations-and-assignment.md](002-local-declarations-and-assignment.md), [004-statement-sequencing-and-conditionals.md](004-statement-sequencing-and-conditionals.md), [006-immutable-lists-and-maps.md](006-immutable-lists-and-maps.md)
 
@@ -8,9 +8,9 @@
 
 Add one structured, ordered `for-each` semantic loop over immutable lists, with a typed iteration binding, `break`/`continue`, lexical scope, and deterministic evaluation. Map iteration is explicitly deferred to Task 014 because Task 006 does not model map order and Java `Map.of`/`Map.ofEntries` do not specify iteration order.
 
-## Current evidence and gap
+## Implemented boundary
 
-No loop or abrupt loop-control statement exists in [`../src/semantic/types.js`](../src/semantic/types.js). Task 004 supplies reusable blocks and Task 006 supplies ordered lists. Official language syntax differs sharply: Ruby commonly uses `each` blocks (and `for` has different scope), JS/TS use `for...of`, PHP uses `foreach`, and Java uses enhanced `for`. All can preserve list order. Map loops are rejected here because the Task 006 Java representation may use factories whose iteration order is unspecified.
+[`../src/semantic/types.js`](../src/semantic/types.js) defines parser-neutral list iteration and abrupt loop-control nodes on top of Task 004 blocks and Task 006 ordered lists. Ruby `.each`, JS/TS `for...of`, PHP `foreach`, and Java enhanced `for` normalize to that shared meaning. Map loops remain rejected because Task 006 deliberately does not guarantee observable map order and its Java representation may use factories whose iteration order is unspecified.
 
 ## Language matrix
 
@@ -32,7 +32,7 @@ This matrix records the original-five mappings researched for this task. Its imp
 - Validate list type, exact binding type, loop-control context, duplicate/shadowing policy, and no assignment to iteration bindings. A map operand is a type error/unsupported source form, not an unordered loop.
 - Define normal/abrupt block completion with Task 004 flow analysis. Non-void function return completeness cannot assume a loop executes.
 
-## Frontend work
+## Frontend contract
 
 - Prism: recognize only exact receiver `.each` calls with one supported block shape and one required block parameter on a resolved list; reject Hash receivers and two-binding blocks.
 - Babel: convert `ForOfStatement` with one `const` identifier over a resolved list; reject `await`, destructuring, Map operands, non-block bodies if the profile requires blocks, and every other loop.
@@ -40,9 +40,9 @@ This matrix records the original-five mappings researched for this task. Its imp
 - Lezer: convert `EnhancedForStatement` only over a resolved `List<T>`; reject `.entrySet()` and every map/entry extraction profile.
 - Rejected nested children point to themselves; no adapter may filter update clauses, labels, destructuring elements, or block statements.
 
-## Backend and target validation work
+## Backend and target validation contract
 
-- Emit the canonical target loop form above, preserving one-time collection evaluation (introduce a generated temporary only if the semantic expression is not a simple binding and name generation is collision-safe).
+- Emit the canonical target loop form above. Each native form already evaluates its collection expression once, so no temporary or collision surface is introduced.
 - Emit Ruby `.each`, JS/TS `for...of`, PHP `foreach`, and Java enhanced `for` with exact list element binding types.
 - Validate list/binding support, target identifiers, `break`/`continue` context, and target list-order guarantee before any emission.
 - Generated source must reparse to the same `ForEachStatement`, not to a language-specific callback/call semantic node.
@@ -74,3 +74,11 @@ Map iteration/entry bindings (deferred to [014-ordered-map-iteration.md](014-ord
 - All five adapters exhaustively recognize only their canonical forms; all backends validate and emit reparsable equivalents.
 - Loop-control/type/location diagnostics are focused and stable.
 - Ordered real registered-runtime execution and semantic round-trip specs pass with docs/changelog updates.
+
+## Implementation delivery record — 2026-09-10
+
+- The semantic IR now has `ForEachStatement {list, valueBinding, body, location}`, immutable typed `ValueBinding`, and nearest-loop `BreakStatement`/`ContinueStatement`. Validation evaluates and types the collection expression once, limits the binding to its body scope, retains the no-shadowing policy, and treats the loop as potentially empty for Task 004 return completeness.
+- Exact parser-backed Ruby Prism `.each do`, Babel JavaScript/JSDoc and TypeScript `for (const … of …)`, PHP `foreach`, and Java enhanced-for forms normalize to the same nodes. Unsupported block shapes, binding forms, labels, async/custom iteration, mutation, nonlocal control, arrays, and all map iteration fail at parser-owned child locations.
+- The five text backends emit canonical native list loops and validate the complete loop, binding, operand, control context, target identifier, type, and acyclic shape before exposing an artifact. Generated source reparses to equivalent structured loop/control nodes; no callback rewrite, pairwise adapter, source-call substitution, compatibility facade, or host-provider shortcut is introduced.
+- The registry advertises `orderedListIteration: true` only for PHP, Ruby, JavaScript, TypeScript, and Java. Every other registered source or target role advertises false and rejects Task 008 IR transactionally with `UNSUPPORTED_CAPABILITY`.
+- Focused specs cover exact frontend acceptance/exclusions, semantic scope/type/flow failures, malformed and cyclic caller IR, transactional target rejection, provenance/mappings, one-time evaluation, generation/reparse equivalence, and real PHP, Ruby, Node.js, strict TypeScript, and Java execution. Missing required tools fail rather than skip; aggregate suite execution remains CI-owned.

@@ -116,6 +116,7 @@ function emitStatement(writer, statement, indent, path) {
     writer.synthetic(")\n", "Kotlin println plumbing", [statement], [path])
     return
   }
+  if (statement.kind != "IfStatement") throw new TypeError("Unsupported Kotlin statement reached emission.")
   writer.mapped("if", {mappingKind: "anchor", node: statement, path})
   writer.synthetic(" (", "Kotlin conditional scaffold", [statement], [path])
   emitExpression(writer, statement.condition, `${path}/condition`, "kotlin", identity)

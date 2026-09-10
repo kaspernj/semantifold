@@ -51,7 +51,8 @@ class RustValueValidator {
         const right = statement.alternate ? this.block(statement.alternate, sizes) : sizes
 
         for (const name of sizes.keys()) sizes.set(name, left.get(name) === right.get(name) ? left.get(name) : undefined)
-      } else {
+      } else if (statement.kind == "ExpressionStatement" || statement.kind == "PrintStatement" ||
+        statement.kind == "ReturnStatement") {
         const expression = statement.expression
 
         if (expression) this.size(expression, sizes)

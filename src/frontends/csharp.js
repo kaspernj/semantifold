@@ -667,7 +667,7 @@ function validateCheckedArithmetic(module) {
       visitExpression(statement.expression)
     } else if (statement.kind == "ReturnStatement") {
       if (statement.expression) visitExpression(statement.expression)
-    } else {
+    } else if (statement.kind == "IfStatement") {
       visitExpression(statement.condition)
       visitBlock(statement.consequent)
       if (statement.alternate) visitBlock(statement.alternate)

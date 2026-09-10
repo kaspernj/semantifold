@@ -103,7 +103,10 @@ export function statementSignature(statement) {
   const consumer = statement.kind == "LocalDeclaration" ? [statement.kind, statement.name,
     scalarName(statement.type, "c", statement.location), statement.mutable] :
     statement.kind == "AssignmentStatement" ? [statement.kind, statement.target.name] : [statement.kind]
-  const expression = statement.kind == "IfStatement" ? statement.condition : statement.kind == "LocalDeclaration" ? statement.initializer : statement.expression
+  const expression = statement.kind == "IfStatement" ? statement.condition :
+    statement.kind == "LocalDeclaration" ? statement.initializer :
+      statement.kind == "AssignmentStatement" || statement.kind == "ExpressionStatement" || statement.kind == "PrintStatement" ? statement.expression :
+        statement.kind == "ReturnStatement" ? statement.expression : undefined
 
   if (!expression) throw new TypeError("Bare return reached native statement signature planning.")
 
@@ -150,7 +153,10 @@ export function planNativeModule(module, language = "c") {
     block.statements.forEach((statement, index) => {
       const statementPath = `${path}/statements/${index}`
       const field = statement.kind == "IfStatement" ? "condition" : statement.kind == "LocalDeclaration" ? "initializer" : "expression"
-      const expression = statement.kind == "IfStatement" ? statement.condition : statement.kind == "LocalDeclaration" ? statement.initializer : statement.expression
+      const expression = statement.kind == "IfStatement" ? statement.condition :
+        statement.kind == "LocalDeclaration" ? statement.initializer :
+          statement.kind == "AssignmentStatement" || statement.kind == "ExpressionStatement" || statement.kind == "PrintStatement" ? statement.expression :
+            statement.kind == "ReturnStatement" ? statement.expression : undefined
       /** @type {PlannedStep[]} */
       const steps = []
 
