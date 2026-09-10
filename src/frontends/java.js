@@ -36,6 +36,11 @@ const javaBinaryOperations = new Map([
 ])
 
 /**
+ * @typedef JavaConversionContext
+ * @property {Map<string, import("../semantic/types.js").SemanticValueType>} bindings - Explicitly typed visible bindings.
+ */
+
+/**
  * Returns all direct child syntax nodes.
  * @param {import("@lezer/common").SyntaxNode} node - Parent syntax node.
  * @returns {import("@lezer/common").SyntaxNode[]} Child syntax nodes.
@@ -116,9 +121,10 @@ function nodeText(node, source) {
  * @param {import("@lezer/common").SyntaxNode} node - Lezer expression.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
+ * @param {JavaConversionContext} context - Typed lexical conversion context.
  * @returns {import("../semantic/types.js").Expression} Semantic expression.
  */
-function convertExpression(node, filename, source) {
+function convertExpression(node, filename, source, context) {
   const location = nodeLocation(node, filename, source)
 
   if (node.name == "ParenthesizedExpression") {
@@ -128,7 +134,7 @@ function convertExpression(node, filename, source) {
       return unsupportedSyntax("java", "unsupported parenthesized expression", location)
     }
 
-    return convertExpression(children[0], filename, source)
+    return convertExpression(children[0], filename, source, context)
   }
 
   if (node.name == "Identifier") {
@@ -162,13 +168,13 @@ function convertExpression(node, filename, source) {
     }
 
     if (operator == "!" && operand.name == "MethodInvocation" && isEqualsInvocation(operand, source)) {
-      return convertStringEquality(operand, true, location, nodeLocation(operatorNode, filename, source), filename, source)
+      return convertStringEquality(operand, true, location, nodeLocation(operatorNode, filename, source), filename, source, context)
     }
 
     const semantic = withAdaptedOperation(withParserRanges({
       kind: "UnaryExpression",
       location,
-      operand: convertExpression(operand, filename, source)
+      operand: convertExpression(operand, filename, source, context)
     }, {operator: nodeLocation(operatorNode, filename, source)}), operator == "!" ? "Not" : "Negate")
 
     return /** @type {import("../semantic/types.js").Expression} */ (/** @type {unknown} */ (semantic))
@@ -191,9 +197,9 @@ function convertExpression(node, filename, source) {
 
     const semantic = withAdaptedOperation(withParserRanges({
       kind: "BinaryExpression",
-      left: convertExpression(operands[0], filename, source),
+      left: convertExpression(operands[0], filename, source, context),
       location,
-      right: convertExpression(operands[1], filename, source)
+      right: convertExpression(operands[1], filename, source, context)
     }, {operator: nodeLocation(operatorNode, filename, source)}), /** @type {import("../semantic/operators.js").AdaptedOperation} */ (javaBinaryOperations.get(operator)))
 
     return /** @type {import("../semantic/types.js").Expression} */ (/** @type {unknown} */ (semantic))
@@ -203,7 +209,7 @@ function convertExpression(node, filename, source) {
     if (isEqualsInvocation(node, source)) {
       const methodName = requiredChild(node, "MethodName", filename, source)
 
-      return convertStringEquality(node, false, location, nodeLocation(methodName, filename, source), filename, source)
+      return convertStringEquality(node, false, location, nodeLocation(methodName, filename, source), filename, source, context)
     }
 
     const methodName = requiredChild(node, "MethodName", filename, source)
@@ -215,7 +221,7 @@ function convertExpression(node, filename, source) {
 
     if (receiver && method == "of" && receiverText == "java.util.List") {
       return withParserRanges({
-        elements: argumentNodes.map((argument) => convertExpression(argument, filename, source)),
+        elements: argumentNodes.map((argument) => convertExpression(argument, filename, source, context)),
         kind: /** @type {const} */ ("ListLiteral"),
         location
       }, {factory: nodeLocation(methodName, filename, source)})
@@ -238,10 +244,10 @@ function convertExpression(node, filename, source) {
 
         if (!separator) throw new Error("Lezer omitted the Java Map.of entry separator.")
         entries.push(withParserRanges({
-          key: /** @type {import("../semantic/types.js").StringLiteral} */ (convertExpression(keyNode, filename, source)),
+          key: /** @type {import("../semantic/types.js").StringLiteral} */ (convertExpression(keyNode, filename, source, context)),
           kind: /** @type {const} */ ("MapEntry"),
           location: locationFromOffsets(filename, source, keyNode.from, argumentNodes[index + 1].to),
-          value: convertExpression(argumentNodes[index + 1], filename, source)
+          value: convertExpression(argumentNodes[index + 1], filename, source, context)
         }, {operator: nodeLocation(separator, filename, source)}))
       }
 
@@ -250,10 +256,12 @@ function convertExpression(node, filename, source) {
       })
     }
     if (receiver && method == "get" && argumentNodes.length == 1) {
-      if (argumentNodes[0].name == "StringLiteral") {
+      const receiverType = receiver.name == "Identifier" ? context.bindings.get(nodeText(receiver, source)) : undefined
+
+      if (receiverType?.kind == "MapType" || (!receiverType && argumentNodes[0].name == "StringLiteral")) {
         return withParserRanges({
-          collection: convertExpression(receiver, filename, source),
-          key: convertExpression(argumentNodes[0], filename, source),
+          collection: convertExpression(receiver, filename, source, context),
+          key: convertExpression(argumentNodes[0], filename, source, context),
           kind: /** @type {const} */ ("MapLookupExpression"),
           location,
           totality: /** @type {const} */ ("proven")
@@ -261,8 +269,8 @@ function convertExpression(node, filename, source) {
       }
 
       return withParserRanges({
-        collection: convertExpression(receiver, filename, source),
-        index: convertExpression(argumentNodes[0], filename, source),
+        collection: convertExpression(receiver, filename, source, context),
+        index: convertExpression(argumentNodes[0], filename, source, context),
         kind: /** @type {const} */ ("ListIndexExpression"),
         location,
         totality: /** @type {const} */ ("fail-on-absence")
@@ -270,7 +278,7 @@ function convertExpression(node, filename, source) {
     }
     if (receiver && method == "size" && argumentNodes.length == 0) {
       return withParserRanges({
-        collection: convertExpression(receiver, filename, source),
+        collection: convertExpression(receiver, filename, source, context),
         kind: /** @type {const} */ ("CollectionSizeExpression"),
         location
       }, {operator: nodeLocation(methodName, filename, source)})
@@ -283,7 +291,7 @@ function convertExpression(node, filename, source) {
 
     if (unsupportedArgument) return unsupportedSyntax("java", `method argument ${unsupportedArgument.name}`, nodeLocation(unsupportedArgument, filename, source))
 
-    const arguments_ = argumentNodes.map((child) => convertExpression(child, filename, source))
+    const arguments_ = argumentNodes.map((child) => convertExpression(child, filename, source, context))
 
     return withParserRanges({arguments: arguments_, callee: nodeText(methodName, source), kind: /** @type {const} */ ("CallExpression"), location}, {
       callee: nodeLocation(methodName, filename, source)
@@ -314,9 +322,10 @@ function isEqualsInvocation(node, source) {
  * @param {import("../semantic/types.js").SourceLocation} operatorLocation - Parser-owned operator/method location.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
+ * @param {JavaConversionContext} context - Typed lexical conversion context.
  * @returns {import("../semantic/types.js").Expression} Adapted equality expression.
  */
-function convertStringEquality(node, negated, location, operatorLocation, filename, source) {
+function convertStringEquality(node, negated, location, operatorLocation, filename, source, context) {
   const argumentList = requiredChild(node, "ArgumentList", filename, source)
   const arguments_ = structuralChildren(argumentList)
   const receivers = structuralChildren(node).filter((child) => child.name != "MethodName" && child.name != "ArgumentList")
@@ -335,9 +344,9 @@ function convertStringEquality(node, negated, location, operatorLocation, filena
 
   const semantic = withAdaptedOperation(withParserRanges({
     kind: "BinaryExpression",
-    left: convertExpression(receivers[0], filename, source),
+    left: convertExpression(receivers[0], filename, source, context),
     location,
-    right: convertExpression(arguments_[0], filename, source)
+    right: convertExpression(arguments_[0], filename, source, context)
   }, ranges), negated ? "StringNotEqual" : "StringEqual")
 
   return /** @type {import("../semantic/types.js").Expression} */ (/** @type {unknown} */ (semantic))
@@ -464,9 +473,10 @@ function decodeStringLiteral(node, filename, source) {
  * @param {import("@lezer/common").SyntaxNode} statement - Java statement.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
+ * @param {JavaConversionContext} context - Typed lexical conversion context.
  * @returns {import("../semantic/types.js").ReturnStatement} Semantic return.
  */
-function convertReturn(statement, filename, source) {
+function convertReturn(statement, filename, source, context) {
   const location = nodeLocation(statement, filename, source)
 
   if (statement.name != "ReturnStatement") return unsupportedSyntax("java", statement.name, location)
@@ -485,7 +495,7 @@ function convertReturn(statement, filename, source) {
   }
 
   return {
-    ...(expression ? {expression: convertExpression(expression, filename, source)} : {}),
+    ...(expression ? {expression: convertExpression(expression, filename, source, context)} : {}),
     kind: "ReturnStatement",
     location
   }
@@ -496,9 +506,10 @@ function convertReturn(statement, filename, source) {
  * @param {import("@lezer/common").SyntaxNode} statement - Java statement.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
+ * @param {JavaConversionContext} context - Typed lexical conversion context.
  * @returns {import("../semantic/types.js").LocalStatement} Semantic local statement.
  */
-function convertLocalStatement(statement, filename, source) {
+function convertLocalStatement(statement, filename, source, context) {
   const location = nodeLocation(statement, filename, source)
 
   if (statement.name == "LocalVariableDeclaration") {
@@ -527,14 +538,18 @@ function convertLocalStatement(statement, filename, source) {
     }
 
     const name = nodeText(definition, source)
+    const initializer = convertExpression(initializerNodes[0], filename, source, context)
+    const type = convertType(typeNode, `Local '${name}'`, location, filename, source)
+
+    context.bindings.set(name, type)
 
     return withParserRanges({
-      initializer: convertExpression(initializerNodes[0], filename, source),
+      initializer,
       kind: "LocalDeclaration",
       location,
       mutable: modifierChildren.length == 0,
       name,
-      type: convertType(typeNode, `Local '${name}'`, location, filename, source)
+      type
     }, {name: nodeLocation(definition, filename, source), operator: nodeLocation(assignment, filename, source)})
   }
 
@@ -559,7 +574,7 @@ function convertLocalStatement(statement, filename, source) {
     }, {name: nodeLocation(target, filename, source)})
 
     return withParserRanges({
-      expression: convertExpression(expression, filename, source),
+      expression: convertExpression(expression, filename, source, context),
       kind: "AssignmentStatement",
       location,
       target: targetExpression
@@ -574,14 +589,15 @@ function convertLocalStatement(statement, filename, source) {
  * @param {import("@lezer/common").SyntaxNode} statement - Java statement.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
+ * @param {JavaConversionContext} context - Typed lexical conversion context.
  * @returns {import("../semantic/types.js").Statement} Semantic statement.
  */
-function convertStatement(statement, filename, source) {
-  if (statement.name == "ReturnStatement") return convertReturn(statement, filename, source)
-  if (statement.name == "IfStatement") return convertIf(statement, filename, source)
-  if (statement.name == "LocalVariableDeclaration") return convertLocalStatement(statement, filename, source)
+function convertStatement(statement, filename, source, context) {
+  if (statement.name == "ReturnStatement") return convertReturn(statement, filename, source, context)
+  if (statement.name == "IfStatement") return convertIf(statement, filename, source, context)
+  if (statement.name == "LocalVariableDeclaration") return convertLocalStatement(statement, filename, source, context)
   if (statement.name == "ExpressionStatement") {
-    if (statement.getChild("AssignmentExpression")) return convertLocalStatement(statement, filename, source)
+    if (statement.getChild("AssignmentExpression")) return convertLocalStatement(statement, filename, source, context)
     const invocation = statement.getChild("MethodInvocation")
 
     if (!invocation) {
@@ -593,14 +609,14 @@ function convertStatement(statement, filename, source) {
     if (!fieldAccess || !methodName || nodeText(fieldAccess, source) != "System.out" || nodeText(methodName, source) != "println") {
       return {
         expression: /** @type {import("../semantic/types.js").CallExpression} */ (
-          convertExpression(invocation, filename, source)
+          convertExpression(invocation, filename, source, context)
         ),
         kind: "ExpressionStatement",
         location: nodeLocation(statement, filename, source)
       }
     }
 
-    return convertPrint(statement, filename, source)
+    return convertPrint(statement, filename, source, context)
   }
 
   return unsupportedSyntax("java", statement.name, nodeLocation(statement, filename, source))
@@ -611,15 +627,16 @@ function convertStatement(statement, filename, source) {
  * @param {import("@lezer/common").SyntaxNode} node - Java Block node.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
+ * @param {JavaConversionContext} context - Typed lexical conversion context.
  * @returns {import("../semantic/types.js").Block} Semantic block.
  */
-function convertBlock(node, filename, source) {
+function convertBlock(node, filename, source, context) {
   if (node.name != "Block") return unsupportedSyntax("java", `expected block, received ${node.name}`, nodeLocation(node, filename, source))
 
   return {
     kind: "Block",
     location: nodeLocation(node, filename, source),
-    statements: structuralChildren(node).map((statement) => convertStatement(statement, filename, source))
+    statements: structuralChildren(node).map((statement) => convertStatement(statement, filename, source, context))
   }
 }
 
@@ -776,7 +793,8 @@ function convertFunction(node, filename, source) {
     return withParserRanges(semanticParameter, {name: nodeLocation(parameterNameNode, filename, source)})
   })
   const block = requiredChild(node, "Block", filename, source)
-  const body = convertBlock(block, filename, source)
+  const context = {bindings: new Map(parameters.map((parameter) => [parameter.name, parameter.type]))}
+  const body = convertBlock(block, filename, source, context)
 
   return withParserRanges({
     body,
@@ -793,9 +811,10 @@ function convertFunction(node, filename, source) {
  * @param {import("@lezer/common").SyntaxNode} node - Java if statement.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
+ * @param {JavaConversionContext} context - Typed lexical conversion context.
  * @returns {import("../semantic/types.js").IfStatement} Semantic branch.
  */
-function convertIf(node, filename, source) {
+function convertIf(node, filename, source, context) {
   const location = nodeLocation(node, filename, source)
   const conditionContainer = requiredChild(node, "ParenthesizedExpression", filename, source)
   const conditionNodes = structuralChildren(conditionContainer)
@@ -811,13 +830,15 @@ function convertIf(node, filename, source) {
   }
 
   let alternate
+  const consequentContext = {bindings: new Map(context.bindings)}
 
-  if (alternateNode?.name == "Block") alternate = convertBlock(alternateNode, filename, source)
-  else if (alternateNode?.name == "IfStatement") {
+  if (alternateNode?.name == "Block") {
+    alternate = convertBlock(alternateNode, filename, source, {bindings: new Map(context.bindings)})
+  } else if (alternateNode?.name == "IfStatement") {
     alternate = {
       kind: /** @type {const} */ ("Block"),
       location: nodeLocation(alternateNode, filename, source),
-      statements: [convertIf(alternateNode, filename, source)]
+      statements: [convertIf(alternateNode, filename, source, {bindings: new Map(context.bindings)})]
     }
   } else if (alternateNode && alternateNode.name != "else") {
     return unsupportedSyntax("java", `if alternate ${alternateNode.name}`, nodeLocation(alternateNode, filename, source))
@@ -825,8 +846,8 @@ function convertIf(node, filename, source) {
 
   return {
     ...(alternate ? {alternate} : {}),
-    condition: convertExpression(condition, filename, source),
-    consequent: convertBlock(consequentNode, filename, source),
+    condition: convertExpression(condition, filename, source, context),
+    consequent: convertBlock(consequentNode, filename, source, consequentContext),
     kind: "IfStatement",
     location
   }
@@ -858,7 +879,7 @@ function convertEntryPoint(node, filename, source) {
     return unsupportedSyntax("java", "main method signature", location)
   }
   const block = requiredChild(node, "Block", filename, source)
-  const body = convertBlock(block, filename, source)
+  const body = convertBlock(block, filename, source, {bindings: new Map()})
 
   return {body, kind: "EntryPoint", location}
 }
@@ -868,9 +889,10 @@ function convertEntryPoint(node, filename, source) {
  * @param {import("@lezer/common").SyntaxNode} statement - Expression statement.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
+ * @param {JavaConversionContext} context - Typed lexical conversion context.
  * @returns {import("../semantic/types.js").PrintStatement} Semantic print.
  */
-function convertPrint(statement, filename, source) {
+function convertPrint(statement, filename, source, context) {
   const location = nodeLocation(statement, filename, source)
 
   const printInvocation = statement.getChild("MethodInvocation")
@@ -893,7 +915,7 @@ function convertPrint(statement, filename, source) {
 
   const printLocation = nodeLocation(printInvocation, filename, source)
 
-  return {expression: convertExpression(arguments_[0], filename, source), kind: "PrintStatement", location: printLocation}
+  return {expression: convertExpression(arguments_[0], filename, source, context), kind: "PrintStatement", location: printLocation}
 }
 
 /**

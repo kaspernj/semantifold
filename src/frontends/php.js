@@ -239,7 +239,12 @@ function convertExpression(node, filename, source, context, expectedType) {
     const lookup = /** @type {import("php-parser").OffsetLookup} */ (node)
 
     if (!lookup.offset) return unsupportedSyntax("php", "append or missing array index", location)
-    if (lookup.offset.kind == "number") {
+    const receiver = lookup.what.kind == "variable" ? /** @type {import("php-parser").Variable} */ (lookup.what) : undefined
+    const receiverType = receiver && typeof receiver.name == "string" ? context.bindings.get(receiver.name) : undefined
+    const accessKind = receiverType?.kind == "ListType" ? "list" : receiverType?.kind == "MapType" ? "map" :
+      lookup.offset.kind == "number" ? "list" : lookup.offset.kind == "string" ? "map" : undefined
+
+    if (accessKind == "list" && ["number", "string", "variable"].includes(lookup.offset.kind)) {
       return withParserRanges({
         collection: convertExpression(lookup.what, filename, source, context),
         index: convertExpression(lookup.offset, filename, source, context),
@@ -248,7 +253,7 @@ function convertExpression(node, filename, source, context, expectedType) {
         totality: /** @type {const} */ ("proven")
       }, {operator: tokenLocation("[", lookup.what.loc?.end.offset ?? 0, lookup.offset.loc?.start.offset ?? source.length, filename, source)})
     }
-    if (lookup.offset.kind == "string") {
+    if (accessKind == "map" && ["number", "string", "variable"].includes(lookup.offset.kind)) {
       return withParserRanges({
         collection: convertExpression(lookup.what, filename, source, context),
         key: convertExpression(lookup.offset, filename, source, context),
