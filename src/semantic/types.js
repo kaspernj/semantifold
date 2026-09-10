@@ -39,6 +39,7 @@
  * @typedef LanguageFeatureCapabilities
  * @property {boolean} generalFunctionsAndCalls - Task 005 arbitrary required signatures, resolved direct calls, and void functions.
  * @property {boolean} immutableCollections - Task 006 recursive immutable lists/maps, total access, and size.
+ * @property {boolean} optionalValues - Task 007 explicit optional values, presence tests, and guarded unwrap.
  */
 
 /**
@@ -305,7 +306,14 @@
  * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned outer and argument ranges.
  */
 
-/** @typedef {TypeReference | ListType | MapType} SemanticValueType */
+/**
+ * @typedef OptionalType
+ * @property {"OptionalType"} kind - Explicit presence/absence type discriminator.
+ * @property {SemanticValueType} valueType - Exact present-value type.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned outer and constituent ranges.
+ */
+
+/** @typedef {TypeReference | ListType | MapType | OptionalType} SemanticValueType */
 
 /**
  * @typedef FunctionReturnTypeReference
@@ -316,7 +324,7 @@
 
 /** @typedef {SemanticValueType | FunctionReturnTypeReference} SemanticFunctionReturnType */
 
-/** @typedef {SemanticTypeName | {kind: "ListType", elementType: SemanticTypeIdentity} | {kind: "MapType", keyType: SemanticTypeIdentity, valueType: SemanticTypeIdentity}} SemanticTypeIdentity */
+/** @typedef {SemanticTypeName | {kind: "ListType", elementType: SemanticTypeIdentity} | {kind: "MapType", keyType: SemanticTypeIdentity, valueType: SemanticTypeIdentity} | {kind: "OptionalType", valueType: SemanticTypeIdentity}} SemanticTypeIdentity */
 /** @typedef {SemanticTypeIdentity | "void"} FunctionReturnTypeIdentity */
 
 /**
@@ -423,6 +431,37 @@
  */
 
 /**
+ * @typedef OptionalNone
+ * @property {"OptionalNone"} kind - Contextually typed absence value.
+ * @property {SourceLocation} location - Source location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
+ */
+
+/**
+ * @typedef OptionalSome
+ * @property {"OptionalSome"} kind - Explicit present optional value.
+ * @property {Expression} value - Exact non-optional present value.
+ * @property {SourceLocation} location - Source location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
+ */
+
+/**
+ * @typedef OptionalIsPresent
+ * @property {"OptionalIsPresent"} kind - Presence test for one simple identifier.
+ * @property {IdentifierExpression} operand - Tested optional binding.
+ * @property {SourceLocation} location - Source location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
+ */
+
+/**
+ * @typedef OptionalUnwrap
+ * @property {"OptionalUnwrap"} kind - Guarded unwrap of one simple identifier.
+ * @property {IdentifierExpression} operand - Proven-present optional binding.
+ * @property {SourceLocation} location - Source location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
+ */
+
+/**
  * @typedef UnaryExpression
  * @property {"UnaryExpression"} kind - Node discriminator.
  * @property {SemanticUnaryOperation} operation - Closed semantic operation.
@@ -453,7 +492,7 @@
  * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
  */
 
-/** @typedef {IdentifierExpression | IntegerLiteral | BooleanLiteral | StringLiteral | ListLiteral | MapLiteral | ListIndexExpression | MapLookupExpression | CollectionSizeExpression | UnaryExpression | BinaryExpression | CallExpression} Expression */
+/** @typedef {IdentifierExpression | IntegerLiteral | BooleanLiteral | StringLiteral | OptionalNone | OptionalSome | OptionalIsPresent | OptionalUnwrap | ListLiteral | MapLiteral | ListIndexExpression | MapLookupExpression | CollectionSizeExpression | UnaryExpression | BinaryExpression | CallExpression} Expression */
 
 /**
  * @typedef LocalDeclaration

@@ -7,7 +7,7 @@ import {withAdaptedOperation} from "../semantic/operators.js"
 import {withParserRanges} from "../semantic/provenance.js"
 import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
 import {requireSourceReturnType, sourceScalarType} from "./scalars.js"
-import {listType, mapType} from "./types.js"
+import {listType, mapType, optionalType} from "./types.js"
 
 /** @type {Readonly<Record<string, string>>} */
 const simpleStringEscapes = Object.freeze({
@@ -38,6 +38,17 @@ const javaBinaryOperations = new Map([
 /**
  * @typedef JavaConversionContext
  * @property {Map<string, import("../semantic/types.js").SemanticValueType>} bindings - Explicitly typed visible bindings.
+ * @property {Map<string, JavaFunctionSignature>} functions - Explicit module function signatures.
+ * @property {import("../semantic/types.js").SemanticFunctionReturnType | undefined} returnType - Enclosing return type.
+ */
+
+/**
+ * @typedef JavaFunctionSignature
+ * @property {import("../semantic/types.js").SourceLocation} location - Complete declaration location.
+ * @property {import("../semantic/types.js").SourceLocation} nameLocation - Parser-owned name location.
+ * @property {string} name - Function name.
+ * @property {import("../semantic/types.js").Parameter[]} parameters - Semantic parameters.
+ * @property {import("../semantic/types.js").SemanticFunctionReturnType} returnType - Semantic return type.
  */
 
 /**
@@ -117,14 +128,45 @@ function nodeText(node, source) {
 }
 
 /**
+ * Proves an exact parser-structured Java qualified identifier.
+ * @param {import("@lezer/common").SyntaxNode} node - Identifier or field-access node.
+ * @param {string} source - Complete source.
+ * @returns {string[] | undefined} Exact structural name parts.
+ */
+function qualifiedNameParts(node, source) {
+  if (["Identifier", "TypeName"].includes(node.name)) return [nodeText(node, source)]
+  if (!["FieldAccess", "ScopedTypeName"].includes(node.name)) return undefined
+  const children = structuralChildren(node)
+
+  if (children.length != 2) return undefined
+  const left = qualifiedNameParts(children[0], source)
+  const right = qualifiedNameParts(children[1], source)
+
+  return left && right ? [...left, ...right] : undefined
+}
+
+/**
+ * Checks the only accepted Java Optional type/factory symbol spellings.
+ * @param {import("@lezer/common").SyntaxNode} node - Parser-qualified symbol node.
+ * @param {string} source - Complete source.
+ * @returns {boolean} Whether the node identifies java.util.Optional or Optional.
+ */
+function isJavaOptionalSymbol(node, source) {
+  const parts = qualifiedNameParts(node, source)
+
+  return parts?.join(".") == "java.util.Optional" || parts?.join(".") == "Optional"
+}
+
+/**
  * Converts a supported Java expression node.
  * @param {import("@lezer/common").SyntaxNode} node - Lezer expression.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
  * @param {JavaConversionContext} context - Typed lexical conversion context.
+ * @param {import("../semantic/types.js").SemanticValueType} [expectedType] - Contextual semantic type.
  * @returns {import("../semantic/types.js").Expression} Semantic expression.
  */
-function convertExpression(node, filename, source, context) {
+function convertExpression(node, filename, source, context, expectedType) {
   const location = nodeLocation(node, filename, source)
 
   if (node.name == "ParenthesizedExpression") {
@@ -134,7 +176,7 @@ function convertExpression(node, filename, source, context) {
       return unsupportedSyntax("java", "unsupported parenthesized expression", location)
     }
 
-    return convertExpression(children[0], filename, source, context)
+    return convertExpression(children[0], filename, source, context, expectedType)
   }
 
   if (node.name == "Identifier") {
@@ -156,6 +198,8 @@ function convertExpression(node, filename, source, context) {
   if (node.name == "StringLiteral") {
     return withParserRanges({kind: /** @type {const} */ ("StringLiteral"), location, value: decodeStringLiteral(node, filename, source)}, {literal: location})
   }
+
+  if (node.name == "null") return unsupportedSyntax("java", "null reference", location)
 
   if (node.name == "UnaryExpression") {
     const children = structuralChildren(node)
@@ -219,9 +263,52 @@ function convertExpression(node, filename, source, context) {
     const method = nodeText(methodName, source)
     const receiverText = receiver ? nodeText(receiver, source) : ""
 
+    if (receiver && isJavaOptionalSymbol(receiver, source)) {
+      const factoryLocation = nodeLocation(methodName, filename, source)
+
+      if (method == "empty" && argumentNodes.length == 0) {
+        return withParserRanges({kind: /** @type {const} */ ("OptionalNone"), location}, {
+          absence: factoryLocation,
+          factory: factoryLocation
+        })
+      }
+      if (method == "of" && argumentNodes.length == 1) {
+        return withParserRanges({
+          kind: /** @type {const} */ ("OptionalSome"),
+          location,
+          value: convertExpression(argumentNodes[0], filename, source, context,
+            expectedType?.kind == "OptionalType" ? expectedType.valueType : undefined)
+        }, {factory: factoryLocation, some: factoryLocation})
+      }
+
+      return unsupportedSyntax("java", `unsupported Optional.${method}`, factoryLocation)
+    }
+    if (receiver?.name == "Identifier" && context.bindings.get(receiverText)?.kind == "OptionalType") {
+      const operand = /** @type {import("../semantic/types.js").IdentifierExpression} */ (
+        convertExpression(receiver, filename, source, context)
+      )
+      const operationLocation = nodeLocation(methodName, filename, source)
+
+      if (method == "isPresent" && argumentNodes.length == 0) {
+        return withParserRanges({kind: /** @type {const} */ ("OptionalIsPresent"), location, operand}, {
+          operator: operationLocation
+        })
+      }
+      if (method == "get" && argumentNodes.length == 0) {
+        return withParserRanges({kind: /** @type {const} */ ("OptionalUnwrap"), location, operand}, {
+          operator: operationLocation,
+          unwrap: operationLocation
+        })
+      }
+
+      return unsupportedSyntax("java", `unsupported Optional.${method}`, operationLocation)
+    }
+
     if (receiver && method == "of" && receiverText == "java.util.List") {
+      const elementType = expectedType?.kind == "ListType" ? expectedType.elementType : undefined
+
       return withParserRanges({
-        elements: argumentNodes.map((argument) => convertExpression(argument, filename, source, context)),
+        elements: argumentNodes.map((argument) => convertExpression(argument, filename, source, context, elementType)),
         kind: /** @type {const} */ ("ListLiteral"),
         location
       }, {factory: nodeLocation(methodName, filename, source)})
@@ -232,6 +319,7 @@ function convertExpression(node, filename, source, context) {
         return unsupportedSyntax("java", "java.util.Map.of supports at most ten entries", nodeLocation(methodName, filename, source))
       }
       const entries = []
+      const valueType = expectedType?.kind == "MapType" ? expectedType.valueType : undefined
 
       for (let index = 0; index < argumentNodes.length; index += 2) {
         const keyNode = argumentNodes[index]
@@ -247,7 +335,7 @@ function convertExpression(node, filename, source, context) {
           key: /** @type {import("../semantic/types.js").StringLiteral} */ (convertExpression(keyNode, filename, source, context)),
           kind: /** @type {const} */ ("MapEntry"),
           location: locationFromOffsets(filename, source, keyNode.from, argumentNodes[index + 1].to),
-          value: convertExpression(argumentNodes[index + 1], filename, source, context)
+          value: convertExpression(argumentNodes[index + 1], filename, source, context, valueType)
         }, {operator: nodeLocation(separator, filename, source)}))
       }
 
@@ -291,7 +379,9 @@ function convertExpression(node, filename, source, context) {
 
     if (unsupportedArgument) return unsupportedSyntax("java", `method argument ${unsupportedArgument.name}`, nodeLocation(unsupportedArgument, filename, source))
 
-    const arguments_ = argumentNodes.map((child) => convertExpression(child, filename, source, context))
+    const signature = context.functions.get(nodeText(methodName, source))
+    const arguments_ = argumentNodes.map((child, index) =>
+      convertExpression(child, filename, source, context, signature?.parameters[index]?.type))
 
     return withParserRanges({arguments: arguments_, callee: nodeText(methodName, source), kind: /** @type {const} */ ("CallExpression"), location}, {
       callee: nodeLocation(methodName, filename, source)
@@ -366,6 +456,7 @@ function isSupportedExpressionNode(node) {
     "UnaryExpression",
     "BinaryExpression",
     "MethodInvocation",
+    "null",
     "ParenthesizedExpression"
   ].includes(node.name)
 }
@@ -495,7 +586,15 @@ function convertReturn(statement, filename, source, context) {
   }
 
   return {
-    ...(expression ? {expression: convertExpression(expression, filename, source, context)} : {}),
+    ...(expression ? {expression: convertExpression(
+      expression,
+      filename,
+      source,
+      context,
+      context.returnType?.kind == "TypeReference" && context.returnType.name == "void"
+        ? undefined
+        : /** @type {import("../semantic/types.js").SemanticValueType | undefined} */ (context.returnType)
+    )} : {}),
     kind: "ReturnStatement",
     location
   }
@@ -538,8 +637,8 @@ function convertLocalStatement(statement, filename, source, context) {
     }
 
     const name = nodeText(definition, source)
-    const initializer = convertExpression(initializerNodes[0], filename, source, context)
     const type = convertType(typeNode, `Local '${name}'`, location, filename, source)
+    const initializer = convertExpression(initializerNodes[0], filename, source, context, type)
 
     context.bindings.set(name, type)
 
@@ -573,8 +672,12 @@ function convertLocalStatement(statement, filename, source, context) {
       name: nodeText(target, source)
     }, {name: nodeLocation(target, filename, source)})
 
+    const targetName = nodeText(target, source)
+    const bindingType = context.bindings.get(targetName)
+    const value = convertExpression(expression, filename, source, context, bindingType)
+
     return withParserRanges({
-      expression: convertExpression(expression, filename, source, context),
+      expression: value,
       kind: "AssignmentStatement",
       location,
       target: targetExpression
@@ -684,8 +787,15 @@ function convertType(sourceType, subject, location, filename, source) {
         nodeLocation(arguments_[1], filename, source)
       )
     }
+    if ((name == "java.util.Optional" || name == "Optional") && arguments_.length == 1) {
+      return optionalType(
+        convertJavaTypeArgument(arguments_[0], subject, location, filename, source),
+        nodeLocation(sourceType, filename, source),
+        nodeLocation(arguments_[0], filename, source)
+      )
+    }
 
-    return unsupportedSyntax("java", "unsupported generic collection type", nodeLocation(sourceType, filename, source))
+    return unsupportedSyntax("java", "unsupported generic type", nodeLocation(sourceType, filename, source))
   }
   if (!["PrimitiveType", "TypeName", "ScopedTypeName"].includes(sourceType.name)) {
     return unsupportedSyntax("java", "unsupported scalar type", location)
@@ -745,13 +855,13 @@ function declarationType(node) {
 }
 
 /**
- * Converts the supported Java function method.
+ * Converts one supported Java function signature before adapting any body.
  * @param {import("@lezer/common").SyntaxNode} node - Method declaration.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
- * @returns {import("../semantic/types.js").FunctionDeclaration} Semantic function.
+ * @returns {JavaFunctionSignature} Semantic function signature.
  */
-function convertFunction(node, filename, source) {
+function convertFunctionSignature(node, filename, source) {
   const location = nodeLocation(node, filename, source)
   const modifiers = node.getChild("Modifiers")
   const modifierNames = modifiers ? structuralChildren(modifiers).map((modifier) => modifier.name) : []
@@ -792,18 +902,40 @@ function convertFunction(node, filename, source) {
 
     return withParserRanges(semanticParameter, {name: nodeLocation(parameterNameNode, filename, source)})
   })
-  const block = requiredChild(node, "Block", filename, source)
-  const context = {bindings: new Map(parameters.map((parameter) => [parameter.name, parameter.type]))}
-  const body = convertBlock(block, filename, source, context)
-
-  return withParserRanges({
-    body,
-    kind: "FunctionDeclaration",
+  return {
     location,
     name,
+    nameLocation: nodeLocation(definition, filename, source),
     parameters,
     returnType: convertReturnType(declarationType(node), `Function '${name}' return`, location, filename, source)
-  }, {name: nodeLocation(definition, filename, source)})
+  }
+}
+
+/**
+ * Converts one Java function body using already-proved module signatures.
+ * @param {import("@lezer/common").SyntaxNode} node - Method declaration.
+ * @param {JavaFunctionSignature} signature - Preconverted function signature.
+ * @param {Map<string, JavaFunctionSignature>} functions - Module function signatures.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @returns {import("../semantic/types.js").FunctionDeclaration} Semantic function.
+ */
+function convertFunction(node, signature, functions, filename, source) {
+  const block = requiredChild(node, "Block", filename, source)
+  const context = {
+    bindings: new Map(signature.parameters.map((parameter) => [parameter.name, parameter.type])),
+    functions,
+    returnType: signature.returnType
+  }
+
+  return withParserRanges({
+    body: convertBlock(block, filename, source, context),
+    kind: "FunctionDeclaration",
+    location: signature.location,
+    name: signature.name,
+    parameters: signature.parameters,
+    returnType: signature.returnType
+  }, {name: signature.nameLocation})
 }
 
 /**
@@ -829,16 +961,18 @@ function convertIf(node, filename, source, context) {
     return unsupportedSyntax("java", "if without block consequent", location)
   }
 
+  const semanticCondition = convertExpression(condition, filename, source, context)
   let alternate
-  const consequentContext = {bindings: new Map(context.bindings)}
+  const consequentContext = {...context, bindings: new Map(context.bindings)}
+  const alternateContext = {...context, bindings: new Map(context.bindings)}
 
   if (alternateNode?.name == "Block") {
-    alternate = convertBlock(alternateNode, filename, source, {bindings: new Map(context.bindings)})
+    alternate = convertBlock(alternateNode, filename, source, alternateContext)
   } else if (alternateNode?.name == "IfStatement") {
     alternate = {
       kind: /** @type {const} */ ("Block"),
       location: nodeLocation(alternateNode, filename, source),
-      statements: [convertIf(alternateNode, filename, source, {bindings: new Map(context.bindings)})]
+      statements: [convertIf(alternateNode, filename, source, alternateContext)]
     }
   } else if (alternateNode && alternateNode.name != "else") {
     return unsupportedSyntax("java", `if alternate ${alternateNode.name}`, nodeLocation(alternateNode, filename, source))
@@ -846,7 +980,7 @@ function convertIf(node, filename, source, context) {
 
   return {
     ...(alternate ? {alternate} : {}),
-    condition: convertExpression(condition, filename, source, context),
+    condition: semanticCondition,
     consequent: convertBlock(consequentNode, filename, source, consequentContext),
     kind: "IfStatement",
     location
@@ -858,9 +992,10 @@ function convertIf(node, filename, source, context) {
  * @param {import("@lezer/common").SyntaxNode} node - Main method.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
+ * @param {Map<string, JavaFunctionSignature>} functions - Module function signatures.
  * @returns {import("../semantic/types.js").EntryPoint} Semantic entry point.
  */
-function convertEntryPoint(node, filename, source) {
+function convertEntryPoint(node, filename, source, functions) {
   const location = nodeLocation(node, filename, source)
   const modifiers = node.getChild("Modifiers")
   const parameters = node.getChild("FormalParameters")
@@ -879,7 +1014,11 @@ function convertEntryPoint(node, filename, source) {
     return unsupportedSyntax("java", "main method signature", location)
   }
   const block = requiredChild(node, "Block", filename, source)
-  const body = convertBlock(block, filename, source, {bindings: new Map()})
+  const body = convertBlock(block, filename, source, {
+    bindings: new Map(),
+    functions,
+    returnType: undefined
+  })
 
   return {body, kind: "EntryPoint", location}
 }
@@ -967,8 +1106,11 @@ export function parseJava({filename, source}) {
   if (functionMethods.length == 0) return unsupportedSyntax("java", "class without a semantic function", location)
   if (!mainMethod || mainMethods.length != 1) return unsupportedSyntax("java", "class without one unambiguous main", location)
 
-  const functions = functionMethods.map((method) => convertFunction(method, filename, source))
-  const entryPoint = convertEntryPoint(mainMethod, filename, source)
+  const signatures = functionMethods.map((method) => convertFunctionSignature(method, filename, source))
+  const functionSignatures = new Map(signatures.map((signature) => [signature.name, signature]))
+  const functions = functionMethods.map((method, index) =>
+    convertFunction(method, signatures[index], functionSignatures, filename, source))
+  const entryPoint = convertEntryPoint(mainMethod, filename, source, functionSignatures)
 
   return {entryPoint, functions, kind: "Module", location}
 }

@@ -18,6 +18,7 @@ const task005Languages = new Set(["php", "ruby", "javascript", "typescript", "ja
  * @typedef Scope
  * @property {Map<string, Binding>} bindings - Bindings declared directly in this scope.
  * @property {Set<string>} pending - Names declared later in this scope.
+ * @property {Set<Binding>} presenceProofs - Optional bindings proven present on this path.
  * @property {Scope | undefined} parent - Enclosing lexical scope.
  * @property {Set<string>} usedNames - All names used by the enclosing function or entry point.
  */
@@ -197,6 +198,7 @@ function validateBlock(block, scope, returnType, functions, fail, normalizeOpera
         fail("TYPE_MISMATCH", `Assignment type ${typeDescription(expressionType)}; expected ${typeDescription(binding.type)}.`, statement.expression.location)
       }
       binding.knownValue = knownValueForExpression(statement.expression, scope)
+      scope.presenceProofs.delete(binding)
       continue
     }
     if (statement.kind == "PrintStatement") {
@@ -254,6 +256,9 @@ function validateBlock(block, scope, returnType, functions, fail, normalizeOpera
       const visibleBindings = bindingsVisibleFrom(scope)
       const initialKnownValues = visibleBindings.map((binding) => binding.knownValue)
       const consequentScope = createScope(scope, statement.consequent.statements)
+      const alternateScope = createScope(scope, statement.alternate?.statements ?? [])
+      applyPresenceNarrowing(statement.condition, scope, consequentScope, true)
+      applyPresenceNarrowing(statement.condition, scope, alternateScope, false)
       const consequentReturns = validateBlock(statement.consequent, consequentScope, returnType, functions, fail, normalizeOperations)
       const consequentKnownValues = visibleBindings.map((binding) => binding.knownValue)
 
@@ -263,8 +268,6 @@ function validateBlock(block, scope, returnType, functions, fail, normalizeOpera
       let alternateReturns = false
 
       if (statement.alternate) {
-        const alternateScope = createScope(scope, statement.alternate.statements)
-
         alternateReturns = validateBlock(statement.alternate, alternateScope, returnType, functions, fail, normalizeOperations)
       }
       const alternateKnownValues = visibleBindings.map((binding) => binding.knownValue)
@@ -276,6 +279,19 @@ function validateBlock(block, scope, returnType, functions, fail, normalizeOpera
           binding.knownValue = consequentKnownValues[index]
         } else binding.knownValue = undefined
       })
+      const continuingProofs = consequentReturns && !alternateReturns
+        ? alternateScope.presenceProofs
+        : !consequentReturns && alternateReturns
+          ? consequentScope.presenceProofs
+          : !consequentReturns && !alternateReturns
+            ? new Set([...consequentScope.presenceProofs].filter((binding) => alternateScope.presenceProofs.has(binding)))
+            : new Set()
+      const visibleSet = new Set(visibleBindings)
+
+      scope.presenceProofs.clear()
+      for (const binding of continuingProofs) {
+        if (visibleSet.has(binding)) scope.presenceProofs.add(binding)
+      }
       alwaysReturns = consequentReturns && alternateReturns
       continue
     }
@@ -299,7 +315,38 @@ function createScope(parent, statements, reservedNames = new Set()) {
   const pending = new Set(statements.filter((statement) => statement.kind == "LocalDeclaration")
     .map((statement) => /** @type {{name: string}} */ (statement).name))
 
-  return {bindings: new Map(), parent, pending, usedNames: parent?.usedNames ?? new Set(reservedNames)}
+  return {
+    bindings: new Map(),
+    parent,
+    pending,
+    presenceProofs: new Set(parent?.presenceProofs ?? []),
+    usedNames: parent?.usedNames ?? new Set(reservedNames)
+  }
+}
+
+/**
+ * Applies a simple-identifier presence proof to exactly the branch where the test is true.
+ * @param {import("./types.js").Expression} condition - Validated branch condition.
+ * @param {Scope} sourceScope - Scope containing the tested binding.
+ * @param {Scope} branchScope - Branch-local proof scope.
+ * @param {boolean} branchWhenTrue - Whether this is the condition's true branch.
+ * @returns {void}
+ */
+function applyPresenceNarrowing(condition, sourceScope, branchScope, branchWhenTrue) {
+  let test = condition
+  let presentWhenTrue = true
+
+  if (condition.kind == "UnaryExpression" && condition.operation == "BooleanNot" &&
+    condition.operand.kind == "OptionalIsPresent") {
+    test = condition.operand
+    presentWhenTrue = false
+  }
+  if (test.kind != "OptionalIsPresent") return
+  const binding = findBinding(test.operand.name, sourceScope)
+
+  if (!binding) return
+  if (branchWhenTrue == presentWhenTrue) branchScope.presenceProofs.add(binding)
+  else branchScope.presenceProofs.delete(binding)
 }
 
 /**
@@ -416,6 +463,22 @@ function validateTypeReference(type, location, fail, seen = new Set()) {
 
     return candidate
   }
+  if (candidate.kind == "OptionalType") {
+    if (Object.keys(candidate).filter((key) => key != "sourceProvenance").sort().join(",") != "kind,valueType") {
+      return fail("TYPE_MISMATCH", "Malformed optional type.", typeLocation(candidate, location))
+    }
+    if (seen.has(candidate)) return fail("TYPE_MISMATCH", "Recursive optional types cannot contain cycles.", typeLocation(candidate, location))
+    seen.add(candidate)
+    const valueType = validateValueTypeReference(candidate.valueType, typeLocation(candidate, location, "valueType"), fail, seen)
+
+    seen.delete(candidate)
+    if (valueType.kind == "OptionalType") {
+      fail("INVALID_OPTIONAL_CONSTITUENT", "Optional values cannot directly contain another optional.", typeLocation(candidate, location, "valueType"))
+    }
+    if (candidate.valueType !== valueType) candidate.valueType = valueType
+
+    return candidate
+  }
 
   return fail("TYPE_MISMATCH", "Unsupported semantic type.", typeLocation(candidate, location))
 }
@@ -469,6 +532,54 @@ function inferExpressionType(expression, scope, functions, fail, normalizeOperat
       fail("TYPE_MISMATCH", "Invalid Unicode string literal.", expression.location)
     }
     return scalarType("string")
+  }
+  if (expression.kind == "OptionalNone") {
+    if (!expectedType || expectedType.kind != "OptionalType") {
+      return fail("MISSING_TYPE", "Optional absence requires an explicit optional type.", expression.location)
+    }
+
+    return expectedType
+  }
+  if (expression.kind == "OptionalSome") {
+    if (!expectedType || expectedType.kind != "OptionalType") {
+      return fail("MISSING_TYPE", "Optional presence requires an explicit optional type.", expression.location)
+    }
+    const valueType = inferValueExpressionType(
+      expression.value, scope, functions, fail, normalizeOperations, "an optional present value", expectedType.valueType
+    )
+
+    if (!sameType(valueType, expectedType.valueType)) {
+      fail("TYPE_MISMATCH", `Optional present type ${typeDescription(valueType)}; expected ${typeDescription(expectedType.valueType)}.`, expression.value.location)
+    }
+
+    return expectedType
+  }
+  if (expression.kind == "OptionalIsPresent") {
+    if (!expression.operand || expression.operand.kind != "IdentifierExpression") {
+      return fail("TYPE_MISMATCH", "Optional presence test requires one simple identifier.", expression.location)
+    }
+    const operandType = resolveBinding(expression.operand.name, expression.operand.location, scope, fail).type
+
+    if (operandType.kind != "OptionalType") {
+      return fail("TYPE_MISMATCH", `Presence test received ${typeDescription(operandType)}; expected optional.`, expression.operand.location)
+    }
+
+    return scalarType("boolean")
+  }
+  if (expression.kind == "OptionalUnwrap") {
+    if (!expression.operand || expression.operand.kind != "IdentifierExpression") {
+      return fail("TYPE_MISMATCH", "Optional unwrap requires one simple identifier.", expression.location)
+    }
+    const binding = resolveBinding(expression.operand.name, expression.operand.location, scope, fail)
+
+    if (binding.type.kind != "OptionalType") {
+      return fail("TYPE_MISMATCH", `Optional unwrap received ${typeDescription(binding.type)}; expected optional.`, expression.operand.location)
+    }
+    if (!scope.presenceProofs.has(binding)) {
+      return fail("UNCHECKED_OPTIONAL_UNWRAP", `Optional binding '${expression.operand.name}' is not proven present.`, expression.location)
+    }
+
+    return binding.type.valueType
   }
   if (expression.kind == "ListLiteral") {
     if (!expectedType || expectedType.kind != "ListType") {
@@ -736,6 +847,7 @@ function validateResolution(actual, expected, location, fail) {
 function typeIdentity(type) {
   if (type.kind == "TypeReference") return type.name
   if (type.kind == "ListType") return {elementType: /** @type {import("./types.js").SemanticTypeIdentity} */ (typeIdentity(type.elementType)), kind: "ListType"}
+  if (type.kind == "OptionalType") return {kind: "OptionalType", valueType: /** @type {import("./types.js").SemanticTypeIdentity} */ (typeIdentity(type.valueType))}
 
   return {
     keyType: /** @type {import("./types.js").SemanticTypeIdentity} */ (typeIdentity(type.keyType)),
@@ -763,6 +875,9 @@ function validTypeIdentity(type, allowVoid, seen = new Set()) {
     valid = validTypeIdentity(candidate.elementType, false, seen)
   } else if (candidate.kind == "MapType" && Object.keys(candidate).sort().join(",") == "keyType,kind,valueType") {
     valid = candidate.keyType == "string" && validTypeIdentity(candidate.valueType, false, seen)
+  } else if (candidate.kind == "OptionalType" && Object.keys(candidate).sort().join(",") == "kind,valueType") {
+    valid = validTypeIdentity(candidate.valueType, false, seen) &&
+      !(candidate.valueType && typeof candidate.valueType == "object" && Reflect.get(candidate.valueType, "kind") == "OptionalType")
   }
   seen.delete(type)
 
@@ -783,6 +898,7 @@ function sameTypeIdentity(left, right) {
 
   if (leftType.kind != rightType.kind) return false
   if (leftType.kind == "ListType") return sameTypeIdentity(leftType.elementType, rightType.elementType)
+  if (leftType.kind == "OptionalType") return sameTypeIdentity(leftType.valueType, rightType.valueType)
   if (leftType.kind == "MapType") {
     return sameTypeIdentity(leftType.keyType, rightType.keyType) && sameTypeIdentity(leftType.valueType, rightType.valueType)
   }
@@ -808,6 +924,7 @@ function sameType(left, right) {
 function typeDescription(type) {
   if (type.kind == "TypeReference") return type.name
   if (type.kind == "ListType") return `list<${typeDescription(type.elementType)}>`
+  if (type.kind == "OptionalType") return `optional<${typeDescription(type.valueType)}>`
 
   return `map<string, ${typeDescription(type.valueType)}>`
 }

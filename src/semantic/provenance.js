@@ -494,6 +494,8 @@ export function semanticEntries(module) {
     } else if (node.kind == "MapType") {
       visit(node.keyType, `${path}/keyType`, location)
       visit(node.valueType, `${path}/valueType`, location)
+    } else if (node.kind == "OptionalType") {
+      visit(node.valueType, `${path}/valueType`, location)
     } else if (node.kind == "LocalDeclaration") {
       visit(node.type, `${path}/type`, location)
       visit(node.initializer, `${path}/initializer`, location)
@@ -532,6 +534,10 @@ export function semanticEntries(module) {
       visit(node.key, `${path}/key`, location)
     } else if (node.kind == "CollectionSizeExpression") {
       visit(node.collection, `${path}/collection`, location)
+    } else if (node.kind == "OptionalSome") {
+      visit(node.value, `${path}/value`, location)
+    } else if (node.kind == "OptionalIsPresent" || node.kind == "OptionalUnwrap") {
+      visit(node.operand, `${path}/operand`, location)
     }
   }
 }
@@ -661,6 +667,10 @@ function resolveSymbols(module, records) {
       visitExpression(expression.key, scope, `${path}/key`)
     } else if (expression.kind == "CollectionSizeExpression") {
       visitExpression(expression.collection, scope, `${path}/collection`)
+    } else if (expression.kind == "OptionalSome") {
+      visitExpression(expression.value, scope, `${path}/value`)
+    } else if (expression.kind == "OptionalIsPresent" || expression.kind == "OptionalUnwrap") {
+      visitExpression(expression.operand, scope, `${path}/operand`)
     }
   }
 

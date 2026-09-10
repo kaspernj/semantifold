@@ -8,7 +8,7 @@ import {withAdaptedOperation} from "../semantic/operators.js"
 import {withParserRanges} from "../semantic/provenance.js"
 import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
 import {requireSourceReturnType, requireSourceScalarType} from "./scalars.js"
-import {documentedValueType} from "./types.js"
+import {documentedValueType, optionalType} from "./types.js"
 const parser = new PhpParser.Engine({
   ast: {withPositions: true},
   parser: {extractDoc: true, suppressErrors: false}
@@ -35,7 +35,7 @@ const phpBinaryOperations = new Map([
 /**
  * @typedef PhpConversionContext
  * @property {Map<string, import("../semantic/types.js").SemanticValueType>} bindings - Explicitly typed visible bindings.
- * @property {Map<string, import("../semantic/types.js").SemanticValueType[]>} functions - Explicit function parameter types.
+ * @property {Map<string, PhpFunctionSignature>} functions - Explicit module function signatures.
  * @property {import("../semantic/types.js").SemanticFunctionReturnType | undefined} returnType - Enclosing return type.
  */
 
@@ -131,17 +131,40 @@ function tokenLocation(tokenText, startOffset, endOffset, filename, source) {
  * @param {string} source - Complete source.
  * @param {PhpConversionContext} context - Typed conversion context.
  * @param {import("../semantic/types.js").SemanticValueType} [expectedType] - Contextual type for empty PHP arrays.
+ * @param {boolean} [preserveOptional] - Whether an optional identifier remains wrapped.
  * @returns {import("../semantic/types.js").Expression} Semantic expression.
  */
-function convertExpression(node, filename, source, context, expectedType) {
+function convertExpression(node, filename, source, context, expectedType, preserveOptional = false) {
   const location = nodeLocation(node, filename, source)
+
+  if (expectedType?.kind == "OptionalType") {
+    if (node.kind == "nullkeyword") {
+      return withParserRanges({kind: /** @type {const} */ ("OptionalNone"), location}, {absence: location})
+    }
+    if (knownExpressionType(node, context)?.kind == "OptionalType") {
+      return convertExpression(node, filename, source, context, undefined, true)
+    }
+    return withParserRanges({
+      kind: /** @type {const} */ ("OptionalSome"),
+      location,
+      value: convertExpression(node, filename, source, context, expectedType.valueType)
+    }, {some: location})
+  }
+
+  if (node.kind == "nullkeyword") return unsupportedSyntax("php", "null outside an explicit optional context", location)
 
   if (node.kind == "variable") {
     const variable = /** @type {import("php-parser").Variable} */ (node)
 
     if (typeof variable.name != "string") return unsupportedSyntax("php", "dynamic variable", location)
 
-    return withParserRanges({kind: /** @type {const} */ ("IdentifierExpression"), location, name: variable.name}, {name: location})
+    const identifier = withParserRanges({kind: /** @type {const} */ ("IdentifierExpression"), location, name: variable.name}, {name: location})
+
+    if (!preserveOptional && context.bindings.get(variable.name)?.kind == "OptionalType") {
+      return withParserRanges({kind: /** @type {const} */ ("OptionalUnwrap"), location, operand: identifier}, {unwrap: location})
+    }
+
+    return identifier
   }
 
   if (node.kind == "number") {
@@ -284,6 +307,15 @@ function convertExpression(node, filename, source, context, expectedType) {
 
   if (node.kind == "bin") {
     const binary = /** @type {import("php-parser").Bin} */ (node)
+    if (binary.type == "!==" && binary.left.kind == "variable" && binary.right.kind == "nullkeyword") {
+      const operand = /** @type {import("../semantic/types.js").IdentifierExpression} */ (
+        convertExpression(binary.left, filename, source, context, undefined, true)
+      )
+
+      return withParserRanges({kind: /** @type {const} */ ("OptionalIsPresent"), location, operand}, {
+        operator: tokenLocation(binary.type, binary.left.loc?.end.offset ?? 0, binary.right.loc?.start.offset ?? source.length, filename, source)
+      })
+    }
     if (["==", "!="].includes(binary.type)) return unsupportedSyntax("php", `coercive equality ${binary.type}`, location)
     if (["and", "or"].includes(binary.type)) return unsupportedSyntax("php", `precedence-sensitive boolean ${binary.type}`, location)
     if (!phpBinaryOperations.has(binary.type)) return unsupportedSyntax("php", `binary ${binary.type}`, location)
@@ -331,9 +363,11 @@ function convertExpression(node, filename, source, context, expectedType) {
 
     const callee = calledName.name
 
+    const signature = context.functions.get(callee)
+
     return withParserRanges({
       arguments: call.arguments.map((argument, index) =>
-        convertExpression(argument, filename, source, context, context.functions.get(callee)?.[index])),
+        convertExpression(argument, filename, source, context, signature?.parameters[index]?.type)),
       callee,
       kind: "CallExpression",
       location
@@ -341,6 +375,35 @@ function convertExpression(node, filename, source, context, expectedType) {
   }
 
   return unsupportedSyntax("php", node.kind, location)
+}
+
+/**
+ * Resolves only result types established by explicit signatures and bindings.
+ * @param {import("php-parser").Expression} node - Parser-owned expression.
+ * @param {PhpConversionContext} context - Typed conversion context.
+ * @returns {import("../semantic/types.js").SemanticFunctionReturnType | undefined} Known result type.
+ */
+function knownExpressionType(node, context) {
+  if (node.kind == "variable") {
+    const variable = /** @type {import("php-parser").Variable} */ (node)
+
+    if (typeof variable.name == "string") return context.bindings.get(variable.name)
+  }
+  if (node.kind == "call") {
+    const call = /** @type {import("php-parser").Call} */ (node)
+    const name = call.what.kind == "name" && typeof call.what.name == "string" ? call.what.name : undefined
+
+    if (name) return context.functions.get(name)?.returnType
+  }
+  if (node.kind == "offsetlookup") {
+    const lookup = /** @type {import("php-parser").OffsetLookup} */ (node)
+    const collectionType = knownExpressionType(lookup.what, context)
+
+    if (collectionType?.kind == "ListType") return collectionType.elementType
+    if (collectionType?.kind == "MapType") return collectionType.valueType
+  }
+
+  return undefined
 }
 
 /**
@@ -445,9 +508,11 @@ function convertLocalStatement(node, filename, source, context) {
   const metadata = localMetadata(node, variable.name, filename, source)
 
   if (metadata) {
+    const initializer = convertExpression(assignment.right, filename, source, context, metadata.type)
+
     context.bindings.set(variable.name, metadata.type)
     return withParserRanges({
-      initializer: convertExpression(assignment.right, filename, source, context, metadata.type),
+      initializer,
       kind: "LocalDeclaration",
       location,
       mutable: !metadata.immutable,
@@ -466,9 +531,10 @@ function convertLocalStatement(node, filename, source, context) {
   const target = withParserRanges({kind: /** @type {const} */ ("IdentifierExpression"), location: targetLocation, name: variable.name}, {
     name: targetLocation
   })
+  const value = convertExpression(assignment.right, filename, source, context, bindingType)
 
   return withParserRanges({
-    expression: convertExpression(assignment.right, filename, source, context, bindingType),
+    expression: value,
     kind: "AssignmentStatement",
     location,
     target
@@ -598,6 +664,31 @@ function phpTypeName(type) {
 }
 
 /**
+ * Wraps one parser-declared canonical PHP nullable type.
+ * @param {import("../semantic/types.js").SemanticValueType} valueType - Present-value semantic type.
+ * @param {import("php-parser").Node} sourceType - Native parser type node.
+ * @param {number} ownerStart - Earliest owning parser offset.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @returns {import("../semantic/types.js").OptionalType} Optional semantic type.
+ */
+function nullableType(valueType, sourceType, ownerStart, filename, source) {
+  if (!sourceType.loc) throw new Error("PHP parser omitted nullable type location.")
+  const valueLocation = nodeLocation(sourceType, filename, source)
+  const marker = tokenLocation("?", ownerStart, sourceType.loc.start.offset, filename, source)
+
+  if (marker.end.offset != valueLocation.start.offset) {
+    return unsupportedSyntax("php", "noncanonical nullable type", marker)
+  }
+
+  return optionalType(
+    valueType,
+    locationFromOffsets(filename, source, marker.start.offset, valueLocation.end.offset),
+    valueLocation
+  )
+}
+
+/**
  * Converts one explicit PHP function return type.
  * @param {import("php-parser").Node | null} sourceType - PHP return type node.
  * @param {string} subject - Typed function return.
@@ -639,8 +730,6 @@ function convertFunctionSignature(node, filename, source) {
     if (parameter.byref) return unsupportedSyntax("php", "by-reference parameter", parameterLocation)
     if (parameter.variadic) return unsupportedSyntax("php", "variadic parameter", parameterLocation)
     if (parameter.value) return unsupportedSyntax("php", "default parameter", parameterLocation)
-    if (parameter.nullable) return unsupportedSyntax("php", "unsupported scalar type", parameterLocation)
-
     const parameterNode = typeof parameter.name == "string" ? parameter : parameter.name
     const documentedType = documented.parameters.get(parameterName)
     const nativeType = phpTypeName(parameter.type)
@@ -649,14 +738,22 @@ function convertFunctionSignature(node, filename, source) {
     if (nativeType != "array" && documentedType) {
       return unsupportedSyntax("php", "container annotation on non-array parameter", documentedType.location)
     }
+    let parameterType = documentedType
+      ? documentedValueType({language: "php", location: documentedType.location, ownerLocation: parameterLocation, source,
+        sourceType: documentedType.sourceType, subject: `Parameter '${parameterName}'`})
+      : convertType(parameter.type, `Parameter '${parameterName}'`, parameterLocation, filename, source)
+
+    if (parameter.nullable && parameterType.kind != "OptionalType") {
+      if (!parameter.type) return missingType("php", `Parameter '${parameterName}'`, parameterLocation)
+      parameterType = nullableType(parameterType, parameter.type, parameter.loc?.start.offset ?? 0, filename, source)
+    } else if (!parameter.nullable && parameterType.kind == "OptionalType") {
+      return unsupportedSyntax("php", "optional annotation without nullable native type", documentedType?.location ?? parameterLocation)
+    }
     const semanticParameter = {
       kind: /** @type {const} */ ("Parameter"),
       location: parameterLocation,
       name: parameterName,
-      type: documentedType
-        ? documentedValueType({language: "php", location: documentedType.location, ownerLocation: parameterLocation, source,
-          sourceType: documentedType.sourceType, subject: `Parameter '${parameterName}'`})
-        : convertType(parameter.type, `Parameter '${parameterName}'`, parameterLocation, filename, source)
+      type: parameterType
     }
 
     return withParserRanges(semanticParameter, {name: nodeLocation(parameterNode, filename, source)})
@@ -666,7 +763,6 @@ function convertFunctionSignature(node, filename, source) {
 
   if (extraDocumentedParameter) return unsupportedSyntax("php", `annotation for unknown parameter '${extraDocumentedParameter}'`, location)
   if (node.byref) return unsupportedSyntax("php", "by-reference return", location)
-  if (node.nullable) return unsupportedSyntax("php", "unsupported scalar type", location)
   const nameNode = typeof node.name == "string" ? node : node.name
   const nativeReturnType = phpTypeName(node.type)
   let returnType
@@ -678,6 +774,20 @@ function convertFunctionSignature(node, filename, source) {
   } else {
     if (documented.returnType) return unsupportedSyntax("php", "container annotation on non-array return", documented.returnType.location)
     returnType = convertReturnType(node.type, `Function '${name}' return`, location, filename, source)
+  }
+  if (node.nullable && returnType.kind != "OptionalType") {
+    if (!node.type) return missingType("php", `Function '${name}' return`, location)
+    const typeStart = node.type.loc?.start.offset ?? 0
+
+    returnType = nullableType(
+      /** @type {import("../semantic/types.js").SemanticValueType} */ (returnType),
+      node.type,
+      Math.max(node.loc?.start.offset ?? 0, typeStart - 2),
+      filename,
+      source
+    )
+  } else if (!node.nullable && returnType.kind == "OptionalType") {
+    return unsupportedSyntax("php", "optional annotation without nullable native return type", documented.returnType?.location ?? location)
   }
 
   return {
@@ -693,7 +803,7 @@ function convertFunctionSignature(node, filename, source) {
  * Converts a PHP function body using the already-proved module signatures.
  * @param {import("php-parser").Function} node - PHP function node.
  * @param {PhpFunctionSignature} signature - Preconverted explicit signature.
- * @param {Map<string, import("../semantic/types.js").SemanticValueType[]>} functions - Module function parameter types.
+ * @param {Map<string, PhpFunctionSignature>} functions - Module function signatures.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
  * @returns {import("../semantic/types.js").FunctionDeclaration} Semantic function.
@@ -729,13 +839,20 @@ function convertIf(node, filename, source, context) {
 
   if (node.shortForm) return unsupportedSyntax("php", "alternative if syntax", location)
   if (node.body.kind != "block") return unsupportedSyntax("php", "if without block consequent", location)
+  if (node.test.kind == "variable") {
+    const tested = /** @type {import("php-parser").Variable} */ (node.test)
 
+    if (typeof tested.name == "string" && context.bindings.get(tested.name)?.kind == "OptionalType") {
+      return unsupportedSyntax("php", "optional truthiness condition", nodeLocation(tested, filename, source))
+    }
+  }
+
+  const condition = convertExpression(node.test, filename, source, context)
   const consequentContext = {...context, bindings: new Map(context.bindings)}
+  const alternateContext = {...context, bindings: new Map(context.bindings)}
   let alternate
 
   if (node.alternate) {
-    const alternateContext = {...context, bindings: new Map(context.bindings)}
-
     if (node.alternate.kind == "block") {
       alternate = convertBlock(/** @type {import("php-parser").Block} */ (node.alternate), filename, source, alternateContext)
     } else if (node.alternate.kind == "if") {
@@ -751,7 +868,7 @@ function convertIf(node, filename, source, context) {
 
   return {
     ...(alternate ? {alternate} : {}),
-    condition: convertExpression(node.test, filename, source, context),
+    condition,
     consequent: convertBlock(node.body, filename, source, consequentContext),
     kind: "IfStatement",
     location
@@ -789,11 +906,9 @@ export function parsePhp({filename, source}) {
   validateDeclareNodes(program.children, filename, source)
   const functionNodes = /** @type {import("php-parser").Function[]} */ (program.children.filter((node) => node.kind == "function"))
   const signatures = functionNodes.map((node) => convertFunctionSignature(node, filename, source))
-  const functionParameterTypes = new Map(signatures.map((signature) => [
-    signature.name, signature.parameters.map((parameter) => parameter.type)
-  ]))
+  const functionSignatures = new Map(signatures.map((signature) => [signature.name, signature]))
   const functions = functionNodes.map((node, index) =>
-    convertFunction(node, signatures[index], functionParameterTypes, filename, source))
+    convertFunction(node, signatures[index], functionSignatures, filename, source))
   const executableNodes = program.children.filter((node) => node.kind != "function" && node.kind != "declare" && node.kind != "noop")
   const location = moduleLocation(filename, source)
 
@@ -805,7 +920,7 @@ export function parsePhp({filename, source}) {
     : location
   const entryContext = {
     bindings: new Map(),
-    functions: functionParameterTypes,
+    functions: functionSignatures,
     returnType: undefined
   }
   const entryBlock = {

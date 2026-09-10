@@ -1,7 +1,6 @@
 // @ts-check
 
 import {emitExpression, emitType} from "./shared.js"
-import {emitSemanticType} from "./scalars.js"
 
 /**
  * Emits an independently executable PHP program through the source-aware writer.
@@ -16,8 +15,8 @@ export function generatePhp(module, writer) {
     if (functionIndex > 0) writer.synthetic("\n\n", "declaration separator", [declaration])
 
     const documentedParameters = declaration.parameters.map((parameter, index) => [parameter, index])
-      .filter(([parameter]) => /** @type {import("../semantic/types.js").Parameter} */ (parameter).type.kind != "TypeReference")
-    const documentedReturn = declaration.returnType.kind != "TypeReference"
+      .filter(([parameter]) => phpTypeNeedsDocumentation(/** @type {import("../semantic/types.js").Parameter} */ (parameter).type))
+    const documentedReturn = phpTypeNeedsDocumentation(declaration.returnType)
 
     if (documentedParameters.length > 0 || documentedReturn) {
       writer.synthetic("/**\n", "PHP collection type scaffolding", [declaration])
@@ -47,23 +46,13 @@ export function generatePhp(module, writer) {
       const parameterPath = `/functions/${functionIndex}/parameters/${index}`
 
       if (index > 0) writer.synthetic(", ", "parameter separator", [declaration])
-      writer.mapped(parameter.type.kind == "TypeReference" ? emitSemanticType("php", parameter.type) : "array", {
-        mappingKind: "exact",
-        node: parameter.type,
-        path: `${parameterPath}/type`,
-        role: "type"
-      })
+      emitNativePhpType(writer, parameter.type, `${parameterPath}/type`)
       writer.synthetic(" ", "parameter spacing", [parameter], [parameterPath])
       writer.mapped(`$${parameter.name}`, {mappingKind: "exact", node: parameter, path: parameterPath, role: "name"})
     })
     writer.mapped(")", {mappingKind: "anchor", node: declaration})
     writer.synthetic(": ", "return type separator", [declaration])
-    writer.mapped(declaration.returnType.kind == "TypeReference" ? emitSemanticType("php", declaration.returnType) : "array", {
-      mappingKind: "exact",
-      node: declaration.returnType,
-      path: `/functions/${functionIndex}/returnType`,
-      role: "type"
-    })
+    emitNativePhpType(writer, declaration.returnType, `/functions/${functionIndex}/returnType`)
     writer.synthetic("\n", "line break", [declaration])
     writer.mapped("{", {mappingKind: "anchor", node: declaration})
     writer.synthetic("\n", "line break", [declaration])
@@ -74,6 +63,38 @@ export function generatePhp(module, writer) {
 
   writer.synthetic("\n\n", "entry-point separator", [module.entryPoint])
   emitBlock(writer, module.entryPoint.body, "", "/entryPoint/body")
+}
+
+/**
+ * Returns whether a PHP native type needs an accompanying recursive PHPDoc type.
+ * @param {import("../semantic/types.js").SemanticFunctionReturnType} type - Semantic type.
+ * @returns {boolean} Whether the type contains a collection.
+ */
+function phpTypeNeedsDocumentation(type) {
+  return type.kind == "ListType" || type.kind == "MapType" ||
+    type.kind == "OptionalType" && phpTypeNeedsDocumentation(type.valueType)
+}
+
+/**
+ * Emits the exact native PHP carrier while retaining recursive type mappings.
+ * @param {import("./writer.js").SourceWriter} writer - Source-aware writer.
+ * @param {import("../semantic/types.js").SemanticFunctionReturnType} type - Semantic type.
+ * @param {string} path - Exact type occurrence path.
+ * @returns {void}
+ */
+function emitNativePhpType(writer, type, path) {
+  if (type.kind == "TypeReference") {
+    emitType(writer, type, path, "php")
+    return
+  }
+  if (type.kind == "OptionalType") {
+    writer.mapped("?", {mappingKind: "exact", node: type, path, role: "type"})
+    if (type.valueType.kind == "TypeReference") emitType(writer, type.valueType, `${path}/valueType`, "php")
+    else writer.mapped("array", {mappingKind: "anchor", node: type, path})
+    return
+  }
+
+  writer.mapped("array", {mappingKind: "exact", node: type, path, role: "type"})
 }
 
 /**

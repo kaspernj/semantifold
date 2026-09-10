@@ -102,17 +102,23 @@ export function createLanguageRegistry(candidateRecords) {
       invalidRegistry(`Registry record '${id}' has an invalid artifact multiplicity.`, id)
     }
     if (typeof candidate.roundTrip != "boolean") invalidRegistry(`Registry record '${id}' requires a Boolean round-trip declaration.`, id)
-    const featuresCandidate = candidate.features ?? {generalFunctionsAndCalls: false, immutableCollections: false}
+    const featuresCandidate = candidate.features ?? {
+      generalFunctionsAndCalls: false,
+      immutableCollections: false,
+      optionalValues: false
+    }
 
     if (!isPlainObject(featuresCandidate) ||
-      Object.keys(featuresCandidate).sort().join(",") != "generalFunctionsAndCalls,immutableCollections" ||
+      Object.keys(featuresCandidate).sort().join(",") != "generalFunctionsAndCalls,immutableCollections,optionalValues" ||
       typeof featuresCandidate.generalFunctionsAndCalls != "boolean" ||
-      typeof featuresCandidate.immutableCollections != "boolean") {
+      typeof featuresCandidate.immutableCollections != "boolean" ||
+      typeof featuresCandidate.optionalValues != "boolean") {
       invalidRegistry(`Registry record '${id}' has an invalid feature declaration.`, id)
     }
     const features = deepFreeze(/** @type {import("./semantic/types.js").LanguageFeatureCapabilities} */ ({
       generalFunctionsAndCalls: featuresCandidate.generalFunctionsAndCalls,
-      immutableCollections: featuresCandidate.immutableCollections
+      immutableCollections: featuresCandidate.immutableCollections,
+      optionalValues: featuresCandidate.optionalValues
     }))
     const mappingCandidate = candidate.mapping
 
@@ -413,7 +419,7 @@ const records = [
     artifactMultiplicity: "multiple",
     binaryBackend: generateBrowserWasm,
     defaultFilename: "program.wasm",
-    features: {generalFunctionsAndCalls: false, immutableCollections: false},
+    features: {generalFunctionsAndCalls: false, immutableCollections: false, optionalValues: false},
     id: "wasm",
     mapping: {binaryRanges: true, richText: true, sourceMapV3: true},
     mediaType: "application/wasm",
@@ -438,7 +444,8 @@ function language(values) {
     artifactMultiplicity: "single",
     features: {
       generalFunctionsAndCalls: ["php", "ruby", "javascript", "typescript", "java"].includes(String(values.id)),
-      immutableCollections: ["php", "ruby", "javascript", "typescript", "java"].includes(String(values.id))
+      immutableCollections: ["php", "ruby", "javascript", "typescript", "java"].includes(String(values.id)),
+      optionalValues: ["php", "ruby", "javascript", "typescript", "java"].includes(String(values.id))
     },
     mapping: {binaryRanges: false, richText: true, sourceMapV3: true},
     roundTrip: true,

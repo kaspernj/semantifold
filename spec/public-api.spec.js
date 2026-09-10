@@ -43,6 +43,8 @@ describe("public API", () => {
     expect(typeof generateArtifact).toEqual("function")
     expect(typeof generateArtifactSet).toEqual("function")
     expect(Array.isArray(languageCapabilities)).toBeTrue()
+    expect(languageCapabilities.filter(({features}) => features.optionalValues).map(({id}) => id))
+      .toEqual(["php", "ruby", "javascript", "typescript", "java"])
     expect(typeof canonicalToolchains).toEqual("object")
     expect(typeof SemantifoldDiagnostic).toEqual("function")
     for (const api of [
