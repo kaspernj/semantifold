@@ -31,6 +31,16 @@ export function withParserRanges(node, ranges) {
 }
 
 /**
+ * Returns one parser-owned token range while frontend validation is still in progress.
+ * @param {object} node - Semantic node or type reference.
+ * @param {string} role - Exact semantic token role.
+ * @returns {import("./types.js").SourceLocation | undefined} Parser range when present.
+ */
+export function parserRangeFor(node, role) {
+  return parserRanges.get(node)?.[role]
+}
+
+/**
  * Adds deterministic provenance to a validated frontend module.
  * @param {import("./types.js").SemanticModule} module - Validated semantic module.
  * @param {object} source - Parsed source.
@@ -485,7 +495,9 @@ export function semanticEntries(module) {
     } else if (node.kind == "AssignmentStatement") {
       visit(node.target, `${path}/target`, location)
       visit(node.expression, `${path}/expression`, location)
-    } else if (node.kind == "ReturnStatement" || node.kind == "PrintStatement") {
+    } else if (node.kind == "ReturnStatement") {
+      if (node.expression) visit(node.expression, `${path}/expression`, location)
+    } else if (node.kind == "ExpressionStatement" || node.kind == "PrintStatement") {
       visit(node.expression, `${path}/expression`, location)
     } else if (node.kind == "IfStatement") {
       visit(node.condition, `${path}/condition`, location)
@@ -551,7 +563,15 @@ function resolveSymbols(module, records) {
     const id = `symbol:${symbols.length}`
 
     record.symbolId = id
-    symbols.push({declarationNodeId: record.id, id, kind, location, name, references: []})
+    symbols.push({
+      declarationNodeId: record.id,
+      id,
+      kind,
+      location,
+      name,
+      references: [],
+      ...(kind == "function" ? {semanticDeclarationId: /** @type {import("./types.js").FunctionDeclaration} */ (node).id} : {})
+    })
 
     return id
   }
@@ -575,7 +595,9 @@ function resolveSymbols(module, records) {
       } else if (statement.kind == "AssignmentStatement") {
         reference(statement.target, scope.get(statement.target.name), "write", `${statementPath}/target`)
         visitExpression(statement.expression, scope, `${statementPath}/expression`)
-      } else if (statement.kind == "ReturnStatement" || statement.kind == "PrintStatement") {
+      } else if (statement.kind == "ReturnStatement") {
+        if (statement.expression) visitExpression(statement.expression, scope, `${statementPath}/expression`)
+      } else if (statement.kind == "ExpressionStatement" || statement.kind == "PrintStatement") {
         visitExpression(statement.expression, scope, `${statementPath}/expression`)
       } else if (statement.kind == "IfStatement") {
         visitExpression(statement.condition, scope, `${statementPath}/condition`)
@@ -595,7 +617,9 @@ function resolveSymbols(module, records) {
   function visitExpression(expression, scope, path) {
     if (expression.kind == "IdentifierExpression") reference(expression, scope.get(expression.name), "read", path)
     else if (expression.kind == "CallExpression") {
-      reference(expression, functions.get(expression.callee), "call", path)
+      const declaration = module.functions.find((candidate) => candidate.id == expression.resolution?.declarationId)
+
+      reference(expression, declaration ? functions.get(declaration.name) : undefined, "call", path)
       for (const [index, argument] of expression.arguments.entries()) visitExpression(argument, scope, `${path}/arguments/${index}`)
     } else if (expression.kind == "UnaryExpression") {
       visitExpression(expression.operand, scope, `${path}/operand`)

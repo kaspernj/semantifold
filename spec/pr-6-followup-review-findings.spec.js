@@ -37,6 +37,7 @@ describe("PR 6 follow-up automatic review findings", () => {
 
     branch.consequent.statements.splice(1, 0, assignment)
     branch.alternate.statements[0] = returned
+    clone.id = "function:1"
     clone.name = "selectAgain"
     clone.body.statements[clone.body.statements.length - 1] = branch
     module.functions.push(clone)

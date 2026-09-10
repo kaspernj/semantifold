@@ -3,7 +3,7 @@
 import {unsupportedCapability} from "../diagnostic.js"
 import {validateBackendTypes} from "../semantic/validate.js"
 import {validateTargetBindingIdentifier, validateTargetIdentifier} from "./identifiers.js"
-import {emitStringLiteral} from "./scalars.js"
+import {emitScalarType, emitStringLiteral} from "./scalars.js"
 
 /** @type {Readonly<Record<import("../semantic/types.js").SemanticUnaryOperation, string>>} */
 const unaryOperationSyntax = Object.freeze({BooleanNot: "!", IntegerNegate: "-"})
@@ -26,6 +26,11 @@ const binaryOperationSyntax = Object.freeze({
   StringEqual: Object.freeze({default: "==", strict: "==="}),
   StringNotEqual: Object.freeze({default: "!=", strict: "!=="})
 })
+const task005Languages = new Set(["php", "ruby", "javascript", "typescript", "java"])
+const javaObjectInstanceMethodSignatures = new Set([
+  "clone()", "equals(Object)", "finalize()", "getClass()", "hashCode()", "notify()", "notifyAll()", "toString()",
+  "wait()", "wait(long)", "wait(long,int)"
+])
 
 /**
  * Checks the intentionally narrow backend contract.
@@ -42,6 +47,9 @@ export function validateBackendModule(module, language) {
     module.entryPoint.kind != "EntryPoint") unsupportedCapability(language, "missing or invalid module members", module.location)
   if (module.functions.length == 0) unsupportedCapability(language, "module without functions", module.location)
   validateBlock(module.entryPoint.body, language, module.entryPoint.location)
+  const declarationIds = new Set()
+  const declarationNames = new Set()
+  const targetDeclarationNames = new Set()
 
   for (const functionDeclaration of module.functions) {
     if (!functionDeclaration || typeof functionDeclaration != "object" || Array.isArray(functionDeclaration) ||
@@ -49,9 +57,29 @@ export function validateBackendModule(module, language) {
       unsupportedCapability(language, "missing or invalid function declaration", module.location)
     }
     validateTargetBindingIdentifier(language, functionDeclaration.name, "function", functionDeclaration.location)
+    if (declarationNames.has(functionDeclaration.name)) {
+      unsupportedCapability(language, `duplicate function '${functionDeclaration.name}'`, functionDeclaration.location)
+    }
+    declarationNames.add(functionDeclaration.name)
+    const targetDeclarationName = language == "php"
+      ? functionDeclaration.name.replace(/[A-Z]/gu, (character) => character.toLowerCase())
+      : functionDeclaration.name
 
-    if (functionDeclaration.parameters.length != 2) {
+    if (targetDeclarationNames.has(targetDeclarationName)) {
+      unsupportedCapability(language, `target function-name collision '${functionDeclaration.name}'`, functionDeclaration.location)
+    }
+    targetDeclarationNames.add(targetDeclarationName)
+    if (typeof functionDeclaration.id != "string" || !/^function:[0-9]+$/u.test(functionDeclaration.id) ||
+      declarationIds.has(functionDeclaration.id)) {
+      unsupportedCapability(language, "duplicate or invalid function declaration identity", functionDeclaration.location)
+    }
+    declarationIds.add(functionDeclaration.id)
+
+    if (!task005Languages.has(language) && functionDeclaration.parameters.length != 2) {
       unsupportedCapability(language, "function parameter count other than two", functionDeclaration.location)
+    }
+    if (!task005Languages.has(language) && functionDeclaration.returnType?.name == "void") {
+      unsupportedCapability(language, "Task 005 void function return", functionDeclaration.location)
     }
     validateBlock(functionDeclaration.body, language, functionDeclaration.location)
 
@@ -83,8 +111,9 @@ function validateScaffoldingNames(module, language) {
     language == "csharp" ? new Set([
     "Equals", "Finalize", "GetHashCode", "GetType", "Main", "MemberwiseClone", "Program", "ReferenceEquals", "System", "ToString"
   ]) :
+    language == "java" ? new Set(["main"]) :
     ["javascript", "typescript"].includes(language) ? new Set(["console"]) :
-    language == "ruby" ? new Set(["puts"]) : new Set()
+    language == "ruby" ? new Set(["puts", "send", "public_send", "__send__"]) : new Set()
 
   for (const statement of allStatements(module.entryPoint.body)) {
     if (statement.kind == "LocalDeclaration" && ownedEntryNames.has(statement.name)) {
@@ -93,7 +122,18 @@ function validateScaffoldingNames(module, language) {
   }
   for (const declaration of module.functions) {
     if (ownedCallableNames.has(declaration.name)) {
-      unsupportedCapability(language, `function '${declaration.name}' captures backend scaffolding`, declaration.location)
+      unsupportedCapability(language, `function '${declaration.name}' captures backend scaffolding`, declarationNameLocation(declaration))
+    }
+    if (language == "java") {
+      const signature = emittedJavaFunctionSignature(declaration)
+
+      if (signature && javaObjectInstanceMethodSignatures.has(signature)) {
+        unsupportedCapability(
+          language,
+          `function '${signature}' conflicts with an inherited java.lang.Object instance method`,
+          declarationNameLocation(declaration)
+        )
+      }
     }
     for (const parameter of declaration.parameters) {
       if (ownedPrintReceiverNames.has(parameter.name)) {
@@ -106,6 +146,36 @@ function validateScaffoldingNames(module, language) {
       }
     }
   }
+}
+
+/**
+ * Returns a parser-backed function-name location when one survived semantic adaptation.
+ * @param {import("../semantic/types.js").FunctionDeclaration} declaration - Semantic function declaration.
+ * @returns {import("../semantic/types.js").SourceLocation} Exact name or declaration location.
+ */
+function declarationNameLocation(declaration) {
+  return declaration.sourceProvenance?.ranges.name ?? declaration.location
+}
+
+/**
+ * Builds the Java method signature used for inherited-instance collision checks.
+ * @param {import("../semantic/types.js").FunctionDeclaration} declaration - Candidate Java target function.
+ * @returns {string | undefined} Emitted name and parameter types when all types are supported.
+ */
+function emittedJavaFunctionSignature(declaration) {
+  const parameterTypes = []
+
+  for (const parameter of declaration.parameters) {
+    const type = parameter.type
+
+    if (!type || typeof type != "object" || Array.isArray(type)) return undefined
+    const emitted = emitScalarType("java", type)
+
+    if (typeof emitted != "string") return undefined
+    parameterTypes.push(emitted)
+  }
+
+  return `${declaration.name}(${parameterTypes.join(",")})`
 }
 
 /**
@@ -175,7 +245,25 @@ function validateStatement(statement, language, ownerLocation) {
     validateExpression(assignment.expression, language, location)
     return
   }
-  if (kind == "ReturnStatement" || kind == "PrintStatement") {
+  if (kind == "ReturnStatement") {
+    const expression = Reflect.get(statement, "expression")
+
+    if (expression !== undefined) validateExpression(expression, language, location)
+    return
+  }
+  if (kind == "ExpressionStatement") {
+    if (!task005Languages.has(language)) {
+      unsupportedCapability(language, "Task 005 void call expression statement", location)
+    }
+    const expression = Reflect.get(statement, "expression")
+
+    if (!expression || typeof expression != "object" || Reflect.get(expression, "kind") != "CallExpression") {
+      unsupportedCapability(language, "expression statement other than a direct call", location)
+    }
+    validateExpression(expression, language, location)
+    return
+  }
+  if (kind == "PrintStatement") {
     validateExpression(Reflect.get(statement, "expression"), language, location)
     return
   }
@@ -254,10 +342,13 @@ function validateExpression(expression, language, ownerLocation, allowJavaNegate
   if (candidate.kind == "BooleanLiteral" || candidate.kind == "StringLiteral") return
   if (candidate.kind == "CallExpression") {
     validateTargetIdentifier(language, candidate.callee, "callee", location)
+    if (!candidate.resolution || typeof candidate.resolution != "object" || Array.isArray(candidate.resolution)) {
+      unsupportedCapability(language, "missing or invalid resolved call signature", location)
+    }
     if (!Array.isArray(candidate.arguments)) {
       unsupportedCapability(language, "missing or invalid call arguments", location)
     }
-    if (candidate.arguments.length != 2) {
+    if (!task005Languages.has(language) && candidate.arguments.length != 2) {
       unsupportedCapability(language, "call argument count other than two", location)
     }
     for (const argument of candidate.arguments) validateExpression(argument, language, location)
@@ -519,8 +610,11 @@ function blockContainsSignProducingOperation(block) {
         Boolean(statement.alternate && blockContainsSignProducingOperation(statement.alternate))
     }
     if (statement.kind == "LocalDeclaration") return expressionContainsSignProducingOperation(statement.initializer)
-    if (statement.kind == "AssignmentStatement" || statement.kind == "ReturnStatement" || statement.kind == "PrintStatement") {
+    if (statement.kind == "AssignmentStatement" || statement.kind == "ExpressionStatement" || statement.kind == "PrintStatement") {
       return expressionContainsSignProducingOperation(statement.expression)
+    }
+    if (statement.kind == "ReturnStatement") {
+      return Boolean(statement.expression && expressionContainsSignProducingOperation(statement.expression))
     }
 
     return false

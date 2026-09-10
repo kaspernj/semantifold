@@ -1,6 +1,6 @@
 # 005 — General required function signatures and calls
 
-- Status: `todo`
+- Status: `implemented and accepted locally — coordinator review, exact-head TensorBuzz CI, and merge pending`
 - Phase/priority: Phase 1 / P1
 - Dependencies: [001-portable-scalar-values-and-types.md](001-portable-scalar-values-and-types.md), [004-statement-sequencing-and-conditionals.md](004-statement-sequencing-and-conditionals.md), [025-core-language-baseline-acceptance.md](025-core-language-baseline-acceptance.md)
 
@@ -76,3 +76,11 @@ Optional/default/rest/keyword/named/variadic parameters or arguments, overloads,
 - Void is enforced as non-value return semantics across source, IR, and targets.
 - Every excluded call/parameter form fails loudly at a useful location.
 - Focused signature/diagnostic specs and real registered-runtime round-trip execution pass with docs/changelog updates.
+
+## Implementation delivery record — 2026-09-10
+
+- The strict RED first added the smallest cross-language semantic fixture and failed exactly because the existing validator rejected `function parameter count other than two`. Production work then added deterministic `function:N` declaration identities, complete-module signature collection, exact resolved call signatures, arbitrary required positional arity, scalar/void return semantics, bare returns, and void-only direct-call expression statements for PHP, Ruby, JavaScript/JSDoc, TypeScript, and Java.
+- Parser-backed frontend coverage accepts zero-, one-, and three-parameter declarations, multiple functions, nested calls, direct terminating recursion, explicit scalar returns, and explicit void profiles. Focused exclusions cover every task-listed optional/default/rest/keyword/named/by-reference/spread/receiver/dynamic/method/constructor/overload/generic/async/generator/higher-order or inferred-signature form without source-text fallback.
+- Backend preflight revalidates declaration identities and exact call signatures for caller-authored IR, rejects all void value placements and target naming conflicts before emission, and advertises the feature only for the required five-language cohort. Python, C#, C, C++, Rust, Swift, Kotlin/JVM, Go, and browser Wasm retain their Task 001–004 profile and reject Task 005 shapes transactionally.
+- Local GREEN evidence is `2/2` semantic/signature checks, `5/5` frontend exclusion groups, `4/4` backend/reparse/capability checks, `2/2` provenance/mapping checks, and `1/1` real-runtime acceptance. The runtime proof invoked PHP, Ruby, Node.js, local `tsc` then Node.js, and `javac` then `java`, requiring exact `ready\n6\n` output. Changed and directly adjacent focused regressions also passed individually.
+- Repository gates passed locally: legacy-runtime consistency and ESLint, root/workspace strict typecheck, root/workspace build, high-severity audit with zero vulnerabilities, production and complete dependency listings, package dry-run, and `git diff --check`. Aggregate Task 013/full-suite discovery, independent review, TensorBuzz, merge, publication, and remote mutation remain outside this local delivery.

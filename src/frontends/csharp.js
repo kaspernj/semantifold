@@ -663,8 +663,10 @@ function validateCheckedArithmetic(module) {
    */
   const visitBlock = (block) => block.statements.forEach((statement) => {
     if (statement.kind == "LocalDeclaration") visitExpression(statement.initializer)
-    else if (statement.kind == "AssignmentStatement" || statement.kind == "PrintStatement" || statement.kind == "ReturnStatement") {
+    else if (statement.kind == "AssignmentStatement" || statement.kind == "ExpressionStatement" || statement.kind == "PrintStatement") {
       visitExpression(statement.expression)
+    } else if (statement.kind == "ReturnStatement") {
+      if (statement.expression) visitExpression(statement.expression)
     } else {
       visitExpression(statement.condition)
       visitBlock(statement.consequent)

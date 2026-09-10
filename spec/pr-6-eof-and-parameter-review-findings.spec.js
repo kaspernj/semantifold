@@ -38,6 +38,7 @@ describe("PR 6 EOF and parameter automatic review findings", () => {
       const declaration = module.functions[0]
       const clone = structuredClone(declaration)
 
+      clone.id = "function:1"
       clone.name = "selectAgain"
       clone.parameters[0] = declaration.parameters[0]
       module.functions.push(clone)

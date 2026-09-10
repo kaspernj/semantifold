@@ -1,8 +1,11 @@
 // @ts-check
 
 import {semanticFailure, unsupportedCapability, unsupportedSyntax} from "../diagnostic.js"
-import {hasOnlyUnicodeScalars, isScalarTypeName} from "./scalars.js"
+import {hasOnlyUnicodeScalars, isFunctionReturnTypeName, isScalarTypeName} from "./scalars.js"
 import {adaptedOperationFor} from "./operators.js"
+import {parserRangeFor} from "./provenance.js"
+
+const task005Languages = new Set(["php", "ruby", "javascript", "typescript", "java"])
 
 /**
  * @typedef Binding
@@ -30,7 +33,7 @@ import {adaptedOperationFor} from "./operators.js"
  * @returns {import("./types.js").SemanticModule} Validated module.
  */
 export function validateParsedModule(module, language) {
-  validateModuleShape(module, (detail, location) => unsupportedSyntax(language, detail, location))
+  validateModuleShape(module, language, (detail, location) => unsupportedSyntax(language, detail, location))
   validateModuleTypes(module, (code, detail, location) => semanticFailure(language, code, detail, location), true)
 
   return module
@@ -49,12 +52,13 @@ export function validateBackendTypes(module, language) {
 /**
  * Checks parser-authored block and statement layouts before semantic validation.
  * @param {import("./types.js").SemanticModule} module - Semantic module.
+ * @param {import("./types.js").SemanticLanguage} language - Source language.
  * @param {(detail: string, location: import("./types.js").SourceLocation) => never} fail - Shape failure.
  * @returns {void}
  */
-function validateModuleShape(module, fail) {
+function validateModuleShape(module, language, fail) {
   for (const functionDeclaration of module.functions) {
-    if (functionDeclaration.parameters.length != 2) {
+    if (!task005Languages.has(language) && functionDeclaration.parameters.length != 2) {
       fail("function parameter count other than two", functionDeclaration.location)
     }
 
@@ -77,7 +81,7 @@ function validateBlockShape(block, detail, fail) {
   }
 
   for (const statement of block.statements) {
-    if (!["AssignmentStatement", "IfStatement", "LocalDeclaration", "PrintStatement", "ReturnStatement"].includes(statement.kind)) {
+    if (!["AssignmentStatement", "ExpressionStatement", "IfStatement", "LocalDeclaration", "PrintStatement", "ReturnStatement"].includes(statement.kind)) {
       fail(`${detail} statement ${statement.kind}`, statement.location)
     }
     if (statement.kind == "IfStatement") {
@@ -97,11 +101,18 @@ function validateBlockShape(block, detail, fail) {
 function validateModuleTypes(module, fail, normalizeOperations) {
   /** @type {Map<string, import("./types.js").FunctionDeclaration>} */
   const functions = new Map()
+  const declarationIds = new Set()
 
-  for (const functionDeclaration of module.functions) {
-    if (functions.has(functionDeclaration.name)) {
-      fail("DUPLICATE_BINDING", `duplicate function '${functionDeclaration.name}'.`, functionDeclaration.location)
+  for (const [index, functionDeclaration] of module.functions.entries()) {
+    if (normalizeOperations) functionDeclaration.id = `function:${index}`
+    if (typeof functionDeclaration.id != "string" || !/^function:[0-9]+$/u.test(functionDeclaration.id) ||
+      declarationIds.has(functionDeclaration.id)) {
+      fail("DUPLICATE_BINDING", "Duplicate or invalid function declaration identity.", functionDeclaration.location)
     }
+    if (functions.has(functionDeclaration.name)) {
+      fail("DUPLICATE_BINDING", `duplicate function '${functionDeclaration.name}'.`, roleLocation(functionDeclaration, "name"))
+    }
+    declarationIds.add(functionDeclaration.id)
     functions.set(functionDeclaration.name, functionDeclaration)
   }
 
@@ -126,22 +137,24 @@ function validateFunction(declaration, functions, fail, normalizeOperations) {
   const scope = createScope(undefined, declaration.body.statements, new Set(functions.keys()))
 
   for (const parameter of declaration.parameters) {
-    const type = validateTypeReference(parameter.type, parameter.location, fail)
+    const type = validateValueTypeReference(parameter.type, parameter.location, fail)
 
     declareBinding(parameter.name, {mutable: false, type}, parameter.location, scope, fail)
   }
 
-  const returnType = validateTypeReference(declaration.returnType, declaration.location, fail)
+  const returnType = validateReturnTypeReference(declaration.returnType, declaration.location, fail)
   const returns = validateBlock(declaration.body, scope, returnType, functions, fail, normalizeOperations)
 
-  if (!returns) fail("MISSING_RETURN", `Function '${declaration.name}' does not return on every reachable path.`, declaration.location)
+  if (returnType != "void" && !returns) {
+    fail("MISSING_RETURN", `Function '${declaration.name}' does not return on every reachable path.`, declaration.location)
+  }
 }
 
 /**
  * Validates one ordered block and reports whether every path returns.
  * @param {import("./types.js").Block} block - Semantic block.
  * @param {Scope} scope - Scope belonging to this block.
- * @param {import("./types.js").SemanticTypeName | undefined} returnType - Function return type, absent for entry points.
+ * @param {import("./types.js").FunctionReturnTypeName | undefined} returnType - Function return type, absent for entry points.
  * @param {Map<string, import("./types.js").FunctionDeclaration>} functions - Function signatures.
  * @param {SemanticFail} fail - Diagnostic callback.
  * @param {boolean} normalizeOperations - Whether to replace transient frontend operation intent.
@@ -154,8 +167,8 @@ function validateBlock(block, scope, returnType, functions, fail, normalizeOpera
     if (alwaysReturns) fail("UNREACHABLE_STATEMENT", "Statement is unreachable.", statement.location)
 
     if (statement.kind == "LocalDeclaration") {
-      const declaredType = validateTypeReference(statement.type, statement.location, fail)
-      const initializerType = inferExpressionType(statement.initializer, scope, functions, fail, normalizeOperations)
+      const declaredType = validateValueTypeReference(statement.type, statement.location, fail)
+      const initializerType = inferValueExpressionType(statement.initializer, scope, functions, fail, normalizeOperations, "an initializer")
 
       scope.pending.delete(statement.name)
       if (initializerType != declaredType) {
@@ -165,7 +178,7 @@ function validateBlock(block, scope, returnType, functions, fail, normalizeOpera
       continue
     }
     if (statement.kind == "AssignmentStatement") {
-      const expressionType = inferExpressionType(statement.expression, scope, functions, fail, normalizeOperations)
+      const expressionType = inferValueExpressionType(statement.expression, scope, functions, fail, normalizeOperations, "an assignment")
       const binding = resolveBinding(statement.target.name, statement.target.location, scope, fail)
 
       if (!binding.mutable) {
@@ -177,21 +190,46 @@ function validateBlock(block, scope, returnType, functions, fail, normalizeOpera
       continue
     }
     if (statement.kind == "PrintStatement") {
-      inferExpressionType(statement.expression, scope, functions, fail, normalizeOperations)
+      inferValueExpressionType(statement.expression, scope, functions, fail, normalizeOperations, "a print value")
+      continue
+    }
+    if (statement.kind == "ExpressionStatement") {
+      if (!statement.expression || statement.expression.kind != "CallExpression") {
+        fail("TYPE_MISMATCH", "Expression statement must contain a direct call.", statement.location)
+      }
+      const expressionType = inferExpressionType(statement.expression, scope, functions, fail, normalizeOperations)
+
+      if (expressionType != "void") {
+        fail("TYPE_MISMATCH", "Expression statements may contain only void calls.", statement.expression.location)
+      }
       continue
     }
     if (statement.kind == "ReturnStatement") {
       if (!returnType) fail("ILLEGAL_RETURN_CONTEXT", "Return statement outside a function.", statement.location)
-      const actualType = inferExpressionType(statement.expression, scope, functions, fail, normalizeOperations)
+      if (returnType == "void") {
+        if (statement.expression) {
+          fail("VOID_RETURN_VALUE", "Void function cannot return a value.", statement.expression.location)
+        }
+      } else {
+        if (!statement.expression) fail("MISSING_RETURN_VALUE", `Function return requires a ${returnType} value.`, statement.location)
+        const actualType = inferValueExpressionType(
+          statement.expression,
+          scope,
+          functions,
+          fail,
+          normalizeOperations,
+          "a returned value"
+        )
 
-      if (actualType != returnType) {
-        fail("TYPE_MISMATCH", `Return type ${actualType}; expected ${returnType}.`, statement.expression.location)
+        if (actualType != returnType) {
+          fail("TYPE_MISMATCH", `Return type ${actualType}; expected ${returnType}.`, statement.expression.location)
+        }
       }
       alwaysReturns = true
       continue
     }
     if (statement.kind == "IfStatement") {
-      const conditionType = inferExpressionType(statement.condition, scope, functions, fail, normalizeOperations)
+      const conditionType = inferValueExpressionType(statement.condition, scope, functions, fail, normalizeOperations, "a condition")
 
       if (conditionType != "boolean") {
         fail("NON_BOOLEAN_CONDITION", `If condition type ${conditionType}; expected boolean.`, statement.condition.location)
@@ -269,11 +307,37 @@ function resolveBinding(name, location, scope, fail) {
 }
 
 /**
- * Validates one semantic type reference.
+ * Validates one semantic value type reference.
  * @param {unknown} type - Candidate semantic type reference.
  * @param {import("./types.js").SourceLocation} location - Owning source location.
  * @param {SemanticFail} fail - Diagnostic callback.
  * @returns {import("./types.js").SemanticTypeName} Validated scalar name.
+ */
+function validateValueTypeReference(type, location, fail) {
+  const name = validateTypeReference(type, location, fail)
+
+  if (name == "void") return fail("VOID_AS_VALUE", "Void is valid only as a function return type.", typeLocation(type, location))
+
+  return name
+}
+
+/**
+ * Validates one function return type reference.
+ * @param {unknown} type - Candidate semantic return type reference.
+ * @param {import("./types.js").SourceLocation} location - Owning source location.
+ * @param {SemanticFail} fail - Diagnostic callback.
+ * @returns {import("./types.js").FunctionReturnTypeName} Validated return name.
+ */
+function validateReturnTypeReference(type, location, fail) {
+  return validateTypeReference(type, location, fail)
+}
+
+/**
+ * Validates one semantic type-reference shape.
+ * @param {unknown} type - Candidate semantic type reference.
+ * @param {import("./types.js").SourceLocation} location - Owning source location.
+ * @param {SemanticFail} fail - Diagnostic callback.
+ * @returns {import("./types.js").FunctionReturnTypeName} Validated type name.
  */
 function validateTypeReference(type, location, fail) {
   if (!type || typeof type != "object" || Array.isArray(type)) {
@@ -282,11 +346,29 @@ function validateTypeReference(type, location, fail) {
 
   const candidate = /** @type {import("./types.js").TypeReference} */ (type)
 
-  if (candidate.kind != "TypeReference" || !isScalarTypeName(candidate.name)) {
-    fail("TYPE_MISMATCH", "Unsupported scalar type.", location)
+  if (candidate.kind != "TypeReference" || !isFunctionReturnTypeName(candidate.name)) {
+    fail("TYPE_MISMATCH", "Unsupported scalar or void return type.", typeLocation(candidate, location))
   }
 
   return candidate.name
+}
+
+/**
+ * Infers a value expression and rejects the non-value result of a void call.
+ * @param {import("./types.js").Expression} expression - Semantic expression.
+ * @param {Scope} scope - Visible lexical scope.
+ * @param {Map<string, import("./types.js").FunctionDeclaration>} functions - Module function signatures.
+ * @param {SemanticFail} fail - Diagnostic callback.
+ * @param {boolean} normalizeOperations - Whether to normalize frontend intent and call resolution.
+ * @param {string} context - Value context for diagnostics.
+ * @returns {import("./types.js").SemanticTypeName} Expression value type.
+ */
+function inferValueExpressionType(expression, scope, functions, fail, normalizeOperations, context) {
+  const type = inferExpressionType(expression, scope, functions, fail, normalizeOperations)
+
+  if (type == "void") fail("VOID_AS_VALUE", `Void call cannot be used as ${context}.`, expression.location)
+
+  return type
 }
 
 /**
@@ -296,7 +378,7 @@ function validateTypeReference(type, location, fail) {
  * @param {Map<string, import("./types.js").FunctionDeclaration>} functions - Module function signatures.
  * @param {SemanticFail} fail - Diagnostic callback.
  * @param {boolean} normalizeOperations - Whether to replace transient frontend operation intent.
- * @returns {import("./types.js").SemanticTypeName} Expression type.
+ * @returns {import("./types.js").FunctionReturnTypeName} Expression type.
  */
 function inferExpressionType(expression, scope, functions, fail, normalizeOperations) {
   if (expression.kind == "IdentifierExpression") return resolveBinding(expression.name, expression.location, scope, fail).type
@@ -322,23 +404,29 @@ function inferExpressionType(expression, scope, functions, fail, normalizeOperat
   if (expression.kind == "CallExpression") {
     const functionDeclaration = functions.get(expression.callee)
 
-    if (!functionDeclaration) return fail("UNRESOLVED_BINDING", `Unknown function '${expression.callee}'.`, expression.location)
+    if (!functionDeclaration) {
+      return fail("UNRESOLVED_BINDING", `Unknown function '${expression.callee}'.`, roleLocation(expression, "callee"))
+    }
+    const resolution = signatureFor(functionDeclaration)
+
+    if (normalizeOperations) expression.resolution = resolution
+    else validateResolution(expression.resolution, resolution, expression.location, fail)
     if (expression.arguments.length != functionDeclaration.parameters.length) {
       return fail("TYPE_MISMATCH", `Call argument count for '${expression.callee}'.`, expression.location)
     }
     for (let index = 0; index < expression.arguments.length; index++) {
       const argument = expression.arguments[index]
-      const actualType = inferExpressionType(argument, scope, functions, fail, normalizeOperations)
-      const expectedType = validateTypeReference(functionDeclaration.parameters[index].type, functionDeclaration.parameters[index].location, fail)
+      const actualType = inferValueExpressionType(argument, scope, functions, fail, normalizeOperations, "a call argument")
+      const expectedType = validateValueTypeReference(functionDeclaration.parameters[index].type, functionDeclaration.parameters[index].location, fail)
 
       if (actualType != expectedType) {
         fail("TYPE_MISMATCH", `Call argument type ${actualType}; expected ${expectedType}.`, argument.location)
       }
     }
-    return validateTypeReference(functionDeclaration.returnType, functionDeclaration.location, fail)
+    return validateReturnTypeReference(functionDeclaration.returnType, functionDeclaration.location, fail)
   }
   if (expression.kind == "UnaryExpression") {
-    const operandType = inferExpressionType(expression.operand, scope, functions, fail, normalizeOperations)
+    const operandType = inferValueExpressionType(expression.operand, scope, functions, fail, normalizeOperations, "a unary operand")
     const operation = normalizeOperations
       ? normalizeUnaryOperation(adaptedOperationFor(expression), operandType, expression.operand.location, fail)
       : expression.operation
@@ -357,8 +445,8 @@ function inferExpressionType(expression, scope, functions, fail, normalizeOperat
     return signature.result
   }
   if (expression.kind == "BinaryExpression") {
-    const leftType = inferExpressionType(expression.left, scope, functions, fail, normalizeOperations)
-    const rightType = inferExpressionType(expression.right, scope, functions, fail, normalizeOperations)
+    const leftType = inferValueExpressionType(expression.left, scope, functions, fail, normalizeOperations, "a binary operand")
+    const rightType = inferValueExpressionType(expression.right, scope, functions, fail, normalizeOperations, "a binary operand")
     const operation = normalizeOperations
       ? normalizeBinaryOperation(adaptedOperationFor(expression), leftType, rightType, expression.left.location, expression.right.location, expression.location, fail)
       : expression.operation
@@ -383,6 +471,74 @@ function inferExpressionType(expression, scope, functions, fail, normalizeOperat
   const unexpected = /** @type {{kind: string, location: import("./types.js").SourceLocation}} */ (expression)
 
   return fail("TYPE_MISMATCH", unexpected.kind, unexpected.location)
+}
+
+/**
+ * Builds the exact semantic signature bound to one declaration.
+ * @param {import("./types.js").FunctionDeclaration} declaration - Resolved declaration.
+ * @returns {import("./types.js").ResolvedFunctionSignature} Detached signature binding.
+ */
+function signatureFor(declaration) {
+  return {
+    declarationId: /** @type {string} */ (declaration.id),
+    kind: "ResolvedFunctionSignature",
+    parameterTypes: declaration.parameters.map((parameter) => /** @type {import("./types.js").SemanticTypeName} */ (parameter.type.name)),
+    returnType: declaration.returnType.name
+  }
+}
+
+/**
+ * Validates an externally supplied call binding against the declaration collected for this module.
+ * @param {unknown} actual - Candidate call resolution.
+ * @param {import("./types.js").ResolvedFunctionSignature} expected - Exact declaration signature.
+ * @param {import("./types.js").SourceLocation} location - Call location.
+ * @param {SemanticFail} fail - Diagnostic callback.
+ * @returns {void}
+ */
+function validateResolution(actual, expected, location, fail) {
+  if (!actual || typeof actual != "object" || Array.isArray(actual) ||
+    Object.keys(actual).sort().join(",") != "declarationId,kind,parameterTypes,returnType") {
+    fail("TYPE_MISMATCH", "Call is missing an exact resolved function signature.", location)
+  }
+  const candidate = /** @type {import("./types.js").ResolvedFunctionSignature} */ (actual)
+
+  if (candidate.kind != "ResolvedFunctionSignature" || typeof candidate.declarationId != "string" ||
+    !Array.isArray(candidate.parameterTypes) ||
+    !isFunctionReturnTypeName(candidate.returnType) ||
+    candidate.declarationId != expected.declarationId ||
+    candidate.returnType != expected.returnType || candidate.parameterTypes.length != expected.parameterTypes.length) {
+    fail("TYPE_MISMATCH", "Call resolution does not match its declaration signature.", location)
+  }
+  for (let index = 0; index < candidate.parameterTypes.length; index++) {
+    const type = candidate.parameterTypes[index]
+
+    if (!Object.hasOwn(candidate.parameterTypes, index) || !isScalarTypeName(type) || type != expected.parameterTypes[index]) {
+      fail("TYPE_MISMATCH", "Call resolution does not match its declaration signature.", location)
+    }
+  }
+}
+
+/**
+ * Selects an exact semantic token location when parser provenance is available.
+ * @param {{location: import("./types.js").SourceLocation, sourceProvenance?: import("./types.js").SemanticNodeSourceProvenance}} node - Located semantic node.
+ * @param {string} role - Token role.
+ * @returns {import("./types.js").SourceLocation} Exact or owning location.
+ */
+function roleLocation(node, role) {
+  return node.sourceProvenance?.ranges[role] ?? parserRangeFor(node, role) ?? node.location
+}
+
+/**
+ * Selects the exact type token or the owning declaration location.
+ * @param {unknown} type - Candidate type reference.
+ * @param {import("./types.js").SourceLocation} ownerLocation - Owning declaration location.
+ * @returns {import("./types.js").SourceLocation} Exact type location when known.
+ */
+function typeLocation(type, ownerLocation) {
+  if (!type || typeof type != "object" || Array.isArray(type)) return ownerLocation
+  const candidate = /** @type {import("./types.js").TypeReference} */ (type)
+
+  return candidate.sourceProvenance?.ranges.type ?? parserRangeFor(candidate, "type") ?? ownerLocation
 }
 
 /** @type {Readonly<Record<import("./types.js").SemanticUnaryOperation, {operand: import("./types.js").SemanticTypeName, result: import("./types.js").SemanticTypeName}>>} */

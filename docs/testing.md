@@ -1,5 +1,21 @@
 # Testing
 
+## Task 005 general function signatures and calls
+
+Task 005 stays bounded to PHP, Ruby, JavaScript with JSDoc, TypeScript, and Java. `general-function-signatures-and-calls.spec.js` proves equivalent zero-, one-, and three-parameter signatures, complete signature collection, nested calls, terminating recursion, scalar/void returns, and the stable semantic failures. `general-function-frontend-validation.spec.js` owns the excluded parameter, call, method, receiver, dispatch, annotation, overload, generic, and higher-order source forms. `general-function-backend-validation.spec.js` proves generation/reparse, exact external-IR signature revalidation, target conflicts, the public feature flag, and transactional rejection from every deferred Task 025/Wasm target. `general-function-provenance-and-mapping.spec.js` proves deterministic declaration/resolution identities and exact signature/call mappings. `general-function-runtime-execution.spec.js` invokes real PHP, Ruby, Node, local `tsc` followed by Node, `javac`, and `java`, requiring exact `ready\n6\n` output; a missing command fails.
+
+Run the Task 005 files individually and sequentially:
+
+```sh
+npx velocious-test spec/general-function-signatures-and-calls.spec.js
+npx velocious-test spec/general-function-frontend-validation.spec.js
+npx velocious-test spec/general-function-backend-validation.spec.js
+npx velocious-test spec/general-function-provenance-and-mapping.spec.js
+npx velocious-test spec/general-function-runtime-execution.spec.js
+```
+
+Task 013 remains the future original-five aggregate compatibility gate. Task 005 does not run or expand its matrix, and it does not adopt Python, C#, C, C++, Rust, Swift, Kotlin/JVM, Go, or browser Wasm beyond focused capability rejection.
+
 ## Task 025 core expanded-language acceptance
 
 Task 025 uses two data-driven focused specs instead of duplicating the eight owning language suites. `spec/core-language-baseline-acceptance.spec.js` normalizes all five Tasks 001–004 profiles for Python, C#, C, C++, Rust, Swift, Kotlin/JVM, and Go; generates, reparses, and really executes one operator round trip per language; runs the eleven-path spanning matrix documented in [language support](language-support.md#task-025-core-expanded-language-acceptance); checks deterministic artifact bytes/mappings/provenance; and asserts the public registry contract. Its ordered program checks eager left-before-right calls and both short-circuit sides. C and C++ run the exact ordered-region source at O0/O2 with and without sanitizers, Rust runs debug/release, and Swift runs debug/`-O`.

@@ -101,7 +101,9 @@ function emitStatement(writer, statement, indent, path) {
     writer.synthetic("\n", "line break", [statement], [path])
     return
   }
+  if (statement.kind == "ExpressionStatement") throw new TypeError("Kotlin Task 005 expression statement reached emission.")
   if (statement.kind == "ReturnStatement") {
+    if (!statement.expression) throw new TypeError("Kotlin bare return reached emission.")
     writer.mapped("return", {mappingKind: "anchor", node: statement, path})
     writer.synthetic(" ", "return spacing", [statement], [path])
     emitExpression(writer, statement.expression, `${path}/expression`, "kotlin", identity)

@@ -66,7 +66,8 @@ class RustEmitter {
    */
   constructor(module, writer) {
     this.writer = writer
-    this.functions = new Map(module.functions.map(declaration => [declaration.name, declaration.returnType.name]))
+    /** @type {Map<string, Scalar>} */
+    this.functions = new Map(module.functions.map(declaration => [declaration.name, /** @type {Scalar} */ (declaration.returnType.name)]))
     this.length = 0
     this.location = module.location
   }
@@ -190,6 +191,7 @@ class RustEmitter {
    */
   statement(statement, path, indent, bindings, depth) {
     this.synthetic(indent, statement, path)
+    if (statement.kind == "ExpressionStatement") throw new TypeError("Rust Task 005 expression statement reached emission.")
     if (statement.kind == "LocalDeclaration") {
       this.mapped(statement.mutable ? "let mut" : "let", statement, path)
       this.synthetic(" ", statement, path)
@@ -207,6 +209,7 @@ class RustEmitter {
       this.synthetic(" ", statement, path)
       this.expression(statement.expression, `${path}/expression`, bindings, true, depth + 3)
     } else if (statement.kind == "ReturnStatement") {
+      if (!statement.expression) throw new TypeError("Rust bare return reached emission.")
       this.mapped("return", statement, path)
       this.synthetic(" ", statement, path)
       this.expression(statement.expression, `${path}/expression`, bindings, false, depth + 3)

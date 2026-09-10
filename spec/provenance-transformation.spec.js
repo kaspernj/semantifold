@@ -36,6 +36,7 @@ describe("provenance through semantic transformations", () => {
     const inserted = parse({filename: "two.ts", language: "typescript", source})
     const clone = structuredClone(inserted.functions[0])
 
+    clone.id = "function:2"
     clone.name = "third"
     inserted.functions.push(clone)
     const insertedArtifact = generateArtifact({language: "javascript", module: inserted})
@@ -58,6 +59,7 @@ describe("provenance through semantic transformations", () => {
 
     deleted.functions.splice(0, 1)
     entryCall.callee = "second"
+    entryCall.resolution.declarationId = /** @type {string} */ (second.id)
     assertFunctionMapping(deleted, second, "second")
   })
 

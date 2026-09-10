@@ -361,7 +361,8 @@ describe("backend shape validation", () => {
         () => generate({language: "php", module}),
         (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
           error.language == "php" && error.location?.filename == "locals.ts" &&
-          error.location.start.line == Reflect.get(lines, malformed) && error.message.includes("invalid expression"),
+          error.location.start.line == Reflect.get(lines, malformed) &&
+          error.message.includes(malformed == "return" ? "return requires" : "invalid expression"),
         malformed
       )
     }

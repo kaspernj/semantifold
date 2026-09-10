@@ -91,7 +91,15 @@ function emitStatement(writer, statement, indent, path) {
   writer.synthetic(indent, "indentation", [statement], [path])
   if (statement.kind == "ReturnStatement") {
     writer.mapped("return", {mappingKind: "anchor", node: statement, path})
-    writer.synthetic(" ", "return spacing", [statement], [path])
+    if (statement.expression) {
+      writer.synthetic(" ", "return spacing", [statement], [path])
+      emitExpression(writer, statement.expression, `${path}/expression`, "java", identity)
+    }
+    writer.mapped(";", {mappingKind: "anchor", node: statement, path})
+    writer.synthetic("\n", "line break", [statement], [path])
+    return
+  }
+  if (statement.kind == "ExpressionStatement") {
     emitExpression(writer, statement.expression, `${path}/expression`, "java", identity)
     writer.mapped(";", {mappingKind: "anchor", node: statement, path})
     writer.synthetic("\n", "line break", [statement], [path])

@@ -2,7 +2,7 @@
 
 import {missingType} from "../diagnostic.js"
 import {setParserRanges} from "../semantic/provenance.js"
-import {scalarType} from "../semantic/scalars.js"
+import {scalarType, voidType} from "../semantic/scalars.js"
 
 /**
  * Builds a source-spelling map with exact semantic scalar values.
@@ -101,4 +101,26 @@ export function requireSourceScalarType(language, sourceType, subject, location,
   if (!type) return missingType(language, subject, location)
 
   return type
+}
+
+/**
+ * Requires an exact scalar or Task-005 void function-return spelling.
+ * @param {import("../semantic/types.js").SemanticLanguage} language - Source language.
+ * @param {string | undefined} sourceType - Exact source return type spelling.
+ * @param {string} subject - Typed function return.
+ * @param {import("../semantic/types.js").SourceLocation} location - Owning function location.
+ * @param {import("../semantic/types.js").SourceLocation} [typeLocation] - Exact parser-owned type spelling.
+ * @returns {import("../semantic/types.js").FunctionReturnTypeReference} Semantic return type.
+ */
+export function requireSourceReturnType(language, sourceType, subject, location, typeLocation = location) {
+  const voidSpelling = language == "ruby" ? "[void]" : "void"
+
+  if (sourceType == voidSpelling) {
+    const type = voidType()
+
+    setParserRanges(type, {type: typeLocation})
+    return type
+  }
+
+  return requireSourceScalarType(language, sourceType, subject, location, typeLocation)
 }

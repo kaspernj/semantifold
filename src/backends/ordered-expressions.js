@@ -18,7 +18,10 @@ export class OrderedExpressionPlanner {
    */
   constructor(module, language = "c") {
     this.language = language
-    this.functions = new Map(module.functions.map((declaration) => [declaration.name, declaration.returnType.name]))
+    this.functions = new Map(module.functions.map((declaration) => [
+      declaration.name,
+      /** @type {Scalar} */ (declaration.returnType.name)
+    ]))
     this.nextTemporary = 1
   }
 
@@ -98,6 +101,8 @@ export function statementSignature(statement) {
     statement.kind == "AssignmentStatement" ? [statement.kind, statement.target.name] : [statement.kind]
   const expression = statement.kind == "IfStatement" ? statement.condition : statement.kind == "LocalDeclaration" ? statement.initializer : statement.expression
 
+  if (!expression) throw new TypeError("Bare return reached native statement signature planning.")
+
   return createHash("sha256").update(JSON.stringify([consumer, expressionSignature(expression)])).digest("hex")
 }
 
@@ -142,6 +147,8 @@ export function planNativeModule(module, language = "c") {
       const expression = statement.kind == "IfStatement" ? statement.condition : statement.kind == "LocalDeclaration" ? statement.initializer : statement.expression
       /** @type {PlannedStep[]} */
       const steps = []
+
+      if (!expression) throw new TypeError("Bare return reached native expression planning.")
       const value = planner.plan(expression, `${statementPath}/${field}`, bindings, steps)
 
       if (plans.size >= 999999) unsupportedCapability(language, "ordered statement limit", statement.location)

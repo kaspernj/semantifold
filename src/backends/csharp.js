@@ -168,8 +168,10 @@ function emitStatement(writer, statement, indent, path) {
   if (statement.kind == "LocalDeclaration" || statement.kind == "AssignmentStatement") {
     return emitLocal(writer, statement, indent, path)
   }
+  if (statement.kind == "ExpressionStatement") throw new TypeError("C# Task 005 expression statement reached emission.")
   writer.synthetic(indent, "indentation", [statement], [path])
   if (statement.kind == "ReturnStatement") {
+    if (!statement.expression) throw new TypeError("C# bare return reached emission.")
     writer.mapped("return", {mappingKind: "anchor", node: statement, path})
     writer.synthetic(" ", "return spacing", [statement], [path])
     emitExpression(writer, statement.expression, `${path}/expression`, "csharp", identity)
