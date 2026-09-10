@@ -231,6 +231,12 @@ function validateJavaUtilFactoryNames(module) {
     let capture = inherited
 
     for (const statement of block.statements) {
+      if (statement.kind == "LocalDeclaration" && statement.name == "java") {
+        capture = {
+          detail: `${owner} local 'java' captures java.util factory syntax`,
+          location: statement.location
+        }
+      }
       const expression = statement.kind == "IfStatement" ? statement.condition :
         statement.kind == "LocalDeclaration" ? statement.initializer :
           statement.kind == "AssignmentStatement" ? statement.expression :
@@ -243,12 +249,6 @@ function validateJavaUtilFactoryNames(module) {
       if (statement.kind == "IfStatement") {
         validateBlockNames(statement.consequent, capture, owner)
         if (statement.alternate) validateBlockNames(statement.alternate, capture, owner)
-      }
-      if (statement.kind == "LocalDeclaration" && statement.name == "java") {
-        capture = {
-          detail: `${owner} local 'java' captures java.util factory syntax`,
-          location: statement.location
-        }
       }
     }
   }

@@ -160,6 +160,37 @@ console.log(singleton(42).length)
     }
   })
 
+  it("rejects a Java local that captures its own collection factory initializer", () => {
+    const source = `function identity(value: number): number { return value }
+const java: readonly number[] = [1]
+console.log(java.length)
+`
+
+    for (const api of [generate, generateArtifact, generateArtifactSet]) {
+      const module = parse({filename: "java-self-capture.ts", language: "typescript", source})
+
+      assert.throws(
+        () => api({language: "java", module}),
+        (error) => backendFailure("java")(error) && error.detail.includes("entry local 'java' captures java.util factory syntax") &&
+          source.slice(error.location.start.offset, error.location.end.offset) == "const java: readonly number[] = [1]"
+      )
+    }
+
+    const safeModule = parse({
+      filename: "java-without-factory-capture.ts",
+      language: "typescript",
+      source: `function pass(values: readonly number[]): readonly number[] {
+  return values
+}
+const values: readonly number[] = [1]
+const java: readonly number[] = pass(values)
+console.log(java.length)
+`
+    })
+
+    expect(generate({language: "java", module: safeModule})).toContain("java.util.List<Integer> java = pass(values)")
+  })
+
   it("rejects a cyclic recursive type in a forward call signature without native recursion failure", () => {
     const module = parse({
       filename: "forward.ts",
