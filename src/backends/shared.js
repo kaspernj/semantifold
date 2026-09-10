@@ -211,6 +211,58 @@ function validateScaffoldingNames(module, language) {
       }
     }
   }
+  if (language == "java") validateJavaUtilFactoryNames(module)
+}
+
+/**
+ * Rejects lexical bindings that would capture Java's package qualifier in emitted collection factories.
+ * @param {import("../semantic/types.js").SemanticModule} module - Validated semantic module.
+ * @returns {void}
+ */
+function validateJavaUtilFactoryNames(module) {
+  /**
+   * Walks one lexical block while retaining only a currently visible capture.
+   * @param {import("../semantic/types.js").Block} block - Block to inspect in semantic order.
+   * @param {{detail: string, location: import("../semantic/types.js").SourceLocation} | undefined} inherited - Visible capture.
+   * @param {"entry" | "function"} owner - Owning scope kind.
+   * @returns {void}
+   */
+  const validateBlockNames = (block, inherited, owner) => {
+    let capture = inherited
+
+    for (const statement of block.statements) {
+      const expression = statement.kind == "IfStatement" ? statement.condition :
+        statement.kind == "LocalDeclaration" ? statement.initializer :
+          statement.kind == "AssignmentStatement" ? statement.expression :
+            statement.kind == "ReturnStatement" ? statement.expression : statement.expression
+
+      if (capture && expression && (expressionContainsKind(expression, "ListLiteral") ||
+        expressionContainsKind(expression, "MapLiteral"))) {
+        unsupportedCapability("java", capture.detail, capture.location)
+      }
+      if (statement.kind == "IfStatement") {
+        validateBlockNames(statement.consequent, capture, owner)
+        if (statement.alternate) validateBlockNames(statement.alternate, capture, owner)
+      }
+      if (statement.kind == "LocalDeclaration" && statement.name == "java") {
+        capture = {
+          detail: `${owner} local 'java' captures java.util factory syntax`,
+          location: statement.location
+        }
+      }
+    }
+  }
+
+  validateBlockNames(module.entryPoint.body, undefined, "entry")
+  for (const declaration of module.functions) {
+    const parameter = declaration.parameters.find(({name}) => name == "java")
+    const capture = parameter ? {
+      detail: "function parameter 'java' captures java.util factory syntax",
+      location: parameter.location
+    } : undefined
+
+    validateBlockNames(declaration.body, capture, "function")
+  }
 }
 
 /**
@@ -692,6 +744,9 @@ export function emitExpression(writer, expression, path, language, emitIdentifie
     writer.mapped(operator, {mappingKind: "exact", node: expression, path, role: "operator"})
     emitExpression(writer, expression.key, `${path}/key`, language, emitIdentifier)
     writer.mapped(language == "php" ? "]" : ")", {mappingKind: "anchor", node: expression, path})
+    if (language == "typescript") {
+      writer.synthetic("!", "statically proven map lookup", [expression], [path])
+    }
     return
   }
   if (expression.kind == "CollectionSizeExpression") {

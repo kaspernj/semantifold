@@ -33,6 +33,22 @@ const phpBinaryOperations = new Map([
 ])
 
 /**
+ * @typedef PhpConversionContext
+ * @property {Map<string, import("../semantic/types.js").SemanticValueType>} bindings - Explicitly typed visible bindings.
+ * @property {Map<string, import("../semantic/types.js").SemanticValueType[]>} functions - Explicit function parameter types.
+ * @property {import("../semantic/types.js").SemanticFunctionReturnType | undefined} returnType - Enclosing return type.
+ */
+
+/**
+ * @typedef PhpFunctionSignature
+ * @property {import("../semantic/types.js").SourceLocation} location - Complete declaration location.
+ * @property {import("../semantic/types.js").SourceLocation} nameLocation - Parser-owned name location.
+ * @property {string} name - Function name.
+ * @property {import("../semantic/types.js").Parameter[]} parameters - Semantic parameters.
+ * @property {import("../semantic/types.js").SemanticFunctionReturnType} returnType - Semantic return type.
+ */
+
+/**
  * Returns a normalized PHP node location.
  * @param {import("php-parser").Node} node - PHP parser node.
  * @param {string} filename - Source filename.
@@ -113,10 +129,11 @@ function tokenLocation(tokenText, startOffset, endOffset, filename, source) {
  * @param {import("php-parser").Expression} node - PHP expression.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
+ * @param {PhpConversionContext} context - Typed conversion context.
  * @param {import("../semantic/types.js").SemanticValueType} [expectedType] - Contextual type for empty PHP arrays.
  * @returns {import("../semantic/types.js").Expression} Semantic expression.
  */
-function convertExpression(node, filename, source, expectedType) {
+function convertExpression(node, filename, source, context, expectedType) {
   const location = nodeLocation(node, filename, source)
 
   if (node.kind == "variable") {
@@ -191,7 +208,7 @@ function convertExpression(node, filename, source, expectedType) {
       const elementType = expectedType?.kind == "ListType" ? expectedType.elementType : undefined
 
       return withParserRanges({
-        elements: entries.map((entry) => convertExpression(entry.value, filename, source, elementType)),
+        elements: entries.map((entry) => convertExpression(entry.value, filename, source, context, elementType)),
         kind: /** @type {const} */ ("ListLiteral"),
         location
       }, {literal: location})
@@ -202,13 +219,13 @@ function convertExpression(node, filename, source, expectedType) {
         if (!entry.key || entry.key.kind != "string") {
           return unsupportedSyntax("php", "map key other than a literal string", entry.key ? nodeLocation(entry.key, filename, source) : nodeLocation(entry, filename, source))
         }
-        const key = convertExpression(entry.key, filename, source)
+        const key = convertExpression(entry.key, filename, source, context)
 
         return withParserRanges({
           key: /** @type {import("../semantic/types.js").StringLiteral} */ (key),
           kind: /** @type {const} */ ("MapEntry"),
           location: nodeLocation(entry, filename, source),
-          value: convertExpression(entry.value, filename, source, valueType)
+          value: convertExpression(entry.value, filename, source, context, valueType)
         }, {operator: tokenLocation("=>", entry.key.loc?.end.offset ?? 0, entry.value.loc?.start.offset ?? source.length, filename, source)})
       })
 
@@ -224,8 +241,8 @@ function convertExpression(node, filename, source, expectedType) {
     if (!lookup.offset) return unsupportedSyntax("php", "append or missing array index", location)
     if (lookup.offset.kind == "number") {
       return withParserRanges({
-        collection: convertExpression(lookup.what, filename, source),
-        index: convertExpression(lookup.offset, filename, source),
+        collection: convertExpression(lookup.what, filename, source, context),
+        index: convertExpression(lookup.offset, filename, source, context),
         kind: /** @type {const} */ ("ListIndexExpression"),
         location,
         totality: /** @type {const} */ ("proven")
@@ -233,8 +250,8 @@ function convertExpression(node, filename, source, expectedType) {
     }
     if (lookup.offset.kind == "string") {
       return withParserRanges({
-        collection: convertExpression(lookup.what, filename, source),
-        key: convertExpression(lookup.offset, filename, source),
+        collection: convertExpression(lookup.what, filename, source, context),
+        key: convertExpression(lookup.offset, filename, source, context),
         kind: /** @type {const} */ ("MapLookupExpression"),
         location,
         totality: /** @type {const} */ ("proven")
@@ -252,7 +269,7 @@ function convertExpression(node, filename, source, expectedType) {
     const semantic = withAdaptedOperation(withParserRanges({
       kind: "UnaryExpression",
       location,
-      operand: convertExpression(unary.what, filename, source)
+      operand: convertExpression(unary.what, filename, source, context)
     }, {
       operator: tokenLocation(unary.type, unary.loc?.start.offset ?? 0, unary.what.loc?.start.offset ?? unary.loc?.end.offset ?? source.length, filename, source)
     }), unary.type == "!" ? "Not" : "Negate")
@@ -268,9 +285,9 @@ function convertExpression(node, filename, source, expectedType) {
 
     const semantic = withAdaptedOperation({
       kind: /** @type {const} */ ("BinaryExpression"),
-      left: convertExpression(binary.left, filename, source),
+      left: convertExpression(binary.left, filename, source, context),
       location,
-      right: convertExpression(binary.right, filename, source)
+      right: convertExpression(binary.right, filename, source, context)
     }, /** @type {import("../semantic/operators.js").AdaptedOperation} */ (phpBinaryOperations.get(binary.type)))
 
     return /** @type {import("../semantic/types.js").Expression} */ (/** @type {unknown} */ (withParserRanges(semantic, {
@@ -283,7 +300,7 @@ function convertExpression(node, filename, source, expectedType) {
 
     if (call.what.kind == "name" && call.what.name == "count" && call.arguments.length == 1) {
       return withParserRanges({
-        collection: convertExpression(call.arguments[0], filename, source),
+        collection: convertExpression(call.arguments[0], filename, source, context),
         kind: /** @type {const} */ ("CollectionSizeExpression"),
         location
       }, {operator: nodeLocation(call.what, filename, source)})
@@ -310,7 +327,8 @@ function convertExpression(node, filename, source, expectedType) {
     const callee = calledName.name
 
     return withParserRanges({
-      arguments: call.arguments.map((argument) => convertExpression(argument, filename, source)),
+      arguments: call.arguments.map((argument, index) =>
+        convertExpression(argument, filename, source, context, context.functions.get(callee)?.[index])),
       callee,
       kind: "CallExpression",
       location
@@ -325,17 +343,21 @@ function convertExpression(node, filename, source, expectedType) {
  * @param {import("php-parser").Node} node - PHP node.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
+ * @param {PhpConversionContext} context - Typed conversion context.
  * @returns {import("../semantic/types.js").ReturnStatement} Semantic return.
  */
-function convertReturn(node, filename, source) {
+function convertReturn(node, filename, source, context) {
   const location = nodeLocation(node, filename, source)
 
   if (node.kind != "return") return unsupportedSyntax("php", node.kind, location)
 
   const returnNode = /** @type {import("php-parser").Return} */ (node)
+  const expectedType = context.returnType?.kind == "TypeReference" && context.returnType.name == "void"
+    ? undefined
+    : /** @type {import("../semantic/types.js").SemanticValueType | undefined} */ (context.returnType)
 
   return {
-    ...(returnNode.expr ? {expression: convertExpression(returnNode.expr, filename, source)} : {}),
+    ...(returnNode.expr ? {expression: convertExpression(returnNode.expr, filename, source, context, expectedType)} : {}),
     kind: "ReturnStatement",
     location
   }
@@ -391,12 +413,12 @@ function localMetadata(node, name, filename, source) {
 /**
  * Converts one PHP local declaration or assignment.
  * @param {import("php-parser").Node} node - PHP statement.
- * @param {Set<string>} visible - Names visible during adaptation.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
+ * @param {PhpConversionContext} context - Typed conversion context.
  * @returns {import("../semantic/types.js").LocalStatement} Semantic local statement.
  */
-function convertLocalStatement(node, visible, filename, source) {
+function convertLocalStatement(node, filename, source, context) {
   const location = nodeLocation(node, filename, source)
 
   if (node.kind != "expressionstatement") return unsupportedSyntax("php", node.kind, location)
@@ -418,9 +440,9 @@ function convertLocalStatement(node, visible, filename, source) {
   const metadata = localMetadata(node, variable.name, filename, source)
 
   if (metadata) {
-    visible.add(variable.name)
+    context.bindings.set(variable.name, metadata.type)
     return withParserRanges({
-      initializer: convertExpression(assignment.right, filename, source, metadata.type),
+      initializer: convertExpression(assignment.right, filename, source, context, metadata.type),
       kind: "LocalDeclaration",
       location,
       mutable: !metadata.immutable,
@@ -432,14 +454,16 @@ function convertLocalStatement(node, visible, filename, source) {
     })
   }
 
-  if (!visible.has(variable.name)) return missingType("php", `Local '${variable.name}'`, location)
+  const bindingType = context.bindings.get(variable.name)
+
+  if (!bindingType) return missingType("php", `Local '${variable.name}'`, location)
 
   const target = withParserRanges({kind: /** @type {const} */ ("IdentifierExpression"), location: targetLocation, name: variable.name}, {
     name: targetLocation
   })
 
   return withParserRanges({
-    expression: convertExpression(assignment.right, filename, source),
+    expression: convertExpression(assignment.right, filename, source, context, bindingType),
     kind: "AssignmentStatement",
     location,
     target
@@ -451,27 +475,29 @@ function convertLocalStatement(node, visible, filename, source) {
 /**
  * Converts one exhaustive PHP statement.
  * @param {import("php-parser").Node} node - PHP statement.
- * @param {Set<string>} visible - Names visible during adaptation.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
+ * @param {PhpConversionContext} context - Typed conversion context.
  * @returns {import("../semantic/types.js").Statement} Semantic statement.
  */
-function convertStatement(node, visible, filename, source) {
-  if (node.kind == "return") return convertReturn(node, filename, source)
-  if (node.kind == "if") return convertIf(/** @type {import("php-parser").If} */ (node), visible, filename, source)
-  if (node.kind == "echo") return convertPrint(/** @type {import("php-parser").Echo} */ (node), filename, source)
+function convertStatement(node, filename, source, context) {
+  if (node.kind == "return") return convertReturn(node, filename, source, context)
+  if (node.kind == "if") return convertIf(/** @type {import("php-parser").If} */ (node), filename, source, context)
+  if (node.kind == "echo") return convertPrint(/** @type {import("php-parser").Echo} */ (node), filename, source, context)
   if (node.kind == "expressionstatement") {
     const expression = /** @type {import("php-parser").ExpressionStatement} */ (node).expression
 
     if (expression.kind == "call") {
       return {
-        expression: /** @type {import("../semantic/types.js").CallExpression} */ (convertExpression(expression, filename, source)),
+        expression: /** @type {import("../semantic/types.js").CallExpression} */ (
+          convertExpression(expression, filename, source, context)
+        ),
         kind: "ExpressionStatement",
         location: nodeLocation(node, filename, source)
       }
     }
 
-    return convertLocalStatement(node, visible, filename, source)
+    return convertLocalStatement(node, filename, source, context)
   }
 
   return unsupportedSyntax("php", node.kind, nodeLocation(node, filename, source))
@@ -480,16 +506,16 @@ function convertStatement(node, visible, filename, source) {
 /**
  * Converts an ordered PHP block with its own adaptation scope.
  * @param {import("php-parser").Block} node - PHP parser block.
- * @param {Set<string>} visible - Names visible on block entry.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
+ * @param {PhpConversionContext} context - Typed conversion context.
  * @returns {import("../semantic/types.js").Block} Semantic block.
  */
-function convertBlock(node, visible, filename, source) {
+function convertBlock(node, filename, source, context) {
   return {
     kind: "Block",
     location: nodeLocation(node, filename, source),
-    statements: node.children.map((statement) => convertStatement(statement, visible, filename, source))
+    statements: node.children.map((statement) => convertStatement(statement, filename, source, context))
   }
 }
 
@@ -586,13 +612,13 @@ function convertReturnType(sourceType, subject, location, filename, source) {
 }
 
 /**
- * Converts a PHP function.
+ * Converts the explicit type signature of one PHP function before any body expressions.
  * @param {import("php-parser").Function} node - PHP function node.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
- * @returns {import("../semantic/types.js").FunctionDeclaration} Semantic function.
+ * @returns {PhpFunctionSignature} Typed function signature.
  */
-function convertFunction(node, filename, source) {
+function convertFunctionSignature(node, filename, source) {
   const location = nodeLocation(node, filename, source)
   const name = typeof node.name == "string" ? node.name : node.name.name
 
@@ -636,11 +662,7 @@ function convertFunction(node, filename, source) {
   if (extraDocumentedParameter) return unsupportedSyntax("php", `annotation for unknown parameter '${extraDocumentedParameter}'`, location)
   if (node.byref) return unsupportedSyntax("php", "by-reference return", location)
   if (node.nullable) return unsupportedSyntax("php", "unsupported scalar type", location)
-  const visible = new Set(parameters.map((parameter) => parameter.name))
-  const body = convertBlock(node.body, visible, filename, source)
-
   const nameNode = typeof node.name == "string" ? node : node.name
-
   const nativeReturnType = phpTypeName(node.type)
   let returnType
 
@@ -653,53 +675,79 @@ function convertFunction(node, filename, source) {
     returnType = convertReturnType(node.type, `Function '${name}' return`, location, filename, source)
   }
 
-  return withParserRanges({
-    body,
-    kind: "FunctionDeclaration",
+  return {
     location,
     name,
+    nameLocation: nodeLocation(nameNode, filename, source),
     parameters,
     returnType
-  }, {name: nodeLocation(nameNode, filename, source)})
+  }
+}
+
+/**
+ * Converts a PHP function body using the already-proved module signatures.
+ * @param {import("php-parser").Function} node - PHP function node.
+ * @param {PhpFunctionSignature} signature - Preconverted explicit signature.
+ * @param {Map<string, import("../semantic/types.js").SemanticValueType[]>} functions - Module function parameter types.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @returns {import("../semantic/types.js").FunctionDeclaration} Semantic function.
+ */
+function convertFunction(node, signature, functions, filename, source) {
+  if (!node.body) return unsupportedSyntax("php", "function body", signature.location)
+  const context = {
+    bindings: new Map(signature.parameters.map((parameter) => [parameter.name, parameter.type])),
+    functions,
+    returnType: signature.returnType
+  }
+
+  return withParserRanges({
+    body: convertBlock(node.body, filename, source, context),
+    kind: "FunctionDeclaration",
+    location: signature.location,
+    name: signature.name,
+    parameters: signature.parameters,
+    returnType: signature.returnType
+  }, {name: signature.nameLocation})
 }
 
 /**
  * Converts the existing PHP if/else terminal with restricted branch prefixes.
  * @param {import("php-parser").If} node - PHP if node.
- * @param {Set<string>} visible - Enclosing visible names.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
+ * @param {PhpConversionContext} context - Typed conversion context.
  * @returns {import("../semantic/types.js").IfStatement} Semantic branch.
  */
-function convertIf(node, visible, filename, source) {
+function convertIf(node, filename, source, context) {
   const location = nodeLocation(node, filename, source)
 
   if (node.shortForm) return unsupportedSyntax("php", "alternative if syntax", location)
   if (node.body.kind != "block") return unsupportedSyntax("php", "if without block consequent", location)
 
-  const consequentVisible = new Set(visible)
+  const consequentContext = {...context, bindings: new Map(context.bindings)}
   let alternate
 
   if (node.alternate) {
-    const alternateVisible = new Set(visible)
+    const alternateContext = {...context, bindings: new Map(context.bindings)}
 
     if (node.alternate.kind == "block") {
-      alternate = convertBlock(/** @type {import("php-parser").Block} */ (node.alternate), alternateVisible, filename, source)
+      alternate = convertBlock(/** @type {import("php-parser").Block} */ (node.alternate), filename, source, alternateContext)
     } else if (node.alternate.kind == "if") {
       const nested = /** @type {import("php-parser").If} */ (node.alternate)
 
       alternate = {
         kind: /** @type {const} */ ("Block"),
         location: nodeLocation(nested, filename, source),
-        statements: [convertIf(nested, alternateVisible, filename, source)]
+        statements: [convertIf(nested, filename, source, alternateContext)]
       }
     } else return unsupportedSyntax("php", `if alternate ${node.alternate.kind}`, nodeLocation(node.alternate, filename, source))
   }
 
   return {
     ...(alternate ? {alternate} : {}),
-    condition: convertExpression(node.test, filename, source),
-    consequent: convertBlock(node.body, consequentVisible, filename, source),
+    condition: convertExpression(node.test, filename, source, context),
+    consequent: convertBlock(node.body, filename, source, consequentContext),
     kind: "IfStatement",
     location
   }
@@ -710,9 +758,10 @@ function convertIf(node, visible, filename, source) {
  * @param {import("php-parser").Echo} node - PHP echo node.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
+ * @param {PhpConversionContext} context - Typed conversion context.
  * @returns {import("../semantic/types.js").PrintStatement} Print statement.
  */
-function convertPrint(node, filename, source) {
+function convertPrint(node, filename, source, context) {
   const location = nodeLocation(node, filename, source)
 
   if (node.expressions.length != 2 || node.expressions[1].kind != "name" ||
@@ -720,7 +769,7 @@ function convertPrint(node, filename, source) {
     return unsupportedSyntax("php", "echo without one expression and PHP_EOL", location)
   }
 
-  return {expression: convertExpression(node.expressions[0], filename, source), kind: "PrintStatement", location}
+  return {expression: convertExpression(node.expressions[0], filename, source, context), kind: "PrintStatement", location}
 }
 
 /**
@@ -733,8 +782,13 @@ function convertPrint(node, filename, source) {
 export function parsePhp({filename, source}) {
   const program = parsePhpProgram(filename, source)
   validateDeclareNodes(program.children, filename, source)
-  const functions = program.children.filter((node) => node.kind == "function")
-    .map((node) => convertFunction(/** @type {import("php-parser").Function} */ (node), filename, source))
+  const functionNodes = /** @type {import("php-parser").Function[]} */ (program.children.filter((node) => node.kind == "function"))
+  const signatures = functionNodes.map((node) => convertFunctionSignature(node, filename, source))
+  const functionParameterTypes = new Map(signatures.map((signature) => [
+    signature.name, signature.parameters.map((parameter) => parameter.type)
+  ]))
+  const functions = functionNodes.map((node, index) =>
+    convertFunction(node, signatures[index], functionParameterTypes, filename, source))
   const executableNodes = program.children.filter((node) => node.kind != "function" && node.kind != "declare" && node.kind != "noop")
   const location = moduleLocation(filename, source)
 
@@ -744,11 +798,15 @@ export function parsePhp({filename, source}) {
   const entryLocation = first
     ? locationFromOffsets(filename, source, first.loc?.start.offset ?? 0, last?.loc?.end.offset ?? source.length)
     : location
-  const entryVisible = new Set()
+  const entryContext = {
+    bindings: new Map(),
+    functions: functionParameterTypes,
+    returnType: undefined
+  }
   const entryBlock = {
     kind: /** @type {const} */ ("Block"),
     location: entryLocation,
-    statements: executableNodes.map((node) => convertStatement(node, entryVisible, filename, source))
+    statements: executableNodes.map((node) => convertStatement(node, filename, source, entryContext))
   }
 
   return {

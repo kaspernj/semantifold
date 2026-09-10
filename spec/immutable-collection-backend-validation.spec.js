@@ -142,6 +142,24 @@ console.log(values.length)
     assert.throws(() => generate({language: "php", module: countCapture}), backendFailure("php"))
   })
 
+  it("rejects Java package-qualifier capture transactionally", () => {
+    const source = `function singleton(java: number): readonly number[] {
+  return [java]
+}
+console.log(singleton(42).length)
+`
+
+    for (const api of [generate, generateArtifact, generateArtifactSet]) {
+      const module = parse({filename: "java-capture.ts", language: "typescript", source})
+
+      assert.throws(
+        () => api({language: "java", module}),
+        (error) => backendFailure("java")(error) && error.detail.includes("function parameter 'java' captures java.util factory syntax") &&
+          source.slice(error.location.start.offset, error.location.end.offset) == "java: number"
+      )
+    }
+  })
+
   it("rejects a cyclic recursive type in a forward call signature without native recursion failure", () => {
     const module = parse({
       filename: "forward.ts",

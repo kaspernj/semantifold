@@ -1,1 +1,1 @@
-Add recursive immutable list and string-key map semantics, exact original-five source and target profiles, total collection access, size, provenance, mappings, and real-toolchain acceptance.
+Add recursive immutable list and string-key map semantics, exact original-five source and target profiles, total collection access, size, provenance, mappings, and real-toolchain acceptance. Preserve proven map value types in strict TypeScript, propagate explicit PHP collection context into empty arrays, and reject Java package-qualifier capture before emission.

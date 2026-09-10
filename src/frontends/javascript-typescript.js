@@ -146,6 +146,16 @@ function commentTagLocation(comment, tag, field, filename, source) {
 function convertExpression(node, language, filename, source) {
   const location = nodeLocation(node, filename, source)
 
+  if (node.type == "TSNonNullExpression") {
+    const expression = convertExpression(node.expression, language, filename, source)
+
+    if (language != "typescript" || expression.kind != "MapLookupExpression") {
+      return unsupportedSyntax(language, "non-null assertion other than Map.get result", location)
+    }
+    expression.location = location
+    return expression
+  }
+
   if (node.type == "Identifier") {
     return withParserRanges({kind: /** @type {const} */ ("IdentifierExpression"), location, name: node.name}, {
       name: identifierLocation(node, filename, source)
