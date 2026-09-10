@@ -79,4 +79,58 @@ for (const outerValue of values) {
     expect(parse({filename: "program.ts", language: "typescript", source: fixture}).functions[1].body.statements.at(-1)?.kind)
       .toEqual("ReturnStatement")
   })
+
+  it("invalidates only outer mutable value facts that any loop path may assign", () => {
+    rejects(`function unsafe(flag: boolean): number {
+  const values: readonly number[] = [7]
+  const iterations: readonly number[] = [1]
+  let index: number = 0
+  for (const ignored of iterations) {
+    if (flag) { index = 1; break }
+  }
+  return values[index]
+}
+console.log(unsafe(true))
+`, "UNCHECKED_COLLECTION_ACCESS", "values[index]")
+    rejects(`function unsafeAfterContinue(flag: boolean): number {
+  const values: readonly number[] = [7]
+  const iterations: readonly number[] = [1]
+  let index: number = 0
+  for (const ignored of iterations) {
+    if (flag) { index = 1; continue }
+  }
+  return values[index]
+}
+console.log(unsafeAfterContinue(true))
+`, "UNCHECKED_COLLECTION_ACCESS", "values[index]")
+
+    assert.doesNotThrow(() => parse({
+      filename: "stable.ts",
+      language: "typescript",
+      source: `function stable(flag: boolean): number {
+  const values: readonly number[] = [7]
+  const iterations: readonly number[] = [1]
+  let stableIndex: number = 0
+  let changed: number = 0
+  for (const ignored of iterations) {
+    if (flag) { changed = 1; break }
+  }
+  return values[stableIndex]
+}
+console.log(stable(true))
+`
+    }))
+    assert.doesNotThrow(() => parse({
+      filename: "pre-loop.ts",
+      language: "typescript",
+      source: `function preLoop(): number {
+  const nested: ReadonlyArray<ReadonlyArray<number>> = [[7]]
+  let index: number = 0
+  for (const value of nested[index]) { index = 1; break }
+  return 0
+}
+console.log(preLoop())
+`
+    }))
+  })
 })

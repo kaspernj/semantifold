@@ -810,9 +810,17 @@ function knownExpressionType(node, context, source) {
   if (node.name == "Identifier") return context.bindings.get(nodeText(node, source))
   if (node.name == "MethodInvocation") {
     const methodName = node.getChild("MethodName")
+    const argumentList = node.getChild("ArgumentList")
     const receiver = structuralChildren(node).find((child) => child.name != "MethodName" && child.name != "ArgumentList")
 
     if (methodName && !receiver) return context.functions.get(nodeText(methodName, source))?.returnType
+    if (methodName && receiver && argumentList && nodeText(methodName, source) == "get" &&
+      structuralChildren(argumentList).length == 1) {
+      const receiverType = knownExpressionType(receiver, context, source)
+
+      if (receiverType?.kind == "ListType") return receiverType.elementType
+      if (receiverType?.kind == "MapType") return receiverType.valueType
+    }
   }
 
   return undefined

@@ -133,7 +133,7 @@ function rejectBlockIteration(block, language, seen = new Set()) {
   for (const statement of statements) {
     if (!statement || typeof statement != "object" || Array.isArray(statement)) continue
     const kind = Reflect.get(statement, "kind")
-    const location = Reflect.get(statement, "location") ?? Reflect.get(block, "location")
+    const location = diagnosticLocation(Reflect.get(statement, "location"), Reflect.get(block, "location"))
 
     if (["ForEachStatement", "BreakStatement", "ContinueStatement"].includes(kind)) {
       unsupportedCapability(language, "Task 008 ordered list iteration", location)
@@ -520,7 +520,7 @@ function validateBlock(block, language, ownerLocation, loopDepth = 0, activePath
   }
 
   const candidate = /** @type {import("../semantic/types.js").Block} */ (block)
-  const location = candidate.location ?? ownerLocation
+  const location = diagnosticLocation(candidate.location, ownerLocation)
 
   if (activePath.has(candidate)) unsupportedCapability(language, "cyclic block", location)
   if (candidate.kind != "Block") unsupportedCapability(language, `block ${String(Reflect.get(block, "kind"))}`, location)
@@ -546,9 +546,8 @@ function validateStatement(statement, language, ownerLocation, loopDepth = 0, ac
   }
 
   const kind = Reflect.get(statement, "kind")
-  const location = /** @type {import("../semantic/types.js").SourceLocation | undefined} */ (
-    Reflect.get(statement, "location") ?? ownerLocation
-  )
+  const ownLocation = Reflect.get(statement, "location")
+  const location = diagnosticLocation(ownLocation, ownerLocation)
 
   if (typeof kind != "string") return unsupportedCapability(language, "missing or invalid statement", location)
   if (kind == "LocalDeclaration") {
@@ -572,6 +571,9 @@ function validateStatement(statement, language, ownerLocation, loopDepth = 0, ac
     const expression = Reflect.get(statement, "expression")
 
     if (expression !== undefined) validateExpression(expression, language, location)
+    if (language == "ruby" && loopDepth > 0) {
+      unsupportedCapability(language, "return from an iteration body", location)
+    }
     return
   }
   if (kind == "ExpressionStatement") {
@@ -600,6 +602,7 @@ function validateStatement(statement, language, ownerLocation, loopDepth = 0, ac
   }
   if (kind == "BreakStatement" || kind == "ContinueStatement") {
     if (!task008Languages.has(language)) unsupportedCapability(language, "Task 008 ordered list iteration", location)
+    requireSemanticLocation(ownLocation, language, `${kind} location`, ownerLocation)
     const fields = Object.keys(/** @type {object} */ (statement)).filter((key) => key != "sourceProvenance").sort().join(",")
 
     if (fields != "kind,location") unsupportedCapability(language, `malformed ${kind}`, location)
@@ -608,16 +611,21 @@ function validateStatement(statement, language, ownerLocation, loopDepth = 0, ac
   }
   if (kind == "ForEachStatement") {
     if (!task008Languages.has(language)) unsupportedCapability(language, "Task 008 ordered list iteration", location)
+    const loopLocation = requireSemanticLocation(ownLocation, language, "ForEachStatement location", ownerLocation)
     const loop = /** @type {import("../semantic/types.js").ForEachStatement} */ (statement)
     const fields = Object.keys(loop).filter((key) => key != "sourceProvenance").sort().join(",")
 
-    if (fields != "body,kind,list,location,valueBinding") unsupportedCapability(language, "malformed ForEachStatement", location)
-    validateExpression(loop.list, language, location)
+    if (fields != "body,kind,list,location,valueBinding") unsupportedCapability(language, "malformed ForEachStatement", loopLocation)
+    if (!loop.list || typeof loop.list != "object" || Array.isArray(loop.list)) {
+      unsupportedCapability(language, "missing or invalid iteration collection", loopLocation)
+    }
+    requireSemanticLocation(Reflect.get(loop.list, "location"), language, "iteration collection location", loopLocation)
+    validateExpression(loop.list, language, loopLocation)
     if (!loop.valueBinding || typeof loop.valueBinding != "object" || Array.isArray(loop.valueBinding)) {
-      unsupportedCapability(language, "missing or invalid iteration binding", location)
+      unsupportedCapability(language, "missing or invalid iteration binding", loopLocation)
     }
     const binding = loop.valueBinding
-    const bindingLocation = binding.location ?? location
+    const bindingLocation = requireSemanticLocation(Reflect.get(binding, "location"), language, "iteration binding location", loopLocation)
     const bindingFields = Object.keys(binding).filter((key) => key != "sourceProvenance").sort().join(",")
 
     if (binding.kind != "ValueBinding" || bindingFields != "kind,location,mutable,name,type") {
@@ -625,11 +633,72 @@ function validateStatement(statement, language, ownerLocation, loopDepth = 0, ac
     }
     if (binding.mutable !== false) unsupportedCapability(language, "mutable iteration binding", bindingLocation)
     validateTargetBindingIdentifier(language, binding.name, "iteration binding", bindingLocation)
-    validateBlock(loop.body, language, location, loopDepth + 1, activePath)
+    if (!loop.body || typeof loop.body != "object" || Array.isArray(loop.body)) {
+      unsupportedCapability(language, "missing or invalid iteration body", loopLocation)
+    }
+    requireSemanticLocation(Reflect.get(loop.body, "location"), language, "iteration body location", loopLocation)
+    validateBlock(loop.body, language, loopLocation, loopDepth + 1, activePath)
     return
   }
 
   unsupportedCapability(language, `statement ${kind}`, location)
+}
+
+/**
+ * Returns a complete semantic location suitable for diagnostic construction.
+ * @param {unknown} candidate - Preferred location.
+ * @param {unknown} fallback - Nearest enclosing location.
+ * @returns {import("../semantic/types.js").SourceLocation | undefined} Safe diagnostic location.
+ */
+function diagnosticLocation(candidate, fallback) {
+  if (isSemanticLocation(candidate)) return candidate
+  if (isSemanticLocation(fallback)) return fallback
+
+  return undefined
+}
+
+/**
+ * Requires one complete parser-neutral location before any backend or diagnostic consumes it.
+ * @param {unknown} candidate - Required location.
+ * @param {import("../semantic/types.js").BackendLanguage} language - Backend identity.
+ * @param {string} subject - Location owner for a deterministic diagnostic.
+ * @param {unknown} fallback - Nearest enclosing location.
+ * @returns {import("../semantic/types.js").SourceLocation} Validated location.
+ */
+function requireSemanticLocation(candidate, language, subject, fallback) {
+  if (!isSemanticLocation(candidate)) unsupportedCapability(language, `missing or invalid ${subject}`, diagnosticLocation(fallback, undefined))
+
+  return candidate
+}
+
+/**
+ * Checks a complete ordered UTF-16 source range.
+ * @param {unknown} location - Candidate source range.
+ * @returns {location is import("../semantic/types.js").SourceLocation} Whether the range is safe to consume.
+ */
+function isSemanticLocation(location) {
+  if (!location || typeof location != "object" || Array.isArray(location)) return false
+  const candidate = /** @type {{filename?: unknown, start?: unknown, end?: unknown}} */ (location)
+
+  if (typeof candidate.filename != "string" || candidate.filename.length == 0 ||
+    !isSemanticPoint(candidate.start) || !isSemanticPoint(candidate.end)) return false
+
+  return candidate.end.offset >= candidate.start.offset && candidate.end.line >= candidate.start.line &&
+    (candidate.end.line != candidate.start.line || candidate.end.column >= candidate.start.column)
+}
+
+/**
+ * Checks one complete one-based UTF-16 source point.
+ * @param {unknown} point - Candidate source point.
+ * @returns {point is import("../semantic/types.js").SourcePoint} Whether all coordinates are valid.
+ */
+function isSemanticPoint(point) {
+  if (!point || typeof point != "object" || Array.isArray(point)) return false
+  const candidate = /** @type {{offset?: unknown, line?: unknown, column?: unknown}} */ (point)
+
+  return Number.isSafeInteger(candidate.offset) && Number(candidate.offset) >= 0 &&
+    Number.isSafeInteger(candidate.line) && Number(candidate.line) >= 1 &&
+    Number.isSafeInteger(candidate.column) && Number(candidate.column) >= 1
 }
 
 /**

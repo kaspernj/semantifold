@@ -324,8 +324,12 @@ function validateBlock(block, scope, returnType, functions, fail, normalizeOpera
         fail("TYPE_MISMATCH", `Iteration binding type ${typeDescription(bindingType)}; expected ${typeDescription(listType.elementType)}.`,
           typeLocation(statement.valueBinding.type, statement.valueBinding.location))
       }
-      const visibleBindings = bindingsVisibleFrom(scope)
-      const initialKnownValues = visibleBindings.map((binding) => binding.knownValue)
+      const assignedOuterBindings = outerMutableBindingsAssignedBy(statement.body, scope)
+
+      for (const binding of assignedOuterBindings) {
+        binding.knownValue = undefined
+        scope.presenceProofs.delete(binding)
+      }
       const loopScope = createScope(scope, statement.body.statements)
 
       declareBinding(statement.valueBinding.name, {
@@ -334,13 +338,10 @@ function validateBlock(block, scope, returnType, functions, fail, normalizeOpera
         type: bindingType
       }, statement.valueBinding.location, loopScope, fail)
       validateBlock(statement.body, loopScope, returnType, functions, fail, normalizeOperations, loopDepth + 1)
-      visibleBindings.forEach((binding, index) => {
-        if (binding.knownValue !== initialKnownValues[index]) binding.knownValue = undefined
-      })
-      const continuingProofs = new Set([...scope.presenceProofs].filter((binding) => loopScope.presenceProofs.has(binding)))
-
-      scope.presenceProofs.clear()
-      for (const binding of continuingProofs) scope.presenceProofs.add(binding)
+      for (const binding of assignedOuterBindings) {
+        binding.knownValue = undefined
+        scope.presenceProofs.delete(binding)
+      }
       continue
     }
 
@@ -1062,6 +1063,31 @@ function bindingsVisibleFrom(scope) {
   }
 
   return bindings
+}
+
+/**
+ * Finds visible mutable bindings that a loop body may assign on any nested path.
+ * The set is computed after validating the list expression because collection evaluation precedes body effects.
+ * @param {import("./types.js").Block} block - Candidate loop body.
+ * @param {Scope} outerScope - Scope visible before entering the loop.
+ * @param {Set<Binding>} [assigned] - Accumulated binding identities.
+ * @returns {Set<Binding>} Exactly the visible mutable bindings targeted by nested assignments.
+ */
+function outerMutableBindingsAssignedBy(block, outerScope, assigned = new Set()) {
+  for (const statement of block.statements) {
+    if (statement.kind == "AssignmentStatement") {
+      const binding = findBinding(statement.target.name, outerScope)
+
+      if (binding?.mutable) assigned.add(binding)
+    } else if (statement.kind == "IfStatement") {
+      outerMutableBindingsAssignedBy(statement.consequent, outerScope, assigned)
+      if (statement.alternate) outerMutableBindingsAssignedBy(statement.alternate, outerScope, assigned)
+    } else if (statement.kind == "ForEachStatement") {
+      outerMutableBindingsAssignedBy(statement.body, outerScope, assigned)
+    }
+  }
+
+  return assigned
 }
 
 /**

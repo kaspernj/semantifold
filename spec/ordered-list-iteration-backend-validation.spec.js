@@ -15,6 +15,11 @@ function backendFailure(error) {
   return error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" && error.language == "typescript"
 }
 
+function failureFor(language) {
+  return (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
+    error.language == language && error.location?.filename == "program.ts"
+}
+
 describe("ordered list iteration backend validation", () => {
   it("rejects malformed loop, binding, list, and control shapes through every generation API", () => {
     const mutations = [
@@ -64,5 +69,49 @@ describe("ordered list iteration backend validation", () => {
       () => generateArtifactSet({language: "csharp", module}),
       (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" && error.language == "csharp"
     )
+  })
+
+  it("rejects Ruby nonlocal returns in iteration bodies through every generation API", () => {
+    const module = parse({
+      filename: "program.ts",
+      language: "typescript",
+      source: `function first(values: readonly number[]): number {
+  for (const value of values) { return value }
+  return 0
+}
+console.log(first([1]))
+`
+    })
+
+    for (const api of [generate, generateArtifact, generateArtifactSet]) {
+      assert.throws(() => api({language: "ruby", module}), failureFor("ruby"))
+    }
+  })
+
+  it("rejects every missing or malformed loop-owned location transactionally", () => {
+    const mutations = [
+      (loop) => { loop.location = null },
+      (loop) => { Reflect.deleteProperty(loop, "location") },
+      (loop) => { loop.location.start = null },
+      (loop) => { loop.valueBinding.location = null },
+      (loop) => { Reflect.deleteProperty(loop.valueBinding, "location") },
+      (loop) => { loop.valueBinding.location.start.offset = -1 },
+      (loop) => { loop.list.location.end.line = 0 },
+      (loop) => { loop.body.location = null },
+      (loop) => { loop.body.location.end = undefined },
+      (loop) => { loop.body.statements[0].consequent.statements[0].consequent.statements[0].location = null },
+      (loop) => { Reflect.deleteProperty(loop.body.statements[0].consequent.statements[0].consequent.statements[0], "location") },
+      (loop) => { loop.body.statements[0].alternate.statements[0].consequent.statements[0].location.end.column = 0 }
+    ]
+
+    for (const mutate of mutations) {
+      for (const api of [generate, generateArtifact, generateArtifactSet]) {
+        const module = moduleWithLoop()
+        const loop = module.functions[1].body.statements[1]
+
+        mutate(loop)
+        assert.throws(() => api({language: "typescript", module}), failureFor("typescript"))
+      }
+    }
   })
 })

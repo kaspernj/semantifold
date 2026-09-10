@@ -47,4 +47,26 @@ describe("ordered list iteration backends", () => {
         error.code == "UNSUPPORTED_CAPABILITY" && error.language == language)
     }
   })
+
+  it("reparses Java iteration over a canonically generated nested-list access", () => {
+    const module = parse({
+      filename: "program.ts",
+      language: "typescript",
+      source: `function sumNested(): number {
+  const nested: ReadonlyArray<ReadonlyArray<number>> = [[1, 2]]
+  let total: number = 0
+  for (const value of nested[0]) { total = total + value }
+  return total
+}
+console.log(sumNested())
+`
+    })
+    const generated = generate({language: "java", module})
+    const reparsed = parse({filename: "Main.java", language: "java", source: generated})
+    const loop = reparsed.functions[0].body.statements[2]
+
+    expect(generated).toContain("for (Integer value : nested.get(0))")
+    expect(loop.kind).toEqual("ForEachStatement")
+    expect(loop.list.kind).toEqual("ListIndexExpression")
+  })
 })
