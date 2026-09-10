@@ -98,7 +98,8 @@ export function documentedValueType({language, location, ownerLocation, source, 
       valueLocation
     )
   }
-  if (language == "javascript" && sourceType.includes("|")) {
+  if (language == "javascript" && sourceType.includes("|") &&
+    !sourceType.startsWith("ReadonlyArray") && !sourceType.startsWith("ReadonlyMap")) {
     return unsupportedSyntax(language, "arbitrary union type", location)
   }
 
@@ -166,6 +167,17 @@ class DocumentedTypeParser {
     this.skipWhitespace()
     const start = this.offset
 
+    if (this.language == "php" && this.consume("?")) {
+      const valueStart = this.offset
+      const valueType = this.parseNamedType()
+
+      return optionalType(
+        valueType,
+        this.range(start, this.offset),
+        this.typeRange(valueType, valueStart, this.offset)
+      )
+    }
+
     while (isTypeIdentifierCharacter(this.text[this.offset])) this.offset++
     const nameEnd = this.offset
     const name = this.text.slice(start, nameEnd)
@@ -177,6 +189,9 @@ class DocumentedTypeParser {
     this.skipWhitespace()
     if (scalar && this.text[this.offset] != "<" && this.text[this.offset] != "[") {
       if (this.language == "ruby" && this.consume("?")) {
+        return optionalType(scalar, this.range(start, this.offset), this.typeRange(scalar, start, nameEnd))
+      }
+      if (this.language == "javascript" && this.consume("|null")) {
         return optionalType(scalar, this.range(start, this.offset), this.typeRange(scalar, start, nameEnd))
       }
 
@@ -198,6 +213,9 @@ class DocumentedTypeParser {
       const type = listType(first, this.range(start, this.offset), this.typeRange(first, start, firstEnd))
 
       if (this.language == "ruby" && this.consume("?")) {
+        return optionalType(type, this.range(start, this.offset), this.typeRange(type, start, firstEnd))
+      }
+      if (this.language == "javascript" && this.consume("|null")) {
         return optionalType(type, this.range(start, this.offset), this.typeRange(type, start, firstEnd))
       }
 
@@ -222,6 +240,9 @@ class DocumentedTypeParser {
     )
 
     if (this.language == "ruby" && this.consume("?")) {
+      return optionalType(type, this.range(start, this.offset), this.typeRange(type, start, secondEnd))
+    }
+    if (this.language == "javascript" && this.consume("|null")) {
       return optionalType(type, this.range(start, this.offset), this.typeRange(type, start, secondEnd))
     }
 
@@ -295,7 +316,11 @@ class DocumentedTypeParser {
    * @returns {import("../semantic/types.js").SemanticValueType} Unreachable semantic type.
    */
   failure() {
-    return unsupportedSyntax(this.language, "unsupported collection type", this.remainingLocation())
+    return unsupportedSyntax(
+      this.language,
+      this.text.slice(this.offset).includes("|") ? "arbitrary union type" : "unsupported collection type",
+      this.remainingLocation()
+    )
   }
 }
 

@@ -541,15 +541,21 @@ function validateAssignmentTarget(target, language, ownerLocation) {
  * @param {import("../semantic/types.js").BackendLanguage} language - Backend language or binary target.
  * @param {import("../semantic/types.js").SourceLocation | undefined} ownerLocation - Nearest owning node location.
  * @param {boolean} [allowJavaNegatedMinimumOperand] - Whether Java may use 2147483648 only beneath integer negation.
+ * @param {Set<object>} [activePath] - Ancestors on the current recursive validation path.
  * @returns {void}
  */
-function validateExpression(expression, language, ownerLocation, allowJavaNegatedMinimumOperand = false) {
+function validateExpression(expression, language, ownerLocation, allowJavaNegatedMinimumOperand = false, activePath = new Set()) {
   if (!expression || typeof expression != "object" || Array.isArray(expression)) {
     return unsupportedCapability(language, "missing or invalid expression", ownerLocation)
   }
 
   const candidate = /** @type {import("../semantic/types.js").Expression} */ (expression)
   const location = candidate.location ?? ownerLocation
+
+  if (activePath.has(candidate)) unsupportedCapability(language, "cyclic expression", location)
+  const expressionPath = new Set(activePath)
+
+  expressionPath.add(candidate)
 
   if (typeof candidate.kind != "string") {
     return unsupportedCapability(language, "missing or invalid expression", location)
@@ -583,7 +589,7 @@ function validateExpression(expression, language, ownerLocation, allowJavaNegate
     if (fields != expectedFields) unsupportedCapability(language, `malformed ${candidate.kind}`, location)
     if (candidate.kind == "OptionalNone") return
     if (candidate.kind == "OptionalSome") {
-      validateExpression(candidate.value, language, location)
+      validateExpression(candidate.value, language, location, false, expressionPath)
       return
     }
     const operation = /** @type {import("../semantic/types.js").OptionalIsPresent | import("../semantic/types.js").OptionalUnwrap} */ (candidate)
@@ -591,14 +597,14 @@ function validateExpression(expression, language, ownerLocation, allowJavaNegate
     if (!operation.operand || operation.operand.kind != "IdentifierExpression") {
       unsupportedCapability(language, `${candidate.kind} without a simple identifier operand`, location)
     }
-    validateExpression(operation.operand, language, location)
+    validateExpression(operation.operand, language, location, false, expressionPath)
     return
   }
   if (["ListLiteral", "MapLiteral", "ListIndexExpression", "MapLookupExpression", "CollectionSizeExpression"].includes(candidate.kind)) {
     if (!task006Languages.has(language)) unsupportedCapability(language, "Task 006 immutable collections", location)
     if (candidate.kind == "ListLiteral") {
       if (!isDenseArray(candidate.elements)) unsupportedCapability(language, "missing or sparse list elements", location)
-      for (const element of candidate.elements) validateExpression(element, language, location)
+      for (const element of candidate.elements) validateExpression(element, language, location, false, expressionPath)
       return
     }
     if (candidate.kind == "MapLiteral") {
@@ -610,8 +616,8 @@ function validateExpression(expression, language, ownerLocation, allowJavaNegate
         if (!entry || entry.kind != "MapEntry" || !entry.key || entry.key.kind != "StringLiteral") {
           unsupportedCapability(language, "missing or invalid map entry", entry?.location ?? location)
         }
-        validateExpression(entry.key, language, entry.location)
-        validateExpression(entry.value, language, entry.location)
+        validateExpression(entry.key, language, entry.location, false, expressionPath)
+        validateExpression(entry.value, language, entry.location, false, expressionPath)
       }
       return
     }
@@ -619,23 +625,23 @@ function validateExpression(expression, language, ownerLocation, allowJavaNegate
       if (candidate.totality == "fail-on-absence" && language != "java") {
         unsupportedCapability(language, "list access depends on Java-specific bounds failure", location)
       }
-      validateExpression(candidate.collection, language, location)
-      validateExpression(candidate.index, language, location)
+      validateExpression(candidate.collection, language, location, false, expressionPath)
+      validateExpression(candidate.index, language, location, false, expressionPath)
       return
     }
     if (candidate.kind == "MapLookupExpression") {
       if (candidate.totality == "fail-on-absence" && language != "ruby") {
         unsupportedCapability(language, "map lookup depends on Ruby fetch absence failure", location)
       }
-      validateExpression(candidate.collection, language, location)
-      validateExpression(candidate.key, language, location)
+      validateExpression(candidate.collection, language, location, false, expressionPath)
+      validateExpression(candidate.key, language, location, false, expressionPath)
       return
     }
     if (candidate.kind == "CollectionSizeExpression") {
       if (candidate.collectionKind != "list" && candidate.collectionKind != "map") {
         unsupportedCapability(language, "collection size without a validated receiver kind", location)
       }
-      validateExpression(candidate.collection, language, location)
+      validateExpression(candidate.collection, language, location, false, expressionPath)
       return
     }
   }
@@ -650,14 +656,14 @@ function validateExpression(expression, language, ownerLocation, allowJavaNegate
     if (!task005Languages.has(language) && candidate.arguments.length != 2) {
       unsupportedCapability(language, "call argument count other than two", location)
     }
-    for (const argument of candidate.arguments) validateExpression(argument, language, location)
+    for (const argument of candidate.arguments) validateExpression(argument, language, location, false, expressionPath)
     return
   }
   if (candidate.kind == "UnaryExpression") {
     if (!Object.hasOwn(unaryOperationSyntax, String(candidate.operation))) {
       unsupportedCapability(language, `unary operation ${String(candidate.operation)}`, location)
     }
-    validateExpression(candidate.operand, language, location, candidate.operation == "IntegerNegate")
+    validateExpression(candidate.operand, language, location, candidate.operation == "IntegerNegate", expressionPath)
     validateKnownTargetInteger(candidate, language, location)
     return
   }
@@ -665,8 +671,8 @@ function validateExpression(expression, language, ownerLocation, allowJavaNegate
     if (!Object.hasOwn(binaryOperationSyntax, String(candidate.operation))) {
       unsupportedCapability(language, `binary operation ${String(candidate.operation)}`, location)
     }
-    validateExpression(candidate.left, language, location)
-    validateExpression(candidate.right, language, location)
+    validateExpression(candidate.left, language, location, false, expressionPath)
+    validateExpression(candidate.right, language, location, false, expressionPath)
     validateKnownTargetInteger(candidate, language, location)
     return
   }

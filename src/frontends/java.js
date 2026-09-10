@@ -305,8 +305,10 @@ function convertExpression(node, filename, source, context, expectedType) {
     }
 
     if (receiver && method == "of" && receiverText == "java.util.List") {
+      const elementType = expectedType?.kind == "ListType" ? expectedType.elementType : undefined
+
       return withParserRanges({
-        elements: argumentNodes.map((argument) => convertExpression(argument, filename, source, context)),
+        elements: argumentNodes.map((argument) => convertExpression(argument, filename, source, context, elementType)),
         kind: /** @type {const} */ ("ListLiteral"),
         location
       }, {factory: nodeLocation(methodName, filename, source)})
@@ -317,6 +319,7 @@ function convertExpression(node, filename, source, context, expectedType) {
         return unsupportedSyntax("java", "java.util.Map.of supports at most ten entries", nodeLocation(methodName, filename, source))
       }
       const entries = []
+      const valueType = expectedType?.kind == "MapType" ? expectedType.valueType : undefined
 
       for (let index = 0; index < argumentNodes.length; index += 2) {
         const keyNode = argumentNodes[index]
@@ -332,7 +335,7 @@ function convertExpression(node, filename, source, context, expectedType) {
           key: /** @type {import("../semantic/types.js").StringLiteral} */ (convertExpression(keyNode, filename, source, context)),
           kind: /** @type {const} */ ("MapEntry"),
           location: locationFromOffsets(filename, source, keyNode.from, argumentNodes[index + 1].to),
-          value: convertExpression(argumentNodes[index + 1], filename, source, context)
+          value: convertExpression(argumentNodes[index + 1], filename, source, context, valueType)
         }, {operator: nodeLocation(separator, filename, source)}))
       }
 

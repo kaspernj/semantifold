@@ -46,4 +46,16 @@ describe("optional value runtime execution", () => {
       expect(await execute(language, generated)).toEqual("present\nabsent\n")
     }
   })
+
+  it("executes present and absent optional list elements and map values through every real toolchain", async () => {
+    const source = await readFile(new URL("fixtures/optionals-recursive/program.ts", import.meta.url), "utf8")
+    const module = parse({filename: "program.ts", language: "typescript", source})
+
+    for (const language of targets) {
+      const generated = generate({language, module})
+
+      expect(parse({filename: filenames[language], language, source: generated}).functions).toHaveLength(1)
+      expect(await execute(language, generated)).toEqual("list-present\nabsent\nmap-present\nabsent\n")
+    }
+  })
 })

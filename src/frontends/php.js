@@ -141,20 +141,8 @@ function convertExpression(node, filename, source, context, expectedType, preser
     if (node.kind == "nullkeyword") {
       return withParserRanges({kind: /** @type {const} */ ("OptionalNone"), location}, {absence: location})
     }
-    if (node.kind == "variable") {
-      const variable = /** @type {import("php-parser").Variable} */ (node)
-
-      if (typeof variable.name == "string" && context.bindings.get(variable.name)?.kind == "OptionalType") {
-        return convertExpression(node, filename, source, context, undefined, true)
-      }
-    }
-    if (node.kind == "call") {
-      const call = /** @type {import("php-parser").Call} */ (node)
-      const name = call.what.kind == "name" && typeof call.what.name == "string" ? call.what.name : undefined
-
-      if (name && context.functions.get(name)?.returnType.kind == "OptionalType") {
-        return convertExpression(node, filename, source, context, undefined, true)
-      }
+    if (knownExpressionType(node, context)?.kind == "OptionalType") {
+      return convertExpression(node, filename, source, context, undefined, true)
     }
     return withParserRanges({
       kind: /** @type {const} */ ("OptionalSome"),
@@ -387,6 +375,35 @@ function convertExpression(node, filename, source, context, expectedType, preser
   }
 
   return unsupportedSyntax("php", node.kind, location)
+}
+
+/**
+ * Resolves only result types established by explicit signatures and bindings.
+ * @param {import("php-parser").Expression} node - Parser-owned expression.
+ * @param {PhpConversionContext} context - Typed conversion context.
+ * @returns {import("../semantic/types.js").SemanticFunctionReturnType | undefined} Known result type.
+ */
+function knownExpressionType(node, context) {
+  if (node.kind == "variable") {
+    const variable = /** @type {import("php-parser").Variable} */ (node)
+
+    if (typeof variable.name == "string") return context.bindings.get(variable.name)
+  }
+  if (node.kind == "call") {
+    const call = /** @type {import("php-parser").Call} */ (node)
+    const name = call.what.kind == "name" && typeof call.what.name == "string" ? call.what.name : undefined
+
+    if (name) return context.functions.get(name)?.returnType
+  }
+  if (node.kind == "offsetlookup") {
+    const lookup = /** @type {import("php-parser").OffsetLookup} */ (node)
+    const collectionType = knownExpressionType(lookup.what, context)
+
+    if (collectionType?.kind == "ListType") return collectionType.elementType
+    if (collectionType?.kind == "MapType") return collectionType.valueType
+  }
+
+  return undefined
 }
 
 /**

@@ -159,11 +159,7 @@ function convertExpression(node, language, filename, source, context = {bindings
     if (node.type == "NullLiteral") {
       return withParserRanges({kind: /** @type {const} */ ("OptionalNone"), location}, {absence: location})
     }
-    if (node.type == "Identifier" && context.bindings.get(node.name)?.kind == "OptionalType") {
-      return convertExpression(node, language, filename, source, context, undefined, true)
-    }
-    if (node.type == "CallExpression" && node.callee.type == "Identifier" &&
-      context.functions.get(node.callee.name)?.returnType.kind == "OptionalType") {
+    if (knownExpressionType(node, context)?.kind == "OptionalType") {
       return convertExpression(node, language, filename, source, context, undefined, true)
     }
     return withParserRanges({
@@ -218,11 +214,12 @@ function convertExpression(node, language, filename, source, context = {bindings
   }
 
   if (node.type == "ArrayExpression") {
+    const elementType = expectedType?.kind == "ListType" ? expectedType.elementType : undefined
     const elements = node.elements.map((element, index) => {
       if (!element) return unsupportedSyntax(language, "sparse array hole", arrayHoleLocation(node, index, filename, source))
       if (element.type == "SpreadElement") return unsupportedSyntax(language, "array spread", nodeLocation(element, filename, source))
 
-      return convertExpression(element, language, filename, source, context)
+      return convertExpression(element, language, filename, source, context, elementType)
     })
 
     return withParserRanges({elements, kind: /** @type {const} */ ("ListLiteral"), location}, {literal: location})
@@ -241,6 +238,7 @@ function convertExpression(node, language, filename, source, context = {bindings
     if (initializer.type != "ArrayExpression") {
       return unsupportedSyntax(language, "Map initializer other than an entry array", nodeLocation(initializer, filename, source))
     }
+    const valueType = expectedType?.kind == "MapType" ? expectedType.valueType : undefined
     const entries = initializer.elements.map((element, index) => {
       if (!element) return unsupportedSyntax(language, "sparse map initializer", arrayHoleLocation(initializer, index, filename, source))
       if (element.type == "SpreadElement") return unsupportedSyntax(language, "map spread", nodeLocation(element, filename, source))
@@ -267,7 +265,7 @@ function convertExpression(node, language, filename, source, context = {bindings
         key: keyExpression,
         kind: /** @type {const} */ ("MapEntry"),
         location: nodeLocation(element, filename, source),
-        value: convertExpression(value, language, filename, source, context)
+        value: convertExpression(value, language, filename, source, context, valueType)
       }, {
         key: keyExpression.location,
         operator: tokenLocation(element, ",", key.end ?? element.start ?? 0, value.start ?? element.end ?? source.length, filename, source)
@@ -411,6 +409,35 @@ function convertExpression(node, language, filename, source, context = {bindings
   }
 
   return unsupportedSyntax(language, node.type, location)
+}
+
+/**
+ * Resolves only expression result types already established by explicit module
+ * signatures and collection bindings.
+ * @param {import("@babel/types").Expression} node - Parser-owned expression.
+ * @param {JavaScriptConversionContext} context - Typed lexical context.
+ * @returns {import("../semantic/types.js").SemanticFunctionReturnType | undefined} Known result type.
+ */
+function knownExpressionType(node, context) {
+  if (node.type == "TSNonNullExpression") return knownExpressionType(node.expression, context)
+  if (node.type == "Identifier") return context.bindings.get(node.name)
+  if (node.type == "CallExpression" && node.callee.type == "Identifier") {
+    return context.functions.get(node.callee.name)?.returnType
+  }
+  if (node.type == "MemberExpression" && node.computed && node.object.type != "Super") {
+    const collectionType = knownExpressionType(node.object, context)
+
+    if (collectionType?.kind == "ListType") return collectionType.elementType
+  }
+  if (node.type == "CallExpression" && node.callee.type == "MemberExpression" &&
+    !node.callee.computed && node.callee.object.type != "Super" &&
+    node.callee.property.type == "Identifier" && node.callee.property.name == "get") {
+    const collectionType = knownExpressionType(node.callee.object, context)
+
+    if (collectionType?.kind == "MapType") return collectionType.valueType
+  }
+
+  return undefined
 }
 
 /**

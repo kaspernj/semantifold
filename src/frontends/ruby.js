@@ -106,10 +106,7 @@ function convertExpression(node, filename, source, context, expectedType, preser
     if (node instanceof NilNode) {
       return withParserRanges({kind: /** @type {const} */ ("OptionalNone"), location}, {absence: location})
     }
-    if (node instanceof LocalVariableReadNode && context.bindings.get(node.name)?.kind == "OptionalType") {
-      return convertExpression(node, filename, source, context, undefined, true)
-    }
-    if (node instanceof CallNode && !node.receiver && context.functions.get(node.name)?.returnType.kind == "OptionalType") {
+    if (knownExpressionType(node, context)?.kind == "OptionalType") {
       return convertExpression(node, filename, source, context, undefined, true)
     }
     return withParserRanges({
@@ -193,8 +190,10 @@ function convertExpression(node, filename, source, context, expectedType, preser
       return unsupportedSyntax("ruby", "array splat", splat ? nodeLocation(splat, filename, source) : location)
     }
 
+    const elementType = expectedType?.kind == "ListType" ? expectedType.elementType : undefined
+
     return withParserRanges({
-      elements: node.elements.map((element) => convertExpression(element, filename, source, context)),
+      elements: node.elements.map((element) => convertExpression(element, filename, source, context, elementType)),
       kind: /** @type {const} */ ("ListLiteral"),
       location
     }, {
@@ -204,6 +203,7 @@ function convertExpression(node, filename, source, context, expectedType, preser
   }
 
   if (node instanceof HashNode) {
+    const valueType = expectedType?.kind == "MapType" ? expectedType.valueType : undefined
     const entries = node.elements.map((element) => {
       if (!(element instanceof AssocNode) || !element.operatorLoc ||
         slicePrismSource(source, element.operatorLoc.startOffset, element.operatorLoc.startOffset + element.operatorLoc.length) != "=>") {
@@ -218,7 +218,7 @@ function convertExpression(node, filename, source, context, expectedType, preser
         key: /** @type {import("../semantic/types.js").StringLiteral} */ (key),
         kind: /** @type {const} */ ("MapEntry"),
         location: nodeLocation(element, filename, source),
-        value: convertExpression(element.value, filename, source, context)
+        value: convertExpression(element.value, filename, source, context, valueType)
       }, {operator: prismLocation(element.operatorLoc, filename, source)})
     })
 
@@ -355,6 +355,32 @@ function convertExpression(node, filename, source, context, expectedType, preser
   }
 
   return unsupportedSyntax("ruby", node.constructor.name, location)
+}
+
+/**
+ * Resolves only result types established by explicit signatures and bindings.
+ * @param {import("@ruby/prism").Node} node - Parser-owned expression.
+ * @param {RubyConversionContext} context - Typed lexical context.
+ * @returns {import("../semantic/types.js").SemanticFunctionReturnType | undefined} Known result type.
+ */
+function knownExpressionType(node, context) {
+  if (node instanceof ParenthesesNode && node.body instanceof StatementsNode && node.body.body.length == 1) {
+    return knownExpressionType(node.body.body[0], context)
+  }
+  if (node instanceof LocalVariableReadNode) return context.bindings.get(node.name)
+  if (node instanceof CallNode && !node.receiver) return context.functions.get(node.name)?.returnType
+  if (node instanceof CallNode && node.receiver && node.name == "[]") {
+    const collectionType = knownExpressionType(node.receiver, context)
+
+    if (collectionType?.kind == "ListType") return collectionType.elementType
+  }
+  if (node instanceof CallNode && node.receiver && node.name == "fetch") {
+    const collectionType = knownExpressionType(node.receiver, context)
+
+    if (collectionType?.kind == "MapType") return collectionType.valueType
+  }
+
+  return undefined
 }
 
 /**

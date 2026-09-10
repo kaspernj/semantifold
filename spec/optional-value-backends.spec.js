@@ -53,4 +53,19 @@ console.log(lengthOf(maybe(["ready"], true)))
       expect(returnType.valueType.kind).toEqual("ListType")
     }
   })
+
+  it("emits and reparses optional list elements and map values recursively", async () => {
+    const source = await readFile(new URL("fixtures/optionals-recursive/program.ts", import.meta.url), "utf8")
+    const module = parse({filename: "program.ts", language: "typescript", source})
+
+    for (const language of targets) {
+      const generated = generate({language, module})
+      const reparsed = parse({filename: filenames[language], language, source: generated})
+      const list = /** @type {import("../src/semantic/types.js").LocalDeclaration} */ (reparsed.entryPoint.body.statements[0])
+      const map = /** @type {import("../src/semantic/types.js").LocalDeclaration} */ (reparsed.entryPoint.body.statements[1])
+
+      expect(/** @type {import("../src/semantic/types.js").ListType} */ (list.type).elementType.kind).toEqual("OptionalType")
+      expect(/** @type {import("../src/semantic/types.js").MapType} */ (map.type).valueType.kind).toEqual("OptionalType")
+    }
+  })
 })

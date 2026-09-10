@@ -87,6 +87,34 @@ describe("optional value backend validation", () => {
     }
   })
 
+  it("rejects cyclic optional expressions through every generation API without rejecting shared acyclic values", () => {
+    for (const api of [generate, generateArtifact, generateArtifactSet]) {
+      const cyclic = optionalModule()
+      const cyclicSome = cyclic.functions[0].body.statements[0].consequent.statements[0].expression
+
+      cyclicSome.value = cyclicSome
+      assert.throws(
+        () => api({language: "typescript", module: cyclic}),
+        (error) => backendFailure("typescript")(error) && error.location?.filename == "program.ts" &&
+          error.detail == "Backend cannot emit semantic capability 'cyclic expression'."
+      )
+
+      const shared = optionalModule()
+      const sharedSome = shared.functions[0].body.statements[0].consequent.statements[0].expression
+      const sharedValue = sharedSome.value
+
+      sharedSome.value = {
+        kind: "BinaryExpression",
+        left: sharedValue,
+        location: sharedSome.location,
+        operation: "StringConcat",
+        right: sharedValue,
+        type: "string"
+      }
+      assert.doesNotThrow(() => api({language: "typescript", module: shared}))
+    }
+  })
+
   it("rejects Java package-qualifier capture before emitting Optional factories", () => {
     const module = parse({
       filename: "java-capture.ts",

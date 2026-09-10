@@ -11,7 +11,6 @@ const fixtures = [
   ["php", "program.php"],
   ["java", "Main.java"]
 ]
-
 describe("optional value frontends", () => {
   it("adapts exact original-five optional types and operations equivalently", async () => {
     for (const [language, filename] of fixtures) {
@@ -90,5 +89,28 @@ puts label(nil)
 
     expect(module.functions[0].returnType.kind).toEqual("OptionalType")
     expect(module.functions[1].parameters[0].type.kind).toEqual("OptionalType")
+  })
+
+  it("adapts optional list elements and map values without rewrapping collection access", async () => {
+    for (const [language, filename] of fixtures) {
+      const source = await readFile(new URL(`fixtures/optionals-recursive/${filename}`, import.meta.url), "utf8")
+      const module = parse({filename, language, source})
+      const list = /** @type {import("../src/semantic/types.js").LocalDeclaration} */ (module.entryPoint.body.statements[0])
+      const map = /** @type {import("../src/semantic/types.js").LocalDeclaration} */ (module.entryPoint.body.statements[1])
+      const listType = /** @type {import("../src/semantic/types.js").ListType} */ (list.type)
+      const mapType = /** @type {import("../src/semantic/types.js").MapType} */ (map.type)
+      const listLiteral = /** @type {import("../src/semantic/types.js").ListLiteral} */ (list.initializer)
+      const mapLiteral = /** @type {import("../src/semantic/types.js").MapLiteral} */ (map.initializer)
+      const accesses = module.entryPoint.body.statements.slice(2).map((statement) =>
+        /** @type {import("../src/semantic/types.js").CallExpression} */ (
+          /** @type {import("../src/semantic/types.js").PrintStatement} */ (statement).expression
+        ).arguments[0].kind)
+
+      expect(listType.elementType.kind).toEqual("OptionalType")
+      expect(mapType.valueType.kind).toEqual("OptionalType")
+      expect(listLiteral.elements.map(({kind}) => kind)).toEqual(["OptionalSome", "OptionalNone"])
+      expect(mapLiteral.entries.map(({value}) => value.kind)).toEqual(["OptionalSome", "OptionalNone"])
+      expect(accesses).toEqual(["ListIndexExpression", "ListIndexExpression", "MapLookupExpression", "MapLookupExpression"])
+    }
   })
 })

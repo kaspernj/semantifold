@@ -19,6 +19,13 @@ const spellings = {
   ruby: {absence: "nil", optional: "String?", present: "nil?", some: "value", unwrap: "value", value: "String"},
   typescript: {absence: "null", optional: "string | null", present: "!==", some: "value", unwrap: "value", value: "string"}
 }
+const recursiveSpellings = {
+  java: {absence: "empty", optional: "java.util.Optional<String>"},
+  javascript: {absence: "null", optional: "string|null"},
+  php: {absence: "null", optional: "?string"},
+  ruby: {absence: "nil", optional: "String?"},
+  typescript: {absence: "null", optional: "string | null"}
+}
 
 function textAt(source, location) {
   return source.slice(location.start.offset, location.end.offset)
@@ -68,6 +75,55 @@ describe("optional value provenance and mapping", () => {
 
       for (const [role, node] of Object.entries(nodes)) {
         assert.ok(spansForNode(artifact.mapping, getNodeProvenance(module, node).id).length > 0, `${language}:${role}`)
+      }
+    }
+  })
+
+  it("retains recursive optional constituent, absence, access, and backend mapping identities", async () => {
+    for (const [language, filename] of fixtures) {
+      const source = await readFile(new URL(`fixtures/optionals-recursive/${filename}`, import.meta.url), "utf8")
+      const module = parse({filename, language, source})
+      const repeated = parse({filename, language, source})
+      const list = /** @type {import("../src/semantic/types.js").LocalDeclaration} */ (module.entryPoint.body.statements[0])
+      const map = /** @type {import("../src/semantic/types.js").LocalDeclaration} */ (module.entryPoint.body.statements[1])
+      const elementType = /** @type {import("../src/semantic/types.js").ListType} */ (list.type).elementType
+      const valueType = /** @type {import("../src/semantic/types.js").MapType} */ (map.type).valueType
+      const listAbsence = /** @type {import("../src/semantic/types.js").ListLiteral} */ (list.initializer).elements[1]
+      const mapAbsence = /** @type {import("../src/semantic/types.js").MapLiteral} */ (map.initializer).entries[1].value
+      const access = /** @type {import("../src/semantic/types.js").CallExpression} */ (
+        /** @type {import("../src/semantic/types.js").PrintStatement} */ (module.entryPoint.body.statements[4]).expression
+      ).arguments[0]
+      const expected = recursiveSpellings[language]
+
+      expect(module.provenance).toEqual(repeated.provenance)
+      expect(textAt(source, getNodeProvenance(module, elementType).ranges.type)).toEqual(expected.optional)
+      expect(textAt(source, getNodeProvenance(module, valueType).ranges.type)).toEqual(expected.optional)
+      expect(textAt(source, getNodeProvenance(module, listAbsence).ranges.absence)).toEqual(expected.absence)
+      expect(textAt(source, getNodeProvenance(module, mapAbsence).ranges.absence)).toEqual(expected.absence)
+      for (const node of [elementType, valueType, listAbsence, mapAbsence, access]) {
+        assert.ok(getNodeProvenance(module, node).origin.location.filename == filename)
+      }
+    }
+
+    const source = await readFile(new URL("fixtures/optionals-recursive/program.ts", import.meta.url), "utf8")
+    const module = parse({filename: "program.ts", language: "typescript", source})
+    const list = /** @type {import("../src/semantic/types.js").LocalDeclaration} */ (module.entryPoint.body.statements[0])
+    const map = /** @type {import("../src/semantic/types.js").LocalDeclaration} */ (module.entryPoint.body.statements[1])
+    const nodes = [
+      /** @type {import("../src/semantic/types.js").ListType} */ (list.type).elementType,
+      /** @type {import("../src/semantic/types.js").MapType} */ (map.type).valueType,
+      /** @type {import("../src/semantic/types.js").ListLiteral} */ (list.initializer).elements[1],
+      /** @type {import("../src/semantic/types.js").MapLiteral} */ (map.initializer).entries[1].value,
+      /** @type {import("../src/semantic/types.js").CallExpression} */ (
+        /** @type {import("../src/semantic/types.js").PrintStatement} */ (module.entryPoint.body.statements[4]).expression
+      ).arguments[0]
+    ]
+
+    for (const language of ["ruby", "javascript", "typescript", "php", "java"]) {
+      const artifact = generateArtifact({language, module})
+
+      for (const node of nodes) {
+        assert.ok(spansForNode(artifact.mapping, getNodeProvenance(module, node).id).length > 0, `${language}:${node.kind}`)
       }
     }
   })
