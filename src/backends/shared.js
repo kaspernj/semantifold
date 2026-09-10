@@ -3,7 +3,7 @@
 import {unsupportedCapability} from "../diagnostic.js"
 import {validateBackendTypes} from "../semantic/validate.js"
 import {validateTargetBindingIdentifier, validateTargetIdentifier} from "./identifiers.js"
-import {emitStringLiteral} from "./scalars.js"
+import {emitScalarType, emitStringLiteral} from "./scalars.js"
 
 /** @type {Readonly<Record<import("../semantic/types.js").SemanticUnaryOperation, string>>} */
 const unaryOperationSyntax = Object.freeze({BooleanNot: "!", IntegerNegate: "-"})
@@ -27,6 +27,10 @@ const binaryOperationSyntax = Object.freeze({
   StringNotEqual: Object.freeze({default: "!=", strict: "!=="})
 })
 const task005Languages = new Set(["php", "ruby", "javascript", "typescript", "java"])
+const javaObjectInstanceMethodSignatures = new Set([
+  "clone()", "equals(Object)", "finalize()", "getClass()", "hashCode()", "notify()", "notifyAll()", "toString()",
+  "wait()", "wait(long)", "wait(long,int)"
+])
 
 /**
  * Checks the intentionally narrow backend contract.
@@ -118,7 +122,18 @@ function validateScaffoldingNames(module, language) {
   }
   for (const declaration of module.functions) {
     if (ownedCallableNames.has(declaration.name)) {
-      unsupportedCapability(language, `function '${declaration.name}' captures backend scaffolding`, declaration.location)
+      unsupportedCapability(language, `function '${declaration.name}' captures backend scaffolding`, declarationNameLocation(declaration))
+    }
+    if (language == "java") {
+      const signature = emittedJavaFunctionSignature(declaration)
+
+      if (signature && javaObjectInstanceMethodSignatures.has(signature)) {
+        unsupportedCapability(
+          language,
+          `function '${signature}' conflicts with an inherited java.lang.Object instance method`,
+          declarationNameLocation(declaration)
+        )
+      }
     }
     for (const parameter of declaration.parameters) {
       if (ownedPrintReceiverNames.has(parameter.name)) {
@@ -131,6 +146,36 @@ function validateScaffoldingNames(module, language) {
       }
     }
   }
+}
+
+/**
+ * Returns a parser-backed function-name location when one survived semantic adaptation.
+ * @param {import("../semantic/types.js").FunctionDeclaration} declaration - Semantic function declaration.
+ * @returns {import("../semantic/types.js").SourceLocation} Exact name or declaration location.
+ */
+function declarationNameLocation(declaration) {
+  return declaration.sourceProvenance?.ranges.name ?? declaration.location
+}
+
+/**
+ * Builds the Java method signature used for inherited-instance collision checks.
+ * @param {import("../semantic/types.js").FunctionDeclaration} declaration - Candidate Java target function.
+ * @returns {string | undefined} Emitted name and parameter types when all types are supported.
+ */
+function emittedJavaFunctionSignature(declaration) {
+  const parameterTypes = []
+
+  for (const parameter of declaration.parameters) {
+    const type = parameter.type
+
+    if (!type || typeof type != "object" || Array.isArray(type)) return undefined
+    const emitted = emitScalarType("java", type)
+
+    if (typeof emitted != "string") return undefined
+    parameterTypes.push(emitted)
+  }
+
+  return `${declaration.name}(${parameterTypes.join(",")})`
 }
 
 /**

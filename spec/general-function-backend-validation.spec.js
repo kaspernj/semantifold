@@ -26,6 +26,36 @@ function backendFailure(language) {
     error.language == language && error.location?.filename == "program.ts"
 }
 
+/**
+ * Builds one exact TypeScript function module for target-conflict validation.
+ * @param {string} name - Function name.
+ * @param {{arguments_?: string, parameters?: string, returned?: string, returnType?: string}} [profile] - Signature profile.
+ * @returns {{module: import("../src/semantic/types.js").SemanticModule, source: string}} Parsed module and source.
+ */
+function functionModule(name, {arguments_ = "", parameters = "", returned = "1", returnType = "number"} = {}) {
+  const source = `function ${name}(${parameters}): ${returnType} { return${returnType == "void" ? "" : ` ${returned}`} }
+${returnType == "void" ? `${name}(${arguments_})` : `console.log(${name}(${arguments_}))`}
+`
+
+  return {module: parse({filename: "program.ts", language: "typescript", source}), source}
+}
+
+/**
+ * Matches one exact target conflict at its parser-backed declaration name.
+ * @param {import("../src/semantic/types.js").BackendLanguage} language - Target language.
+ * @param {string} name - Conflicting function name.
+ * @param {string} source - Original TypeScript source.
+ * @returns {(error: unknown) => boolean} Diagnostic matcher.
+ */
+function targetNameFailure(language, name, source) {
+  const offset = source.indexOf(name)
+
+  return (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
+    error.language == language && error.location?.filename == "program.ts" &&
+    error.location.start.offset == offset && error.location.end.offset == offset + name.length &&
+    error.message.includes(name)
+}
+
 describe("general function backend validation", () => {
   it("emits arbitrary signatures, void returns, and direct calls that reparse in the required cohort", async () => {
     const module = await moduleFromFixture()
@@ -166,5 +196,47 @@ describe("general function backend validation", () => {
         assert.throws(() => api({language: "ruby", module}), backendFailure("ruby"), name)
       }
     }
+  })
+
+  it("rejects Ruby's built-in print spelling as a target function conflict", () => {
+    for (const api of [generate, generateArtifact, generateArtifactSet]) {
+      const {module, source} = functionModule("puts", {
+        arguments_: "1", parameters: "value: number", returnType: "void"
+      })
+
+      assert.throws(() => api({language: "ruby", module}), targetNameFailure("ruby", "puts", source))
+    }
+  })
+
+  it("rejects only Java signatures that collide with inherited Object instance methods", () => {
+    const conflicts = [
+      ["getClass", "number", "1"],
+      ["hashCode", "number", "1"],
+      ["clone", "string", '"value"'],
+      ["toString", "string", '"value"'],
+      ["notify", "void", ""],
+      ["notifyAll", "void", ""],
+      ["wait", "void", ""],
+      ["finalize", "void", ""]
+    ]
+
+    for (const [name, returnType, returned] of conflicts) {
+      for (const api of [generate, generateArtifact, generateArtifactSet]) {
+        const {module, source} = functionModule(name, {returned, returnType})
+
+        assert.throws(() => api({language: "java", module}), targetNameFailure("java", name, source), name)
+      }
+    }
+
+    for (const name of [...conflicts.map(([candidate]) => candidate), "equals"]) {
+      const {module} = functionModule(name, {arguments_: "1", parameters: "value: number", returned: "value"})
+
+      expect(generate({language: "java", module})).toContain(` ${name}(int value)`)
+    }
+    const {module: twoParameterWait} = functionModule("wait", {
+      arguments_: "1, 2", parameters: "left: number, right: number", returned: "left"
+    })
+
+    expect(generate({language: "java", module: twoParameterWait})).toContain(" wait(int left, int right)")
   })
 })

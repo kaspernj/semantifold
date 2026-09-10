@@ -500,6 +500,9 @@ function convertFunction(node, comments, filename, source) {
   const parameterList = node.parameters
 
   if (node.receiver) return unsupportedSyntax("ruby", "singleton method", nodeLocation(node.receiver, filename, source))
+  const nameLocation = prismLocation(node.nameLoc, filename, source)
+
+  if (node.name == "puts") return unsupportedSyntax("ruby", "function 'puts' captures built-in printing", nameLocation)
   const unsupportedParameter = parameterList && [
     parameterList.optionals[0], parameterList.rest, parameterList.posts[0], parameterList.keywords[0],
     parameterList.keywordRest, parameterList.block,
@@ -546,7 +549,7 @@ function convertFunction(node, comments, filename, source) {
       location,
       declaredTypes.returnType?.location
     )
-  }, {name: prismLocation(node.nameLoc, filename, source)})
+  }, {name: nameLocation})
 }
 
 /**

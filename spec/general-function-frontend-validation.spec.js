@@ -49,6 +49,25 @@ ${members}
 `
 
 describe("general function frontend exclusions", () => {
+  it("rejects a Ruby function declaration that captures built-in puts", () => {
+    const source = `# @param value [Integer]
+# @return [void]
+def puts(value)
+  return
+end
+puts 1
+`
+    const nameOffset = source.indexOf("puts")
+
+    assert.throws(
+      () => parse({filename: "puts-conflict.rb", language: "ruby", source}),
+      (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_SYNTAX" &&
+        error.language == "ruby" && error.location?.filename == "puts-conflict.rb" &&
+        error.location.start.offset == nameOffset && error.location.end.offset == nameOffset + "puts".length &&
+        error.message.includes("puts")
+    )
+  })
+
   it("rejects a block attached to Ruby puts at the unmodeled call subtree", () => {
     const source = `# @return [void]
 def ping()
