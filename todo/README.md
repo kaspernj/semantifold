@@ -2,11 +2,11 @@
 
 ## Purpose and current baseline
 
-This folder is Semantifold's durable, dependency-ordered implementation backlog and delivered design record. The released baseline is `semantifold@0.3.0` / `v0.3.0` at commit `80e221d`; the current merged `master` baseline is PR 27 commit `78ff710081a6385ffc887a14c66f45b918998ff8`, and repository and external evidence is recorded in [SOURCES.md](SOURCES.md).
+This folder is Semantifold's durable, dependency-ordered implementation backlog and delivered design record. The released baseline is `semantifold@0.3.0` / `v0.3.0` at commit `80e221d`; the current merged `master` baseline before Task 007 is PR 29 commit `7199418bd05d6234ae7a022ee26d93bb1ec935b3`, and repository and external evidence is recorded in [SOURCES.md](SOURCES.md).
 
-Tasks 001–004 and 015–025 are delivered. The merged language expansion includes C++ at `8d672f3`, Rust at `eca13c0`, browser Wasm at `754d76d`, Swift at `80019a9`, Kotlin/JVM at `f468eb9`, and the Task 025 aggregate gate in PR 27 at `78ff710081a6385ffc887a14c66f45b918998ff8`. Semantifold models safe integer, Boolean, and Unicode string scalars; explicitly typed locals and assignment; typed unary/binary expressions; ordered lexical blocks; nested strict-Boolean conditionals; explicit returns; direct calls; and entry-point printing. Local Task 005 and Task 006 candidates add general required calls/void and recursive immutable collections for PHP, Ruby, JavaScript/JSDoc, TypeScript, and Java. This Task 007 candidate adds explicit optional presence/absence plus conservative branch-local narrowing for the same cohort. Coordinator review, TensorBuzz, and merge remain pending. The other eight source languages retain the delivered Tasks 001–004 exact-two/scalar-return profile, and browser Wasm remains target-only. Tasks 008–014 and 026–037 remain roadmap work.
+Tasks 001–006 and 015–025 are delivered. The merged language expansion includes C++ at `8d672f3`, Rust at `eca13c0`, browser Wasm at `754d76d`, Swift at `80019a9`, Kotlin/JVM at `f468eb9`, and the Task 025 aggregate gate in PR 27 at `78ff710081a6385ffc887a14c66f45b918998ff8`. Task 005 delivered general required calls and void functions for PHP, Ruby, JavaScript/JSDoc, TypeScript, and Java in PR 28 at `26982754e15b7e647662d2b094171e5f649b23b1`; Task 006 delivered recursive immutable collections for the same cohort in PR 29 at `7199418bd05d6234ae7a022ee26d93bb1ec935b3`. This Task 007 local candidate adds explicit optional presence/absence plus conservative branch-local narrowing for that cohort; coordinator review, TensorBuzz CI, and merge remain pending. The other eight source languages retain the delivered Tasks 001–004 exact-two/scalar-return profile, and browser Wasm remains target-only. Tasks 008–014 and 026–037 remain roadmap work.
 
-The delivered language-baseline expansion keeps its small Tasks 001–004 IR contract. Local Tasks 005–007 are bounded original-five semantic layers; they do not make every platform, legacy bridge, or later language block semantic progress.
+The delivered language-baseline expansion keeps its small Tasks 001–004 IR contract. Delivered Tasks 005 and 006 are bounded original-five semantic layers, and Task 007 is the next local candidate; none makes every platform, legacy bridge, or later language block semantic progress.
 
 ## Guiding principles
 
@@ -84,9 +84,9 @@ Swift is in this cohort because it is a modern general-purpose language independ
 
 ### Phase 1 — portable semantic expansion (P1, after Task 025)
 
-- [005 — General required function signatures and calls](005-general-function-signatures-and-calls.md) — local acceptance passed; coordinator review/CI/merge pending
-- [006 — Immutable lists and maps](006-immutable-lists-and-maps.md) — local acceptance passed; coordinator review/CI/merge pending
-- [007 — Optional values and presence narrowing](007-optional-values-and-presence-narrowing.md) — local candidate; coordinator review/CI/merge pending
+- [005 — General required function signatures and calls](005-general-function-signatures-and-calls.md) — delivered in PR 28 at `26982754e15b7e647662d2b094171e5f649b23b1`
+- [006 — Immutable lists and maps](006-immutable-lists-and-maps.md) — delivered in PR 29 at `7199418bd05d6234ae7a022ee26d93bb1ec935b3`
+- [007 — Optional values and presence narrowing](007-optional-values-and-presence-narrowing.md) — local candidate; coordinator review, TensorBuzz CI, and merge pending
 - [008 — Ordered list iteration](008-collection-iteration.md)
 - [013 — Five-language compatibility acceptance](013-five-language-compatibility-acceptance.md)
 
@@ -231,9 +231,9 @@ Dependencies in task files are authoritative. Existing IDs remain stable; numeri
 | [022](022-swift-source-and-target.md) | delivered (L1) | — | Swift frontend/backend | 015 |
 | [023](023-kotlin-source-and-target.md) | delivered (L1) | — | Kotlin/JVM frontend/backend | 015 |
 | [025](025-core-language-baseline-acceptance.md) | delivered (L1) | — | Spanning Tasks 001–004 acceptance; merged as PR 27 at `78ff710081a6385ffc887a14c66f45b918998ff8` | 016–020, 022–024 |
-| [005](005-general-function-signatures-and-calls.md) | local acceptance passed (1) | P1 | Required arity/void/resolved direct calls; coordinator review/CI/merge pending | 001, 004, 025 |
-| [006](006-immutable-lists-and-maps.md) | 1 | P1 | Immutable lists/maps | 002, 003, 005 |
-| [007](007-optional-values-and-presence-narrowing.md) | local candidate | P1 | Optionals/narrowing; coordinator review/CI/merge pending | 001, 003, 004, 025 |
+| [005](005-general-function-signatures-and-calls.md) | delivered | P1 | Required arity/void/resolved direct calls; merged as PR 28 at `26982754e15b7e647662d2b094171e5f649b23b1` | 001, 004, 025 |
+| [006](006-immutable-lists-and-maps.md) | delivered | P1 | Immutable lists/maps; merged as PR 29 at `7199418bd05d6234ae7a022ee26d93bb1ec935b3` | 002, 003, 005 |
+| [007](007-optional-values-and-presence-narrowing.md) | local candidate | P1 | Optionals/narrowing; coordinator review, TensorBuzz CI, and merge pending | 001, 003, 004, 025 |
 | [008](008-collection-iteration.md) | 1 | P1 | Ordered list iteration | 002, 004, 006 |
 | [009](009-closed-records-and-member-access.md) | 2 | P2 | Closed records/members | 002, 005, 006, 007 |
 | [010](010-multifile-modules-and-names.md) | 2 | P2 | Semantic projects/modules | 005, 009 |
