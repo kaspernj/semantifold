@@ -151,6 +151,7 @@ describe("generated source mappings", () => {
 
     const secondSource = source.replaceAll("difference", "alternate")
     const second = parse({filename: "second.ts", language: "typescript", source: secondSource})
+    second.functions[0].id = "function:1"
     const assembled = {...legacy, functions: [legacy.functions[0], second.functions[0]], provenance: undefined}
     const multi = generateArtifact({
       language: "javascript",

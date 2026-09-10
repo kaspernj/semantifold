@@ -66,6 +66,7 @@ function moduleWithFunctions(template, count) {
   for (let index = 0; index < count; index++) {
     const declaration = structuredClone(template.functions[0])
 
+    declaration.id = `function:${index}`
     declaration.name = `function${index}`
     module.functions.push(declaration)
   }

@@ -24,9 +24,11 @@ describe("language role registry", () => {
     for (const descriptor of languageCapabilities) {
       expect(Object.isFrozen(descriptor)).toBeTrue()
       expect(Object.isFrozen(descriptor.roles)).toBeTrue()
+      expect(Object.isFrozen(descriptor.features)).toBeTrue()
       expect(Object.isFrozen(descriptor.mapping)).toBeTrue()
       expect(Object.isFrozen(descriptor.acceptance)).toBeTrue()
       if (descriptor.id == "wasm") {
+        expect(descriptor.features).toEqual({generalFunctionsAndCalls: false})
         expect(descriptor.roles).toEqual({
           applicationBackend: true,
           binaryBackend: true,
@@ -46,6 +48,7 @@ describe("language role registry", () => {
         interoperability: false,
         textBackend: true
       })
+      expect(descriptor.features).toEqual({generalFunctionsAndCalls: originalFive.includes(descriptor.id)})
       expect(descriptor.artifactMultiplicity).toEqual(["csharp", "go", "c", "rust"].includes(descriptor.id) ? "multiple" : "single")
       expect(descriptor.roundTrip).toBeTrue()
       expect(descriptor.mapping).toEqual({binaryRanges: false, richText: true, sourceMapV3: true})
@@ -95,6 +98,7 @@ console.log(choose(true, "no"))
       [{...record, id: ""}],
       [{...record, artifactMultiplicity: "many"}],
       [{...record, surprise: true}],
+      [{...record, features: {generalFunctionsAndCalls: "yes"}}],
       [{...record, acceptance: {stages: ["execute", "parse"], toolchains: []}}],
       [{...record, acceptance: {stages: ["parse", "parse"], toolchains: []}}],
       [{...record, mapping: {binaryRanges: false, richText: true, sourceMapV3: false}}],

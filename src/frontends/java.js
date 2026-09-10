@@ -6,7 +6,7 @@ import {locationFromOffsets, moduleLocation} from "../semantic/location.js"
 import {withAdaptedOperation} from "../semantic/operators.js"
 import {withParserRanges} from "../semantic/provenance.js"
 import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
-import {sourceScalarType} from "./scalars.js"
+import {requireSourceReturnType, sourceScalarType} from "./scalars.js"
 
 /** @type {Readonly<Record<string, string>>} */
 const simpleStringEscapes = Object.freeze({
@@ -407,17 +407,21 @@ function convertReturn(statement, filename, source) {
   const expressionNodes = directChildren(statement).filter((child) => child.name != "return" && child.name != ";")
   const expression = expressionNodes.length == 1 ? expressionNodes[0] : undefined
 
-  if (!expression) {
+  if (expressionNodes.length > 1) {
     const unsupported = expressionNodes[0]
 
     return unsupportedSyntax(
       "java",
-      unsupported?.name ?? "empty return",
+      unsupported?.name ?? "return expression",
       unsupported ? nodeLocation(unsupported, filename, source) : location
     )
   }
 
-  return {expression: convertExpression(expression, filename, source), kind: "ReturnStatement", location}
+  return {
+    ...(expression ? {expression: convertExpression(expression, filename, source)} : {}),
+    kind: "ReturnStatement",
+    location
+  }
 }
 
 /**
@@ -511,8 +515,22 @@ function convertStatement(statement, filename, source) {
   if (statement.name == "LocalVariableDeclaration") return convertLocalStatement(statement, filename, source)
   if (statement.name == "ExpressionStatement") {
     if (statement.getChild("AssignmentExpression")) return convertLocalStatement(statement, filename, source)
-    if (!statement.getChild("MethodInvocation")) {
+    const invocation = statement.getChild("MethodInvocation")
+
+    if (!invocation) {
       return unsupportedSyntax("java", statement.name, nodeLocation(statement, filename, source))
+    }
+    const fieldAccess = invocation.getChild("FieldAccess")
+    const methodName = invocation.getChild("MethodName")
+
+    if (!fieldAccess || !methodName || nodeText(fieldAccess, source) != "System.out" || nodeText(methodName, source) != "println") {
+      return {
+        expression: /** @type {import("../semantic/types.js").CallExpression} */ (
+          convertExpression(invocation, filename, source)
+        ),
+        kind: "ExpressionStatement",
+        location: nodeLocation(statement, filename, source)
+      }
     }
 
     return convertPrint(statement, filename, source)
@@ -549,6 +567,7 @@ function convertBlock(node, filename, source) {
  */
 function convertType(sourceType, subject, location, filename, source) {
   if (!sourceType) return missingType("java", subject, location)
+  if (sourceType.name == "void") return unsupportedSyntax("java", "void value type", nodeLocation(sourceType, filename, source))
   if (!["PrimitiveType", "TypeName", "ScopedTypeName"].includes(sourceType.name)) {
     return unsupportedSyntax("java", "unsupported scalar type", location)
   }
@@ -561,12 +580,29 @@ function convertType(sourceType, subject, location, filename, source) {
 }
 
 /**
+ * Converts one explicit Java function return type.
+ * @param {import("@lezer/common").SyntaxNode | null} sourceType - Java return type node.
+ * @param {string} subject - Typed function return.
+ * @param {import("../semantic/types.js").SourceLocation} location - Function location.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @returns {import("../semantic/types.js").FunctionReturnTypeReference} Semantic return type.
+ */
+function convertReturnType(sourceType, subject, location, filename, source) {
+  if (sourceType?.name == "void") {
+    return requireSourceReturnType("java", "void", subject, location, nodeLocation(sourceType, filename, source))
+  }
+
+  return convertType(sourceType, subject, location, filename, source)
+}
+
+/**
  * Returns the direct Java declaration type node supported by scalar conversion.
  * @param {import("@lezer/common").SyntaxNode} node - Declaration node.
  * @returns {import("@lezer/common").SyntaxNode | null} Type syntax node.
  */
 function declarationType(node) {
-  return node.getChild("PrimitiveType") ?? node.getChild("TypeName") ?? node.getChild("ScopedTypeName")
+  return node.getChild("PrimitiveType") ?? node.getChild("TypeName") ?? node.getChild("ScopedTypeName") ?? node.getChild("void")
 }
 
 /**
@@ -578,11 +614,33 @@ function declarationType(node) {
  */
 function convertFunction(node, filename, source) {
   const location = nodeLocation(node, filename, source)
+  const modifiers = node.getChild("Modifiers")
+  const modifierNames = modifiers ? structuralChildren(modifiers).map((modifier) => modifier.name) : []
+
+  if (modifierNames.join(" ") != "private static") {
+    return unsupportedSyntax("java", "non-private-static semantic function", modifiers ? nodeLocation(modifiers, filename, source) : location)
+  }
+  const typeParameters = node.getChild("TypeParameters")
+  const throws = node.getChild("Throws")
+
+  if (typeParameters) return unsupportedSyntax("java", "generic method", nodeLocation(typeParameters, filename, source))
+  if (throws) return unsupportedSyntax("java", "checked throws", nodeLocation(throws, filename, source))
   const definition = requiredChild(node, "Definition", filename, source)
   const name = nodeText(definition, source)
   const parametersNode = requiredChild(node, "FormalParameters", filename, source)
-  const parameters = parametersNode.getChildren("FormalParameter").map((parameter) => {
+  const parameterNodes = structuralChildren(parametersNode)
+  const unsupportedParameter = parameterNodes.find((parameter) => parameter.name != "FormalParameter")
+
+  if (unsupportedParameter) {
+    return unsupportedSyntax("java", "unsupported parameter form", nodeLocation(unsupportedParameter, filename, source))
+  }
+  const parameters = parameterNodes.map((parameter) => {
     const parameterLocation = nodeLocation(parameter, filename, source)
+    const parameterChildren = structuralChildren(parameter)
+
+    if (parameterChildren.length != 2 || parameter.getChild("Modifiers") || parameter.getChild("Dimension")) {
+      return unsupportedSyntax("java", "unsupported parameter form", parameterLocation)
+    }
     const parameterNameNode = requiredChild(parameter, "Definition", filename, source)
     const parameterName = nodeText(parameterNameNode, source)
 
@@ -604,7 +662,7 @@ function convertFunction(node, filename, source) {
     location,
     name,
     parameters,
-    returnType: convertType(declarationType(node), `Function '${name}' return`, location, filename, source)
+    returnType: convertReturnType(declarationType(node), `Function '${name}' return`, location, filename, source)
   }, {name: nodeLocation(definition, filename, source)})
 }
 
@@ -661,6 +719,22 @@ function convertIf(node, filename, source) {
  */
 function convertEntryPoint(node, filename, source) {
   const location = nodeLocation(node, filename, source)
+  const modifiers = node.getChild("Modifiers")
+  const parameters = node.getChild("FormalParameters")
+  const definition = node.getChild("Definition")
+  const returnType = node.getChild("void")
+  const modifierNames = modifiers ? structuralChildren(modifiers).map((modifier) => modifier.name) : []
+  const parameterNodes = parameters ? structuralChildren(parameters) : []
+  const parameter = parameterNodes[0]
+  const parameterType = parameter?.getChild("ArrayType")
+  const parameterName = parameter?.getChild("Definition")
+
+  if (modifierNames.join(" ") != "public static" || !parameters || parameterNodes.length != 1 ||
+    parameter?.name != "FormalParameter" || nodeText(parameterType ?? node, source) != "String[]" ||
+    nodeText(parameterName ?? node, source) != "args" || !definition || nodeText(definition, source) != "main" || !returnType ||
+    node.getChild("TypeParameters") || node.getChild("Throws")) {
+    return unsupportedSyntax("java", "main method signature", location)
+  }
   const block = requiredChild(node, "Block", filename, source)
   const body = convertBlock(block, filename, source)
 
@@ -720,13 +794,34 @@ export function parseJava({filename, source}) {
     })
   }
 
-  const methods = descendants(tree.topNode, "MethodDeclaration")
-  const mainMethod = methods.find((method) => nodeText(requiredChild(method, "Definition", filename, source), source) == "main")
+  const programMembers = structuralChildren(tree.topNode)
+  const classDeclaration = programMembers.find((member) => member.name == "ClassDeclaration")
+  const unexpectedProgramMember = programMembers.find((member) => member != classDeclaration)
+
+  if (!classDeclaration || unexpectedProgramMember || programMembers.length != 1) {
+    return unsupportedSyntax("java", "compilation unit other than one Main class",
+      nodeLocation(unexpectedProgramMember ?? tree.topNode, filename, source))
+  }
+  const className = requiredChild(classDeclaration, "Definition", filename, source)
+  const classModifiers = classDeclaration.getChild("Modifiers")
+  const classModifierNames = classModifiers ? structuralChildren(classModifiers).map((modifier) => modifier.name) : []
+
+  if (nodeText(className, source) != "Main" || classModifierNames.join(" ") != "public final") {
+    return unsupportedSyntax("java", "public final Main class", nodeLocation(classDeclaration, filename, source))
+  }
+  const classBody = requiredChild(classDeclaration, "ClassBody", filename, source)
+  const members = structuralChildren(classBody)
+  const unsupportedMember = members.find((member) => member.name != "MethodDeclaration")
+
+  if (unsupportedMember) return unsupportedSyntax("java", unsupportedMember.name, nodeLocation(unsupportedMember, filename, source))
+  const methods = members
+  const mainMethods = methods.filter((method) => nodeText(requiredChild(method, "Definition", filename, source), source) == "main")
+  const mainMethod = mainMethods[0]
   const functionMethods = methods.filter((method) => method != mainMethod)
   const location = moduleLocation(filename, source)
 
   if (functionMethods.length == 0) return unsupportedSyntax("java", "class without a semantic function", location)
-  if (!mainMethod) return unsupportedSyntax("java", "class without main", location)
+  if (!mainMethod || mainMethods.length != 1) return unsupportedSyntax("java", "class without one unambiguous main", location)
 
   const functions = functionMethods.map((method) => convertFunction(method, filename, source))
   const entryPoint = convertEntryPoint(mainMethod, filename, source)

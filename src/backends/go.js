@@ -98,7 +98,11 @@ function validateLocalReads(module) {
         declarations.push(statement)
         collectIdentifierReads(statement.initializer, reads)
       } else if (statement.kind == "IfStatement") collectIdentifierReads(statement.condition, reads)
-      else collectIdentifierReads(statement.expression, reads)
+      else {
+        const expression = statement.expression
+
+        if (expression) collectIdentifierReads(expression, reads)
+      }
     })
     for (const declaration of declarations) {
       if (!reads.has(declaration.name)) {
@@ -243,8 +247,10 @@ function emitStatement(writer, statement, indent, path) {
     return emitLocal(writer, statement, indent, path)
   }
   if (statement.kind == "IfStatement") return emitIf(writer, statement, indent, path, true)
+  if (statement.kind == "ExpressionStatement") throw new TypeError("Go Task 005 expression statement reached emission.")
   writer.synthetic(indent, "indentation", [statement], [path])
   if (statement.kind == "ReturnStatement") {
+    if (!statement.expression) throw new TypeError("Go bare return reached emission.")
     writer.mapped("return", {mappingKind: "anchor", node: statement, path})
     writer.synthetic(" ", "return spacing", [statement], [path])
     emitExpression(writer, statement.expression, path + "/expression", "go", identity)

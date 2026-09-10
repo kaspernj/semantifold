@@ -774,7 +774,9 @@ class SwiftReader {
           this.rejectNativeStringEqualityExpression(statement.condition)
         } else if (statement.kind == "LocalDeclaration") this.rejectNativeStringEqualityExpression(statement.initializer)
         else if (statement.kind == "AssignmentStatement") this.rejectNativeStringEqualityExpression(statement.expression)
-        else if (statement.kind == "PrintStatement" || statement.kind == "ReturnStatement") {
+        else if (statement.kind == "ExpressionStatement" || statement.kind == "PrintStatement") {
+          this.rejectNativeStringEqualityExpression(statement.expression)
+        } else if (statement.kind == "ReturnStatement" && statement.expression) {
           this.rejectNativeStringEqualityExpression(statement.expression)
         }
       }

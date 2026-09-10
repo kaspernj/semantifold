@@ -46,7 +46,13 @@ const expectedModule = {
             {kind: "StringLiteral", value: "no"}
           ],
           callee: "label",
-          kind: "CallExpression"
+          kind: "CallExpression",
+          resolution: {
+            declarationId: "function:0",
+            kind: "ResolvedFunctionSignature",
+            parameterTypes: ["boolean", "string"],
+            returnType: "string"
+          }
         },
         kind: "PrintStatement"
       }]
@@ -68,6 +74,7 @@ const expectedModule = {
       }]},
       kind: "IfStatement"
     }]},
+    id: "function:0",
     kind: "FunctionDeclaration",
     name: "label",
     parameters: [

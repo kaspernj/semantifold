@@ -5,6 +5,7 @@
 /** @typedef {TextBackendLanguage | "wasm"} BackendLanguage */
 /** @typedef {SemanticLanguage | "html"} GeneratedTextLanguage */
 /** @typedef {"integer" | "boolean" | "string"} SemanticTypeName */
+/** @typedef {SemanticTypeName | "void"} FunctionReturnTypeName */
 /** @typedef {"IntegerNegate" | "BooleanNot"} SemanticUnaryOperation */
 /** @typedef {"IntegerAdd" | "IntegerSubtract" | "IntegerMultiply" | "BooleanAnd" | "BooleanOr" | "IntegerEqual" | "IntegerNotEqual" | "BooleanEqual" | "BooleanNotEqual" | "StringEqual" | "StringNotEqual" | "IntegerLessThan" | "IntegerLessThanOrEqual" | "IntegerGreaterThan" | "IntegerGreaterThanOrEqual" | "StringConcat"} SemanticBinaryOperation */
 /** @typedef {"function" | "parameter" | "local"} SemanticSymbolKind */
@@ -35,11 +36,17 @@
  */
 
 /**
+ * @typedef LanguageFeatureCapabilities
+ * @property {boolean} generalFunctionsAndCalls - Task 005 arbitrary required signatures, resolved direct calls, and void functions.
+ */
+
+/**
  * @typedef LanguageCapabilities
  * @property {string} id - Stable registry identity.
  * @property {Readonly<LanguageRoleCapabilities>} roles - Independently registered roles.
  * @property {"single" | "multiple"} artifactMultiplicity - Target artifact multiplicity.
  * @property {boolean} roundTrip - Whether frontend/backend round-trip acceptance is declared.
+ * @property {Readonly<LanguageFeatureCapabilities>} features - Semantic feature capabilities.
  * @property {Readonly<LanguageMappingCapabilities>} mapping - Mapping forms.
  * @property {Readonly<LanguageAcceptanceCapabilities>} acceptance - Stages and toolchains.
  */
@@ -146,6 +153,7 @@
  * @property {string} name - Semantic symbol name.
  * @property {SemanticSymbolKind} kind - Symbol category.
  * @property {string} declarationNodeId - Declaring node identity.
+ * @property {string} [semanticDeclarationId] - Function declaration identity when kind is function.
  * @property {SourceLocation} location - Exact declaration-name range.
  * @property {SemanticSymbolReference[]} references - Ordered resolved references.
  */
@@ -277,8 +285,23 @@
 /**
  * @typedef TypeReference
  * @property {"TypeReference"} kind - Node discriminator.
- * @property {SemanticTypeName} name - Normalized type name.
+ * @property {SemanticTypeName} name - Normalized scalar value type name.
  * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance that survives semantic transforms.
+ */
+
+/**
+ * @typedef FunctionReturnTypeReference
+ * @property {"TypeReference"} kind - Node discriminator.
+ * @property {FunctionReturnTypeName} name - Normalized function return type name.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance that survives semantic transforms.
+ */
+
+/**
+ * @typedef ResolvedFunctionSignature
+ * @property {"ResolvedFunctionSignature"} kind - Resolution discriminator.
+ * @property {string} declarationId - Deterministic module-local declaration identity.
+ * @property {SemanticTypeName[]} parameterTypes - Exact required positional parameter types.
+ * @property {FunctionReturnTypeName} returnType - Exact resolved return type.
  */
 
 /**
@@ -348,6 +371,7 @@
  * @property {"CallExpression"} kind - Node discriminator.
  * @property {string} callee - Function name.
  * @property {Expression[]} arguments - Positional arguments.
+ * @property {ResolvedFunctionSignature} [resolution] - Deterministic declaration and signature binding, required after frontend validation.
  * @property {SourceLocation} location - Source location.
  * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
  */
@@ -377,7 +401,15 @@
 /**
  * @typedef ReturnStatement
  * @property {"ReturnStatement"} kind - Node discriminator.
- * @property {Expression} expression - Returned expression.
+ * @property {Expression} [expression] - Returned expression; absent exactly for a bare void return.
+ * @property {SourceLocation} location - Source location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
+ */
+
+/**
+ * @typedef ExpressionStatement
+ * @property {"ExpressionStatement"} kind - Node discriminator.
+ * @property {CallExpression} expression - A direct call whose resolved return type is void.
  * @property {SourceLocation} location - Source location.
  * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
  */
@@ -393,7 +425,7 @@
  */
 
 /** @typedef {LocalDeclaration | AssignmentStatement} LocalStatement */
-/** @typedef {LocalStatement | IfStatement | ReturnStatement | PrintStatement} Statement */
+/** @typedef {LocalStatement | ExpressionStatement | IfStatement | ReturnStatement | PrintStatement} Statement */
 
 /**
  * @typedef Block
@@ -406,9 +438,10 @@
 /**
  * @typedef FunctionDeclaration
  * @property {"FunctionDeclaration"} kind - Node discriminator.
+ * @property {string} [id] - Deterministic module-local declaration identity, required after frontend validation.
  * @property {string} name - Function name.
  * @property {Parameter[]} parameters - Function parameters.
- * @property {TypeReference} returnType - Return type.
+ * @property {FunctionReturnTypeReference} returnType - Return type.
  * @property {Block} body - Function body.
  * @property {SourceLocation} location - Source location.
  * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
@@ -440,7 +473,7 @@
  * @property {SemanticProvenance} [provenance] - Parser-authored source and identity index; optional for legacy caller-authored modules.
  */
 
-/** @typedef {SemanticModule | FunctionDeclaration | Parameter | Block | Statement | EntryPoint | Expression | TypeReference} SemanticNode */
+/** @typedef {SemanticModule | FunctionDeclaration | Parameter | Block | Statement | EntryPoint | Expression | TypeReference | FunctionReturnTypeReference} SemanticNode */
 /** @typedef {SemanticNode} SemanticNodeWithoutLocations */
 
 export {}

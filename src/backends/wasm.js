@@ -178,7 +178,7 @@ function encodeModule(module, index, literals, scratchBase, memoryPages) {
   ]
   const semanticTypeIndexes = module.functions.map((declaration) => types.add(
     declaration.parameters.flatMap(({type}) => wasmTypes(type.name)),
-    wasmTypes(declaration.returnType.name)
+    wasmTypes(wasmReturnType(declaration))
   ))
   const runType = types.add([], [])
   const functionIndexes = new Map(module.functions.map((declaration, offset) => [declaration.name, importCount + helperCount + offset]))
@@ -327,8 +327,11 @@ class FunctionEmitter {
         this.mappedOp(0x10, statement, statementPath, "print instruction")
         this.mappedImmediate(u32(importIndex), statement, statementPath, "print import index")
       } else if (statement.kind == "ReturnStatement") {
+        if (!statement.expression) throw new TypeError("Wasm bare return reached emission.")
         this.expression(statement.expression, `${statementPath}/expression`)
         this.mappedOp(0x0f, statement, statementPath, "return instruction")
+      } else if (statement.kind == "ExpressionStatement") {
+        throw new TypeError("Wasm Task 005 expression statement reached emission.")
       } else {
         this.expression(statement.condition, `${statementPath}/condition`)
         this.mappedOp(0x04, statement.condition, `${statementPath}/condition`, "conditional instruction")
@@ -461,7 +464,7 @@ class FunctionEmitter {
     this.mappedOp(0x10, expression, path, "semantic call instruction", "callee")
     this.mappedImmediate(u32(functionIndex), expression, path, "semantic callee index", "callee")
 
-    const result = this.allocateBinding(declaration.returnType.name)
+    const result = this.allocateBinding(wasmReturnType(declaration))
 
     this.setBinding(result, expression, path)
     this.syntheticOp(0x23, expression, path, "read semantic call depth")
@@ -1328,7 +1331,10 @@ function analyzeScratchUse(module) {
         } else if (statement.kind == "PrintStatement") {
           for (const result of expression(statement.expression, state, depth)) next.push(result.state)
         } else if (statement.kind == "ReturnStatement") {
+          if (!statement.expression) throw new TypeError("Wasm bare return reached abstract execution.")
           for (const result of expression(statement.expression, state, depth)) next.push({...result.state, returned: result.value})
+        } else if (statement.kind == "ExpressionStatement") {
+          throw new TypeError("Wasm Task 005 expression statement reached abstract execution.")
         } else {
           for (const condition of expression(statement.condition, state, depth)) {
             if (condition.value.knownBoolean !== false) {
@@ -1598,13 +1604,26 @@ function expressionType(expression, bindings, functions) {
 
     if (!declaration) throw new Error("Validated Wasm expression omitted its call declaration.")
 
-    return declaration.returnType.name
+    return wasmReturnType(declaration)
   }
   const binding = bindings.get(expression.name)
 
   if (!binding) throw new Error("Validated Wasm expression omitted its local binding.")
 
   return binding.type
+}
+
+/**
+ * Narrows a declaration return after the Wasm Task 005 capability preflight.
+ * @param {import("../semantic/types.js").FunctionDeclaration} declaration - Validated declaration.
+ * @returns {Scalar} Supported Wasm scalar return.
+ */
+function wasmReturnType(declaration) {
+  if (declaration.returnType.name == "void") {
+    return unsupportedCapability("wasm", "Task 005 void function return", declaration.location)
+  }
+
+  return declaration.returnType.name
 }
 
 /**

@@ -12,7 +12,7 @@ This works for every supported source language and mapped text output. It is not
 
 ## Parsing and semantic provenance
 
-`parse()` preserves the existing `location.filename/start/end` shape. Lines and columns are one-based, ranges are half-open, and offsets and columns count UTF-16 code units. CRLF is one line break, a lone CR is one line break, and astral characters occupy two columns and offsets. A CRLF start-of-line coordinate resolves after both code units; the interior offset remains a unique position on the preceding line rather than aliasing the next line. Source content and its original newlines are preserved exactly.
+`parse()` preserves the existing `location.filename/start/end` shape. Lines and columns are one-based, ranges are half-open, and offsets and columns count UTF-16 code units. CRLF is one line break, a lone CR is one line break, and astral characters occupy two columns and offsets. A CRLF start-of-line coordinate resolves after both code units; the interior offset remains a unique position on the preceding line rather than aliasing the next line. Source content and its original newlines are preserved exactly. Function symbol records additionally expose `semanticDeclarationId`, matching the `function:N` identity carried by every resolved call signature; generated callee spans and call references continue to use the ordinary canonical symbol ID.
 
 Parsed modules additionally have a JSON-safe `provenance` value:
 

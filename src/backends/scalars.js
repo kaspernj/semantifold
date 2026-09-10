@@ -1,26 +1,26 @@
 // @ts-check
 
-/** @type {Readonly<Record<import("../semantic/types.js").TextBackendLanguage, Readonly<Record<import("../semantic/types.js").SemanticTypeName, string>>>>} */
+/** @type {Readonly<Record<import("../semantic/types.js").TextBackendLanguage, Readonly<Record<import("../semantic/types.js").FunctionReturnTypeName, string>>>>} */
 const targetScalarTypes = Object.freeze({
-  swift: Object.freeze({boolean: "Bool", integer: "Int64", string: "String"}),
-  rust: Object.freeze({boolean: "bool", integer: "i64", string: "String"}),
-  cpp: Object.freeze({boolean: "bool", integer: "std::int64_t", string: "std::string"}),
-  c: Object.freeze({boolean: "bool", integer: "int64_t", string: "SemantifoldString"}),
-  csharp: Object.freeze({boolean: "bool", integer: "long", string: "string"}),
-  go: Object.freeze({boolean: "bool", integer: "int64", string: "string"}),
-  java: Object.freeze({boolean: "boolean", integer: "int", string: "String"}),
-  kotlin: Object.freeze({boolean: "Boolean", integer: "Long", string: "String"}),
-  javascript: Object.freeze({boolean: "boolean", integer: "number", string: "string"}),
-  php: Object.freeze({boolean: "bool", integer: "int", string: "string"}),
-  python: Object.freeze({boolean: "bool", integer: "int", string: "str"}),
-  ruby: Object.freeze({boolean: "bool", integer: "Integer", string: "String"}),
-  typescript: Object.freeze({boolean: "boolean", integer: "number", string: "string"})
+  swift: Object.freeze({boolean: "Bool", integer: "Int64", string: "String", void: "Void"}),
+  rust: Object.freeze({boolean: "bool", integer: "i64", string: "String", void: "()"}),
+  cpp: Object.freeze({boolean: "bool", integer: "std::int64_t", string: "std::string", void: "void"}),
+  c: Object.freeze({boolean: "bool", integer: "int64_t", string: "SemantifoldString", void: "void"}),
+  csharp: Object.freeze({boolean: "bool", integer: "long", string: "string", void: "void"}),
+  go: Object.freeze({boolean: "bool", integer: "int64", string: "string", void: "void"}),
+  java: Object.freeze({boolean: "boolean", integer: "int", string: "String", void: "void"}),
+  kotlin: Object.freeze({boolean: "Boolean", integer: "Long", string: "String", void: "Unit"}),
+  javascript: Object.freeze({boolean: "boolean", integer: "number", string: "string", void: "void"}),
+  php: Object.freeze({boolean: "bool", integer: "int", string: "string", void: "void"}),
+  python: Object.freeze({boolean: "bool", integer: "int", string: "str", void: "None"}),
+  ruby: Object.freeze({boolean: "bool", integer: "Integer", string: "String", void: "void"}),
+  typescript: Object.freeze({boolean: "boolean", integer: "number", string: "string", void: "void"})
 })
 
 /**
- * Emits one target-language scalar type spelling.
+ * Emits one target-language scalar or function-return type spelling.
  * @param {import("../semantic/types.js").TextBackendLanguage} language - Target language.
- * @param {import("../semantic/types.js").TypeReference} type - Semantic scalar type.
+ * @param {import("../semantic/types.js").TypeReference | import("../semantic/types.js").FunctionReturnTypeReference} type - Semantic type.
  * @returns {string} Target type spelling.
  */
 export function emitScalarType(language, type) {

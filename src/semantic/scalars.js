@@ -22,6 +22,23 @@ export function isScalarTypeName(name) {
 }
 
 /**
+ * Checks a function return type name, including the non-value `void` result.
+ * @param {string} name - Candidate semantic return type name.
+ * @returns {name is import("./types.js").FunctionReturnTypeName} Whether the name is supported for a function return.
+ */
+export function isFunctionReturnTypeName(name) {
+  return name == "void" || isScalarTypeName(name)
+}
+
+/**
+ * Returns the canonical semantic void return type reference.
+ * @returns {import("./types.js").FunctionReturnTypeReference} Void return type.
+ */
+export function voidType() {
+  return {kind: "TypeReference", name: "void"}
+}
+
+/**
  * Checks that a JavaScript string contains only complete Unicode scalar values.
  * @param {string} value - Candidate Unicode string.
  * @returns {boolean} Whether the string excludes lone UTF-16 surrogates.

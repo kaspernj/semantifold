@@ -7,7 +7,7 @@ import {locationFromOffsets, moduleLocation} from "../semantic/location.js"
 import {withAdaptedOperation} from "../semantic/operators.js"
 import {withParserRanges} from "../semantic/provenance.js"
 import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
-import {requireSourceScalarType} from "./scalars.js"
+import {requireSourceReturnType, requireSourceScalarType} from "./scalars.js"
 
 /** @typedef {NonNullable<import("@babel/parser").ParseResult<import("@babel/types").File>["tokens"]>[number]} BabelToken */
 /** @typedef {{byStart: Map<number, BabelToken>, tokens: BabelToken[]}} BabelTokenIndex */
@@ -223,6 +223,9 @@ function convertExpression(node, language, filename, source) {
   }
 
   if (node.type == "CallExpression" && node.callee.type == "Identifier") {
+    if (node.optional || node.callee.optional || node.typeArguments || node.typeParameters) {
+      return unsupportedSyntax(language, "optional or generic call", location)
+    }
     const arguments_ = node.arguments.map((argument) => {
       if (argument.type == "SpreadElement" || argument.type == "ArgumentPlaceholder") {
         return unsupportedSyntax(language, argument.type, nodeLocation(argument, filename, source))
@@ -250,9 +253,13 @@ function convertExpression(node, language, filename, source) {
 function convertReturn(node, language, filename, source) {
   const location = nodeLocation(node, filename, source)
 
-  if (node.type != "ReturnStatement" || !node.argument) return unsupportedSyntax(language, node.type, location)
+  if (node.type != "ReturnStatement") return unsupportedSyntax(language, node.type, location)
 
-  return {expression: convertExpression(node.argument, language, filename, source), kind: "ReturnStatement", location}
+  return {
+    ...(node.argument ? {expression: convertExpression(node.argument, language, filename, source)} : {}),
+    kind: "ReturnStatement",
+    location
+  }
 }
 
 /**
@@ -369,7 +376,19 @@ function convertStatement(node, language, filename, source, canonicalZeroRequire
   if (node.type == "VariableDeclaration" || node.type == "ExpressionStatement" && node.expression.type == "AssignmentExpression") {
     return convertLocalStatement(node, language, filename, source)
   }
-  if (node.type == "ExpressionStatement") return convertPrint(node, language, filename, source, canonicalZeroRequired)
+  if (node.type == "ExpressionStatement") {
+    if (node.expression.type == "CallExpression" && node.expression.callee.type == "Identifier") {
+      return {
+        expression: /** @type {import("../semantic/types.js").CallExpression} */ (
+          convertExpression(node.expression, language, filename, source)
+        ),
+        kind: "ExpressionStatement",
+        location: nodeLocation(node, filename, source)
+      }
+    }
+
+    return convertPrint(node, language, filename, source, canonicalZeroRequired)
+  }
 
   return unsupportedSyntax(language, node.type, nodeLocation(node, filename, source))
 }
@@ -414,11 +433,25 @@ function jsdocTypes(node, filename, source) {
 
   const commentBlock = /** @type {import("@babel/types").CommentBlock} */ (comment)
   const block = parseComment(`/*${commentBlock.value}*/`)[0]
-  const parameters = new Map(block.tags.filter((tag) => tag.tag == "param").map((tag) => [tag.name, {
+  const parameterTags = block.tags.filter((tag) => tag.tag == "param")
+  const returnTags = block.tags.filter((tag) => tag.tag == "returns" || tag.tag == "return")
+
+  if (new Set(parameterTags.map((tag) => tag.name)).size != parameterTags.length) {
+    const duplicate = parameterTags.find((tag, index) => parameterTags.findIndex((candidate) => candidate.name == tag.name) != index)
+
+    return unsupportedSyntax("javascript", "duplicate @param annotation", duplicate
+      ? commentTagLocation(commentBlock, duplicate, "name", filename, source)
+      : nodeLocation(node, filename, source))
+  }
+  if (returnTags.length > 1) {
+    return unsupportedSyntax("javascript", "duplicate @return annotation",
+      commentTagLocation(commentBlock, returnTags[1], "type", filename, source))
+  }
+  const parameters = new Map(parameterTags.map((tag) => [tag.name, {
     location: commentTagLocation(commentBlock, tag, "type", filename, source),
     sourceType: tag.type
   }]))
-  const returnTag = block.tags.find((tag) => tag.tag == "returns" || tag.tag == "return")
+  const returnTag = returnTags[0]
 
   return {
     parameters,
@@ -437,6 +470,19 @@ function jsdocTypes(node, filename, source) {
  */
 function convertType(sourceType, language, subject, location, typeLocation = location) {
   return requireSourceScalarType(language, sourceType, subject, location, typeLocation)
+}
+
+/**
+ * Converts one exact JavaScript function return annotation.
+ * @param {string | undefined} sourceType - JSDoc type spelling.
+ * @param {"javascript" | "typescript"} language - Frontend language.
+ * @param {string} subject - Typed function return.
+ * @param {import("../semantic/types.js").SourceLocation} location - Function location.
+ * @param {import("../semantic/types.js").SourceLocation} [typeLocation] - Exact annotation location.
+ * @returns {import("../semantic/types.js").FunctionReturnTypeReference} Semantic return type.
+ */
+function convertReturnType(sourceType, language, subject, location, typeLocation = location) {
+  return requireSourceReturnType(language, sourceType, subject, location, typeLocation)
 }
 
 /**
@@ -465,7 +511,32 @@ function convertTypeScriptType(annotation, subject, ownerLocation, filename, sou
     return unsupportedSyntax("typescript", "unsupported scalar type", nodeLocation(typeNode, filename, source))
   }
 
-  return requireSourceScalarType("typescript", sourceType, subject, ownerLocation, nodeLocation(typeNode, filename, source))
+  const typeLocation = nodeLocation(typeNode, filename, source)
+
+  return requireSourceScalarType("typescript", sourceType, subject, ownerLocation, typeLocation)
+}
+
+/**
+ * Converts one exact TypeScript function return annotation.
+ * @param {import("@babel/types").TypeAnnotation | import("@babel/types").TSTypeAnnotation | import("@babel/types").Noop | null | undefined} annotation - Return annotation.
+ * @param {string} subject - Typed function return.
+ * @param {import("../semantic/types.js").SourceLocation} ownerLocation - Function location.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @returns {import("../semantic/types.js").FunctionReturnTypeReference} Semantic return type.
+ */
+function convertTypeScriptReturnType(annotation, subject, ownerLocation, filename, source) {
+  if (!annotation) return requireSourceReturnType("typescript", undefined, subject, ownerLocation)
+  if (annotation.type != "TSTypeAnnotation") {
+    return unsupportedSyntax("typescript", "unsupported return type", nodeLocation(annotation, filename, source))
+  }
+  const typeNode = annotation.typeAnnotation
+  const sourceType = typeNode.type == "TSNumberKeyword" ? "number" : typeNode.type == "TSBooleanKeyword" ? "boolean" :
+    typeNode.type == "TSStringKeyword" ? "string" : typeNode.type == "TSVoidKeyword" ? "void" : undefined
+
+  if (!sourceType) return unsupportedSyntax("typescript", "unsupported return type", nodeLocation(typeNode, filename, source))
+
+  return requireSourceReturnType("typescript", sourceType, subject, ownerLocation, nodeLocation(typeNode, filename, source))
 }
 
 /**
@@ -483,12 +554,14 @@ function convertFunction(node, language, filename, source, canonicalZeroRequired
   if (!node.id) return unsupportedSyntax(language, "anonymous function", location)
   if (node.async) return unsupportedSyntax(language, "async function", location)
   if (node.generator) return unsupportedSyntax(language, "generator function", location)
+  if (node.typeParameters) return unsupportedSyntax(language, "generic function", nodeLocation(node.typeParameters, filename, source))
 
   const documentedTypes = language == "javascript" ? jsdocTypes(node, filename, source) : undefined
   const parameters = node.params.map((parameter) => {
     const parameterLocation = nodeLocation(parameter, filename, source)
 
     if (parameter.type != "Identifier") return unsupportedSyntax(language, parameter.type, parameterLocation)
+    if (parameter.optional) return unsupportedSyntax(language, "optional parameter", parameterLocation)
 
     const documentedType = documentedTypes?.parameters.get(parameter.name)
     const type = language == "javascript"
@@ -502,10 +575,14 @@ function convertFunction(node, language, filename, source, canonicalZeroRequired
       type
     }, {name: identifierLocation(parameter, filename, source)})
   })
+  const extraDocumentedParameter = documentedTypes && [...documentedTypes.parameters.keys()]
+    .find((name) => !node.params.some((parameter) => parameter.type == "Identifier" && parameter.name == name))
+
+  if (extraDocumentedParameter) return unsupportedSyntax(language, `annotation for unknown parameter '${extraDocumentedParameter}'`, location)
   const returnAnnotation = node.returnType
   const returnType = language == "javascript"
-    ? convertType(documentedTypes?.returnType?.sourceType, language, `Function '${node.id.name}' return`, location, documentedTypes?.returnType?.location)
-    : convertTypeScriptType(returnAnnotation, `Function '${node.id.name}' return`, location, filename, source)
+    ? convertReturnType(documentedTypes?.returnType?.sourceType, language, `Function '${node.id.name}' return`, location, documentedTypes?.returnType?.location)
+    : convertTypeScriptReturnType(returnAnnotation, `Function '${node.id.name}' return`, location, filename, source)
   const body = convertBlock(node.body, language, filename, source, canonicalZeroRequired)
 
   return withParserRanges({

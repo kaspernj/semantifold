@@ -34,7 +34,7 @@ const acceptanceStageOrder = ["parse", "generate", "restore", "compile", "link",
 const acceptanceStages = new Map(acceptanceStageOrder.map((stage, index) => [stage, index]))
 const registryKeys = new Set([
   "acceptance", "applicationBackend", "artifactMultiplicity", "binaryBackend", "defaultFilename", "frontend", "id",
-  "interoperability", "mapping", "mediaType", "roundTrip", "textBackend"
+  "features", "interoperability", "mapping", "mediaType", "roundTrip", "textBackend"
 ])
 
 /** @typedef {"frontend" | "textBackend" | "binaryBackend" | "applicationBackend" | "interoperability"} RegistryRole */
@@ -46,6 +46,7 @@ const registryKeys = new Set([
  * @property {string} id - Stable identity.
  * @property {{stages: import("./semantic/types.js").AcceptanceStage[], toolchains: string[]}} acceptance - Acceptance declaration.
  * @property {"single" | "multiple"} artifactMultiplicity - Artifact multiplicity.
+ * @property {import("./semantic/types.js").LanguageFeatureCapabilities} features - Semantic feature capabilities.
  * @property {import("./semantic/types.js").LanguageMappingCapabilities} mapping - Mapping capabilities.
  * @property {boolean} roundTrip - Round-trip declaration.
  * @property {string} [defaultFilename] - Default backend filename.
@@ -101,6 +102,15 @@ export function createLanguageRegistry(candidateRecords) {
       invalidRegistry(`Registry record '${id}' has an invalid artifact multiplicity.`, id)
     }
     if (typeof candidate.roundTrip != "boolean") invalidRegistry(`Registry record '${id}' requires a Boolean round-trip declaration.`, id)
+    const featuresCandidate = candidate.features ?? {generalFunctionsAndCalls: false}
+
+    if (!isPlainObject(featuresCandidate) || Object.keys(featuresCandidate).sort().join(",") != "generalFunctionsAndCalls" ||
+      typeof featuresCandidate.generalFunctionsAndCalls != "boolean") {
+      invalidRegistry(`Registry record '${id}' has an invalid feature declaration.`, id)
+    }
+    const features = deepFreeze(/** @type {import("./semantic/types.js").LanguageFeatureCapabilities} */ ({
+      generalFunctionsAndCalls: featuresCandidate.generalFunctionsAndCalls
+    }))
     const mappingCandidate = candidate.mapping
 
     if (!isPlainObject(mappingCandidate)) invalidRegistry(`Registry record '${id}' has an invalid mapping declaration.`, id)
@@ -186,6 +196,7 @@ export function createLanguageRegistry(candidateRecords) {
     const record = deepFreeze(/** @type {LanguageRegistryRecord} */ ({
       acceptance,
       artifactMultiplicity,
+      features,
       id,
       mapping,
       roundTrip: candidate.roundTrip,
@@ -200,6 +211,7 @@ export function createLanguageRegistry(candidateRecords) {
     const descriptor = deepFreeze(/** @type {import("./semantic/types.js").LanguageCapabilities} */ ({
       acceptance,
       artifactMultiplicity,
+      features,
       id,
       mapping,
       roles: {
@@ -398,6 +410,7 @@ const records = [
     artifactMultiplicity: "multiple",
     binaryBackend: generateBrowserWasm,
     defaultFilename: "program.wasm",
+    features: {generalFunctionsAndCalls: false},
     id: "wasm",
     mapping: {binaryRanges: true, richText: true, sourceMapV3: true},
     mediaType: "application/wasm",
@@ -420,6 +433,7 @@ export const supportedLanguages = Object.freeze(languageCapabilities
 function language(values) {
   return {
     artifactMultiplicity: "single",
+    features: {generalFunctionsAndCalls: ["php", "ruby", "javascript", "typescript", "java"].includes(String(values.id))},
     mapping: {binaryRanges: false, richText: true, sourceMapV3: true},
     roundTrip: true,
     ...values

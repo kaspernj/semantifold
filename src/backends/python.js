@@ -81,9 +81,11 @@ function emitStatement(writer, statement, indent, path) {
     emitIf(writer, statement, indent, path, "if")
     return
   }
+  if (statement.kind == "ExpressionStatement") throw new TypeError("Python Task 005 expression statement reached emission.")
 
   writer.synthetic(indent, "indentation", [statement], [path])
   if (statement.kind == "ReturnStatement") {
+    if (!statement.expression) throw new TypeError("Python bare return reached emission.")
     writer.mapped("return", {mappingKind: "anchor", node: statement, path})
     writer.synthetic(" ", "return spacing", [statement], [path])
     emitExpression(writer, statement.expression, `${path}/expression`, "python", identity)

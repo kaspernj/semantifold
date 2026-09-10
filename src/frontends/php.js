@@ -7,7 +7,7 @@ import {locationFromOffsets, moduleLocation} from "../semantic/location.js"
 import {withAdaptedOperation} from "../semantic/operators.js"
 import {withParserRanges} from "../semantic/provenance.js"
 import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
-import {requireSourceScalarType} from "./scalars.js"
+import {requireSourceReturnType, requireSourceScalarType} from "./scalars.js"
 const parser = new PhpParser.Engine({
   ast: {withPositions: true},
   parser: {extractDoc: true, suppressErrors: false}
@@ -206,11 +206,25 @@ function convertExpression(node, filename, source) {
   if (node.kind == "call") {
     const call = /** @type {import("php-parser").Call} */ (node)
 
-    if (call.what.kind != "name" && call.what.kind != "identifier") {
+    if (call.what.kind != "name") {
       return unsupportedSyntax("php", "dynamic call", location)
     }
+    const calledName = /** @type {import("php-parser").Name} */ (call.what)
 
-    const callee = /** @type {import("php-parser").Name | import("php-parser").Identifier} */ (call.what).name
+    if (calledName.resolution != "uqn" || calledName.name.includes("\\")) {
+      return unsupportedSyntax("php", "qualified call", nodeLocation(call.what, filename, source))
+    }
+    const unsupportedArgument = call.arguments.find((argument) =>
+      argument.kind == "namedargument" || argument.kind == "variadic" || Reflect.get(argument, "byref") === true)
+
+    if (unsupportedArgument) {
+      const detail = unsupportedArgument.kind == "namedargument" ? "named argument" :
+        unsupportedArgument.kind == "variadic" ? "unpacked argument" : "by-reference argument"
+
+      return unsupportedSyntax("php", detail, nodeLocation(unsupportedArgument, filename, source))
+    }
+
+    const callee = calledName.name
 
     return withParserRanges({
       arguments: call.arguments.map((argument) => convertExpression(argument, filename, source)),
@@ -237,9 +251,11 @@ function convertReturn(node, filename, source) {
 
   const returnNode = /** @type {import("php-parser").Return} */ (node)
 
-  if (!returnNode.expr) return unsupportedSyntax("php", "empty return", location)
-
-  return {expression: convertExpression(returnNode.expr, filename, source), kind: "ReturnStatement", location}
+  return {
+    ...(returnNode.expr ? {expression: convertExpression(returnNode.expr, filename, source)} : {}),
+    kind: "ReturnStatement",
+    location
+  }
 }
 
 /**
@@ -360,7 +376,19 @@ function convertStatement(node, visible, filename, source) {
   if (node.kind == "return") return convertReturn(node, filename, source)
   if (node.kind == "if") return convertIf(/** @type {import("php-parser").If} */ (node), visible, filename, source)
   if (node.kind == "echo") return convertPrint(/** @type {import("php-parser").Echo} */ (node), filename, source)
-  if (node.kind == "expressionstatement") return convertLocalStatement(node, visible, filename, source)
+  if (node.kind == "expressionstatement") {
+    const expression = /** @type {import("php-parser").ExpressionStatement} */ (node).expression
+
+    if (expression.kind == "call") {
+      return {
+        expression: /** @type {import("../semantic/types.js").CallExpression} */ (convertExpression(expression, filename, source)),
+        kind: "ExpressionStatement",
+        location: nodeLocation(node, filename, source)
+      }
+    }
+
+    return convertLocalStatement(node, visible, filename, source)
+  }
 
   return unsupportedSyntax("php", node.kind, nodeLocation(node, filename, source))
 }
@@ -398,7 +426,28 @@ function convertType(sourceType, subject, location, filename, source) {
 
   const typeName = /** @type {import("php-parser").TypeReference | import("php-parser").Name | import("php-parser").Identifier} */ (sourceType).name
 
-  return requireSourceScalarType("php", typeName, subject, location, nodeLocation(sourceType, filename, source))
+  const typeLocation = nodeLocation(sourceType, filename, source)
+
+  return requireSourceScalarType("php", typeName, subject, location, typeLocation)
+}
+
+/**
+ * Converts one explicit PHP function return type.
+ * @param {import("php-parser").Node | null} sourceType - PHP return type node.
+ * @param {string} subject - Typed function return.
+ * @param {import("../semantic/types.js").SourceLocation} location - Function location.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @returns {import("../semantic/types.js").FunctionReturnTypeReference} Semantic return type.
+ */
+function convertReturnType(sourceType, subject, location, filename, source) {
+  if (!sourceType) return requireSourceReturnType("php", undefined, subject, location)
+  if (sourceType.kind != "typereference" && sourceType.kind != "name" && sourceType.kind != "identifier") {
+    return unsupportedSyntax("php", "unsupported return type", nodeLocation(sourceType, filename, source))
+  }
+  const typeName = /** @type {import("php-parser").TypeReference | import("php-parser").Name | import("php-parser").Identifier} */ (sourceType).name
+
+  return requireSourceReturnType("php", typeName, subject, location, nodeLocation(sourceType, filename, source))
 }
 
 /**
@@ -420,6 +469,9 @@ function convertFunction(node, filename, source) {
     const parameterLocation = nodeLocation(parameter, filename, source)
     const parameterName = typeof parameter.name == "string" ? parameter.name : parameter.name.name
 
+    if (parameter.byref) return unsupportedSyntax("php", "by-reference parameter", parameterLocation)
+    if (parameter.variadic) return unsupportedSyntax("php", "variadic parameter", parameterLocation)
+    if (parameter.value) return unsupportedSyntax("php", "default parameter", parameterLocation)
     if (parameter.nullable) return unsupportedSyntax("php", "unsupported scalar type", parameterLocation)
 
     const parameterNode = typeof parameter.name == "string" ? parameter : parameter.name
@@ -432,6 +484,7 @@ function convertFunction(node, filename, source) {
 
     return withParserRanges(semanticParameter, {name: nodeLocation(parameterNode, filename, source)})
   })
+  if (node.byref) return unsupportedSyntax("php", "by-reference return", location)
   if (node.nullable) return unsupportedSyntax("php", "unsupported scalar type", location)
   const visible = new Set(parameters.map((parameter) => parameter.name))
   const body = convertBlock(node.body, visible, filename, source)
@@ -444,7 +497,7 @@ function convertFunction(node, filename, source) {
     location,
     name,
     parameters,
-    returnType: convertType(node.type, `Function '${name}' return`, location, filename, source)
+    returnType: convertReturnType(node.type, `Function '${name}' return`, location, filename, source)
   }, {name: nodeLocation(nameNode, filename, source)})
 }
 

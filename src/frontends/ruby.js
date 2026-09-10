@@ -26,7 +26,7 @@ import {locationFromOffsets, moduleLocation, utf8ByteOffsetToUtf16Offset} from "
 import {withAdaptedOperation} from "../semantic/operators.js"
 import {withParserRanges} from "../semantic/provenance.js"
 import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
-import {requireSourceScalarType} from "./scalars.js"
+import {requireSourceReturnType, requireSourceScalarType} from "./scalars.js"
 const parsePrism = await loadPrism()
 const rubyBinaryOperations = new Map([
   ["+", "Add"],
@@ -90,6 +90,10 @@ function slicePrismSource(source, startOffset, endOffset) {
  */
 function convertExpression(node, filename, source) {
   const location = nodeLocation(node, filename, source)
+
+  if (node instanceof CallNode && node.block) {
+    return unsupportedSyntax("ruby", "call block", nodeLocation(node.block, filename, source))
+  }
 
   if (node instanceof ParenthesesNode && node.body instanceof StatementsNode && node.body.body.length == 1) {
     return convertExpression(node.body.body[0], filename, source)
@@ -194,12 +198,18 @@ function convertExpression(node, filename, source) {
   }
 
   if (node instanceof CallNode && !node.receiver) {
+    if (["send", "public_send", "__send__"].includes(node.name)) {
+      return unsupportedSyntax("ruby", "dynamic call", prismLocation(node.messageLoc ?? node.location, filename, source))
+    }
     return withParserRanges({
       arguments: (node.arguments_?.arguments_ ?? []).map((argument) => convertExpression(argument, filename, source)),
       callee: node.name,
       kind: "CallExpression",
       location
     }, {callee: prismLocation(node.messageLoc ?? node.location, filename, source)})
+  }
+  if (node instanceof CallNode && node.receiver) {
+    return unsupportedSyntax("ruby", "receiver call", nodeLocation(node.receiver, filename, source))
   }
 
   return unsupportedSyntax("ruby", node.constructor.name, location)
@@ -215,12 +225,12 @@ function convertExpression(node, filename, source) {
 function convertReturn(node, filename, source) {
   const location = nodeLocation(node, filename, source)
 
-  if (!(node instanceof ReturnNode) || node.arguments_?.arguments_.length != 1) {
+  if (!(node instanceof ReturnNode) || (node.arguments_?.arguments_.length ?? 0) > 1) {
     return unsupportedSyntax("ruby", node.constructor.name, location)
   }
 
   return {
-    expression: convertExpression(node.arguments_.arguments_[0], filename, source),
+    ...(node.arguments_?.arguments_[0] ? {expression: convertExpression(node.arguments_.arguments_[0], filename, source)} : {}),
     kind: "ReturnStatement",
     location
   }
@@ -244,10 +254,15 @@ function typeComments(comments, node, filename, source) {
     const words = commentTokens(comment, filename, source)
 
     if (words[0]?.text == "@param" && words.length == 3) {
+      if (parameterTypes.has(words[1].text)) {
+        return unsupportedSyntax("ruby", "duplicate parameter annotation", words[1].location)
+      }
       parameterTypes.set(words[1].text, {location: words[2].location, sourceType: words[2].text})
-    }
-    if (words[0]?.text == "@return" && words.length == 2) {
+    } else if (words[0]?.text == "@return" && words.length == 2) {
+      if (returnType) return unsupportedSyntax("ruby", "duplicate return annotation", words[1].location)
       returnType = {location: words[1].location, sourceType: words[1].text}
+    } else if (words[0]?.text?.startsWith("@param") || words[0]?.text?.startsWith("@return")) {
+      return unsupportedSyntax("ruby", "malformed function type annotation", nodeLocation(node, filename, source))
     }
   }
 
@@ -405,7 +420,15 @@ function convertStatement(node, comments, visible, filename, source) {
   if (node instanceof ReturnNode) return convertReturn(node, filename, source)
   if (node instanceof IfNode) return convertIf(node, comments, visible, filename, source)
   if (node instanceof LocalVariableWriteNode) return convertLocalStatement(node, comments, visible, filename, source)
-  if (node instanceof CallNode) return convertPrint(node, filename, source)
+  if (node instanceof CallNode) {
+    if (!node.receiver && node.name == "puts") return convertPrint(node, filename, source)
+
+    return {
+      expression: /** @type {import("../semantic/types.js").CallExpression} */ (convertExpression(node, filename, source)),
+      kind: "ExpressionStatement",
+      location: nodeLocation(node, filename, source)
+    }
+  }
 
   return unsupportedSyntax("ruby", node.constructor.name, nodeLocation(node, filename, source))
 }
@@ -469,15 +492,26 @@ function convertType(sourceType, subject, location, typeLocation = location) {
  */
 function convertFunction(node, comments, filename, source) {
   const location = nodeLocation(node, filename, source)
+  const parameterList = node.parameters
 
-  if (!node.parameters || node.parameters.optionals.length > 0 || node.parameters.rest || node.parameters.posts.length > 0 ||
-    node.parameters.keywords.length > 0 || node.parameters.keywordRest || node.parameters.block ||
-    node.parameters.requireds.some((parameter) => !(parameter instanceof RequiredParameterNode))) {
-    return unsupportedSyntax("ruby", "parameters", location)
+  if (node.receiver) return unsupportedSyntax("ruby", "singleton method", nodeLocation(node.receiver, filename, source))
+  const unsupportedParameter = parameterList && [
+    parameterList.optionals[0], parameterList.rest, parameterList.posts[0], parameterList.keywords[0],
+    parameterList.keywordRest, parameterList.block,
+    parameterList.requireds.find((parameter) => !(parameter instanceof RequiredParameterNode))
+  ].find(Boolean)
+
+  if (unsupportedParameter) {
+    return unsupportedSyntax("ruby", "parameters", nodeLocation(unsupportedParameter, filename, source))
   }
 
   const declaredTypes = typeComments(comments, node, filename, source)
-  const parameters = node.parameters.requireds.map((parameter) => {
+  const requiredParameters = parameterList?.requireds ?? []
+  const extraAnnotation = [...declaredTypes.parameters.keys()].find((name) =>
+    !requiredParameters.some((parameter) => parameter instanceof RequiredParameterNode && parameter.name == name))
+
+  if (extraAnnotation) return unsupportedSyntax("ruby", `annotation for unknown parameter '${extraAnnotation}'`, location)
+  const parameters = requiredParameters.map((parameter) => {
     if (!(parameter instanceof RequiredParameterNode)) return unsupportedSyntax("ruby", parameter.constructor.name, location)
 
     const parameterLocation = nodeLocation(parameter, filename, source)
@@ -500,7 +534,13 @@ function convertFunction(node, comments, filename, source) {
     location,
     name: node.name,
     parameters,
-    returnType: convertType(declaredTypes.returnType?.sourceType, `Function '${node.name}' return`, location, declaredTypes.returnType?.location)
+    returnType: requireSourceReturnType(
+      "ruby",
+      declaredTypes.returnType?.sourceType,
+      `Function '${node.name}' return`,
+      location,
+      declaredTypes.returnType?.location
+    )
   }, {name: prismLocation(node.nameLoc, filename, source)})
 }
 
