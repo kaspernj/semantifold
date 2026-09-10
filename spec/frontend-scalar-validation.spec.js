@@ -89,7 +89,7 @@ console.log(label(true, "no"))
 
       assertDiagnostic({
         code: "UNSUPPORTED_SYNTAX",
-        detail: "unsupported scalar type",
+        detail: "unsupported collection or scalar type",
         filename: "boxed.ts",
         language: "typescript",
         line: 1,
