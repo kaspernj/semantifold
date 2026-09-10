@@ -2,10 +2,13 @@
 
 import {
   AndNode,
+  ArrayNode,
+  AssocNode,
   CallNode,
   DefNode,
   ElseNode,
   FalseNode,
+  HashNode,
   IfNode,
   IntegerNode,
   InterpolatedStringNode,
@@ -26,7 +29,8 @@ import {locationFromOffsets, moduleLocation, utf8ByteOffsetToUtf16Offset} from "
 import {withAdaptedOperation} from "../semantic/operators.js"
 import {withParserRanges} from "../semantic/provenance.js"
 import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
-import {requireSourceReturnType, requireSourceScalarType} from "./scalars.js"
+import {requireSourceReturnType} from "./scalars.js"
+import {documentedValueType} from "./types.js"
 const parsePrism = await loadPrism()
 const rubyBinaryOperations = new Map([
   ["+", "Add"],
@@ -126,6 +130,49 @@ function convertExpression(node, filename, source) {
 
   if (node instanceof InterpolatedStringNode) return unsupportedSyntax("ruby", "interpolated string", location)
 
+  if (node instanceof ArrayNode) {
+    if (!node.openingLoc || !node.closingLoc) return unsupportedSyntax("ruby", "special array literal", location)
+    if (node.isContainsSplat()) {
+      const splat = node.elements.find((element) => element.constructor.name == "SplatNode")
+
+      return unsupportedSyntax("ruby", "array splat", splat ? nodeLocation(splat, filename, source) : location)
+    }
+
+    return withParserRanges({
+      elements: node.elements.map((element) => convertExpression(element, filename, source)),
+      kind: /** @type {const} */ ("ListLiteral"),
+      location
+    }, {
+      close: prismLocation(node.closingLoc, filename, source),
+      open: prismLocation(node.openingLoc, filename, source)
+    })
+  }
+
+  if (node instanceof HashNode) {
+    const entries = node.elements.map((element) => {
+      if (!(element instanceof AssocNode) || !element.operatorLoc ||
+        slicePrismSource(source, element.operatorLoc.startOffset, element.operatorLoc.startOffset + element.operatorLoc.length) != "=>") {
+        return unsupportedSyntax("ruby", "hash entry", nodeLocation(element, filename, source))
+      }
+      if (!(element.key instanceof StringNode)) {
+        return unsupportedSyntax("ruby", "map key other than a string literal", nodeLocation(element.key, filename, source))
+      }
+      const key = convertExpression(element.key, filename, source)
+
+      return withParserRanges({
+        key: /** @type {import("../semantic/types.js").StringLiteral} */ (key),
+        kind: /** @type {const} */ ("MapEntry"),
+        location: nodeLocation(element, filename, source),
+        value: convertExpression(element.value, filename, source)
+      }, {operator: prismLocation(element.operatorLoc, filename, source)})
+    })
+
+    return withParserRanges({entries, kind: /** @type {const} */ ("MapLiteral"), location}, {
+      close: prismLocation(node.closingLoc, filename, source),
+      open: prismLocation(node.openingLoc, filename, source)
+    })
+  }
+
   if (node instanceof CallNode && node.receiver && node.name == "!") {
     const operatorLocation = prismLocation(node.messageLoc ?? node.location, filename, source)
 
@@ -197,6 +244,34 @@ function convertExpression(node, filename, source) {
     return /** @type {import("../semantic/types.js").Expression} */ (/** @type {unknown} */ (semantic))
   }
 
+  if (node instanceof CallNode && node.receiver && node.name == "[]" && node.arguments_?.arguments_.length == 1 &&
+    !node.callOperatorLoc && !node.block) {
+    return withParserRanges({
+      collection: convertExpression(node.receiver, filename, source),
+      index: convertExpression(node.arguments_.arguments_[0], filename, source),
+      kind: /** @type {const} */ ("ListIndexExpression"),
+      location,
+      totality: /** @type {const} */ ("proven")
+    }, {operator: prismLocation(node.openingLoc ?? node.messageLoc ?? node.location, filename, source)})
+  }
+  if (node instanceof CallNode && node.receiver && node.name == "fetch" && node.arguments_?.arguments_.length == 1 &&
+    node.callOperatorLoc && !node.block) {
+    return withParserRanges({
+      collection: convertExpression(node.receiver, filename, source),
+      key: convertExpression(node.arguments_.arguments_[0], filename, source),
+      kind: /** @type {const} */ ("MapLookupExpression"),
+      location,
+      totality: /** @type {const} */ ("fail-on-absence")
+    }, {operator: prismLocation(node.messageLoc ?? node.location, filename, source)})
+  }
+  if (node instanceof CallNode && node.receiver && node.name == "size" && !node.arguments_ && node.callOperatorLoc && !node.block) {
+    return withParserRanges({
+      collection: convertExpression(node.receiver, filename, source),
+      kind: /** @type {const} */ ("CollectionSizeExpression"),
+      location
+    }, {operator: prismLocation(node.messageLoc ?? node.location, filename, source)})
+  }
+
   if (node instanceof CallNode && !node.receiver) {
     if (["send", "public_send", "__send__"].includes(node.name)) {
       return unsupportedSyntax("ruby", "dynamic call", prismLocation(node.messageLoc ?? node.location, filename, source))
@@ -257,20 +332,37 @@ function typeComments(comments, node, filename, source) {
   for (const comment of preceding) {
     const words = commentTokens(comment, filename, source)
 
-    if (words[0]?.text == "@param" && words.length == 3) {
+    if (words[0]?.text == "@param" && words.length >= 3) {
       if (parameterTypes.has(words[1].text)) {
         return unsupportedSyntax("ruby", "duplicate parameter annotation", words[1].location)
       }
-      parameterTypes.set(words[1].text, {location: words[2].location, sourceType: words[2].text})
-    } else if (words[0]?.text == "@return" && words.length == 2) {
+      parameterTypes.set(words[1].text, joinedCommentToken(words, 2, source))
+    } else if (words[0]?.text == "@return" && words.length >= 2) {
       if (returnType) return unsupportedSyntax("ruby", "duplicate return annotation", words[1].location)
-      returnType = {location: words[1].location, sourceType: words[1].text}
+      returnType = joinedCommentToken(words, 1, source)
     } else if (words[0]?.text?.startsWith("@param") || words[0]?.text?.startsWith("@return")) {
       return unsupportedSyntax("ruby", "malformed function type annotation", nodeLocation(node, filename, source))
     }
   }
 
   return {parameters: parameterTypes, returnType}
+}
+
+/**
+ * Rejoins a bounded metadata suffix while retaining its parser-owned range.
+ * @param {{location: import("../semantic/types.js").SourceLocation, text: string}[]} tokens - Comment tokens.
+ * @param {number} start - First suffix token.
+ * @param {string} source - Complete source.
+ * @returns {{location: import("../semantic/types.js").SourceLocation, sourceType: string}} Joined token.
+ */
+function joinedCommentToken(tokens, start, source) {
+  const first = tokens[start]
+  const last = tokens.at(-1)
+
+  if (!first || !last) throw new Error("Ruby metadata suffix unexpectedly disappeared.")
+  const location = locationFromOffsets(first.location.filename, source, first.location.start.offset, last.location.end.offset)
+
+  return {location, sourceType: source.slice(location.start.offset, location.end.offset)}
 }
 
 /**
@@ -341,7 +433,7 @@ function associatedComments(comments, node, source) {
  * @param {LocalVariableWriteNode} node - Local write.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
- * @returns {{immutable: boolean, type: import("../semantic/types.js").TypeReference} | undefined} Metadata when present.
+ * @returns {{immutable: boolean, type: import("../semantic/types.js").SemanticValueType} | undefined} Metadata when present.
  */
 function localMetadata(comments, node, filename, source) {
   const associated = associatedComments(comments, node, source)
@@ -356,15 +448,17 @@ function localMetadata(comments, node, filename, source) {
 
   const location = nodeLocation(node, filename, source)
 
-  if (typeMetadata.length != 1 || typeMetadata[0].length != 2 ||
+  if (typeMetadata.length != 1 || typeMetadata[0].length < 2 ||
     immutableMetadata.length > 1 || immutableMetadata.some((tokens) => tokens.length != 1) ||
     profileMetadata.length != typeMetadata.length + immutableMetadata.length) {
     return unsupportedSyntax("ruby", "malformed local type metadata", location)
   }
 
+  const declaredType = joinedCommentToken(typeMetadata[0], 1, source)
+
   return {
     immutable: immutableMetadata.length == 1,
-    type: convertType(typeMetadata[0][1].text, `Local '${node.name}'`, location, typeMetadata[0][1].location)
+    type: convertType(declaredType.sourceType, `Local '${node.name}'`, location, source, declaredType.location)
   }
 }
 
@@ -476,15 +570,16 @@ function isImmediateCommentGap(gap) {
 }
 
 /**
- * Requires an exact supported Ruby scalar spelling.
+ * Requires an exact supported Ruby value-type spelling.
  * @param {string | undefined} sourceType - Ruby type comment value.
  * @param {string} subject - Typed subject.
  * @param {import("../semantic/types.js").SourceLocation} location - Source location.
+ * @param {string} source - Complete parser input.
  * @param {import("../semantic/types.js").SourceLocation} [typeLocation] - Exact type comment token location.
- * @returns {import("../semantic/types.js").TypeReference} Semantic type.
+ * @returns {import("../semantic/types.js").SemanticValueType} Semantic type.
  */
-function convertType(sourceType, subject, location, typeLocation = location) {
-  return requireSourceScalarType("ruby", sourceType, subject, location, typeLocation)
+function convertType(sourceType, subject, location, source, typeLocation = location) {
+  return documentedValueType({language: "ruby", location: typeLocation, ownerLocation: location, source, sourceType, subject})
 }
 
 /**
@@ -530,7 +625,7 @@ function convertFunction(node, comments, filename, source) {
       kind: /** @type {const} */ ("Parameter"),
       location: parameterLocation,
       name: parameter.name,
-      type: convertType(declaredType?.sourceType, `Parameter '${parameter.name}'`, parameterLocation, declaredType?.location)
+      type: convertType(declaredType?.sourceType, `Parameter '${parameter.name}'`, parameterLocation, source, declaredType?.location)
     }, {name: parameterLocation})
   })
   const visible = new Set(parameters.map((parameter) => parameter.name))
@@ -542,13 +637,9 @@ function convertFunction(node, comments, filename, source) {
     location,
     name: node.name,
     parameters,
-    returnType: requireSourceReturnType(
-      "ruby",
-      declaredTypes.returnType?.sourceType,
-      `Function '${node.name}' return`,
-      location,
-      declaredTypes.returnType?.location
-    )
+    returnType: declaredTypes.returnType?.sourceType == "[void]"
+      ? requireSourceReturnType("ruby", "[void]", `Function '${node.name}' return`, location, declaredTypes.returnType.location)
+      : convertType(declaredTypes.returnType?.sourceType, `Function '${node.name}' return`, location, source, declaredTypes.returnType?.location)
   }, {name: nameLocation})
 }
 

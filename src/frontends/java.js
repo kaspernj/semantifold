@@ -7,6 +7,7 @@ import {withAdaptedOperation} from "../semantic/operators.js"
 import {withParserRanges} from "../semantic/provenance.js"
 import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
 import {requireSourceReturnType, sourceScalarType} from "./scalars.js"
+import {listType, mapType} from "./types.js"
 
 /** @type {Readonly<Record<string, string>>} */
 const simpleStringEscapes = Object.freeze({
@@ -205,13 +206,79 @@ function convertExpression(node, filename, source) {
       return convertStringEquality(node, false, location, nodeLocation(methodName, filename, source), filename, source)
     }
 
-    const unsupportedReceiver = structuralChildren(node).find((child) => child.name != "MethodName" && child.name != "ArgumentList")
-
-    if (unsupportedReceiver) return unsupportedSyntax("java", "method invocation receiver", nodeLocation(unsupportedReceiver, filename, source))
-
     const methodName = requiredChild(node, "MethodName", filename, source)
     const argumentList = requiredChild(node, "ArgumentList", filename, source)
     const argumentNodes = structuralChildren(argumentList)
+    const receiver = structuralChildren(node).find((child) => child.name != "MethodName" && child.name != "ArgumentList")
+    const method = nodeText(methodName, source)
+    const receiverText = receiver ? nodeText(receiver, source) : ""
+
+    if (receiver && method == "of" && receiverText == "java.util.List") {
+      return withParserRanges({
+        elements: argumentNodes.map((argument) => convertExpression(argument, filename, source)),
+        kind: /** @type {const} */ ("ListLiteral"),
+        location
+      }, {factory: nodeLocation(methodName, filename, source)})
+    }
+    if (receiver && method == "of" && receiverText == "java.util.Map") {
+      if (argumentNodes.length % 2 != 0) return unsupportedSyntax("java", "Map.of odd argument count", location)
+      if (argumentNodes.length > 20) {
+        return unsupportedSyntax("java", "java.util.Map.of supports at most ten entries", nodeLocation(methodName, filename, source))
+      }
+      const entries = []
+
+      for (let index = 0; index < argumentNodes.length; index += 2) {
+        const keyNode = argumentNodes[index]
+
+        if (keyNode.name != "StringLiteral") {
+          return unsupportedSyntax("java", "map key other than a string literal", nodeLocation(keyNode, filename, source))
+        }
+        const separator = directChildren(argumentList).find((child) => child.name == "," &&
+          child.from >= keyNode.to && child.to <= argumentNodes[index + 1].from)
+
+        if (!separator) throw new Error("Lezer omitted the Java Map.of entry separator.")
+        entries.push(withParserRanges({
+          key: /** @type {import("../semantic/types.js").StringLiteral} */ (convertExpression(keyNode, filename, source)),
+          kind: /** @type {const} */ ("MapEntry"),
+          location: locationFromOffsets(filename, source, keyNode.from, argumentNodes[index + 1].to),
+          value: convertExpression(argumentNodes[index + 1], filename, source)
+        }, {operator: nodeLocation(separator, filename, source)}))
+      }
+
+      return withParserRanges({entries, kind: /** @type {const} */ ("MapLiteral"), location}, {
+        factory: nodeLocation(methodName, filename, source)
+      })
+    }
+    if (receiver && method == "get" && argumentNodes.length == 1) {
+      if (argumentNodes[0].name == "StringLiteral") {
+        return withParserRanges({
+          collection: convertExpression(receiver, filename, source),
+          key: convertExpression(argumentNodes[0], filename, source),
+          kind: /** @type {const} */ ("MapLookupExpression"),
+          location,
+          totality: /** @type {const} */ ("proven")
+        }, {operator: nodeLocation(methodName, filename, source)})
+      }
+
+      return withParserRanges({
+        collection: convertExpression(receiver, filename, source),
+        index: convertExpression(argumentNodes[0], filename, source),
+        kind: /** @type {const} */ ("ListIndexExpression"),
+        location,
+        totality: /** @type {const} */ ("fail-on-absence")
+      }, {operator: nodeLocation(methodName, filename, source)})
+    }
+    if (receiver && method == "size" && argumentNodes.length == 0) {
+      return withParserRanges({
+        collection: convertExpression(receiver, filename, source),
+        kind: /** @type {const} */ ("CollectionSizeExpression"),
+        location
+      }, {operator: nodeLocation(methodName, filename, source)})
+    }
+
+    const unsupportedReceiver = receiver
+
+    if (unsupportedReceiver) return unsupportedSyntax("java", "method invocation receiver", nodeLocation(unsupportedReceiver, filename, source))
     const unsupportedArgument = argumentNodes.find((child) => !isSupportedExpressionNode(child))
 
     if (unsupportedArgument) return unsupportedSyntax("java", `method argument ${unsupportedArgument.name}`, nodeLocation(unsupportedArgument, filename, source))
@@ -563,11 +630,46 @@ function convertBlock(node, filename, source) {
  * @param {import("../semantic/types.js").SourceLocation} location - Source location.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
- * @returns {import("../semantic/types.js").TypeReference} Semantic type.
+ * @returns {import("../semantic/types.js").SemanticValueType} Semantic type.
  */
 function convertType(sourceType, subject, location, filename, source) {
   if (!sourceType) return missingType("java", subject, location)
   if (sourceType.name == "void") return unsupportedSyntax("java", "void value type", nodeLocation(sourceType, filename, source))
+  if (sourceType.name == "GenericType") {
+    const children = structuralChildren(sourceType)
+    const nameNode = children[0]
+    const argumentsNode = children[1]
+
+    if (!nameNode || !argumentsNode || argumentsNode.name != "TypeArguments") {
+      return unsupportedSyntax("java", "malformed generic collection type", nodeLocation(sourceType, filename, source))
+    }
+    const name = nodeText(nameNode, source)
+    const arguments_ = structuralChildren(argumentsNode)
+
+    if (name == "java.util.List" && arguments_.length == 1) {
+      return listType(
+        convertJavaTypeArgument(arguments_[0], subject, location, filename, source),
+        nodeLocation(sourceType, filename, source),
+        nodeLocation(arguments_[0], filename, source)
+      )
+    }
+    if (name == "java.util.Map" && arguments_.length == 2) {
+      const keyType = convertJavaTypeArgument(arguments_[0], subject, location, filename, source)
+
+      if (keyType.kind != "TypeReference") {
+        return unsupportedSyntax("java", "map key type other than string", nodeLocation(arguments_[0], filename, source))
+      }
+      return mapType(
+        keyType,
+        convertJavaTypeArgument(arguments_[1], subject, location, filename, source),
+        nodeLocation(sourceType, filename, source),
+        nodeLocation(arguments_[0], filename, source),
+        nodeLocation(arguments_[1], filename, source)
+      )
+    }
+
+    return unsupportedSyntax("java", "unsupported generic collection type", nodeLocation(sourceType, filename, source))
+  }
   if (!["PrimitiveType", "TypeName", "ScopedTypeName"].includes(sourceType.name)) {
     return unsupportedSyntax("java", "unsupported scalar type", location)
   }
@@ -580,13 +682,33 @@ function convertType(sourceType, subject, location, filename, source) {
 }
 
 /**
+ * Converts one exact boxed Java collection type argument or nested collection.
+ * @param {import("@lezer/common").SyntaxNode} node - Type argument node.
+ * @param {string} subject - Typed subject.
+ * @param {import("../semantic/types.js").SourceLocation} location - Owning location.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @returns {import("../semantic/types.js").SemanticValueType} Semantic type.
+ */
+function convertJavaTypeArgument(node, subject, location, filename, source) {
+  if (node.name == "GenericType") return convertType(node, subject, location, filename, source)
+  const spelling = nodeText(node, source)
+  const scalar = spelling == "Integer" ? "integer" : spelling == "Boolean" ? "boolean" : spelling == "String" ? "string" : undefined
+
+  if (!scalar) return unsupportedSyntax("java", "unsupported collection type argument", nodeLocation(node, filename, source))
+  const type = {kind: /** @type {const} */ ("TypeReference"), name: /** @type {import("../semantic/types.js").SemanticTypeName} */ (scalar)}
+
+  return withParserRanges(type, {type: nodeLocation(node, filename, source)})
+}
+
+/**
  * Converts one explicit Java function return type.
  * @param {import("@lezer/common").SyntaxNode | null} sourceType - Java return type node.
  * @param {string} subject - Typed function return.
  * @param {import("../semantic/types.js").SourceLocation} location - Function location.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
- * @returns {import("../semantic/types.js").FunctionReturnTypeReference} Semantic return type.
+ * @returns {import("../semantic/types.js").SemanticFunctionReturnType} Semantic return type.
  */
 function convertReturnType(sourceType, subject, location, filename, source) {
   if (sourceType?.name == "void") {
@@ -602,7 +724,7 @@ function convertReturnType(sourceType, subject, location, filename, source) {
  * @returns {import("@lezer/common").SyntaxNode | null} Type syntax node.
  */
 function declarationType(node) {
-  return node.getChild("PrimitiveType") ?? node.getChild("TypeName") ?? node.getChild("ScopedTypeName") ?? node.getChild("void")
+  return node.getChild("GenericType") ?? node.getChild("PrimitiveType") ?? node.getChild("TypeName") ?? node.getChild("ScopedTypeName") ?? node.getChild("void")
 }
 
 /**

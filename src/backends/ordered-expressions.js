@@ -20,7 +20,7 @@ export class OrderedExpressionPlanner {
     this.language = language
     this.functions = new Map(module.functions.map((declaration) => [
       declaration.name,
-      /** @type {Scalar} */ (declaration.returnType.name)
+      scalarName(declaration.returnType, language, declaration.location)
     ]))
     this.nextTemporary = 1
   }
@@ -36,6 +36,9 @@ export class OrderedExpressionPlanner {
     if (expression.kind == "BooleanLiteral") return "boolean"
     if (expression.kind == "StringLiteral") return "string"
     if (expression.kind == "UnaryExpression" || expression.kind == "BinaryExpression") return expression.type
+    if (expression.kind != "CallExpression" && expression.kind != "IdentifierExpression") {
+      return unsupportedCapability(this.language, "collection expression reached native scalar planning", expression.location)
+    }
     const type = expression.kind == "CallExpression" ? this.functions.get(expression.callee) : bindings.get(expression.name)
 
     if (!type) return unsupportedCapability(this.language, "unresolved expression type", expression.location)
@@ -97,7 +100,8 @@ export class OrderedExpressionPlanner {
  * @returns {string} Stable SHA-256 profile signature.
  */
 export function statementSignature(statement) {
-  const consumer = statement.kind == "LocalDeclaration" ? [statement.kind, statement.name, statement.type.name, statement.mutable] :
+  const consumer = statement.kind == "LocalDeclaration" ? [statement.kind, statement.name,
+    scalarName(statement.type, "c", statement.location), statement.mutable] :
     statement.kind == "AssignmentStatement" ? [statement.kind, statement.target.name] : [statement.kind]
   const expression = statement.kind == "IfStatement" ? statement.condition : statement.kind == "LocalDeclaration" ? statement.initializer : statement.expression
 
@@ -116,6 +120,8 @@ function expressionSignature(expression) {
   if (expression.kind == "IntegerLiteral" || expression.kind == "BooleanLiteral" || expression.kind == "StringLiteral") return [expression.kind, expression.value]
   if (expression.kind == "CallExpression") return [expression.kind, expression.callee, ...expression.arguments.map(expressionSignature)]
   if (expression.kind == "UnaryExpression") return [expression.kind, expression.operation, expression.type, expressionSignature(expression.operand)]
+  if (expression.kind != "BinaryExpression") return [expression.kind]
+
   return [expression.kind, expression.operation, expression.type, expressionSignature(expression.left), expressionSignature(expression.right)]
 }
 
@@ -153,7 +159,7 @@ export function planNativeModule(module, language = "c") {
 
       if (plans.size >= 999999) unsupportedCapability(language, "ordered statement limit", statement.location)
       plans.set(statementPath, {id: String(plans.size + 1).padStart(6, "0"), steps, value})
-      if (statement.kind == "LocalDeclaration") bindings.set(statement.name, statement.type.name)
+      if (statement.kind == "LocalDeclaration") bindings.set(statement.name, scalarName(statement.type, language, statement.location))
       if (statement.kind == "IfStatement") {
         visit(statement.consequent, `${statementPath}/consequent`, bindings)
         if (statement.alternate) visit(statement.alternate, `${statementPath}/alternate`, bindings)
@@ -162,7 +168,22 @@ export function planNativeModule(module, language = "c") {
   }
 
   module.functions.forEach((declaration, index) => visit(declaration.body, `/functions/${index}/body`,
-    new Map(declaration.parameters.map((parameter) => [parameter.name, parameter.type.name]))))
+    new Map(declaration.parameters.map((parameter) => [parameter.name, scalarName(parameter.type, language, parameter.location)]))))
   visit(module.entryPoint.body, "/entryPoint/body", new Map())
   return plans
+}
+
+/**
+ * Narrows a type after non-cohort collection rejection.
+ * @param {import("../semantic/types.js").SemanticFunctionReturnType} type - Semantic type.
+ * @param {"c" | "cpp"} language - Diagnostic language.
+ * @param {import("../semantic/types.js").SourceLocation} location - Owning location.
+ * @returns {Scalar} Scalar name.
+ */
+function scalarName(type, language, location) {
+  if (type.kind != "TypeReference" || type.name == "void") {
+    return unsupportedCapability(language, "collection or void type reached native scalar planning", location)
+  }
+
+  return type.name
 }

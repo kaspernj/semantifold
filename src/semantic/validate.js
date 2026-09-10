@@ -1,7 +1,7 @@
 // @ts-check
 
 import {semanticFailure, unsupportedCapability, unsupportedSyntax} from "../diagnostic.js"
-import {hasOnlyUnicodeScalars, isFunctionReturnTypeName, isScalarTypeName} from "./scalars.js"
+import {hasOnlyUnicodeScalars, isScalarTypeName, scalarType} from "./scalars.js"
 import {adaptedOperationFor} from "./operators.js"
 import {parserRangeFor} from "./provenance.js"
 
@@ -10,7 +10,8 @@ const task005Languages = new Set(["php", "ruby", "javascript", "typescript", "ja
 /**
  * @typedef Binding
  * @property {boolean} mutable - Whether assignment is allowed.
- * @property {import("./types.js").SemanticTypeName} type - Binding type.
+ * @property {import("./types.js").SemanticValueType} type - Binding type.
+ * @property {import("./types.js").Expression | undefined} knownValue - Current statically known immutable value.
  */
 
 /**
@@ -139,13 +140,13 @@ function validateFunction(declaration, functions, fail, normalizeOperations) {
   for (const parameter of declaration.parameters) {
     const type = validateValueTypeReference(parameter.type, parameter.location, fail)
 
-    declareBinding(parameter.name, {mutable: false, type}, parameter.location, scope, fail)
+    declareBinding(parameter.name, {knownValue: undefined, mutable: false, type}, parameter.location, scope, fail)
   }
 
   const returnType = validateReturnTypeReference(declaration.returnType, declaration.location, fail)
   const returns = validateBlock(declaration.body, scope, returnType, functions, fail, normalizeOperations)
 
-  if (returnType != "void" && !returns) {
+  if (!isVoidType(returnType) && !returns) {
     fail("MISSING_RETURN", `Function '${declaration.name}' does not return on every reachable path.`, declaration.location)
   }
 }
@@ -154,7 +155,7 @@ function validateFunction(declaration, functions, fail, normalizeOperations) {
  * Validates one ordered block and reports whether every path returns.
  * @param {import("./types.js").Block} block - Semantic block.
  * @param {Scope} scope - Scope belonging to this block.
- * @param {import("./types.js").FunctionReturnTypeName | undefined} returnType - Function return type, absent for entry points.
+ * @param {import("./types.js").SemanticFunctionReturnType | undefined} returnType - Function return type, absent for entry points.
  * @param {Map<string, import("./types.js").FunctionDeclaration>} functions - Function signatures.
  * @param {SemanticFail} fail - Diagnostic callback.
  * @param {boolean} normalizeOperations - Whether to replace transient frontend operation intent.
@@ -168,29 +169,42 @@ function validateBlock(block, scope, returnType, functions, fail, normalizeOpera
 
     if (statement.kind == "LocalDeclaration") {
       const declaredType = validateValueTypeReference(statement.type, statement.location, fail)
-      const initializerType = inferValueExpressionType(statement.initializer, scope, functions, fail, normalizeOperations, "an initializer")
+      const initializerType = inferValueExpressionType(
+        statement.initializer, scope, functions, fail, normalizeOperations, "an initializer", declaredType
+      )
 
       scope.pending.delete(statement.name)
-      if (initializerType != declaredType) {
-        fail("TYPE_MISMATCH", `Initializer type ${initializerType}; expected ${declaredType}.`, statement.initializer.location)
+      if (!sameType(initializerType, declaredType)) {
+        fail("TYPE_MISMATCH", `Initializer type ${typeDescription(initializerType)}; expected ${typeDescription(declaredType)}.`, statement.initializer.location)
       }
-      declareBinding(statement.name, {mutable: statement.mutable, type: declaredType}, statement.location, scope, fail)
+      declareBinding(statement.name, {
+        knownValue: knownValueForExpression(statement.initializer, scope),
+        mutable: statement.mutable,
+        type: declaredType
+      }, statement.location, scope, fail)
       continue
     }
     if (statement.kind == "AssignmentStatement") {
-      const expressionType = inferValueExpressionType(statement.expression, scope, functions, fail, normalizeOperations, "an assignment")
       const binding = resolveBinding(statement.target.name, statement.target.location, scope, fail)
+      const expressionType = inferValueExpressionType(
+        statement.expression, scope, functions, fail, normalizeOperations, "an assignment", binding.type
+      )
 
       if (!binding.mutable) {
         fail("IMMUTABLE_ASSIGNMENT", `Cannot assign to immutable binding '${statement.target.name}'.`, statement.target.location)
       }
-      if (expressionType != binding.type) {
-        fail("TYPE_MISMATCH", `Assignment type ${expressionType}; expected ${binding.type}.`, statement.expression.location)
+      if (!sameType(expressionType, binding.type)) {
+        fail("TYPE_MISMATCH", `Assignment type ${typeDescription(expressionType)}; expected ${typeDescription(binding.type)}.`, statement.expression.location)
       }
+      binding.knownValue = knownValueForExpression(statement.expression, scope)
       continue
     }
     if (statement.kind == "PrintStatement") {
-      inferValueExpressionType(statement.expression, scope, functions, fail, normalizeOperations, "a print value")
+      const printedType = inferValueExpressionType(statement.expression, scope, functions, fail, normalizeOperations, "a print value")
+
+      if (printedType.kind != "TypeReference") {
+        fail("TYPE_MISMATCH", "Collections cannot be printed directly.", statement.expression.location)
+      }
       continue
     }
     if (statement.kind == "ExpressionStatement") {
@@ -206,23 +220,26 @@ function validateBlock(block, scope, returnType, functions, fail, normalizeOpera
     }
     if (statement.kind == "ReturnStatement") {
       if (!returnType) fail("ILLEGAL_RETURN_CONTEXT", "Return statement outside a function.", statement.location)
-      if (returnType == "void") {
+      if (isVoidType(returnType)) {
         if (statement.expression) {
           fail("VOID_RETURN_VALUE", "Void function cannot return a value.", statement.expression.location)
         }
       } else {
-        if (!statement.expression) fail("MISSING_RETURN_VALUE", `Function return requires a ${returnType} value.`, statement.location)
+        if (!statement.expression) {
+          fail("MISSING_RETURN_VALUE", `Function return requires a ${typeDescription(returnType)} value.`, statement.location)
+        }
         const actualType = inferValueExpressionType(
           statement.expression,
           scope,
           functions,
           fail,
           normalizeOperations,
-          "a returned value"
+          "a returned value",
+          returnType
         )
 
-        if (actualType != returnType) {
-          fail("TYPE_MISMATCH", `Return type ${actualType}; expected ${returnType}.`, statement.expression.location)
+        if (!sameType(actualType, returnType)) {
+          fail("TYPE_MISMATCH", `Return type ${typeDescription(actualType)}; expected ${typeDescription(returnType)}.`, statement.expression.location)
         }
       }
       alwaysReturns = true
@@ -231,11 +248,18 @@ function validateBlock(block, scope, returnType, functions, fail, normalizeOpera
     if (statement.kind == "IfStatement") {
       const conditionType = inferValueExpressionType(statement.condition, scope, functions, fail, normalizeOperations, "a condition")
 
-      if (conditionType != "boolean") {
-        fail("NON_BOOLEAN_CONDITION", `If condition type ${conditionType}; expected boolean.`, statement.condition.location)
+      if (!isScalarType(conditionType, "boolean")) {
+        fail("NON_BOOLEAN_CONDITION", `If condition type ${typeDescription(conditionType)}; expected boolean.`, statement.condition.location)
       }
+      const visibleBindings = bindingsVisibleFrom(scope)
+      const initialKnownValues = visibleBindings.map((binding) => binding.knownValue)
       const consequentScope = createScope(scope, statement.consequent.statements)
       const consequentReturns = validateBlock(statement.consequent, consequentScope, returnType, functions, fail, normalizeOperations)
+      const consequentKnownValues = visibleBindings.map((binding) => binding.knownValue)
+
+      visibleBindings.forEach((binding, index) => {
+        binding.knownValue = initialKnownValues[index]
+      })
       let alternateReturns = false
 
       if (statement.alternate) {
@@ -243,6 +267,15 @@ function validateBlock(block, scope, returnType, functions, fail, normalizeOpera
 
         alternateReturns = validateBlock(statement.alternate, alternateScope, returnType, functions, fail, normalizeOperations)
       }
+      const alternateKnownValues = visibleBindings.map((binding) => binding.knownValue)
+
+      visibleBindings.forEach((binding, index) => {
+        if (consequentReturns && !alternateReturns) binding.knownValue = alternateKnownValues[index]
+        else if (!consequentReturns && alternateReturns) binding.knownValue = consequentKnownValues[index]
+        else if (!consequentReturns && !alternateReturns && consequentKnownValues[index] === alternateKnownValues[index]) {
+          binding.knownValue = consequentKnownValues[index]
+        } else binding.knownValue = undefined
+      })
       alwaysReturns = consequentReturns && alternateReturns
       continue
     }
@@ -311,14 +344,15 @@ function resolveBinding(name, location, scope, fail) {
  * @param {unknown} type - Candidate semantic type reference.
  * @param {import("./types.js").SourceLocation} location - Owning source location.
  * @param {SemanticFail} fail - Diagnostic callback.
- * @returns {import("./types.js").SemanticTypeName} Validated scalar name.
+ * @param {Set<object>} [seen] - Active recursive type path.
+ * @returns {import("./types.js").SemanticValueType} Validated value type.
  */
-function validateValueTypeReference(type, location, fail) {
-  const name = validateTypeReference(type, location, fail)
+function validateValueTypeReference(type, location, fail, seen) {
+  const candidate = validateTypeReference(type, location, fail, seen)
 
-  if (name == "void") return fail("VOID_AS_VALUE", "Void is valid only as a function return type.", typeLocation(type, location))
+  if (isVoidType(candidate)) return fail("VOID_AS_VALUE", "Void is valid only as a function return type.", typeLocation(type, location))
 
-  return name
+  return candidate
 }
 
 /**
@@ -326,31 +360,64 @@ function validateValueTypeReference(type, location, fail) {
  * @param {unknown} type - Candidate semantic return type reference.
  * @param {import("./types.js").SourceLocation} location - Owning source location.
  * @param {SemanticFail} fail - Diagnostic callback.
- * @returns {import("./types.js").FunctionReturnTypeName} Validated return name.
+ * @returns {import("./types.js").SemanticFunctionReturnType} Validated return type.
  */
 function validateReturnTypeReference(type, location, fail) {
   return validateTypeReference(type, location, fail)
 }
 
 /**
- * Validates one semantic type-reference shape.
+ * Validates one recursive semantic type-reference shape.
  * @param {unknown} type - Candidate semantic type reference.
  * @param {import("./types.js").SourceLocation} location - Owning source location.
  * @param {SemanticFail} fail - Diagnostic callback.
- * @returns {import("./types.js").FunctionReturnTypeName} Validated type name.
+ * @param {Set<object>} [seen] - Active recursive type path.
+ * @returns {import("./types.js").SemanticFunctionReturnType} Validated type.
  */
-function validateTypeReference(type, location, fail) {
+function validateTypeReference(type, location, fail, seen = new Set()) {
   if (!type || typeof type != "object" || Array.isArray(type)) {
-    return fail("TYPE_MISMATCH", "Unsupported scalar type.", location)
+    return fail("TYPE_MISMATCH", "Unsupported semantic type.", location)
   }
 
-  const candidate = /** @type {import("./types.js").TypeReference} */ (type)
+  const candidate = /** @type {import("./types.js").SemanticFunctionReturnType} */ (type)
 
-  if (candidate.kind != "TypeReference" || !isFunctionReturnTypeName(candidate.name)) {
-    fail("TYPE_MISMATCH", "Unsupported scalar or void return type.", typeLocation(candidate, location))
+  if (candidate.kind == "TypeReference") {
+    if (!isScalarTypeName(candidate.name) && candidate.name != "void") {
+      fail("TYPE_MISMATCH", "Unsupported scalar or void return type.", typeLocation(candidate, location))
+    }
+
+    return candidate
+  }
+  if (candidate.kind == "ListType") {
+    if (seen.has(candidate)) return fail("TYPE_MISMATCH", "Recursive collection types cannot contain cycles.", typeLocation(candidate, location))
+    seen.add(candidate)
+    const elementType = validateValueTypeReference(candidate.elementType, typeLocation(candidate, location, "elementType"), fail, seen)
+
+    seen.delete(candidate)
+
+    if (candidate.elementType !== elementType) candidate.elementType = elementType
+
+    return candidate
+  }
+  if (candidate.kind == "MapType") {
+    if (seen.has(candidate)) return fail("TYPE_MISMATCH", "Recursive collection types cannot contain cycles.", typeLocation(candidate, location))
+    seen.add(candidate)
+    const keyType = validateValueTypeReference(candidate.keyType, typeLocation(candidate, location, "keyType"), fail, seen)
+
+    if (!isScalarType(keyType, "string")) {
+      fail("TYPE_MISMATCH", `Map key type ${typeDescription(keyType)}; expected string.`, typeLocation(candidate.keyType, location))
+    }
+    const valueType = validateValueTypeReference(candidate.valueType, typeLocation(candidate, location, "valueType"), fail, seen)
+
+    seen.delete(candidate)
+
+    if (candidate.keyType !== keyType) candidate.keyType = /** @type {import("./types.js").TypeReference} */ (keyType)
+    if (candidate.valueType !== valueType) candidate.valueType = valueType
+
+    return candidate
   }
 
-  return candidate.name
+  return fail("TYPE_MISMATCH", "Unsupported semantic type.", typeLocation(candidate, location))
 }
 
 /**
@@ -361,10 +428,11 @@ function validateTypeReference(type, location, fail) {
  * @param {SemanticFail} fail - Diagnostic callback.
  * @param {boolean} normalizeOperations - Whether to normalize frontend intent and call resolution.
  * @param {string} context - Value context for diagnostics.
- * @returns {import("./types.js").SemanticTypeName} Expression value type.
+ * @param {import("./types.js").SemanticValueType} [expectedType] - Contextual collection type.
+ * @returns {import("./types.js").SemanticValueType} Expression value type.
  */
-function inferValueExpressionType(expression, scope, functions, fail, normalizeOperations, context) {
-  const type = inferExpressionType(expression, scope, functions, fail, normalizeOperations)
+function inferValueExpressionType(expression, scope, functions, fail, normalizeOperations, context, expectedType) {
+  const type = inferExpressionType(expression, scope, functions, fail, normalizeOperations, expectedType)
 
   if (type == "void") fail("VOID_AS_VALUE", `Void call cannot be used as ${context}.`, expression.location)
 
@@ -378,20 +446,21 @@ function inferValueExpressionType(expression, scope, functions, fail, normalizeO
  * @param {Map<string, import("./types.js").FunctionDeclaration>} functions - Module function signatures.
  * @param {SemanticFail} fail - Diagnostic callback.
  * @param {boolean} normalizeOperations - Whether to replace transient frontend operation intent.
- * @returns {import("./types.js").FunctionReturnTypeName} Expression type.
+ * @param {import("./types.js").SemanticValueType} [expectedType] - Contextual collection type.
+ * @returns {import("./types.js").SemanticValueType | "void"} Expression type.
  */
-function inferExpressionType(expression, scope, functions, fail, normalizeOperations) {
+function inferExpressionType(expression, scope, functions, fail, normalizeOperations, expectedType) {
   if (expression.kind == "IdentifierExpression") return resolveBinding(expression.name, expression.location, scope, fail).type
 
   if (expression.kind == "IntegerLiteral") {
     if (!Number.isSafeInteger(expression.value)) fail("TYPE_MISMATCH", "Non-safe integer literal.", expression.location)
-    return "integer"
+    return scalarType("integer")
   }
   if (expression.kind == "BooleanLiteral") {
     if (typeof Reflect.get(expression, "value") != "boolean") {
       fail("TYPE_MISMATCH", "Invalid boolean literal value.", expression.location)
     }
-    return "boolean"
+    return scalarType("boolean")
   }
   if (expression.kind == "StringLiteral") {
     const value = Reflect.get(expression, "value")
@@ -399,7 +468,136 @@ function inferExpressionType(expression, scope, functions, fail, normalizeOperat
     if (typeof value != "string" || !hasOnlyUnicodeScalars(value)) {
       fail("TYPE_MISMATCH", "Invalid Unicode string literal.", expression.location)
     }
-    return "string"
+    return scalarType("string")
+  }
+  if (expression.kind == "ListLiteral") {
+    if (!expectedType || expectedType.kind != "ListType") {
+      return fail("MISSING_TYPE", "List literal requires an explicit recursive list type.", expression.location)
+    }
+    if (!Array.isArray(expression.elements)) {
+      return fail("TYPE_MISMATCH", "List literal elements must be a dense source-ordered array.", expression.location)
+    }
+    for (let index = 0; index < expression.elements.length; index++) {
+      if (!Object.hasOwn(expression.elements, index)) {
+        fail("TYPE_MISMATCH", "Sparse list literals are outside the implemented subset.", expression.location)
+      }
+      const element = expression.elements[index]
+      const actual = inferValueExpressionType(
+        element, scope, functions, fail, normalizeOperations, "a list element", expectedType.elementType
+      )
+
+      if (!sameType(actual, expectedType.elementType)) {
+        fail("TYPE_MISMATCH", `List element type ${typeDescription(actual)}; expected ${typeDescription(expectedType.elementType)}.`, element.location)
+      }
+    }
+
+    return expectedType
+  }
+  if (expression.kind == "MapLiteral") {
+    if (!expectedType || expectedType.kind != "MapType") {
+      return fail("MISSING_TYPE", "Map literal requires an explicit recursive map type.", expression.location)
+    }
+    if (!isScalarType(expectedType.keyType, "string")) {
+      return fail("TYPE_MISMATCH", "Map key type must be string.", typeLocation(expectedType.keyType, expression.location))
+    }
+    if (!Array.isArray(expression.entries)) {
+      return fail("TYPE_MISMATCH", "Map literal entries must be a dense source-ordered array.", expression.location)
+    }
+    const keys = new Set()
+
+    for (let index = 0; index < expression.entries.length; index++) {
+      if (!Object.hasOwn(expression.entries, index)) {
+        fail("TYPE_MISMATCH", "Sparse map literals are outside the implemented subset.", expression.location)
+      }
+      const entry = expression.entries[index]
+
+      if (!entry || entry.kind != "MapEntry" || !entry.key || entry.key.kind != "StringLiteral") {
+        fail("TYPE_MISMATCH", "Map entries require literal string keys.", entry?.location ?? expression.location)
+      }
+      inferValueExpressionType(entry.key, scope, functions, fail, normalizeOperations, "a map key", expectedType.keyType)
+      if (isNumericString(entry.key.value)) {
+        fail("INVALID_MAP_KEY", "Map initializer keys must be nonnumeric strings.", entry.key.location)
+      }
+      if (keys.has(entry.key.value)) {
+        fail("DUPLICATE_MAP_KEY", `Duplicate map key '${entry.key.value}'.`, entry.key.location)
+      }
+      keys.add(entry.key.value)
+      const actual = inferValueExpressionType(
+        entry.value, scope, functions, fail, normalizeOperations, "a map value", expectedType.valueType
+      )
+
+      if (!sameType(actual, expectedType.valueType)) {
+        fail("TYPE_MISMATCH", `Map value type ${typeDescription(actual)}; expected ${typeDescription(expectedType.valueType)}.`, entry.value.location)
+      }
+    }
+
+    return expectedType
+  }
+  if (expression.kind == "ListIndexExpression") {
+    const collectionType = inferValueExpressionType(expression.collection, scope, functions, fail, normalizeOperations, "a list receiver")
+    const indexType = inferValueExpressionType(expression.index, scope, functions, fail, normalizeOperations, "a list index", scalarType("integer"))
+
+    if (collectionType.kind != "ListType") {
+      return fail("TYPE_MISMATCH", `List index receiver type ${typeDescription(collectionType)}; expected list.`, expression.collection.location)
+    }
+    if (!isScalarType(indexType, "integer")) {
+      fail("TYPE_MISMATCH", `List index type ${typeDescription(indexType)}; expected integer.`, expression.index.location)
+    }
+    const knownCollection = knownValueForExpression(expression.collection, scope)
+    const knownIndex = knownValueForExpression(expression.index, scope)
+
+    if (knownCollection?.kind == "ListLiteral" && knownIndex?.kind == "IntegerLiteral" &&
+      (knownIndex.value < 0 || knownIndex.value >= knownCollection.elements.length)) {
+      fail("INDEX_OUT_OF_BOUNDS", `List index ${knownIndex.value} is outside a literal list of size ${knownCollection.elements.length}.`, expression.location)
+    }
+    const proven = provenListElement(expression.collection, expression.index, scope)
+
+    validateAccessTotality(expression, proven !== undefined, normalizeOperations, fail)
+
+    return collectionType.elementType
+  }
+  if (expression.kind == "MapLookupExpression") {
+    const collectionType = inferValueExpressionType(expression.collection, scope, functions, fail, normalizeOperations, "a map receiver")
+    const keyType = inferValueExpressionType(expression.key, scope, functions, fail, normalizeOperations, "a map key", scalarType("string"))
+
+    if (collectionType.kind != "MapType") {
+      return fail("TYPE_MISMATCH", `Map lookup receiver type ${typeDescription(collectionType)}; expected map.`, expression.collection.location)
+    }
+    if (!isScalarType(keyType, "string")) {
+      fail("TYPE_MISMATCH", `Map lookup key type ${typeDescription(keyType)}; expected string.`, expression.key.location)
+    }
+    const knownCollection = knownValueForExpression(expression.collection, scope)
+    const knownKey = knownValueForExpression(expression.key, scope)
+
+    if (knownCollection?.kind == "MapLiteral" && knownKey?.kind == "StringLiteral" &&
+      !knownCollection.entries.some((entry) => entry.key.value == knownKey.value)) {
+      fail("MISSING_MAP_KEY", `Map key '${knownKey.value}' is absent from the literal initializer.`, expression.location)
+    }
+    const proven = provenMapValue(expression.collection, expression.key, scope)
+
+    validateAccessTotality(expression, proven !== undefined, normalizeOperations, fail)
+
+    return collectionType.valueType
+  }
+  if (expression.kind == "CollectionSizeExpression") {
+    const collectionType = inferValueExpressionType(expression.collection, scope, functions, fail, normalizeOperations, "a collection-size receiver")
+
+    if (collectionType.kind != "ListType" && collectionType.kind != "MapType") {
+      return fail("TYPE_MISMATCH", `Collection size receiver type ${typeDescription(collectionType)}; expected list or map.`, expression.collection.location)
+    }
+    const collectionKind = collectionType.kind == "ListType" ? "list" : "map"
+
+    if (normalizeOperations) {
+      if (expression.collectionKind !== undefined && expression.collectionKind != collectionKind) {
+        fail("TYPE_MISMATCH", "Collection size operation does not match its receiver type.", expression.location)
+      }
+      expression.collectionKind = collectionKind
+    }
+    else if (expression.collectionKind != collectionKind) {
+      fail("TYPE_MISMATCH", "Collection size kind does not match its receiver type.", expression.location)
+    }
+
+    return scalarType("integer")
   }
   if (expression.kind == "CallExpression") {
     const functionDeclaration = functions.get(expression.callee)
@@ -407,7 +605,7 @@ function inferExpressionType(expression, scope, functions, fail, normalizeOperat
     if (!functionDeclaration) {
       return fail("UNRESOLVED_BINDING", `Unknown function '${expression.callee}'.`, roleLocation(expression, "callee"))
     }
-    const resolution = signatureFor(functionDeclaration)
+    const resolution = signatureFor(functionDeclaration, fail)
 
     if (normalizeOperations) expression.resolution = resolution
     else validateResolution(expression.resolution, resolution, expression.location, fail)
@@ -416,17 +614,22 @@ function inferExpressionType(expression, scope, functions, fail, normalizeOperat
     }
     for (let index = 0; index < expression.arguments.length; index++) {
       const argument = expression.arguments[index]
-      const actualType = inferValueExpressionType(argument, scope, functions, fail, normalizeOperations, "a call argument")
       const expectedType = validateValueTypeReference(functionDeclaration.parameters[index].type, functionDeclaration.parameters[index].location, fail)
+      const actualType = inferValueExpressionType(
+        argument, scope, functions, fail, normalizeOperations, "a call argument", expectedType
+      )
 
-      if (actualType != expectedType) {
-        fail("TYPE_MISMATCH", `Call argument type ${actualType}; expected ${expectedType}.`, argument.location)
+      if (!sameType(actualType, expectedType)) {
+        fail("TYPE_MISMATCH", `Call argument type ${typeDescription(actualType)}; expected ${typeDescription(expectedType)}.`, argument.location)
       }
     }
-    return validateReturnTypeReference(functionDeclaration.returnType, functionDeclaration.location, fail)
+    const returnType = validateReturnTypeReference(functionDeclaration.returnType, functionDeclaration.location, fail)
+
+    return isVoidType(returnType) ? "void" : returnType
   }
   if (expression.kind == "UnaryExpression") {
-    const operandType = inferValueExpressionType(expression.operand, scope, functions, fail, normalizeOperations, "a unary operand")
+    const operand = inferValueExpressionType(expression.operand, scope, functions, fail, normalizeOperations, "a unary operand")
+    const operandType = scalarNameForOperation(operand, expression.operand.location, fail)
     const operation = normalizeOperations
       ? normalizeUnaryOperation(adaptedOperationFor(expression), operandType, expression.operand.location, fail)
       : expression.operation
@@ -442,11 +645,13 @@ function inferExpressionType(expression, scope, functions, fail, normalizeOperat
     if (expression.type != signature.result) {
       return fail("TYPE_MISMATCH", `${operation} result type ${String(expression.type)}; expected ${signature.result}.`, expression.location)
     }
-    return signature.result
+    return scalarType(signature.result)
   }
   if (expression.kind == "BinaryExpression") {
-    const leftType = inferValueExpressionType(expression.left, scope, functions, fail, normalizeOperations, "a binary operand")
-    const rightType = inferValueExpressionType(expression.right, scope, functions, fail, normalizeOperations, "a binary operand")
+    const left = inferValueExpressionType(expression.left, scope, functions, fail, normalizeOperations, "a binary operand")
+    const right = inferValueExpressionType(expression.right, scope, functions, fail, normalizeOperations, "a binary operand")
+    const leftType = scalarNameForOperation(left, expression.left.location, fail)
+    const rightType = scalarNameForOperation(right, expression.right.location, fail)
     const operation = normalizeOperations
       ? normalizeBinaryOperation(adaptedOperationFor(expression), leftType, rightType, expression.left.location, expression.right.location, expression.location, fail)
       : expression.operation
@@ -465,7 +670,7 @@ function inferExpressionType(expression, scope, functions, fail, normalizeOperat
     if (expression.type != signature.result) {
       return fail("TYPE_MISMATCH", `${operation} result type ${String(expression.type)}; expected ${signature.result}.`, expression.location)
     }
-    return signature.result
+    return scalarType(signature.result)
   }
 
   const unexpected = /** @type {{kind: string, location: import("./types.js").SourceLocation}} */ (expression)
@@ -476,14 +681,19 @@ function inferExpressionType(expression, scope, functions, fail, normalizeOperat
 /**
  * Builds the exact semantic signature bound to one declaration.
  * @param {import("./types.js").FunctionDeclaration} declaration - Resolved declaration.
+ * @param {SemanticFail} fail - Diagnostic callback.
  * @returns {import("./types.js").ResolvedFunctionSignature} Detached signature binding.
  */
-function signatureFor(declaration) {
+function signatureFor(declaration, fail) {
+  const parameterTypes = declaration.parameters.map((parameter) =>
+    validateValueTypeReference(parameter.type, parameter.location, fail))
+  const returnType = validateReturnTypeReference(declaration.returnType, declaration.location, fail)
+
   return {
     declarationId: /** @type {string} */ (declaration.id),
     kind: "ResolvedFunctionSignature",
-    parameterTypes: declaration.parameters.map((parameter) => /** @type {import("./types.js").SemanticTypeName} */ (parameter.type.name)),
-    returnType: declaration.returnType.name
+    parameterTypes: parameterTypes.map((type) => /** @type {import("./types.js").SemanticTypeIdentity} */ (typeIdentity(type))),
+    returnType: typeIdentity(returnType)
   }
 }
 
@@ -503,19 +713,247 @@ function validateResolution(actual, expected, location, fail) {
   const candidate = /** @type {import("./types.js").ResolvedFunctionSignature} */ (actual)
 
   if (candidate.kind != "ResolvedFunctionSignature" || typeof candidate.declarationId != "string" ||
-    !Array.isArray(candidate.parameterTypes) ||
-    !isFunctionReturnTypeName(candidate.returnType) ||
+    !Array.isArray(candidate.parameterTypes) || !validTypeIdentity(candidate.returnType, true) ||
     candidate.declarationId != expected.declarationId ||
-    candidate.returnType != expected.returnType || candidate.parameterTypes.length != expected.parameterTypes.length) {
+    !sameTypeIdentity(candidate.returnType, expected.returnType) || candidate.parameterTypes.length != expected.parameterTypes.length) {
     fail("TYPE_MISMATCH", "Call resolution does not match its declaration signature.", location)
   }
   for (let index = 0; index < candidate.parameterTypes.length; index++) {
     const type = candidate.parameterTypes[index]
 
-    if (!Object.hasOwn(candidate.parameterTypes, index) || !isScalarTypeName(type) || type != expected.parameterTypes[index]) {
+    if (!Object.hasOwn(candidate.parameterTypes, index) || !validTypeIdentity(type, false) ||
+      !sameTypeIdentity(type, expected.parameterTypes[index])) {
       fail("TYPE_MISMATCH", "Call resolution does not match its declaration signature.", location)
     }
   }
+}
+
+/**
+ * Converts a semantic type to its detached call-resolution identity.
+ * @param {import("./types.js").SemanticFunctionReturnType} type - Validated semantic type.
+ * @returns {import("./types.js").FunctionReturnTypeIdentity} Detached identity.
+ */
+function typeIdentity(type) {
+  if (type.kind == "TypeReference") return type.name
+  if (type.kind == "ListType") return {elementType: /** @type {import("./types.js").SemanticTypeIdentity} */ (typeIdentity(type.elementType)), kind: "ListType"}
+
+  return {
+    keyType: /** @type {import("./types.js").SemanticTypeIdentity} */ (typeIdentity(type.keyType)),
+    kind: "MapType",
+    valueType: /** @type {import("./types.js").SemanticTypeIdentity} */ (typeIdentity(type.valueType))
+  }
+}
+
+/**
+ * Checks one externally supplied recursive type identity.
+ * @param {unknown} type - Candidate identity.
+ * @param {boolean} allowVoid - Whether void is permitted.
+ * @param {Set<object>} [seen] - Active recursion path.
+ * @returns {boolean} Whether the identity is closed and acyclic.
+ */
+function validTypeIdentity(type, allowVoid, seen = new Set()) {
+  if (typeof type == "string") return isScalarTypeName(type) || allowVoid && type == "void"
+  if (!type || typeof type != "object" || Array.isArray(type) || seen.has(type)) return false
+
+  seen.add(type)
+  const candidate = /** @type {Record<string, unknown>} */ (type)
+  let valid = false
+
+  if (candidate.kind == "ListType" && Object.keys(candidate).sort().join(",") == "elementType,kind") {
+    valid = validTypeIdentity(candidate.elementType, false, seen)
+  } else if (candidate.kind == "MapType" && Object.keys(candidate).sort().join(",") == "keyType,kind,valueType") {
+    valid = candidate.keyType == "string" && validTypeIdentity(candidate.valueType, false, seen)
+  }
+  seen.delete(type)
+
+  return valid
+}
+
+/**
+ * Compares two closed type identities structurally.
+ * @param {unknown} left - First identity.
+ * @param {unknown} right - Second identity.
+ * @returns {boolean} Whether the identities are equal.
+ */
+function sameTypeIdentity(left, right) {
+  if (typeof left == "string" || typeof right == "string") return left === right
+  if (!left || !right || typeof left != "object" || typeof right != "object") return false
+  const leftType = /** @type {Record<string, unknown>} */ (left)
+  const rightType = /** @type {Record<string, unknown>} */ (right)
+
+  if (leftType.kind != rightType.kind) return false
+  if (leftType.kind == "ListType") return sameTypeIdentity(leftType.elementType, rightType.elementType)
+  if (leftType.kind == "MapType") {
+    return sameTypeIdentity(leftType.keyType, rightType.keyType) && sameTypeIdentity(leftType.valueType, rightType.valueType)
+  }
+
+  return false
+}
+
+/**
+ * Compares two validated semantic types structurally.
+ * @param {import("./types.js").SemanticFunctionReturnType} left - First type.
+ * @param {import("./types.js").SemanticFunctionReturnType} right - Second type.
+ * @returns {boolean} Whether the types are equal.
+ */
+function sameType(left, right) {
+  return sameTypeIdentity(typeIdentity(left), typeIdentity(right))
+}
+
+/**
+ * Formats one validated semantic type for diagnostics.
+ * @param {import("./types.js").SemanticFunctionReturnType} type - Semantic type.
+ * @returns {string} Stable recursive spelling.
+ */
+function typeDescription(type) {
+  if (type.kind == "TypeReference") return type.name
+  if (type.kind == "ListType") return `list<${typeDescription(type.elementType)}>`
+
+  return `map<string, ${typeDescription(type.valueType)}>`
+}
+
+/**
+ * Checks one scalar semantic type.
+ * @param {import("./types.js").SemanticFunctionReturnType} type - Semantic type.
+ * @param {import("./types.js").SemanticTypeName} [name] - Optional required scalar.
+ * @returns {type is import("./types.js").TypeReference} Whether it is the requested scalar.
+ */
+function isScalarType(type, name) {
+  return type.kind == "TypeReference" && isScalarTypeName(type.name) && (name === undefined || type.name == name)
+}
+
+/**
+ * Checks the sole non-value return type.
+ * @param {import("./types.js").SemanticFunctionReturnType} type - Semantic type.
+ * @returns {type is import("./types.js").FunctionReturnTypeReference} Whether it is void.
+ */
+function isVoidType(type) {
+  return type.kind == "TypeReference" && type.name == "void"
+}
+
+/**
+ * Requires a scalar type for the pre-collection operator contract.
+ * @param {import("./types.js").SemanticValueType} type - Operand type.
+ * @param {import("./types.js").SourceLocation} location - Operand location.
+ * @param {SemanticFail} fail - Diagnostic callback.
+ * @returns {import("./types.js").SemanticTypeName} Scalar name.
+ */
+function scalarNameForOperation(type, location, fail) {
+  if (!isScalarType(type)) {
+    return fail("INVALID_OPERAND_TYPE", `Scalar operation received ${typeDescription(type)}.`, location)
+  }
+
+  return type.name
+}
+
+/**
+ * Enforces that a total collection access is proven or uses a source operation that fails on absence.
+ * @param {import("./types.js").ListIndexExpression | import("./types.js").MapLookupExpression} expression - Access.
+ * @param {boolean} proven - Whether static literal propagation proves presence.
+ * @param {boolean} normalizeOperations - Whether this is frontend admission.
+ * @param {SemanticFail} fail - Diagnostic callback.
+ * @returns {void}
+ */
+function validateAccessTotality(expression, proven, normalizeOperations, fail) {
+  if (proven) {
+    if (normalizeOperations) expression.totality = "proven"
+    else if (expression.totality != "proven" && expression.totality != "fail-on-absence") {
+      fail("UNCHECKED_COLLECTION_ACCESS", "Collection access lacks a totality guarantee.", expression.location)
+    }
+
+    return
+  }
+  if (expression.totality != "fail-on-absence") {
+    fail("UNCHECKED_COLLECTION_ACCESS", "Collection access is not statically proven and does not fail on absence.", expression.location)
+  }
+}
+
+/**
+ * Resolves a binding without producing a diagnostic.
+ * @param {string} name - Binding name.
+ * @param {Scope} scope - Visible scope.
+ * @returns {Binding | undefined} Binding when visible.
+ */
+function findBinding(name, scope) {
+  for (let current = /** @type {Scope | undefined} */ (scope); current; current = current.parent) {
+    const binding = current.bindings.get(name)
+
+    if (binding) return binding
+  }
+
+  return undefined
+}
+
+/**
+ * Returns the existing bindings whose known values must be merged across a conditional.
+ * @param {Scope} scope - Visible scope.
+ * @returns {Binding[]} Nearest-to-farthest bindings.
+ */
+function bindingsVisibleFrom(scope) {
+  const bindings = []
+
+  for (let current = /** @type {Scope | undefined} */ (scope); current; current = current.parent) {
+    bindings.push(...current.bindings.values())
+  }
+
+  return bindings
+}
+
+/**
+ * Propagates only immutable values whose exact collection contents remain known.
+ * @param {import("./types.js").Expression} expression - Expression.
+ * @param {Scope} scope - Visible scope.
+ * @returns {import("./types.js").Expression | undefined} Known value.
+ */
+function knownValueForExpression(expression, scope) {
+  if (["IntegerLiteral", "BooleanLiteral", "StringLiteral", "ListLiteral", "MapLiteral"].includes(expression.kind)) return expression
+  if (expression.kind == "IdentifierExpression") return findBinding(expression.name, scope)?.knownValue
+  if (expression.kind == "ListIndexExpression") return provenListElement(expression.collection, expression.index, scope)
+  if (expression.kind == "MapLookupExpression") return provenMapValue(expression.collection, expression.key, scope)
+
+  return undefined
+}
+
+/**
+ * Finds the statically selected list element.
+ * @param {import("./types.js").Expression} collection - List receiver.
+ * @param {import("./types.js").Expression} index - Index expression.
+ * @param {Scope} scope - Visible scope.
+ * @returns {import("./types.js").Expression | undefined} Proven element.
+ */
+function provenListElement(collection, index, scope) {
+  const knownCollection = knownValueForExpression(collection, scope)
+  const knownIndex = knownValueForExpression(index, scope)
+
+  if (knownCollection?.kind != "ListLiteral" || knownIndex?.kind != "IntegerLiteral" ||
+    knownIndex.value < 0 || knownIndex.value >= knownCollection.elements.length) return undefined
+
+  return knownCollection.elements[knownIndex.value]
+}
+
+/**
+ * Finds the statically selected map value.
+ * @param {import("./types.js").Expression} collection - Map receiver.
+ * @param {import("./types.js").Expression} key - Key expression.
+ * @param {Scope} scope - Visible scope.
+ * @returns {import("./types.js").Expression | undefined} Proven value.
+ */
+function provenMapValue(collection, key, scope) {
+  const knownCollection = knownValueForExpression(collection, scope)
+  const knownKey = knownValueForExpression(key, scope)
+
+  if (knownCollection?.kind != "MapLiteral" || knownKey?.kind != "StringLiteral") return undefined
+
+  return knownCollection.entries.find((entry) => entry.key.value == knownKey.value)?.value
+}
+
+/**
+ * Identifies numeric strings independently from any target's key coercions.
+ * @param {string} value - Literal key.
+ * @returns {boolean} Whether it is numeric.
+ */
+function isNumericString(value) {
+  return /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/iu.test(value.trim())
 }
 
 /**
@@ -532,13 +970,15 @@ function roleLocation(node, role) {
  * Selects the exact type token or the owning declaration location.
  * @param {unknown} type - Candidate type reference.
  * @param {import("./types.js").SourceLocation} ownerLocation - Owning declaration location.
+ * @param {string} [role] - Recursive type role.
  * @returns {import("./types.js").SourceLocation} Exact type location when known.
  */
-function typeLocation(type, ownerLocation) {
+function typeLocation(type, ownerLocation, role = "type") {
   if (!type || typeof type != "object" || Array.isArray(type)) return ownerLocation
-  const candidate = /** @type {import("./types.js").TypeReference} */ (type)
+  const candidate = /** @type {import("./types.js").SemanticFunctionReturnType} */ (type)
 
-  return candidate.sourceProvenance?.ranges.type ?? parserRangeFor(candidate, "type") ?? ownerLocation
+  return candidate.sourceProvenance?.ranges[role] ?? parserRangeFor(candidate, role) ??
+    candidate.sourceProvenance?.ranges.type ?? parserRangeFor(candidate, "type") ?? ownerLocation
 }
 
 /** @type {Readonly<Record<import("./types.js").SemanticUnaryOperation, {operand: import("./types.js").SemanticTypeName, result: import("./types.js").SemanticTypeName}>>} */

@@ -489,6 +489,11 @@ export function semanticEntries(module) {
       node.statements.forEach((child, index) => visit(child, `${path}/statements/${index}`, location))
     } else if (node.kind == "Parameter") {
       visit(node.type, `${path}/type`, location)
+    } else if (node.kind == "ListType") {
+      visit(node.elementType, `${path}/elementType`, location)
+    } else if (node.kind == "MapType") {
+      visit(node.keyType, `${path}/keyType`, location)
+      visit(node.valueType, `${path}/valueType`, location)
     } else if (node.kind == "LocalDeclaration") {
       visit(node.type, `${path}/type`, location)
       visit(node.initializer, `${path}/initializer`, location)
@@ -512,6 +517,21 @@ export function semanticEntries(module) {
       visit(node.right, `${path}/right`, location)
     } else if (node.kind == "CallExpression") {
       node.arguments.forEach((child, index) => visit(child, `${path}/arguments/${index}`, location))
+    } else if (node.kind == "ListLiteral") {
+      node.elements.forEach((child, index) => visit(child, `${path}/elements/${index}`, location))
+    } else if (node.kind == "MapLiteral") {
+      node.entries.forEach((child, index) => visit(child, `${path}/entries/${index}`, location))
+    } else if (node.kind == "MapEntry") {
+      visit(node.key, `${path}/key`, location)
+      visit(node.value, `${path}/value`, location)
+    } else if (node.kind == "ListIndexExpression") {
+      visit(node.collection, `${path}/collection`, location)
+      visit(node.index, `${path}/index`, location)
+    } else if (node.kind == "MapLookupExpression") {
+      visit(node.collection, `${path}/collection`, location)
+      visit(node.key, `${path}/key`, location)
+    } else if (node.kind == "CollectionSizeExpression") {
+      visit(node.collection, `${path}/collection`, location)
     }
   }
 }
@@ -626,6 +646,21 @@ function resolveSymbols(module, records) {
     } else if (expression.kind == "BinaryExpression") {
       visitExpression(expression.left, scope, `${path}/left`)
       visitExpression(expression.right, scope, `${path}/right`)
+    } else if (expression.kind == "ListLiteral") {
+      for (const [index, element] of expression.elements.entries()) visitExpression(element, scope, `${path}/elements/${index}`)
+    } else if (expression.kind == "MapLiteral") {
+      for (const [index, entry] of expression.entries.entries()) {
+        visitExpression(entry.key, scope, `${path}/entries/${index}/key`)
+        visitExpression(entry.value, scope, `${path}/entries/${index}/value`)
+      }
+    } else if (expression.kind == "ListIndexExpression") {
+      visitExpression(expression.collection, scope, `${path}/collection`)
+      visitExpression(expression.index, scope, `${path}/index`)
+    } else if (expression.kind == "MapLookupExpression") {
+      visitExpression(expression.collection, scope, `${path}/collection`)
+      visitExpression(expression.key, scope, `${path}/key`)
+    } else if (expression.kind == "CollectionSizeExpression") {
+      visitExpression(expression.collection, scope, `${path}/collection`)
     }
   }
 

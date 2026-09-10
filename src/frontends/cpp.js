@@ -585,7 +585,8 @@ export class CppReader {
       const bindings = new Map(inherited)
 
       for (const statement of block.statements) {
-        if (statement.kind == "LocalDeclaration") bindings.set(statement.name, statement.type.name)
+        if (statement.kind == "LocalDeclaration") bindings.set(statement.name,
+          /** @type {import("../semantic/types.js").TypeReference} */ (statement.type).name)
         if (statement.kind == "PrintStatement") {
           const expected = this.printTypes.get(statement)
 
@@ -599,7 +600,8 @@ export class CppReader {
       }
     }
 
-    for (const declaration of module.functions) visit(declaration.body, new Map(declaration.parameters.map((parameter) => [parameter.name, parameter.type.name])))
+    for (const declaration of module.functions) visit(declaration.body, new Map(declaration.parameters.map((parameter) => [parameter.name,
+      /** @type {import("../semantic/types.js").TypeReference} */ (parameter.type).name])))
     visit(module.entryPoint.body, new Map())
   }
 

@@ -4,24 +4,24 @@
 
 The immutable registry is authoritative for both dispatch and discovery:
 
-| ID | Frontend | Text backend | Binary backend | Application backend | Interoperability | General functions/calls | Artifacts | Round trip | Mapping | Acceptance |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `php` | yes | yes | no | no | no | yes | single | yes | rich + v3 | parse, generate, execute (`php`) |
-| `ruby` | yes | yes | no | no | no | yes | single | yes | rich + v3 | parse, generate, execute (`ruby`) |
-| `javascript` | yes | yes | no | no | no | yes | single | yes | rich + v3 | parse, generate, execute (`node`) |
-| `typescript` | yes | yes | no | no | no | yes | single | yes | rich + v3 | parse, generate, compile, execute (`tsc`, `node`) |
-| `java` | yes | yes | no | no | no | yes | single | yes | rich + v3 | parse, generate, compile, execute (`javac`, `java`) |
-| `kotlin` | yes | yes | no | no | no | no | single | yes | rich + v3 | parse, generate, compile, execute (`kotlinc`, `java25`) |
-| `python` | yes | yes | no | no | no | no | single | yes | rich + v3 | parse, generate, compile, execute (`python3`) |
-| `csharp` | yes | yes | no | no | no | no | multiple | yes | rich + v3 | parse, generate, restore, compile, execute (`dotnet`) |
-| `go` | yes | yes | no | no | no | no | multiple | yes | rich + v3 | parse, generate, compile, validate, execute (`go`) |
-| `cpp` | yes | yes | no | no | no | no | single | yes | rich + v3 | parse, generate, compile, link, execute (`clangpp`, native executable) |
-| `c` | yes | yes | no | no | no | no | multiple | yes | rich + v3 | parse, generate, compile, link, execute (`clang`, native executable) |
-| `rust` | yes | yes | no | no | no | no | multiple | yes | rich + v3 | parse, generate, compile, validate, execute (`rustc`, `cargo`) |
-| `swift` | yes | yes | no | no | no | no | single | yes | rich + v3 | parse, generate, compile, execute (`swiftc`) |
-| `wasm` | no | no | yes | yes | no | no | multiple | no | rich text + v3 + byte ranges | generate, validate, instantiate, execute (`wasm-validate`, `node`, `chromium`) |
+| ID | Frontend | Text backend | Binary backend | Application backend | Interoperability | General functions/calls | Immutable collections | Artifacts | Round trip | Mapping | Acceptance |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `php` | yes | yes | no | no | no | yes | yes | single | yes | rich + v3 | parse, generate, execute (`php`) |
+| `ruby` | yes | yes | no | no | no | yes | yes | single | yes | rich + v3 | parse, generate, execute (`ruby`) |
+| `javascript` | yes | yes | no | no | no | yes | yes | single | yes | rich + v3 | parse, generate, execute (`node`) |
+| `typescript` | yes | yes | no | no | no | yes | yes | single | yes | rich + v3 | parse, generate, compile, execute (`tsc`, `node`) |
+| `java` | yes | yes | no | no | no | yes | yes | single | yes | rich + v3 | parse, generate, compile, execute (`javac`, `java`) |
+| `kotlin` | yes | yes | no | no | no | no | no | single | yes | rich + v3 | parse, generate, compile, execute (`kotlinc`, `java25`) |
+| `python` | yes | yes | no | no | no | no | no | single | yes | rich + v3 | parse, generate, compile, execute (`python3`) |
+| `csharp` | yes | yes | no | no | no | no | no | multiple | yes | rich + v3 | parse, generate, restore, compile, execute (`dotnet`) |
+| `go` | yes | yes | no | no | no | no | no | multiple | yes | rich + v3 | parse, generate, compile, validate, execute (`go`) |
+| `cpp` | yes | yes | no | no | no | no | no | single | yes | rich + v3 | parse, generate, compile, link, execute (`clangpp`, native executable) |
+| `c` | yes | yes | no | no | no | no | no | multiple | yes | rich + v3 | parse, generate, compile, link, execute (`clang`, native executable) |
+| `rust` | yes | yes | no | no | no | no | no | multiple | yes | rich + v3 | parse, generate, compile, validate, execute (`rustc`, `cargo`) |
+| `swift` | yes | yes | no | no | no | no | no | single | yes | rich + v3 | parse, generate, compile, execute (`swiftc`) |
+| `wasm` | no | no | yes | yes | no | no | no | multiple | no | rich text + v3 + byte ranges | generate, validate, instantiate, execute (`wasm-validate`, `node`, `chromium`) |
 
-`languageCapabilities` exposes all fourteen records as frozen data, including `features.generalFunctionsAndCalls`. A role or semantic feature is not inferred from another role: browser Wasm has binary/application backends without a frontend, text backend, source round trip, general-call support, or general interoperability role. `supportedLanguages` is the derived list of thirteen records with both frontend and text generation. C#, Go, and C return two text artifacts; Rust returns three; Wasm returns one binary and three text artifacts. Their callers use `generateArtifactSet()`; the legacy single-artifact APIs reject them with `UNSUPPORTED_ROLE`.
+`languageCapabilities` exposes all fourteen records as frozen data, including `features.generalFunctionsAndCalls` and `features.immutableCollections`. A role or semantic feature is not inferred from another role: browser Wasm has binary/application backends without a frontend, text backend, source round trip, either feature, or general interoperability role. `supportedLanguages` is the derived list of thirteen records with both frontend and text generation. C#, Go, and C return two text artifacts; Rust returns three; Wasm returns one binary and three text artifacts. Their callers use `generateArtifactSet()`; the legacy single-artifact APIs reject them with `UNSUPPORTED_ROLE`.
 
 ## Task 025 core expanded-language acceptance
 
@@ -47,6 +47,21 @@ The source profiles remain deliberately exact:
 - Java accepts the established private-static semantic method profile with explicit supported parameter and scalar-or-void result types inside `public final class Main`, plus receiver-free direct calls and the exact entry method. Generated zero-parameter signatures named `getClass`, `hashCode`, `clone`, `toString`, `notify`, `notifyAll`, `wait`, or `finalize` conflict with inherited `java.lang.Object` instance methods and are rejected before emission; nonconflicting scalar-parameter overloads of those names remain available. Overload sets, instance/receiver/qualified/static-import ambiguity, varargs, generics, constructors, throws clauses, and non-static semantic methods are rejected.
 
 Python, C#, C, C++, Rust, Swift, Kotlin/JVM, Go, and browser Wasm remain on their Task 025 Tasks 001–004 profile. Their registry feature flag is false, their existing exact-two/scalar-return behavior is unchanged, and a Task-005-only arity, void return, or void call statement is a located `UNSUPPORTED_CAPABILITY` before source, bytes, or a partial artifact set is exposed. This boundary does not broaden the future Task 013 aggregate acceptance.
+
+## Task 006 immutable lists and maps
+
+PHP, Ruby, JavaScript with JSDoc, TypeScript, and Java add finite homogeneous immutable collection values. `ListType {elementType}` and `MapType {keyType, valueType}` are distinct recursive semantic types; map keys are exactly semantic strings and initial keys must be nonnumeric string literals. `ListLiteral` preserves zero-based source order and duplicate values. `MapLiteral` retains source entry order only for initializer evaluation, provenance, and diagnostics: portable map iteration and observable map order are not modeled.
+
+The accepted operations are list indexing, total map lookup, and collection size. A read is admitted only when literal propagation proves its index/key present or the exact source operation fails on absence, such as Ruby `Hash#fetch` and Java `List#get`. Known out-of-bounds indices and absent literal keys are rejected. Optional lookup results remain Task 007; unchecked dynamic reads are not converted. Collection mutation, sets, tuples, object/record maps, sparse arrays, spreads, arbitrary keys, iteration, ranges/slices, comprehensions, sorting, and deep-freezing claims remain outside this capability. Semantic immutability is guaranteed by the accepted operation profile: generated runtime containers need not be recursively frozen because no alias-visible mutation operation can enter or be emitted.
+
+The exact source and target profiles are:
+
+- Ruby uses adjacent `[Array[T]]` and `[Hash[String,T]]` metadata, bracket list literals/indexing, string-rocket hashes, `fetch`, and `size`. Hash defaults, symbol/numeric keys, splats, bracket map lookup, and mutation are rejected.
+- JavaScript/JSDoc uses `ReadonlyArray<T>`, `ReadonlyMap<string, T>`, dense array literals, and exact `new Map([[key, value]])`; TypeScript additionally accepts `readonly T[]`. Plain objects, tuples, mutable array types/APIs, weak collections, spreads, assertions, and unproven `Map#get` are rejected. Generation uses read-only annotations and the same array/`Map` values.
+- PHP uses exact PHPDoc `list<T>` versus `array<string,T>` while native function signatures use `array`. Implicit list entries cannot mix with explicit map entries; references, unpacking, coercive/numeric-string keys, duplicates, mutation, and absent bracket reads are rejected. Generation reproduces PHPDoc so the distinction reparses.
+- Java uses only fully qualified `java.util.List<T>`/`java.util.Map<String,T>` with boxed recursive arguments and `java.util.List.of`/`java.util.Map.of`. Arrays, raw or mutable implementations, null factory members, duplicate keys, and more than ten `Map.of` entries are rejected. Java imports remain Task 010.
+
+Recursive type arguments, list elements, map entries and their key/value children, accesses, sizes, call-signature identities, provenance, and generated mappings have deterministic identities and parser-owned locations. All other registered frontends retain their prior source subset, and all registered non-cohort targets reject collection IR with `UNSUPPORTED_CAPABILITY` before returning any source, bytes, or partial artifact set. Task 013 remains the original-five aggregate boundary.
 
 ## Implemented subset
 

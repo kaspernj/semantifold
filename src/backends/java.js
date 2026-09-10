@@ -1,7 +1,6 @@
 // @ts-check
 
-import {emitExpression} from "./shared.js"
-import {emitScalarType} from "./scalars.js"
+import {emitExpression, emitType} from "./shared.js"
 
 /**
  * Emits an independently executable Java `Main` program through the source-aware writer.
@@ -18,12 +17,7 @@ export function generateJava(module, writer) {
     writer.synthetic("  ", "indentation", [declaration])
     writer.mapped("private static", {mappingKind: "anchor", node: declaration})
     writer.synthetic(" ", "method spacing", [declaration])
-    writer.mapped(emitScalarType("java", declaration.returnType), {
-      mappingKind: "exact",
-      node: declaration.returnType,
-      path: `/functions/${functionIndex}/returnType`,
-      role: "type"
-    })
+    emitType(writer, declaration.returnType, `/functions/${functionIndex}/returnType`, "java")
     writer.synthetic(" ", "method spacing", [declaration])
     writer.mapped(declaration.name, {mappingKind: "exact", node: declaration, role: "name"})
     writer.mapped("(", {mappingKind: "anchor", node: declaration})
@@ -31,12 +25,7 @@ export function generateJava(module, writer) {
       const parameterPath = `/functions/${functionIndex}/parameters/${index}`
 
       if (index > 0) writer.synthetic(", ", "parameter separator", [declaration])
-      writer.mapped(emitScalarType("java", parameter.type), {
-        mappingKind: "exact",
-        node: parameter.type,
-        path: `${parameterPath}/type`,
-        role: "type"
-      })
+      emitType(writer, parameter.type, `${parameterPath}/type`, "java")
       writer.synthetic(" ", "parameter spacing", [parameter], [parameterPath])
       writer.mapped(parameter.name, {mappingKind: "exact", node: parameter, path: parameterPath, role: "name"})
     })
@@ -164,12 +153,7 @@ function emitLocal(writer, statement, indent, statementPath) {
     writer.mapped("final", {mappingKind: "anchor", node: statement, path: statementPath})
     writer.synthetic(" ", "modifier spacing", [statement], [statementPath])
   }
-  writer.mapped(emitScalarType("java", statement.type), {
-    mappingKind: "exact",
-    node: statement.type,
-    path: `${statementPath}/type`,
-    role: "type"
-  })
+  emitType(writer, statement.type, `${statementPath}/type`, "java")
   writer.synthetic(" ", "declaration spacing", [statement], [statementPath])
   writer.mapped(statement.name, {mappingKind: "exact", node: statement, path: statementPath, role: "name"})
   writer.synthetic(" ", "assignment spacing", [statement], [statementPath])

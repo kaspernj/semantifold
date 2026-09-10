@@ -1,7 +1,6 @@
 // @ts-check
 
-import {emitExpression} from "./shared.js"
-import {emitScalarType} from "./scalars.js"
+import {emitExpression, emitType} from "./shared.js"
 
 /**
  * Emits an independently executable Ruby program through the source-aware writer.
@@ -19,21 +18,11 @@ export function generateRuby(module, writer) {
       writer.synthetic("# @param ", "Ruby type scaffolding", [parameter], [parameterPath])
       writer.mapped(parameter.name, {mappingKind: "exact", node: parameter, path: parameterPath, role: "name"})
       writer.synthetic(" [", "Ruby type scaffolding", [parameter], [parameterPath])
-      writer.mapped(emitScalarType("ruby", parameter.type), {
-        mappingKind: "exact",
-        node: parameter.type,
-        path: `${parameterPath}/type`,
-        role: "type"
-      })
+      emitType(writer, parameter.type, `${parameterPath}/type`, "ruby")
       writer.synthetic("]\n", "Ruby type scaffolding", [parameter], [parameterPath])
     }
     writer.synthetic("# @return [", "Ruby type scaffolding", [declaration])
-    writer.mapped(emitScalarType("ruby", declaration.returnType), {
-      mappingKind: "exact",
-      node: declaration.returnType,
-      path: `/functions/${functionIndex}/returnType`,
-      role: "type"
-    })
+    emitType(writer, declaration.returnType, `/functions/${functionIndex}/returnType`, "ruby")
     writer.synthetic("]\n", "Ruby type scaffolding", [declaration])
     writer.mapped("def", {mappingKind: "anchor", node: declaration})
     writer.synthetic(" ", "function spacing", [declaration])
@@ -141,12 +130,7 @@ function emitLocal(writer, statement, indent, statementPath) {
   }
 
   writer.synthetic("# @type [", "Ruby local type scaffolding", [statement], [statementPath])
-  writer.mapped(emitScalarType("ruby", statement.type), {
-    mappingKind: "exact",
-    node: statement.type,
-    path: `${statementPath}/type`,
-    role: "type"
-  })
+  emitType(writer, statement.type, `${statementPath}/type`, "ruby")
   writer.synthetic("]\n", "Ruby local type scaffolding", [statement], [statementPath])
   if (!statement.mutable) {
     writer.synthetic(`${indent}# @semantifold-immutable\n`, "Ruby immutability scaffolding", [statement], [statementPath])
