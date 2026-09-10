@@ -485,6 +485,9 @@ class RustReader {
     if (expression.kind == "IntegerLiteral") return "integer"
     if (expression.kind == "BooleanLiteral") return "boolean"
     if (expression.kind == "BinaryExpression" || expression.kind == "UnaryExpression") return expression.type
+    if (expression.kind != "CallExpression" && expression.kind != "IdentifierExpression") {
+      throw new Error("Validated Rust source exposed a collection expression.")
+    }
     const type = expression.kind == "CallExpression" ? this.functions.get(expression.callee) : bindings.get(expression.name)
 
     if (!type) throw new Error("Validated Rust expression lost its scalar binding.")
@@ -520,7 +523,8 @@ class RustReader {
 
       if (!expression) throw new Error("Validated Rust source contained a bare return.")
       visit(expression)
-      if (statement.kind == "LocalDeclaration") bindings.set(statement.name, statement.type.name)
+      if (statement.kind == "LocalDeclaration") bindings.set(statement.name,
+        /** @type {import("../semantic/types.js").TypeReference} */ (statement.type).name)
       if (statement.kind == "PrintStatement") {
         const print = this.prints.get(statement)
 
@@ -594,7 +598,8 @@ class RustReader {
       if (!expression) throw new Error("Validated Rust source contained a bare return.")
       this.ownershipExpression(expression, bindings, moved, new Set())
       if (statement.kind == "ReturnStatement") return {moved, returns: true}
-      if (statement.kind == "LocalDeclaration") bindings.set(statement.name, statement.type.name)
+      if (statement.kind == "LocalDeclaration") bindings.set(statement.name,
+        /** @type {import("../semantic/types.js").TypeReference} */ (statement.type).name)
       else if (statement.kind == "AssignmentStatement") moved.delete(statement.target.name)
       else if (statement.kind == "IfStatement") {
         const consequent = this.validateOwnership(statement.consequent, bindings, moved)
@@ -660,10 +665,11 @@ class RustReader {
 
     this.functions = new Map(module.functions.map(declaration => [
       declaration.name,
-      /** @type {Scalar} */ (declaration.returnType.name)
+      /** @type {Scalar} */ (/** @type {import("../semantic/types.js").TypeReference} */ (declaration.returnType).name)
     ]))
     for (const declaration of module.functions) {
-      const bindings = new Map(declaration.parameters.map(parameter => [parameter.name, parameter.type.name]))
+      const bindings = new Map(declaration.parameters.map(parameter => [parameter.name,
+        /** @type {import("../semantic/types.js").TypeReference} */ (parameter.type).name]))
 
       this.validateScalars(declaration.body, bindings)
       this.validateOwnership(declaration.body, bindings, new Set())

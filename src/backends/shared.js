@@ -1,6 +1,7 @@
 // @ts-check
 
 import {unsupportedCapability} from "../diagnostic.js"
+import {isDenseArray} from "../array.js"
 import {validateBackendTypes} from "../semantic/validate.js"
 import {validateTargetBindingIdentifier, validateTargetIdentifier} from "./identifiers.js"
 import {emitScalarType, emitStringLiteral} from "./scalars.js"
@@ -27,6 +28,7 @@ const binaryOperationSyntax = Object.freeze({
   StringNotEqual: Object.freeze({default: "!=", strict: "!=="})
 })
 const task005Languages = new Set(["php", "ruby", "javascript", "typescript", "java"])
+const task006Languages = new Set(["php", "ruby", "javascript", "typescript", "java"])
 const javaObjectInstanceMethodSignatures = new Set([
   "clone()", "equals(Object)", "finalize()", "getClass()", "hashCode()", "notify()", "notifyAll()", "toString()",
   "wait()", "wait(long)", "wait(long,int)"
@@ -46,6 +48,7 @@ export function validateBackendModule(module, language) {
   if (!Array.isArray(module.functions) || !module.entryPoint || typeof module.entryPoint != "object" ||
     module.entryPoint.kind != "EntryPoint") unsupportedCapability(language, "missing or invalid module members", module.location)
   if (module.functions.length == 0) unsupportedCapability(language, "module without functions", module.location)
+  if (!task006Languages.has(language)) rejectCollectionTypes(module, language)
   validateBlock(module.entryPoint.body, language, module.entryPoint.location)
   const declarationIds = new Set()
   const declarationNames = new Set()
@@ -78,7 +81,8 @@ export function validateBackendModule(module, language) {
     if (!task005Languages.has(language) && functionDeclaration.parameters.length != 2) {
       unsupportedCapability(language, "function parameter count other than two", functionDeclaration.location)
     }
-    if (!task005Languages.has(language) && functionDeclaration.returnType?.name == "void") {
+    if (!task005Languages.has(language) && functionDeclaration.returnType?.kind == "TypeReference" &&
+      functionDeclaration.returnType.name == "void") {
       unsupportedCapability(language, "Task 005 void function return", functionDeclaration.location)
     }
     validateBlock(functionDeclaration.body, language, functionDeclaration.location)
@@ -95,24 +99,83 @@ export function validateBackendModule(module, language) {
 }
 
 /**
+ * Rejects Task 006 types before a registered non-cohort emitter can allocate an artifact.
+ * @param {import("../semantic/types.js").SemanticModule} module - Semantic module.
+ * @param {import("../semantic/types.js").BackendLanguage} language - Target identity.
+ * @returns {void}
+ */
+function rejectCollectionTypes(module, language) {
+  for (const declaration of module.functions) {
+    if (!declaration || typeof declaration != "object" || Array.isArray(declaration)) continue
+    const location = Reflect.get(declaration, "location") ?? module.location
+    const returnType = Reflect.get(declaration, "returnType")
+
+    if (isCollectionType(returnType)) {
+      unsupportedCapability(language, "Task 006 immutable collection return type", location)
+    }
+    const parameters = Reflect.get(declaration, "parameters")
+
+    for (const parameter of Array.isArray(parameters) ? parameters : []) {
+      if (isCollectionType(parameter?.type)) unsupportedCapability(language, "Task 006 immutable collection parameter type", parameter.location ?? location)
+    }
+    rejectBlockCollectionTypes(Reflect.get(declaration, "body"), language)
+  }
+  rejectBlockCollectionTypes(module.entryPoint.body, language)
+}
+
+/**
+ * Rejects collection local types recursively in one block.
+ * @param {unknown} block - Candidate semantic block.
+ * @param {import("../semantic/types.js").BackendLanguage} language - Target identity.
+ * @returns {void}
+ */
+function rejectBlockCollectionTypes(block, language) {
+  if (!block || typeof block != "object" || Array.isArray(block) || !Array.isArray(Reflect.get(block, "statements"))) return
+  for (const statement of Reflect.get(block, "statements")) {
+    if (!statement || typeof statement != "object" || Array.isArray(statement)) continue
+    if (statement.kind == "LocalDeclaration" && isCollectionType(statement.type)) {
+      unsupportedCapability(language, "Task 006 immutable collection local type", statement.location)
+    }
+    if (statement.kind == "IfStatement") {
+      rejectBlockCollectionTypes(statement.consequent, language)
+      if (statement.alternate) rejectBlockCollectionTypes(statement.alternate, language)
+    }
+  }
+}
+
+/**
+ * Checks a possible recursive collection type without traversing malformed children.
+ * @param {unknown} type - Candidate type.
+ * @returns {boolean} Whether the outer type is a collection.
+ */
+function isCollectionType(type) {
+  return Boolean(type && typeof type == "object" && !Array.isArray(type) &&
+    (Reflect.get(type, "kind") == "ListType" || Reflect.get(type, "kind") == "MapType"))
+}
+
+/**
  * Rejects semantic names that would capture syntax owned by one backend emitter.
  * @param {import("../semantic/types.js").SemanticModule} module - Semantic module.
  * @param {import("../semantic/types.js").BackendLanguage} language - Backend language or binary target.
  * @returns {void}
  */
 function validateScaffoldingNames(module, language) {
+  const needsNativeMap = ["javascript", "typescript"].includes(language) && moduleContainsExpressionKind(module, "MapLiteral")
+  const needsPhpCount = language == "php" && moduleContainsExpressionKind(module, "CollectionSizeExpression")
+  const javascriptOwnedNames = new Set(["console", ...(needsNativeMap ? ["Map"] : [])])
   const ownedEntryNames = language == "go" ? new Set(["fmt", "int64", "bool", "string", "true", "false"]) :
     language == "csharp" ? new Set(["System"]) : language == "java" ? new Set(["args", "System"]) :
-    ["javascript", "typescript"].includes(language) ? new Set(["console"]) : new Set()
+    ["javascript", "typescript"].includes(language) ? javascriptOwnedNames : new Set()
   const ownedPrintReceiverNames = language == "go" ? new Set(["fmt", "int64", "bool", "string", "true", "false"]) :
     language == "csharp" || language == "java" ? new Set(["System"]) :
-    ["javascript", "typescript"].includes(language) ? new Set(["console"]) : new Set()
+    ["javascript", "typescript"].includes(language) ? javascriptOwnedNames : new Set()
   const ownedCallableNames = language == "go" ? new Set(["main", "init", "fmt", "int64", "bool", "string", "true", "false"]) :
     language == "csharp" ? new Set([
     "Equals", "Finalize", "GetHashCode", "GetType", "Main", "MemberwiseClone", "Program", "ReferenceEquals", "System", "ToString"
   ]) :
     language == "java" ? new Set(["main"]) :
-    ["javascript", "typescript"].includes(language) ? new Set(["console"]) :
+    ["javascript", "typescript"].includes(language) ? javascriptOwnedNames :
+    needsPhpCount ? new Set(["count"]) :
     language == "ruby" ? new Set(["puts", "send", "public_send", "__send__"]) : new Set()
 
   for (const statement of allStatements(module.entryPoint.body)) {
@@ -121,7 +184,9 @@ function validateScaffoldingNames(module, language) {
     }
   }
   for (const declaration of module.functions) {
-    if (ownedCallableNames.has(declaration.name)) {
+    const targetName = language == "php" ? declaration.name.toLowerCase() : declaration.name
+
+    if (ownedCallableNames.has(targetName)) {
       unsupportedCapability(language, `function '${declaration.name}' captures backend scaffolding`, declarationNameLocation(declaration))
     }
     if (language == "java") {
@@ -146,6 +211,104 @@ function validateScaffoldingNames(module, language) {
       }
     }
   }
+  if (language == "java") validateJavaUtilFactoryNames(module)
+}
+
+/**
+ * Rejects lexical bindings that would capture Java's package qualifier in emitted collection factories.
+ * @param {import("../semantic/types.js").SemanticModule} module - Validated semantic module.
+ * @returns {void}
+ */
+function validateJavaUtilFactoryNames(module) {
+  /**
+   * Walks one lexical block while retaining only a currently visible capture.
+   * @param {import("../semantic/types.js").Block} block - Block to inspect in semantic order.
+   * @param {{detail: string, location: import("../semantic/types.js").SourceLocation} | undefined} inherited - Visible capture.
+   * @param {"entry" | "function"} owner - Owning scope kind.
+   * @returns {void}
+   */
+  const validateBlockNames = (block, inherited, owner) => {
+    let capture = inherited
+
+    for (const statement of block.statements) {
+      if (statement.kind == "LocalDeclaration" && statement.name == "java") {
+        capture = {
+          detail: `${owner} local 'java' captures java.util factory syntax`,
+          location: statement.location
+        }
+      }
+      const expression = statement.kind == "IfStatement" ? statement.condition :
+        statement.kind == "LocalDeclaration" ? statement.initializer :
+          statement.kind == "AssignmentStatement" ? statement.expression :
+            statement.kind == "ReturnStatement" ? statement.expression : statement.expression
+
+      if (capture && expression && (expressionContainsKind(expression, "ListLiteral") ||
+        expressionContainsKind(expression, "MapLiteral"))) {
+        unsupportedCapability("java", capture.detail, capture.location)
+      }
+      if (statement.kind == "IfStatement") {
+        validateBlockNames(statement.consequent, capture, owner)
+        if (statement.alternate) validateBlockNames(statement.alternate, capture, owner)
+      }
+    }
+  }
+
+  validateBlockNames(module.entryPoint.body, undefined, "entry")
+  for (const declaration of module.functions) {
+    const parameter = declaration.parameters.find(({name}) => name == "java")
+    const capture = parameter ? {
+      detail: "function parameter 'java' captures java.util factory syntax",
+      location: parameter.location
+    } : undefined
+
+    validateBlockNames(declaration.body, capture, "function")
+  }
+}
+
+/**
+ * Reports whether a module contains an expression kind that requires target runtime scaffolding.
+ * @param {import("../semantic/types.js").SemanticModule} module - Validated-shape semantic module.
+ * @param {import("../semantic/types.js").Expression["kind"]} kind - Sought expression kind.
+ * @returns {boolean} Whether the kind occurs.
+ */
+function moduleContainsExpressionKind(module, kind) {
+  return [module.entryPoint.body, ...module.functions.map((declaration) => declaration.body)].some((block) =>
+    allStatements(block).some((statement) => {
+      const expression = statement.kind == "IfStatement" ? statement.condition :
+        statement.kind == "LocalDeclaration" ? statement.initializer :
+          statement.kind == "AssignmentStatement" ? statement.expression :
+            statement.kind == "ReturnStatement" ? statement.expression : statement.expression
+
+      return expression ? expressionContainsKind(expression, kind) : false
+    }))
+}
+
+/**
+ * Searches one validated expression tree for a semantic kind.
+ * @param {import("../semantic/types.js").Expression} expression - Expression root.
+ * @param {import("../semantic/types.js").Expression["kind"]} kind - Sought kind.
+ * @returns {boolean} Whether the kind occurs.
+ */
+function expressionContainsKind(expression, kind) {
+  if (expression.kind == kind) return true
+  if (expression.kind == "UnaryExpression") return expressionContainsKind(expression.operand, kind)
+  if (expression.kind == "BinaryExpression") {
+    return expressionContainsKind(expression.left, kind) || expressionContainsKind(expression.right, kind)
+  }
+  if (expression.kind == "CallExpression") return expression.arguments.some((argument) => expressionContainsKind(argument, kind))
+  if (expression.kind == "ListLiteral") return expression.elements.some((element) => expressionContainsKind(element, kind))
+  if (expression.kind == "MapLiteral") {
+    return expression.entries.some((entry) => expressionContainsKind(entry.key, kind) || expressionContainsKind(entry.value, kind))
+  }
+  if (expression.kind == "ListIndexExpression") {
+    return expressionContainsKind(expression.collection, kind) || expressionContainsKind(expression.index, kind)
+  }
+  if (expression.kind == "MapLookupExpression") {
+    return expressionContainsKind(expression.collection, kind) || expressionContainsKind(expression.key, kind)
+  }
+  if (expression.kind == "CollectionSizeExpression") return expressionContainsKind(expression.collection, kind)
+
+  return false
 }
 
 /**
@@ -169,9 +332,10 @@ function emittedJavaFunctionSignature(declaration) {
     const type = parameter.type
 
     if (!type || typeof type != "object" || Array.isArray(type)) return undefined
-    const emitted = emitScalarType("java", type)
+    const emitted = type.kind == "ListType" ? "java.util.List" : type.kind == "MapType" ? "java.util.Map" :
+      type.kind == "TypeReference" ? emitScalarType("java", type) : undefined
 
-    if (typeof emitted != "string") return undefined
+    if (!emitted) return undefined
     parameterTypes.push(emitted)
   }
 
@@ -340,6 +504,51 @@ function validateExpression(expression, language, ownerLocation, allowJavaNegate
     return
   }
   if (candidate.kind == "BooleanLiteral" || candidate.kind == "StringLiteral") return
+  if (["ListLiteral", "MapLiteral", "ListIndexExpression", "MapLookupExpression", "CollectionSizeExpression"].includes(candidate.kind)) {
+    if (!task006Languages.has(language)) unsupportedCapability(language, "Task 006 immutable collections", location)
+    if (candidate.kind == "ListLiteral") {
+      if (!isDenseArray(candidate.elements)) unsupportedCapability(language, "missing or sparse list elements", location)
+      for (const element of candidate.elements) validateExpression(element, language, location)
+      return
+    }
+    if (candidate.kind == "MapLiteral") {
+      if (!isDenseArray(candidate.entries)) unsupportedCapability(language, "missing or sparse map entries", location)
+      if (language == "java" && candidate.entries.length > 10) {
+        unsupportedCapability(language, "java.util.Map.of supports at most ten entries", location)
+      }
+      for (const entry of candidate.entries) {
+        if (!entry || entry.kind != "MapEntry" || !entry.key || entry.key.kind != "StringLiteral") {
+          unsupportedCapability(language, "missing or invalid map entry", entry?.location ?? location)
+        }
+        validateExpression(entry.key, language, entry.location)
+        validateExpression(entry.value, language, entry.location)
+      }
+      return
+    }
+    if (candidate.kind == "ListIndexExpression") {
+      if (candidate.totality == "fail-on-absence" && language != "java") {
+        unsupportedCapability(language, "list access depends on Java-specific bounds failure", location)
+      }
+      validateExpression(candidate.collection, language, location)
+      validateExpression(candidate.index, language, location)
+      return
+    }
+    if (candidate.kind == "MapLookupExpression") {
+      if (candidate.totality == "fail-on-absence" && language != "ruby") {
+        unsupportedCapability(language, "map lookup depends on Ruby fetch absence failure", location)
+      }
+      validateExpression(candidate.collection, language, location)
+      validateExpression(candidate.key, language, location)
+      return
+    }
+    if (candidate.kind == "CollectionSizeExpression") {
+      if (candidate.collectionKind != "list" && candidate.collectionKind != "map") {
+        unsupportedCapability(language, "collection size without a validated receiver kind", location)
+      }
+      validateExpression(candidate.collection, language, location)
+      return
+    }
+  }
   if (candidate.kind == "CallExpression") {
     validateTargetIdentifier(language, candidate.callee, "callee", location)
     if (!candidate.resolution || typeof candidate.resolution != "object" || Array.isArray(candidate.resolution)) {
@@ -426,6 +635,41 @@ function knownIntegerValue(expression) {
 }
 
 /**
+ * Emits one recursive semantic type while mapping every constituent identity.
+ * @param {import("./writer.js").SourceWriter} writer - Source-aware writer.
+ * @param {import("../semantic/types.js").SemanticFunctionReturnType} type - Semantic type.
+ * @param {string} path - Exact type occurrence path.
+ * @param {import("../semantic/types.js").TextBackendLanguage} language - Target language.
+ * @param {boolean} [javaBoxed] - Whether a Java scalar is a generic argument.
+ * @returns {void}
+ */
+export function emitType(writer, type, path, language, javaBoxed = false) {
+  if (type.kind == "TypeReference") {
+    const spelling = language == "java" && javaBoxed
+      ? type.name == "integer" ? "Integer" : type.name == "boolean" ? "Boolean" : type.name == "string" ? "String" : "void"
+      : emitScalarType(language, type)
+
+    writer.mapped(spelling, {mappingKind: "exact", node: type, path, role: "type"})
+    return
+  }
+  const prefix = type.kind == "ListType"
+    ? language == "ruby" ? "Array[" : language == "php" ? "list<" :
+      language == "java" ? "java.util.List<" : "ReadonlyArray<"
+    : language == "ruby" ? "Hash[" : language == "php" ? "array<" :
+      language == "java" ? "java.util.Map<" : "ReadonlyMap<"
+
+  writer.mapped(prefix, {mappingKind: "exact", node: type, path, role: "type"})
+  if (type.kind == "ListType") {
+    emitType(writer, type.elementType, `${path}/elementType`, language, language == "java")
+  } else {
+    emitType(writer, type.keyType, `${path}/keyType`, language, language == "java")
+    writer.synthetic(language == "javascript" || language == "typescript" ? ", " : ",", "map type separator", [type], [path])
+    emitType(writer, type.valueType, `${path}/valueType`, language, language == "java")
+  }
+  writer.mapped(language == "ruby" ? "]" : ">", {mappingKind: "anchor", node: type, path})
+}
+
+/**
  * Emits a supported expression.
  * @param {import("./writer.js").SourceWriter} writer - Source-aware writer.
  * @param {import("../semantic/types.js").Expression} expression - Semantic expression.
@@ -453,6 +697,72 @@ export function emitExpression(writer, expression, path, language, emitIdentifie
   }
   if (expression.kind == "StringLiteral") {
     writer.mapped(emitStringLiteral(language, expression.value), {mappingKind: "exact", node: expression, path, role: "literal"})
+    return
+  }
+  if (expression.kind == "ListLiteral") {
+    writer.mapped(language == "java" ? "java.util.List.of(" : "[", {mappingKind: "anchor", node: expression, path})
+    expression.elements.forEach((element, index) => {
+      if (index) writer.synthetic(", ", "list element separator", [expression], [path])
+      emitExpression(writer, element, `${path}/elements/${index}`, language, emitIdentifier)
+    })
+    writer.mapped(language == "java" ? ")" : "]", {mappingKind: "anchor", node: expression, path})
+    return
+  }
+  if (expression.kind == "MapLiteral") {
+    const open = language == "java" ? "java.util.Map.of(" : language == "javascript" || language == "typescript" ? "new Map([" :
+      language == "php" ? "[" : "{"
+    const close = language == "java" ? ")" : language == "javascript" || language == "typescript" ? "])" :
+      language == "php" ? "]" : "}"
+
+    writer.mapped(open, {mappingKind: "anchor", node: expression, path})
+    expression.entries.forEach((entry, index) => {
+      const entryPath = `${path}/entries/${index}`
+
+      if (index) writer.synthetic(", ", "map entry separator", [expression], [path])
+      if (language == "javascript" || language == "typescript") writer.mapped("[", {mappingKind: "anchor", node: entry, path: entryPath})
+      emitExpression(writer, entry.key, `${entryPath}/key`, language, emitIdentifier)
+      writer.mapped(language == "ruby" ? " => " : language == "php" ? " => " : ", ", {
+        mappingKind: "exact", node: entry, path: entryPath, role: "operator"
+      })
+      emitExpression(writer, entry.value, `${entryPath}/value`, language, emitIdentifier)
+      if (language == "javascript" || language == "typescript") writer.mapped("]", {mappingKind: "anchor", node: entry, path: entryPath})
+    })
+    writer.mapped(close, {mappingKind: "anchor", node: expression, path})
+    return
+  }
+  if (expression.kind == "ListIndexExpression") {
+    emitExpression(writer, expression.collection, `${path}/collection`, language, emitIdentifier)
+    writer.mapped(language == "java" ? ".get(" : "[", {mappingKind: "exact", node: expression, path, role: "operator"})
+    emitExpression(writer, expression.index, `${path}/index`, language, emitIdentifier)
+    writer.mapped(language == "java" ? ")" : "]", {mappingKind: "anchor", node: expression, path})
+    return
+  }
+  if (expression.kind == "MapLookupExpression") {
+    emitExpression(writer, expression.collection, `${path}/collection`, language, emitIdentifier)
+    const operator = language == "ruby" ? ".fetch(" : language == "php" ? "[" : ".get("
+
+    writer.mapped(operator, {mappingKind: "exact", node: expression, path, role: "operator"})
+    emitExpression(writer, expression.key, `${path}/key`, language, emitIdentifier)
+    writer.mapped(language == "php" ? "]" : ")", {mappingKind: "anchor", node: expression, path})
+    if (language == "typescript") {
+      writer.synthetic("!", "statically proven map lookup", [expression], [path])
+    }
+    return
+  }
+  if (expression.kind == "CollectionSizeExpression") {
+    if (language == "php") {
+      writer.mapped("count(", {mappingKind: "exact", node: expression, path, role: "operator"})
+      emitExpression(writer, expression.collection, `${path}/collection`, language, emitIdentifier)
+      writer.mapped(")", {mappingKind: "anchor", node: expression, path})
+      return
+    }
+    emitExpression(writer, expression.collection, `${path}/collection`, language, emitIdentifier)
+    const operator = language == "ruby" || language == "java" ? ".size" :
+      expression.collectionKind == "list" ? ".length" : ".size"
+
+    writer.mapped(`${operator}${language == "java" ? "()" : ""}`, {
+      mappingKind: "exact", node: expression, path, role: "operator"
+    })
     return
   }
   if (expression.kind == "CallExpression") {
@@ -637,6 +947,18 @@ function expressionContainsSignProducingOperation(expression) {
   if (expression.kind == "CallExpression") {
     return expression.arguments.some((argument) => expressionContainsSignProducingOperation(argument))
   }
+  if (expression.kind == "ListLiteral") return expression.elements.some((element) => expressionContainsSignProducingOperation(element))
+  if (expression.kind == "MapLiteral") {
+    return expression.entries.some((entry) => expressionContainsSignProducingOperation(entry.key) ||
+      expressionContainsSignProducingOperation(entry.value))
+  }
+  if (expression.kind == "ListIndexExpression") {
+    return expressionContainsSignProducingOperation(expression.collection) || expressionContainsSignProducingOperation(expression.index)
+  }
+  if (expression.kind == "MapLookupExpression") {
+    return expressionContainsSignProducingOperation(expression.collection) || expressionContainsSignProducingOperation(expression.key)
+  }
+  if (expression.kind == "CollectionSizeExpression") return expressionContainsSignProducingOperation(expression.collection)
 
   return false
 }

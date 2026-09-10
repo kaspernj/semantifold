@@ -1,7 +1,7 @@
 // @ts-check
 
-import {emitExpression} from "./shared.js"
-import {emitScalarType} from "./scalars.js"
+import {emitExpression, emitType} from "./shared.js"
+import {emitSemanticType} from "./scalars.js"
 
 /**
  * Emits an independently executable PHP program through the source-aware writer.
@@ -15,6 +15,30 @@ export function generatePhp(module, writer) {
   module.functions.forEach((declaration, functionIndex) => {
     if (functionIndex > 0) writer.synthetic("\n\n", "declaration separator", [declaration])
 
+    const documentedParameters = declaration.parameters.map((parameter, index) => [parameter, index])
+      .filter(([parameter]) => /** @type {import("../semantic/types.js").Parameter} */ (parameter).type.kind != "TypeReference")
+    const documentedReturn = declaration.returnType.kind != "TypeReference"
+
+    if (documentedParameters.length > 0 || documentedReturn) {
+      writer.synthetic("/**\n", "PHP collection type scaffolding", [declaration])
+      for (const [candidate, index] of documentedParameters) {
+        const parameter = /** @type {import("../semantic/types.js").Parameter} */ (candidate)
+        const parameterIndex = /** @type {number} */ (index)
+        const parameterPath = `/functions/${functionIndex}/parameters/${parameterIndex}`
+
+        writer.synthetic(" * @param ", "PHP collection type scaffolding", [parameter], [parameterPath])
+        emitType(writer, parameter.type, `${parameterPath}/type`, "php")
+        writer.synthetic(" ", "PHP collection type scaffolding", [parameter], [parameterPath])
+        writer.mapped(`$${parameter.name}`, {mappingKind: "exact", node: parameter, path: parameterPath, role: "name"})
+        writer.synthetic("\n", "PHP collection type scaffolding", [parameter], [parameterPath])
+      }
+      if (documentedReturn) {
+        writer.synthetic(" * @return ", "PHP collection type scaffolding", [declaration])
+        emitType(writer, declaration.returnType, `/functions/${functionIndex}/returnType`, "php")
+        writer.synthetic("\n", "PHP collection type scaffolding", [declaration])
+      }
+      writer.synthetic(" */\n", "PHP collection type scaffolding", [declaration])
+    }
     writer.mapped("function", {mappingKind: "anchor", node: declaration})
     writer.synthetic(" ", "function spacing", [declaration])
     writer.mapped(declaration.name, {mappingKind: "exact", node: declaration, role: "name"})
@@ -23,7 +47,7 @@ export function generatePhp(module, writer) {
       const parameterPath = `/functions/${functionIndex}/parameters/${index}`
 
       if (index > 0) writer.synthetic(", ", "parameter separator", [declaration])
-      writer.mapped(emitScalarType("php", parameter.type), {
+      writer.mapped(parameter.type.kind == "TypeReference" ? emitSemanticType("php", parameter.type) : "array", {
         mappingKind: "exact",
         node: parameter.type,
         path: `${parameterPath}/type`,
@@ -34,7 +58,7 @@ export function generatePhp(module, writer) {
     })
     writer.mapped(")", {mappingKind: "anchor", node: declaration})
     writer.synthetic(": ", "return type separator", [declaration])
-    writer.mapped(emitScalarType("php", declaration.returnType), {
+    writer.mapped(declaration.returnType.kind == "TypeReference" ? emitSemanticType("php", declaration.returnType) : "array", {
       mappingKind: "exact",
       node: declaration.returnType,
       path: `/functions/${functionIndex}/returnType`,
@@ -149,24 +173,14 @@ function emitLocal(writer, statement, indent, statementPath) {
 
   if (statement.mutable) {
     writer.synthetic("/** @var ", "PHP local type scaffolding", [statement], [statementPath])
-    writer.mapped(emitScalarType("php", statement.type), {
-      mappingKind: "exact",
-      node: statement.type,
-      path: `${statementPath}/type`,
-      role: "type"
-    })
+    emitType(writer, statement.type, `${statementPath}/type`, "php")
     writer.synthetic(" ", "PHP local type scaffolding", [statement], [statementPath])
     writer.mapped(`$${statement.name}`, {mappingKind: "exact", node: statement, path: statementPath, role: "name"})
     writer.synthetic(" */\n", "PHP local type scaffolding", [statement], [statementPath])
   } else {
     writer.synthetic("/**\n", "PHP local type scaffolding", [statement], [statementPath])
     writer.synthetic(`${indent} * @var `, "PHP local type scaffolding", [statement], [statementPath])
-    writer.mapped(emitScalarType("php", statement.type), {
-      mappingKind: "exact",
-      node: statement.type,
-      path: `${statementPath}/type`,
-      role: "type"
-    })
+    emitType(writer, statement.type, `${statementPath}/type`, "php")
     writer.synthetic(" ", "PHP local type scaffolding", [statement], [statementPath])
     writer.mapped(`$${statement.name}`, {mappingKind: "exact", node: statement, path: statementPath, role: "name"})
     writer.synthetic(`\n${indent} * @semantifold-immutable\n${indent} */\n`, "PHP local type scaffolding", [statement], [statementPath])

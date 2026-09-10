@@ -102,14 +102,17 @@ export function createLanguageRegistry(candidateRecords) {
       invalidRegistry(`Registry record '${id}' has an invalid artifact multiplicity.`, id)
     }
     if (typeof candidate.roundTrip != "boolean") invalidRegistry(`Registry record '${id}' requires a Boolean round-trip declaration.`, id)
-    const featuresCandidate = candidate.features ?? {generalFunctionsAndCalls: false}
+    const featuresCandidate = candidate.features ?? {generalFunctionsAndCalls: false, immutableCollections: false}
 
-    if (!isPlainObject(featuresCandidate) || Object.keys(featuresCandidate).sort().join(",") != "generalFunctionsAndCalls" ||
-      typeof featuresCandidate.generalFunctionsAndCalls != "boolean") {
+    if (!isPlainObject(featuresCandidate) ||
+      Object.keys(featuresCandidate).sort().join(",") != "generalFunctionsAndCalls,immutableCollections" ||
+      typeof featuresCandidate.generalFunctionsAndCalls != "boolean" ||
+      typeof featuresCandidate.immutableCollections != "boolean") {
       invalidRegistry(`Registry record '${id}' has an invalid feature declaration.`, id)
     }
     const features = deepFreeze(/** @type {import("./semantic/types.js").LanguageFeatureCapabilities} */ ({
-      generalFunctionsAndCalls: featuresCandidate.generalFunctionsAndCalls
+      generalFunctionsAndCalls: featuresCandidate.generalFunctionsAndCalls,
+      immutableCollections: featuresCandidate.immutableCollections
     }))
     const mappingCandidate = candidate.mapping
 
@@ -410,7 +413,7 @@ const records = [
     artifactMultiplicity: "multiple",
     binaryBackend: generateBrowserWasm,
     defaultFilename: "program.wasm",
-    features: {generalFunctionsAndCalls: false},
+    features: {generalFunctionsAndCalls: false, immutableCollections: false},
     id: "wasm",
     mapping: {binaryRanges: true, richText: true, sourceMapV3: true},
     mediaType: "application/wasm",
@@ -433,7 +436,10 @@ export const supportedLanguages = Object.freeze(languageCapabilities
 function language(values) {
   return {
     artifactMultiplicity: "single",
-    features: {generalFunctionsAndCalls: ["php", "ruby", "javascript", "typescript", "java"].includes(String(values.id))},
+    features: {
+      generalFunctionsAndCalls: ["php", "ruby", "javascript", "typescript", "java"].includes(String(values.id)),
+      immutableCollections: ["php", "ruby", "javascript", "typescript", "java"].includes(String(values.id))
+    },
     mapping: {binaryRanges: false, richText: true, sourceMapV3: true},
     roundTrip: true,
     ...values

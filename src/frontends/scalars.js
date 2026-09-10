@@ -110,7 +110,7 @@ export function requireSourceScalarType(language, sourceType, subject, location,
  * @param {string} subject - Typed function return.
  * @param {import("../semantic/types.js").SourceLocation} location - Owning function location.
  * @param {import("../semantic/types.js").SourceLocation} [typeLocation] - Exact parser-owned type spelling.
- * @returns {import("../semantic/types.js").FunctionReturnTypeReference} Semantic return type.
+ * @returns {import("../semantic/types.js").SemanticFunctionReturnType} Semantic return type.
  */
 export function requireSourceReturnType(language, sourceType, subject, location, typeLocation = location) {
   const voidSpelling = language == "ruby" ? "[void]" : "void"

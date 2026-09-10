@@ -1,7 +1,6 @@
 // @ts-check
 
-import {emitExpression, requiresCanonicalZeroRendering} from "./shared.js"
-import {emitScalarType} from "./scalars.js"
+import {emitExpression, emitType, requiresCanonicalZeroRendering} from "./shared.js"
 
 /**
  * Emits an independently executable TypeScript program through the source-aware writer.
@@ -25,21 +24,11 @@ export function generateTypeScript(module, writer) {
       if (index > 0) writer.synthetic(", ", "parameter separator", [declaration])
       writer.mapped(parameter.name, {mappingKind: "exact", node: parameter, path: parameterPath, role: "name"})
       writer.synthetic(": ", "type separator", [parameter], [parameterPath])
-      writer.mapped(emitScalarType("typescript", parameter.type), {
-        mappingKind: "exact",
-        node: parameter.type,
-        path: `${parameterPath}/type`,
-        role: "type"
-      })
+      emitType(writer, parameter.type, `${parameterPath}/type`, "typescript")
     })
     writer.mapped(")", {mappingKind: "anchor", node: declaration})
     writer.synthetic(": ", "return type separator", [declaration])
-    writer.mapped(emitScalarType("typescript", declaration.returnType), {
-      mappingKind: "exact",
-      node: declaration.returnType,
-      path: `/functions/${functionIndex}/returnType`,
-      role: "type"
-    })
+    emitType(writer, declaration.returnType, `/functions/${functionIndex}/returnType`, "typescript")
     writer.synthetic(" ", "function spacing", [declaration])
     writer.mapped("{", {mappingKind: "anchor", node: declaration})
     writer.synthetic("\n", "line break", [declaration])
@@ -153,12 +142,7 @@ function emitLocal(writer, statement, indent, statementPath) {
   writer.synthetic(" ", "declaration spacing", [statement], [statementPath])
   writer.mapped(statement.name, {mappingKind: "exact", node: statement, path: statementPath, role: "name"})
   writer.synthetic(": ", "type separator", [statement], [statementPath])
-  writer.mapped(emitScalarType("typescript", statement.type), {
-    mappingKind: "exact",
-    node: statement.type,
-    path: `${statementPath}/type`,
-    role: "type"
-  })
+  emitType(writer, statement.type, `${statementPath}/type`, "typescript")
   writer.synthetic(" ", "assignment spacing", [statement], [statementPath])
   writer.mapped("=", {mappingKind: "exact", node: statement, path: statementPath, role: "operator"})
   writer.synthetic(" ", "assignment spacing", [statement], [statementPath])

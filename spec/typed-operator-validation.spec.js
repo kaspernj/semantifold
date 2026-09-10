@@ -235,7 +235,7 @@ describe("typed operator validation", () => {
       source: typescriptExpression("left === right").replace("right: number", "right: string").replace("invalid(1, 2)", "invalid(1, \"2\")")
     })
 
-    assertDiagnostic({code: "UNSUPPORTED_SYNTAX", detail: "ArrayExpression", filename: "collection-equality.ts", language: "typescript", line: 2, source: typescriptExpression("[] === []")})
+    assertDiagnostic({code: "MISSING_TYPE", detail: "explicit recursive list type", filename: "collection-equality.ts", language: "typescript", line: 2, source: typescriptExpression("[] === []")})
     assertDiagnostic({code: "UNSUPPORTED_SYNTAX", detail: "TSAsExpression", filename: "assertion.ts", language: "typescript", line: 2, source: typescriptExpression("(left as number) === right")})
     assertDiagnostic({code: "UNSUPPORTED_SYNTAX", detail: "CastExpression", filename: "cast.java", language: "java", line: 4, source: javaExpression("(int) left < right")})
 

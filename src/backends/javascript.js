@@ -1,7 +1,6 @@
 // @ts-check
 
-import {emitExpression, requiresCanonicalZeroRendering} from "./shared.js"
-import {emitScalarType} from "./scalars.js"
+import {emitExpression, emitType, requiresCanonicalZeroRendering} from "./shared.js"
 
 /**
  * Emits an independently executable JavaScript program with JSDoc types.
@@ -20,23 +19,13 @@ export function generateJavaScript(module, writer) {
       const parameterPath = `/functions/${functionIndex}/parameters/${parameterIndex}`
 
       writer.synthetic(" * @param {", "JavaScript type scaffolding", [parameter], [parameterPath])
-      writer.mapped(emitScalarType("javascript", parameter.type), {
-        mappingKind: "exact",
-        node: parameter.type,
-        path: `${parameterPath}/type`,
-        role: "type"
-      })
+      emitType(writer, parameter.type, `${parameterPath}/type`, "javascript")
       writer.synthetic("} ", "JavaScript type scaffolding", [parameter], [parameterPath])
       writer.mapped(parameter.name, {mappingKind: "exact", node: parameter, path: parameterPath, role: "name"})
       writer.synthetic(" - Semantic parameter.\n", "JavaScript type scaffolding", [parameter], [parameterPath])
     }
     writer.synthetic(" * @returns {", "JavaScript type scaffolding", [declaration])
-    writer.mapped(emitScalarType("javascript", declaration.returnType), {
-      mappingKind: "exact",
-      node: declaration.returnType,
-      path: `/functions/${functionIndex}/returnType`,
-      role: "type"
-    })
+    emitType(writer, declaration.returnType, `/functions/${functionIndex}/returnType`, "javascript")
     writer.synthetic("} Semantic result.\n */\n", "JavaScript type scaffolding", [declaration])
     writer.mapped("function", {mappingKind: "anchor", node: declaration})
     writer.synthetic(" ", "function spacing", [declaration])
@@ -163,12 +152,7 @@ function emitLocal(writer, statement, indent, statementPath) {
   }
 
   writer.synthetic("/** @type {", "JavaScript local type scaffolding", [statement], [statementPath])
-  writer.mapped(emitScalarType("javascript", statement.type), {
-    mappingKind: "exact",
-    node: statement.type,
-    path: `${statementPath}/type`,
-    role: "type"
-  })
+  emitType(writer, statement.type, `${statementPath}/type`, "javascript")
   writer.synthetic("} */\n", "JavaScript local type scaffolding", [statement], [statementPath])
   writer.synthetic(indent, "indentation", [statement], [statementPath])
   writer.mapped(statement.mutable ? "let" : "const", {mappingKind: "anchor", node: statement, path: statementPath})

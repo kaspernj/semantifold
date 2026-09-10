@@ -20,11 +20,45 @@ const targetScalarTypes = Object.freeze({
 /**
  * Emits one target-language scalar or function-return type spelling.
  * @param {import("../semantic/types.js").TextBackendLanguage} language - Target language.
- * @param {import("../semantic/types.js").TypeReference | import("../semantic/types.js").FunctionReturnTypeReference} type - Semantic type.
+ * @param {import("../semantic/types.js").SemanticFunctionReturnType} type - Semantic type.
  * @returns {string} Target type spelling.
  */
 export function emitScalarType(language, type) {
-  return targetScalarTypes[language][type.name]
+  return type.kind == "TypeReference" ? targetScalarTypes[language][type.name] : ""
+}
+
+/**
+ * Emits one recursively parameterized semantic type for the Task 006 cohort.
+ * @param {import("../semantic/types.js").TextBackendLanguage} language - Target language.
+ * @param {import("../semantic/types.js").SemanticFunctionReturnType} type - Semantic type.
+ * @param {boolean} [javaBoxed] - Whether Java scalar arguments require boxed spellings.
+ * @returns {string} Exact target spelling.
+ */
+export function emitSemanticType(language, type, javaBoxed = false) {
+  if (type.kind == "TypeReference") {
+    if (language == "java" && javaBoxed) {
+      return type.name == "integer" ? "Integer" : type.name == "boolean" ? "Boolean" : type.name == "string" ? "String" : "void"
+    }
+
+    return emitScalarType(language, type)
+  }
+
+  const element = type.kind == "ListType" ? type.elementType : type.valueType
+  const nested = emitSemanticType(language, element, language == "java")
+
+  if (type.kind == "ListType") {
+    if (language == "ruby") return `Array[${nested}]`
+    if (language == "php") return `list<${nested}>`
+    if (language == "javascript" || language == "typescript") return `ReadonlyArray<${nested}>`
+    if (language == "java") return `java.util.List<${nested}>`
+  } else {
+    if (language == "ruby") return `Hash[String,${nested}]`
+    if (language == "php") return `array<string,${nested}>`
+    if (language == "javascript" || language == "typescript") return `ReadonlyMap<string, ${nested}>`
+    if (language == "java") return `java.util.Map<String,${nested}>`
+  }
+
+  return ""
 }
 
 /**

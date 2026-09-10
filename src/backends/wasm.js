@@ -177,7 +177,7 @@ function encodeModule(module, index, literals, scratchBase, memoryPages) {
     types.add(["i64"], ["i64"])
   ]
   const semanticTypeIndexes = module.functions.map((declaration) => types.add(
-    declaration.parameters.flatMap(({type}) => wasmTypes(type.name)),
+    declaration.parameters.flatMap(({type, location}) => wasmTypes(wasmScalarType(type, location))),
     wasmTypes(wasmReturnType(declaration))
   ))
   const runType = types.add([], [])
@@ -260,10 +260,11 @@ class FunctionEmitter {
     let index = 0
 
     for (const parameter of parameters) {
-      const types = wasmTypes(parameter.type.name)
+      const scalar = wasmScalarType(parameter.type, parameter.location)
+      const types = wasmTypes(scalar)
       const indexes = types.map(() => index++)
 
-      this.bindings.set(parameter.name, {indexes, type: parameter.type.name})
+      this.bindings.set(parameter.name, {indexes, type: scalar})
     }
     this.parameterCount = index
   }
@@ -308,7 +309,7 @@ class FunctionEmitter {
 
       if (statement.kind == "LocalDeclaration") {
         this.expression(statement.initializer, `${statementPath}/initializer`)
-        const binding = this.allocateBinding(statement.type.name)
+        const binding = this.allocateBinding(wasmScalarType(statement.type, statement.location))
 
         this.bindings.set(statement.name, binding)
         this.setBinding(binding, statement, statementPath, "name")
@@ -398,6 +399,9 @@ class FunctionEmitter {
         this.mappedImmediate(u32(checkedNegateFunctionIndex), expression, path, "checked helper index", "operator")
       }
       return
+    }
+    if (expression.kind != "BinaryExpression") {
+      return unsupportedCapability("wasm", "collection expression reached scalar emission", expression.location)
     }
     if (expression.operation == "BooleanAnd" || expression.operation == "BooleanOr") {
       this.expression(expression.left, `${path}/left`)
@@ -1424,6 +1428,9 @@ function analyzeScratchUse(module) {
         return {state: operand.state, value: {type: "integer", ...(knownInteger === undefined ? {} : {knownInteger})}}
       })
     }
+    if (value.kind != "BinaryExpression") {
+      return unsupportedCapability("wasm", "collection expression reached scalar analysis", value.location)
+    }
     if (value.operation == "BooleanAnd" || value.operation == "BooleanOr") {
       /** @type {{state: AnalysisState, value: AbstractValue}[]} */
       const outcomes = []
@@ -1606,6 +1613,9 @@ function expressionType(expression, bindings, functions) {
 
     return wasmReturnType(declaration)
   }
+  if (expression.kind != "IdentifierExpression") {
+    return unsupportedCapability("wasm", "collection expression reached scalar type inference", expression.location)
+  }
   const binding = bindings.get(expression.name)
 
   if (!binding) throw new Error("Validated Wasm expression omitted its local binding.")
@@ -1619,11 +1629,23 @@ function expressionType(expression, bindings, functions) {
  * @returns {Scalar} Supported Wasm scalar return.
  */
 function wasmReturnType(declaration) {
-  if (declaration.returnType.name == "void") {
+  if (declaration.returnType.kind != "TypeReference" || declaration.returnType.name == "void") {
     return unsupportedCapability("wasm", "Task 005 void function return", declaration.location)
   }
 
   return declaration.returnType.name
+}
+
+/**
+ * Narrows one scalar after Wasm collection capability rejection.
+ * @param {import("../semantic/types.js").SemanticValueType} type - Semantic value type.
+ * @param {import("../semantic/types.js").SourceLocation} location - Owning location.
+ * @returns {Scalar} Scalar type.
+ */
+function wasmScalarType(type, location) {
+  if (type.kind != "TypeReference") return unsupportedCapability("wasm", "Task 006 immutable collection type", location)
+
+  return type.name
 }
 
 /**

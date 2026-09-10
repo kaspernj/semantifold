@@ -67,7 +67,7 @@ class RustEmitter {
   constructor(module, writer) {
     this.writer = writer
     /** @type {Map<string, Scalar>} */
-    this.functions = new Map(module.functions.map(declaration => [declaration.name, /** @type {Scalar} */ (declaration.returnType.name)]))
+    this.functions = new Map(module.functions.map(declaration => [declaration.name, rustScalarType(declaration.returnType, declaration.location)]))
     this.length = 0
     this.location = module.location
   }
@@ -121,6 +121,9 @@ class RustEmitter {
     if (expression.kind == "BooleanLiteral") return "boolean"
     if (expression.kind == "StringLiteral") return "string"
     if (expression.kind == "UnaryExpression" || expression.kind == "BinaryExpression") return expression.type
+    if (expression.kind != "CallExpression" && expression.kind != "IdentifierExpression") {
+      return unsupportedCapability("rust", "collection expression reached scalar emission", expression.location)
+    }
     const type = expression.kind == "CallExpression" ? this.functions.get(expression.callee) : bindings.get(expression.name)
 
     if (!type) throw new Error("Validated Rust expression lost its scalar type.")
@@ -153,7 +156,9 @@ class RustEmitter {
       this.synthetic(") -> ", declaration, path)
       this.mapped(emitScalarType("rust", declaration.returnType), declaration.returnType, `${path}/returnType`, "type")
       this.synthetic(" {\n", declaration, path)
-      this.block(declaration.body, `${path}/body`, "    ", new Map(declaration.parameters.map(parameter => [parameter.name, parameter.type.name])))
+      this.block(declaration.body, `${path}/body`, "    ", new Map(declaration.parameters.map(parameter => [
+        parameter.name, rustScalarType(parameter.type, parameter.location)
+      ])))
       this.synthetic("}\n", declaration, path)
     })
     this.synthetic("\nfn main() {\n", module.entryPoint, "/entryPoint")
@@ -176,7 +181,7 @@ class RustEmitter {
 
     block.statements.forEach((statement, index) => {
       this.statement(statement, `${path}/statements/${index}`, indent, bindings, depth)
-      if (statement.kind == "LocalDeclaration") bindings.set(statement.name, statement.type.name)
+      if (statement.kind == "LocalDeclaration") bindings.set(statement.name, rustScalarType(statement.type, statement.location))
     })
   }
 
@@ -286,6 +291,9 @@ class RustEmitter {
       this.expression(expression.operand, `${path}/operand`, bindings, true, depth + 2)
       this.synthetic(")", expression, path)
     } else {
+      if (expression.kind != "BinaryExpression") {
+        return unsupportedCapability("rust", "collection expression reached scalar emission", expression.location)
+      }
       const token = operators.get(expression.operation)
 
       if (!token) throw new Error("Unsupported operation passed Rust validation.")
@@ -308,4 +316,18 @@ class RustEmitter {
       this.synthetic(")", expression, path)
     }
   }
+}
+
+/**
+ * Narrows a type after Rust collection capability rejection.
+ * @param {import("../semantic/types.js").SemanticFunctionReturnType} type - Semantic type.
+ * @param {import("../semantic/types.js").SourceLocation} location - Owning location.
+ * @returns {Scalar} Scalar type.
+ */
+function rustScalarType(type, location) {
+  if (type.kind != "TypeReference" || type.name == "void") {
+    return unsupportedCapability("rust", "collection or void type reached scalar emission", location)
+  }
+
+  return type.name
 }
