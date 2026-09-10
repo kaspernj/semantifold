@@ -281,15 +281,15 @@ echo label(true, 'no'), PHP_EOL;
 
     assertDiagnostic({
       code: "UNSUPPORTED_SYNTAX",
-      detail: "unsupported scalar type",
+      detail: "optional truthiness condition",
       filename: "nullable.php",
       language: "php",
-      line: 3,
+      line: 4,
       source: `<?php
 declare(strict_types=1);
 function label(?bool $flag, string $fallback): string {
-  if ($flag) return 'yes';
-  else return $fallback;
+  if ($flag) { return 'yes'; }
+  else { return $fallback; }
 }
 echo label(true, 'no'), PHP_EOL;
 `

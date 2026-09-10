@@ -14,6 +14,7 @@ import {
   InterpolatedStringNode,
   LocalVariableReadNode,
   LocalVariableWriteNode,
+  NilNode,
   OrNode,
   ParenthesesNode,
   ProgramNode,
@@ -22,6 +23,7 @@ import {
   StatementsNode,
   StringNode,
   TrueNode,
+  UnlessNode,
   loadPrism
 } from "@ruby/prism"
 import {missingType, SemantifoldDiagnostic, unsupportedSyntax} from "../diagnostic.js"
@@ -32,6 +34,8 @@ import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
 import {requireSourceReturnType} from "./scalars.js"
 import {documentedValueType} from "./types.js"
 const parsePrism = await loadPrism()
+/** @typedef {{name: string, nameLocation: import("../semantic/types.js").SourceLocation, parameters: import("../semantic/types.js").Parameter[], returnType: import("../semantic/types.js").SemanticFunctionReturnType, location: import("../semantic/types.js").SourceLocation}} RubyFunctionSignature */
+/** @typedef {{bindings: Map<string, import("../semantic/types.js").SemanticValueType>, functions: Map<string, RubyFunctionSignature>, returnType?: import("../semantic/types.js").SemanticFunctionReturnType}} RubyConversionContext */
 const rubyBinaryOperations = new Map([
   ["+", "Add"],
   ["-", "Subtract"],
@@ -90,21 +94,49 @@ function slicePrismSource(source, startOffset, endOffset) {
  * @param {import("@ruby/prism").Node} node - Prism node.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
+ * @param {RubyConversionContext} context - Typed lexical conversion context.
+ * @param {import("../semantic/types.js").SemanticValueType} [expectedType] - Explicit contextual value type.
+ * @param {boolean} [preserveOptional] - Whether an optional identifier remains wrapped.
  * @returns {import("../semantic/types.js").Expression} Semantic expression.
  */
-function convertExpression(node, filename, source) {
+function convertExpression(node, filename, source, context, expectedType, preserveOptional = false) {
   const location = nodeLocation(node, filename, source)
+
+  if (expectedType?.kind == "OptionalType") {
+    if (node instanceof NilNode) {
+      return withParserRanges({kind: /** @type {const} */ ("OptionalNone"), location}, {absence: location})
+    }
+    if (node instanceof LocalVariableReadNode && context.bindings.get(node.name)?.kind == "OptionalType") {
+      return convertExpression(node, filename, source, context, undefined, true)
+    }
+    if (node instanceof CallNode && !node.receiver && context.functions.get(node.name)?.returnType.kind == "OptionalType") {
+      return convertExpression(node, filename, source, context, undefined, true)
+    }
+    return withParserRanges({
+      kind: /** @type {const} */ ("OptionalSome"),
+      location,
+      value: convertExpression(node, filename, source, context, expectedType.valueType)
+    }, {some: location})
+  }
+
+  if (node instanceof NilNode) return unsupportedSyntax("ruby", "nil outside an explicit optional context", location)
 
   if (node instanceof CallNode && node.block) {
     return unsupportedSyntax("ruby", "call block", nodeLocation(node.block, filename, source))
   }
 
   if (node instanceof ParenthesesNode && node.body instanceof StatementsNode && node.body.body.length == 1) {
-    return convertExpression(node.body.body[0], filename, source)
+    return convertExpression(node.body.body[0], filename, source, context, expectedType, preserveOptional)
   }
 
   if (node instanceof LocalVariableReadNode) {
-    return withParserRanges({kind: /** @type {const} */ ("IdentifierExpression"), location, name: node.name}, {name: location})
+    const identifier = withParserRanges({kind: /** @type {const} */ ("IdentifierExpression"), location, name: node.name}, {name: location})
+
+    if (!preserveOptional && context.bindings.get(node.name)?.kind == "OptionalType") {
+      return withParserRanges({kind: /** @type {const} */ ("OptionalUnwrap"), location, operand: identifier}, {unwrap: location})
+    }
+
+    return identifier
   }
 
   if (node instanceof IntegerNode) {
@@ -130,6 +162,29 @@ function convertExpression(node, filename, source) {
 
   if (node instanceof InterpolatedStringNode) return unsupportedSyntax("ruby", "interpolated string", location)
 
+  if (node instanceof OrNode && node.left instanceof LocalVariableReadNode &&
+    context.bindings.get(node.left.name)?.kind == "OptionalType") {
+    return unsupportedSyntax("ruby", "optional default with ||", prismLocation(node.operatorLoc, filename, source))
+  }
+
+  if (exactNilTest(node, source)) {
+    const call = /** @type {CallNode} */ (node)
+    const receiver = /** @type {LocalVariableReadNode} */ (call.receiver)
+    const operand = /** @type {import("../semantic/types.js").IdentifierExpression} */ (
+      convertExpression(receiver, filename, source, context, undefined, true)
+    )
+    const present = withParserRanges({kind: /** @type {const} */ ("OptionalIsPresent"), location, operand}, {
+      operator: prismLocation(call.messageLoc ?? call.location, filename, source)
+    })
+    const semantic = withAdaptedOperation(withParserRanges({
+      kind: "UnaryExpression",
+      location,
+      operand: present
+    }, {operator: prismLocation(call.messageLoc ?? call.location, filename, source)}), "Not")
+
+    return /** @type {import("../semantic/types.js").Expression} */ (/** @type {unknown} */ (semantic))
+  }
+
   if (node instanceof ArrayNode) {
     if (!node.openingLoc || !node.closingLoc) return unsupportedSyntax("ruby", "special array literal", location)
     if (node.isContainsSplat()) {
@@ -139,7 +194,7 @@ function convertExpression(node, filename, source) {
     }
 
     return withParserRanges({
-      elements: node.elements.map((element) => convertExpression(element, filename, source)),
+      elements: node.elements.map((element) => convertExpression(element, filename, source, context)),
       kind: /** @type {const} */ ("ListLiteral"),
       location
     }, {
@@ -157,13 +212,13 @@ function convertExpression(node, filename, source) {
       if (!(element.key instanceof StringNode)) {
         return unsupportedSyntax("ruby", "map key other than a string literal", nodeLocation(element.key, filename, source))
       }
-      const key = convertExpression(element.key, filename, source)
+      const key = convertExpression(element.key, filename, source, context)
 
       return withParserRanges({
         key: /** @type {import("../semantic/types.js").StringLiteral} */ (key),
         kind: /** @type {const} */ ("MapEntry"),
         location: nodeLocation(element, filename, source),
-        value: convertExpression(element.value, filename, source)
+        value: convertExpression(element.value, filename, source, context)
       }, {operator: prismLocation(element.operatorLoc, filename, source)})
     })
 
@@ -182,10 +237,15 @@ function convertExpression(node, filename, source) {
     }
     if (node.arguments_) return unsupportedSyntax("ruby", "boolean not argument list", operatorLocation)
 
+    const operand = convertExpression(node.receiver, filename, source, context)
+
+    if (operand.kind == "UnaryExpression" && operand.operand.kind == "OptionalIsPresent") {
+      return operand.operand
+    }
     const semantic = withAdaptedOperation(withParserRanges({
       kind: "UnaryExpression",
       location,
-      operand: convertExpression(node.receiver, filename, source)
+      operand
     }, {operator: operatorLocation}), "Not")
 
     return /** @type {import("../semantic/types.js").Expression} */ (/** @type {unknown} */ (semantic))
@@ -200,7 +260,7 @@ function convertExpression(node, filename, source) {
     const semantic = withAdaptedOperation(withParserRanges({
       kind: "UnaryExpression",
       location,
-      operand: convertExpression(node.receiver, filename, source)
+      operand: convertExpression(node.receiver, filename, source, context)
     }, {operator: operatorLocation}), "Negate")
 
     return /** @type {import("../semantic/types.js").Expression} */ (/** @type {unknown} */ (semantic))
@@ -216,9 +276,9 @@ function convertExpression(node, filename, source) {
 
     const semantic = withAdaptedOperation(withParserRanges({
       kind: "BinaryExpression",
-      left: convertExpression(node.left, filename, source),
+      left: convertExpression(node.left, filename, source, context),
       location,
-      right: convertExpression(node.right, filename, source)
+      right: convertExpression(node.right, filename, source, context)
     }, {operator: operatorLocation}), node instanceof AndNode ? "And" : "Or")
 
     return /** @type {import("../semantic/types.js").Expression} */ (/** @type {unknown} */ (semantic))
@@ -236,9 +296,9 @@ function convertExpression(node, filename, source) {
   if (node instanceof CallNode && node.receiver && rubyBinaryOperations.has(node.name) && node.arguments_?.arguments_.length == 1) {
     const semantic = withAdaptedOperation(withParserRanges({
       kind: "BinaryExpression",
-      left: convertExpression(node.receiver, filename, source),
+      left: convertExpression(node.receiver, filename, source, context),
       location,
-      right: convertExpression(node.arguments_.arguments_[0], filename, source)
+      right: convertExpression(node.arguments_.arguments_[0], filename, source, context)
     }, {operator: prismLocation(node.messageLoc ?? node.location, filename, source)}), /** @type {import("../semantic/operators.js").AdaptedOperation} */ (rubyBinaryOperations.get(node.name)))
 
     return /** @type {import("../semantic/types.js").Expression} */ (/** @type {unknown} */ (semantic))
@@ -247,8 +307,8 @@ function convertExpression(node, filename, source) {
   if (node instanceof CallNode && node.receiver && node.name == "[]" && node.arguments_?.arguments_.length == 1 &&
     !node.callOperatorLoc && !node.block) {
     return withParserRanges({
-      collection: convertExpression(node.receiver, filename, source),
-      index: convertExpression(node.arguments_.arguments_[0], filename, source),
+      collection: convertExpression(node.receiver, filename, source, context),
+      index: convertExpression(node.arguments_.arguments_[0], filename, source, context),
       kind: /** @type {const} */ ("ListIndexExpression"),
       location,
       totality: /** @type {const} */ ("proven")
@@ -257,8 +317,8 @@ function convertExpression(node, filename, source) {
   if (node instanceof CallNode && node.receiver && node.name == "fetch" && node.arguments_?.arguments_.length == 1 &&
     node.callOperatorLoc && !node.block) {
     return withParserRanges({
-      collection: convertExpression(node.receiver, filename, source),
-      key: convertExpression(node.arguments_.arguments_[0], filename, source),
+      collection: convertExpression(node.receiver, filename, source, context),
+      key: convertExpression(node.arguments_.arguments_[0], filename, source, context),
       kind: /** @type {const} */ ("MapLookupExpression"),
       location,
       totality: /** @type {const} */ ("fail-on-absence")
@@ -266,7 +326,7 @@ function convertExpression(node, filename, source) {
   }
   if (node instanceof CallNode && node.receiver && node.name == "size" && !node.arguments_ && node.callOperatorLoc && !node.block) {
     return withParserRanges({
-      collection: convertExpression(node.receiver, filename, source),
+      collection: convertExpression(node.receiver, filename, source, context),
       kind: /** @type {const} */ ("CollectionSizeExpression"),
       location
     }, {operator: prismLocation(node.messageLoc ?? node.location, filename, source)})
@@ -276,8 +336,11 @@ function convertExpression(node, filename, source) {
     if (["send", "public_send", "__send__"].includes(node.name)) {
       return unsupportedSyntax("ruby", "dynamic call", prismLocation(node.messageLoc ?? node.location, filename, source))
     }
+    const signature = context.functions.get(node.name)
+
     return withParserRanges({
-      arguments: (node.arguments_?.arguments_ ?? []).map((argument) => convertExpression(argument, filename, source)),
+      arguments: (node.arguments_?.arguments_ ?? []).map((argument, index) =>
+        convertExpression(argument, filename, source, context, signature?.parameters[index]?.type)),
       callee: node.name,
       kind: "CallExpression",
       location
@@ -295,13 +358,31 @@ function convertExpression(node, filename, source) {
 }
 
 /**
+ * Recognizes only the parser-backed `identifier.nil?` spelling used by Task 007.
+ * @param {import("@ruby/prism").Node} node - Candidate Prism expression.
+ * @param {string} source - Complete source.
+ * @returns {boolean} Whether this is one exact nil test.
+ */
+function exactNilTest(node, source) {
+  if (!(node instanceof CallNode) || !(node.receiver instanceof LocalVariableReadNode) ||
+    node.name != "nil?" || !node.callOperatorLoc || node.arguments_ || node.block) return false
+
+  return slicePrismSource(
+    source,
+    node.callOperatorLoc.startOffset,
+    node.callOperatorLoc.startOffset + node.callOperatorLoc.length
+  ) == "."
+}
+
+/**
  * Converts one explicit Ruby return.
  * @param {import("@ruby/prism").Node} node - Prism node.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
+ * @param {RubyConversionContext} context - Typed lexical conversion context.
  * @returns {import("../semantic/types.js").ReturnStatement} Semantic return.
  */
-function convertReturn(node, filename, source) {
+function convertReturn(node, filename, source, context) {
   const location = nodeLocation(node, filename, source)
 
   if (!(node instanceof ReturnNode) || (node.arguments_?.arguments_.length ?? 0) > 1) {
@@ -309,7 +390,13 @@ function convertReturn(node, filename, source) {
   }
 
   return {
-    ...(node.arguments_?.arguments_[0] ? {expression: convertExpression(node.arguments_.arguments_[0], filename, source)} : {}),
+    ...(node.arguments_?.arguments_[0] ? {expression: convertExpression(
+      node.arguments_.arguments_[0],
+      filename,
+      source,
+      context,
+      context.returnType?.kind == "TypeReference" && context.returnType.name == "void" ? undefined : context.returnType
+    )} : {}),
     kind: "ReturnStatement",
     location
   }
@@ -466,12 +553,12 @@ function localMetadata(comments, node, filename, source) {
  * Converts one Ruby local declaration or assignment.
  * @param {import("@ruby/prism").Node} node - Prism node.
  * @param {import("@ruby/prism/src/deserialize.js").Comment[]} comments - Prism comments.
- * @param {Set<string>} visible - Names visible during adaptation.
+ * @param {RubyConversionContext} context - Typed lexical conversion context.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
  * @returns {import("../semantic/types.js").LocalStatement} Semantic local statement.
  */
-function convertLocalStatement(node, comments, visible, filename, source) {
+function convertLocalStatement(node, comments, context, filename, source) {
   const location = nodeLocation(node, filename, source)
 
   if (!(node instanceof LocalVariableWriteNode)) return unsupportedSyntax("ruby", node.constructor.name, location)
@@ -479,51 +566,55 @@ function convertLocalStatement(node, comments, visible, filename, source) {
   const metadata = localMetadata(comments, node, filename, source)
 
   if (metadata) {
-    visible.add(node.name)
-    return withParserRanges({
-      initializer: convertExpression(node.value, filename, source),
-      kind: "LocalDeclaration",
+    const semantic = withParserRanges({
+      initializer: convertExpression(node.value, filename, source, context, metadata.type),
+      kind: /** @type {const} */ ("LocalDeclaration"),
       location,
       mutable: !metadata.immutable,
       name: node.name,
       type: metadata.type
     }, {name: prismLocation(node.nameLoc, filename, source), operator: prismLocation(node.operatorLoc, filename, source)})
+
+    context.bindings.set(node.name, metadata.type)
+    return semantic
   }
 
-  if (!visible.has(node.name)) return missingType("ruby", `Local '${node.name}'`, location)
+  if (!context.bindings.has(node.name)) return missingType("ruby", `Local '${node.name}'`, location)
 
   const targetLocation = prismLocation(node.nameLoc, filename, source)
   const target = withParserRanges({kind: /** @type {const} */ ("IdentifierExpression"), location: targetLocation, name: node.name}, {
     name: targetLocation
   })
 
-  return withParserRanges({
-    expression: convertExpression(node.value, filename, source),
-    kind: "AssignmentStatement",
+  const semantic = withParserRanges({
+    expression: convertExpression(node.value, filename, source, context, context.bindings.get(node.name)),
+    kind: /** @type {const} */ ("AssignmentStatement"),
     location,
     target
   }, {operator: prismLocation(node.operatorLoc, filename, source)})
+
+  return semantic
 }
 
 /**
  * Converts one exhaustive Prism statement.
  * @param {import("@ruby/prism").Node} node - Prism statement.
  * @param {import("@ruby/prism/src/deserialize.js").Comment[]} comments - Prism comments.
- * @param {Set<string>} visible - Names visible during adaptation.
+ * @param {RubyConversionContext} context - Typed lexical conversion context.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
  * @returns {import("../semantic/types.js").Statement} Semantic statement.
  */
-function convertStatement(node, comments, visible, filename, source) {
-  if (node instanceof ReturnNode) return convertReturn(node, filename, source)
-  if (node instanceof IfNode) return convertIf(node, comments, visible, filename, source)
-  if (node instanceof LocalVariableWriteNode) return convertLocalStatement(node, comments, visible, filename, source)
+function convertStatement(node, comments, context, filename, source) {
+  if (node instanceof ReturnNode) return convertReturn(node, filename, source, context)
+  if (node instanceof IfNode || node instanceof UnlessNode) return convertIf(node, comments, context, filename, source)
+  if (node instanceof LocalVariableWriteNode) return convertLocalStatement(node, comments, context, filename, source)
   if (node instanceof CallNode) {
     if (node.block) return unsupportedSyntax("ruby", "call block", nodeLocation(node.block, filename, source))
-    if (!node.receiver && node.name == "puts") return convertPrint(node, filename, source)
+    if (!node.receiver && node.name == "puts") return convertPrint(node, filename, source, context)
 
     return {
-      expression: /** @type {import("../semantic/types.js").CallExpression} */ (convertExpression(node, filename, source)),
+      expression: /** @type {import("../semantic/types.js").CallExpression} */ (convertExpression(node, filename, source, context)),
       kind: "ExpressionStatement",
       location: nodeLocation(node, filename, source)
     }
@@ -536,17 +627,17 @@ function convertStatement(node, comments, visible, filename, source) {
  * Converts one ordered Prism statement list.
  * @param {StatementsNode | null} node - Prism statements, or an empty source block.
  * @param {import("@ruby/prism/src/deserialize.js").Comment[]} comments - Prism comments.
- * @param {Set<string>} visible - Names visible on block entry.
+ * @param {RubyConversionContext} context - Typed lexical conversion context.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
  * @param {import("../semantic/types.js").SourceLocation} fallbackLocation - Empty block location.
  * @returns {import("../semantic/types.js").Block} Semantic block.
  */
-function convertBlock(node, comments, visible, filename, source, fallbackLocation) {
+function convertBlock(node, comments, context, filename, source, fallbackLocation) {
   return {
     kind: "Block",
     location: node ? nodeLocation(node, filename, source) : fallbackLocation,
-    statements: node ? node.body.map((statement) => convertStatement(statement, comments, visible, filename, source)) : []
+    statements: node ? node.body.map((statement) => convertStatement(statement, comments, context, filename, source)) : []
   }
 }
 
@@ -583,14 +674,14 @@ function convertType(sourceType, subject, location, source, typeLocation = locat
 }
 
 /**
- * Converts a Ruby definition.
+ * Converts a Ruby definition signature before body expressions.
  * @param {DefNode} node - Prism definition.
  * @param {import("@ruby/prism/src/deserialize.js").Comment[]} comments - Prism comments.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
- * @returns {import("../semantic/types.js").FunctionDeclaration} Semantic function.
+ * @returns {RubyFunctionSignature} Semantic signature.
  */
-function convertFunction(node, comments, filename, source) {
+function convertFunctionSignature(node, comments, filename, source) {
   const location = nodeLocation(node, filename, source)
   const parameterList = node.parameters
 
@@ -628,61 +719,111 @@ function convertFunction(node, comments, filename, source) {
       type: convertType(declaredType?.sourceType, `Parameter '${parameter.name}'`, parameterLocation, source, declaredType?.location)
     }, {name: parameterLocation})
   })
-  const visible = new Set(parameters.map((parameter) => parameter.name))
-  const body = convertBlock(node.body instanceof StatementsNode ? node.body : null, comments, visible, filename, source, location)
-
-  return withParserRanges({
-    body,
-    kind: "FunctionDeclaration",
+  return {
     location,
     name: node.name,
+    nameLocation,
     parameters,
     returnType: declaredTypes.returnType?.sourceType == "[void]"
       ? requireSourceReturnType("ruby", "[void]", `Function '${node.name}' return`, location, declaredTypes.returnType.location)
       : convertType(declaredTypes.returnType?.sourceType, `Function '${node.name}' return`, location, source, declaredTypes.returnType?.location)
-  }, {name: nameLocation})
+  }
+}
+
+/**
+ * Converts a Ruby definition body using all already-proved signatures.
+ * @param {DefNode} node - Prism definition.
+ * @param {RubyFunctionSignature} signature - Converted signature.
+ * @param {Map<string, RubyFunctionSignature>} functions - Module signatures.
+ * @param {import("@ruby/prism/src/deserialize.js").Comment[]} comments - Prism comments.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @returns {import("../semantic/types.js").FunctionDeclaration} Semantic function.
+ */
+function convertFunction(node, signature, functions, comments, filename, source) {
+  const context = {
+    bindings: new Map(signature.parameters.map((parameter) => [parameter.name, parameter.type])),
+    functions,
+    returnType: signature.returnType
+  }
+  const body = convertBlock(
+    node.body instanceof StatementsNode ? node.body : null,
+    comments,
+    context,
+    filename,
+    source,
+    signature.location
+  )
+
+  return withParserRanges({
+    body,
+    kind: "FunctionDeclaration",
+    location: signature.location,
+    name: signature.name,
+    parameters: signature.parameters,
+    returnType: signature.returnType
+  }, {name: signature.nameLocation})
 }
 
 /**
  * Converts the existing Ruby if/else terminal with restricted branch prefixes.
- * @param {IfNode} node - Prism if node.
+ * @param {IfNode | UnlessNode} node - Prism conditional node.
  * @param {import("@ruby/prism/src/deserialize.js").Comment[]} comments - Prism comments.
- * @param {Set<string>} visible - Enclosing visible names.
+ * @param {RubyConversionContext} context - Typed lexical conversion context.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
  * @returns {import("../semantic/types.js").IfStatement} Semantic branch.
  */
-function convertIf(node, comments, visible, filename, source) {
+function convertIf(node, comments, context, filename, source) {
   const location = nodeLocation(node, filename, source)
 
-  if (!node.ifKeywordLoc || node.ifKeywordLoc.startOffset != node.location.startOffset) {
-    return unsupportedSyntax("ruby", "modifier conditional", node.ifKeywordLoc
-      ? prismLocation(node.ifKeywordLoc, filename, source)
+  const keywordLocation = node instanceof UnlessNode ? node.keywordLoc : node.ifKeywordLoc
+
+  if (!keywordLocation || keywordLocation.startOffset != node.location.startOffset) {
+    return unsupportedSyntax("ruby", "modifier conditional", keywordLocation
+      ? prismLocation(keywordLocation, filename, source)
       : location)
   }
 
-  const consequentVisible = new Set(visible)
+  if (node.predicate instanceof LocalVariableReadNode &&
+    context.bindings.get(node.predicate.name)?.kind == "OptionalType") {
+    return unsupportedSyntax("ruby", "optional truthiness condition", nodeLocation(node.predicate, filename, source))
+  }
+
+  if (node instanceof UnlessNode && !exactNilTest(node.predicate, source)) {
+    return unsupportedSyntax("ruby", "unless condition other than an exact nil? presence guard", nodeLocation(node.predicate, filename, source))
+  }
+
+  const predicate = convertExpression(node.predicate, filename, source, context)
+  const condition = node instanceof UnlessNode && predicate.kind == "UnaryExpression" &&
+    predicate.operand.kind == "OptionalIsPresent"
+    ? predicate.operand
+    : predicate
+  if (node instanceof UnlessNode && condition.kind != "OptionalIsPresent") {
+    return unsupportedSyntax("ruby", "unless condition other than an exact nil? presence guard", nodeLocation(node.predicate, filename, source))
+  }
+  const consequentContext = {...context, bindings: new Map(context.bindings)}
+  const alternateContext = {...context, bindings: new Map(context.bindings)}
   let alternate
+  const subsequent = node instanceof UnlessNode ? node.elseClause : node.subsequent
 
-  if (node.subsequent) {
-    const alternateVisible = new Set(visible)
-
-    if (node.subsequent instanceof ElseNode) {
-      alternate = convertBlock(node.subsequent.statements, comments, alternateVisible, filename, source,
-        nodeLocation(node.subsequent, filename, source))
-    } else if (node.subsequent instanceof IfNode) {
+  if (subsequent) {
+    if (subsequent instanceof ElseNode) {
+      alternate = convertBlock(subsequent.statements, comments, alternateContext, filename, source,
+        nodeLocation(subsequent, filename, source))
+    } else if (subsequent instanceof IfNode) {
       alternate = {
         kind: /** @type {const} */ ("Block"),
-        location: nodeLocation(node.subsequent, filename, source),
-        statements: [convertIf(node.subsequent, comments, alternateVisible, filename, source)]
+        location: nodeLocation(subsequent, filename, source),
+        statements: [convertIf(subsequent, comments, alternateContext, filename, source)]
       }
-    } else return unsupportedSyntax("ruby", node.subsequent.constructor.name, nodeLocation(node.subsequent, filename, source))
+    } else return unsupportedSyntax("ruby", subsequent.constructor.name, nodeLocation(subsequent, filename, source))
   }
 
   return {
     ...(alternate ? {alternate} : {}),
-    condition: convertExpression(node.predicate, filename, source),
-    consequent: convertBlock(node.statements, comments, consequentVisible, filename, source, location),
+    condition,
+    consequent: convertBlock(node.statements, comments, consequentContext, filename, source, location),
     kind: "IfStatement",
     location
   }
@@ -693,16 +834,17 @@ function convertIf(node, comments, visible, filename, source) {
  * @param {import("@ruby/prism").Node} node - Prism node.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
+ * @param {RubyConversionContext} context - Typed lexical conversion context.
  * @returns {import("../semantic/types.js").PrintStatement} Print statement.
  */
-function convertPrint(node, filename, source) {
+function convertPrint(node, filename, source, context) {
   const location = nodeLocation(node, filename, source)
 
   if (!(node instanceof CallNode) || node.receiver || node.name != "puts" || node.arguments_?.arguments_.length != 1) {
     return unsupportedSyntax("ruby", node.constructor.name, location)
   }
 
-  return {expression: convertExpression(node.arguments_.arguments_[0], filename, source), kind: "PrintStatement", location}
+  return {expression: convertExpression(node.arguments_.arguments_[0], filename, source, context), kind: "PrintStatement", location}
 }
 
 /**
@@ -725,8 +867,11 @@ export function parseRuby({filename, source}) {
   if (!(result.value instanceof ProgramNode)) throw new Error("Prism returned a non-program root.")
 
   const body = result.value.statements.body
-  const functions = body.filter((node) => node instanceof DefNode)
-    .map((node) => convertFunction(node, result.comments, filename, source))
+  const functionNodes = body.filter((node) => node instanceof DefNode)
+  const signatures = functionNodes.map((node) => convertFunctionSignature(node, result.comments, filename, source))
+  const functionSignatures = new Map(signatures.map((signature) => [signature.name, signature]))
+  const functions = functionNodes.map((node, index) =>
+    convertFunction(node, signatures[index], functionSignatures, result.comments, filename, source))
   const entryNodes = body.filter((node) => !(node instanceof DefNode))
   const location = moduleLocation(filename, source)
 
@@ -741,11 +886,11 @@ export function parseRuby({filename, source}) {
       (entryNodes.at(-1)?.location.startOffset ?? 0) + (entryNodes.at(-1)?.location.length ?? 0)
     )
   ) : location
-  const entryVisible = new Set()
+  const entryContext = {bindings: new Map(), functions: functionSignatures}
   const entryBlock = {
     kind: /** @type {const} */ ("Block"),
     location: entryLocation,
-    statements: entryNodes.map((statement) => convertStatement(statement, result.comments, entryVisible, filename, source))
+    statements: entryNodes.map((statement) => convertStatement(statement, result.comments, entryContext, filename, source))
   }
 
   return {

@@ -1,6 +1,6 @@
 # 007 — Optional values and presence narrowing
 
-- Status: `todo`
+- Status: `implemented and accepted locally — coordinator review, exact-head TensorBuzz CI, and merge pending`
 - Phase/priority: Phase 1 / P1
 - Dependencies: [001-portable-scalar-values-and-types.md](001-portable-scalar-values-and-types.md), [003-typed-operators-and-expressions.md](003-typed-operators-and-expressions.md), [004-statement-sequencing-and-conditionals.md](004-statement-sequencing-and-conditionals.md), [025-core-language-baseline-acceptance.md](025-core-language-baseline-acceptance.md)
 
@@ -74,3 +74,10 @@ Arbitrary unions/intersections, `undefined`, optional/default parameters or prop
 - All unwrapping is statically guarded, and every language mapping round-trips without relying on implicit nullability.
 - Arbitrary unions and nullish shortcuts fail loudly rather than erase meaning.
 - Focused flow/diagnostic specs and real present/absent registered-runtime execution pass with docs/changelog updates.
+
+## Implementation delivery record — 2026-09-10
+
+- Strict RED-GREEN slices first exposed missing TypeScript optional typing, contextual absence and call-argument handling, Ruby `nil`, PHP nullable declarations, Java Optional factories, excluded truthiness/undefined/checking opt-outs, backend emission, recursive PHP optional carriers, registry capability data, malformed optional IR, Java package-qualifier capture, and generated mapping identities. Each production behavior was implemented only after its focused RED and returned GREEN before the next slice.
+- The semantic IR now has recursive acyclic `OptionalType`, explicit `OptionalNone`/`OptionalSome`, simple-identifier `OptionalIsPresent`, and proof-checked `OptionalUnwrap`. Validation confines absence and presence construction to explicit optional contexts, rejects direct nested optionals and void/wrong constituents, grants a proof only on the present branch, and invalidates it on assignment while retaining shared shadowing and return-completeness rules.
+- Exact parser-backed Ruby, JavaScript/JSDoc, TypeScript, PHP, and Java profiles normalize explicit optional parameters, returns, and locals. Backends emit `nil`, `null`, canonical PHP nullable carriers, or fully qualified `java.util.Optional` syntax from semantic operations only. All other registered roles advertise `optionalValues: false` and reject optional IR transactionally. This adds no pairwise adapter, standard-library substitution, facade/provider link, universal nullable literal, arbitrary union, or general method model.
+- Focused source, flow, exclusion, backend, malformed-IR, registry, provenance/mapping, and real-toolchain specs pass individually. The runtime proof invokes PHP, Ruby, Node.js, strict local `tsc` then Node.js, and `javac` then `java`, requiring exact `present\nabsent\n` output; missing commands fail rather than skip. The final local gate and commit identifiers are recorded in the worker handoff; independent review, TensorBuzz, merge, release, and remote mutation remain coordinator-owned.

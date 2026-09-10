@@ -8,10 +8,12 @@ import {withAdaptedOperation} from "../semantic/operators.js"
 import {withParserRanges} from "../semantic/provenance.js"
 import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
 import {requireSourceReturnType, requireSourceScalarType} from "./scalars.js"
-import {documentedValueType, listType, mapType} from "./types.js"
+import {documentedValueType, listType, mapType, optionalType} from "./types.js"
 
 /** @typedef {NonNullable<import("@babel/parser").ParseResult<import("@babel/types").File>["tokens"]>[number]} BabelToken */
 /** @typedef {{byStart: Map<number, BabelToken>, tokens: BabelToken[]}} BabelTokenIndex */
+/** @typedef {{name: string, nameLocation: import("../semantic/types.js").SourceLocation, parameters: import("../semantic/types.js").Parameter[], returnType: import("../semantic/types.js").SemanticFunctionReturnType, location: import("../semantic/types.js").SourceLocation}} JavaScriptFunctionSignature */
+/** @typedef {{bindings: Map<string, import("../semantic/types.js").SemanticValueType>, functions: Map<string, JavaScriptFunctionSignature>, returnType?: import("../semantic/types.js").SemanticFunctionReturnType}} JavaScriptConversionContext */
 
 /** @type {WeakMap<object, BabelTokenIndex>} */
 const nodeTokens = new WeakMap()
@@ -141,13 +143,40 @@ function commentTagLocation(comment, tag, field, filename, source) {
  * @param {"javascript" | "typescript"} language - Frontend language.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
+ * @param {JavaScriptConversionContext} [context] - Typed lexical conversion context.
+ * @param {import("../semantic/types.js").SemanticValueType} [expectedType] - Explicit contextual value type.
+ * @param {boolean} [preserveOptional] - Whether an optional identifier remains wrapped.
  * @returns {import("../semantic/types.js").Expression} Semantic expression.
  */
-function convertExpression(node, language, filename, source) {
+function convertExpression(node, language, filename, source, context = {bindings: new Map(), functions: new Map()}, expectedType, preserveOptional = false) {
   const location = nodeLocation(node, filename, source)
 
+  if (node.type == "Identifier" && node.name == "undefined") {
+    return unsupportedSyntax(language, "undefined absence value", location)
+  }
+
+  if (expectedType?.kind == "OptionalType") {
+    if (node.type == "NullLiteral") {
+      return withParserRanges({kind: /** @type {const} */ ("OptionalNone"), location}, {absence: location})
+    }
+    if (node.type == "Identifier" && context.bindings.get(node.name)?.kind == "OptionalType") {
+      return convertExpression(node, language, filename, source, context, undefined, true)
+    }
+    if (node.type == "CallExpression" && node.callee.type == "Identifier" &&
+      context.functions.get(node.callee.name)?.returnType.kind == "OptionalType") {
+      return convertExpression(node, language, filename, source, context, undefined, true)
+    }
+    return withParserRanges({
+      kind: /** @type {const} */ ("OptionalSome"),
+      location,
+      value: convertExpression(node, language, filename, source, context, expectedType.valueType)
+    }, {some: location})
+  }
+
+  if (node.type == "NullLiteral") return unsupportedSyntax(language, "null outside an explicit optional context", location)
+
   if (node.type == "TSNonNullExpression") {
-    const expression = convertExpression(node.expression, language, filename, source)
+    const expression = convertExpression(node.expression, language, filename, source, context)
 
     if (language != "typescript" || expression.kind != "MapLookupExpression") {
       return unsupportedSyntax(language, "non-null assertion other than Map.get result", location)
@@ -157,9 +186,15 @@ function convertExpression(node, language, filename, source) {
   }
 
   if (node.type == "Identifier") {
-    return withParserRanges({kind: /** @type {const} */ ("IdentifierExpression"), location, name: node.name}, {
+    const identifier = withParserRanges({kind: /** @type {const} */ ("IdentifierExpression"), location, name: node.name}, {
       name: identifierLocation(node, filename, source)
     })
+
+    if (!preserveOptional && context.bindings.get(node.name)?.kind == "OptionalType") {
+      return withParserRanges({kind: /** @type {const} */ ("OptionalUnwrap"), location, operand: identifier}, {unwrap: location})
+    }
+
+    return identifier
   }
 
   if (node.type == "NumericLiteral") {
@@ -187,7 +222,7 @@ function convertExpression(node, language, filename, source) {
       if (!element) return unsupportedSyntax(language, "sparse array hole", arrayHoleLocation(node, index, filename, source))
       if (element.type == "SpreadElement") return unsupportedSyntax(language, "array spread", nodeLocation(element, filename, source))
 
-      return convertExpression(element, language, filename, source)
+      return convertExpression(element, language, filename, source, context)
     })
 
     return withParserRanges({elements, kind: /** @type {const} */ ("ListLiteral"), location}, {literal: location})
@@ -225,14 +260,14 @@ function convertExpression(node, language, filename, source) {
         return unsupportedSyntax(language, "map key other than a string literal", nodeLocation(key, filename, source))
       }
       const keyExpression = /** @type {import("../semantic/types.js").StringLiteral} */ (
-        convertExpression(key, language, filename, source)
+        convertExpression(key, language, filename, source, context)
       )
 
       return withParserRanges({
         key: keyExpression,
         kind: /** @type {const} */ ("MapEntry"),
         location: nodeLocation(element, filename, source),
-        value: convertExpression(value, language, filename, source)
+        value: convertExpression(value, language, filename, source, context)
       }, {
         key: keyExpression.location,
         operator: tokenLocation(element, ",", key.end ?? element.start ?? 0, value.start ?? element.end ?? source.length, filename, source)
@@ -247,8 +282,8 @@ function convertExpression(node, language, filename, source) {
       if (node.property.type == "PrivateName") return unsupportedSyntax(language, node.property.type, location)
 
       return withParserRanges({
-        collection: convertExpression(node.object, language, filename, source),
-        index: convertExpression(node.property, language, filename, source),
+        collection: convertExpression(node.object, language, filename, source, context),
+        index: convertExpression(node.property, language, filename, source, context),
         kind: /** @type {const} */ ("ListIndexExpression"),
         location,
         totality: /** @type {const} */ ("proven")
@@ -258,7 +293,7 @@ function convertExpression(node, language, filename, source) {
     }
     if (node.property.type == "Identifier" && ["length", "size"].includes(node.property.name)) {
       return withParserRanges({
-        collection: convertExpression(node.object, language, filename, source),
+        collection: convertExpression(node.object, language, filename, source, context),
         collectionKind: /** @type {"list" | "map"} */ (node.property.name == "length" ? "list" : "map"),
         kind: /** @type {const} */ ("CollectionSizeExpression"),
         location
@@ -279,7 +314,7 @@ function convertExpression(node, language, filename, source) {
   }
 
   if (node.type == "UnaryExpression" && ["!", "-"].includes(node.operator)) {
-    const operand = convertExpression(node.argument, language, filename, source)
+    const operand = convertExpression(node.argument, language, filename, source, context)
     const semantic = withAdaptedOperation(withParserRanges({
       kind: "UnaryExpression",
       location,
@@ -294,9 +329,9 @@ function convertExpression(node, language, filename, source) {
   if (node.type == "LogicalExpression" && ["&&", "||"].includes(node.operator)) {
     const semantic = withAdaptedOperation(withParserRanges({
       kind: "BinaryExpression",
-      left: convertExpression(node.left, language, filename, source),
+      left: convertExpression(node.left, language, filename, source, context),
       location,
-      right: convertExpression(node.right, language, filename, source)
+      right: convertExpression(node.right, language, filename, source, context)
     }, {
       operator: tokenLocation(node, node.operator, node.left.end ?? node.start ?? 0, node.right.start ?? node.end ?? source.length, filename, source)
     }), node.operator == "&&" ? "And" : "Or")
@@ -304,11 +339,22 @@ function convertExpression(node, language, filename, source) {
     return /** @type {import("../semantic/types.js").Expression} */ (/** @type {unknown} */ (semantic))
   }
 
+  if (node.type == "BinaryExpression" && node.operator == "!==" && node.left.type == "Identifier" &&
+    node.right.type == "NullLiteral") {
+    const operand = /** @type {import("../semantic/types.js").IdentifierExpression} */ (
+      convertExpression(node.left, language, filename, source, context, undefined, true)
+    )
+
+    return withParserRanges({kind: /** @type {const} */ ("OptionalIsPresent"), location, operand}, {
+      operator: tokenLocation(node, node.operator, node.left.end ?? node.start ?? 0, node.right.start ?? node.end ?? source.length, filename, source)
+    })
+  }
+
   if (node.type == "BinaryExpression" && babelBinaryOperations.has(node.operator)) {
     if (node.left.type == "PrivateName") unsupportedSyntax(language, node.left.type, location)
 
-    const left = convertExpression(node.left, language, filename, source)
-    const right = convertExpression(node.right, language, filename, source)
+    const left = convertExpression(node.left, language, filename, source, context)
+    const right = convertExpression(node.right, language, filename, source, context)
 
     const semantic = withAdaptedOperation(withParserRanges({
       kind: "BinaryExpression",
@@ -330,12 +376,13 @@ function convertExpression(node, language, filename, source) {
     if (node.optional || node.callee.optional || node.typeArguments || node.typeParameters) {
       return unsupportedSyntax(language, "optional or generic call", location)
     }
-    const arguments_ = node.arguments.map((argument) => {
+    const signature = context.functions.get(node.callee.name)
+    const arguments_ = node.arguments.map((argument, index) => {
       if (argument.type == "SpreadElement" || argument.type == "ArgumentPlaceholder") {
         return unsupportedSyntax(language, argument.type, nodeLocation(argument, filename, source))
       }
 
-      return convertExpression(argument, language, filename, source)
+      return convertExpression(argument, language, filename, source, context, signature?.parameters[index]?.type)
     })
 
     return withParserRanges({arguments: arguments_, callee: node.callee.name, kind: /** @type {const} */ ("CallExpression"), location}, {
@@ -355,8 +402,8 @@ function convertExpression(node, language, filename, source) {
     }
 
     return withParserRanges({
-      collection: convertExpression(node.callee.object, language, filename, source),
-      key: convertExpression(key, language, filename, source),
+      collection: convertExpression(node.callee.object, language, filename, source, context),
+      key: convertExpression(key, language, filename, source, context),
       kind: /** @type {const} */ ("MapLookupExpression"),
       location,
       totality: /** @type {const} */ ("proven")
@@ -389,15 +436,23 @@ function arrayHoleLocation(node, index, filename, source) {
  * @param {"javascript" | "typescript"} language - Frontend language.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
+ * @param {JavaScriptConversionContext} context - Typed lexical conversion context.
  * @returns {import("../semantic/types.js").ReturnStatement} Semantic return.
  */
-function convertReturn(node, language, filename, source) {
+function convertReturn(node, language, filename, source, context) {
   const location = nodeLocation(node, filename, source)
 
   if (node.type != "ReturnStatement") return unsupportedSyntax(language, node.type, location)
 
   return {
-    ...(node.argument ? {expression: convertExpression(node.argument, language, filename, source)} : {}),
+    ...(node.argument ? {expression: convertExpression(
+      node.argument,
+      language,
+      filename,
+      source,
+      context,
+      context.returnType?.kind == "TypeReference" && context.returnType.name == "void" ? undefined : context.returnType
+    )} : {}),
     kind: "ReturnStatement",
     location
   }
@@ -409,9 +464,10 @@ function convertReturn(node, language, filename, source) {
  * @param {"javascript" | "typescript"} language - Frontend language.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
+ * @param {JavaScriptConversionContext} context - Typed lexical conversion context.
  * @returns {import("../semantic/types.js").LocalStatement} Semantic local statement.
  */
-function convertLocalStatement(node, language, filename, source) {
+function convertLocalStatement(node, language, filename, source, context) {
   const location = nodeLocation(node, filename, source)
 
   if (node.type == "VariableDeclaration") {
@@ -429,9 +485,9 @@ function convertLocalStatement(node, language, filename, source) {
       ? convertTypeScriptType(declarator.id.typeAnnotation, `Local '${declarator.id.name}'`, declaratorLocation, filename, source)
       : localJavaScriptType(node, declarator.id.name, filename, source)
 
-    return withParserRanges({
-      initializer: convertExpression(declarator.init, language, filename, source),
-      kind: "LocalDeclaration",
+    const semantic = withParserRanges({
+      initializer: convertExpression(declarator.init, language, filename, source, context, type),
+      kind: /** @type {const} */ ("LocalDeclaration"),
       location,
       mutable: node.kind == "let",
       name: declarator.id.name,
@@ -440,6 +496,9 @@ function convertLocalStatement(node, language, filename, source) {
       name: identifierLocation(declarator.id, filename, source),
       operator: tokenLocation(declarator, "=", declarator.id.end ?? declarator.start ?? 0, declarator.init.start ?? declarator.end ?? source.length, filename, source)
     })
+
+    context.bindings.set(declarator.id.name, type)
+    return semantic
   }
 
   if (node.type == "ExpressionStatement" && node.expression.type == "AssignmentExpression") {
@@ -453,14 +512,16 @@ function convertLocalStatement(node, language, filename, source) {
       name: identifierLocation(assignment.left, filename, source)
     })
 
-    return withParserRanges({
-      expression: convertExpression(assignment.right, language, filename, source),
-      kind: "AssignmentStatement",
+    const semantic = withParserRanges({
+      expression: convertExpression(assignment.right, language, filename, source, context, context.bindings.get(assignment.left.name)),
+      kind: /** @type {const} */ ("AssignmentStatement"),
       location,
       target
     }, {
       operator: tokenLocation(assignment, "=", assignment.left.end ?? assignment.start ?? 0, assignment.right.start ?? assignment.end ?? source.length, filename, source)
     })
+
+    return semantic
   }
 
   return unsupportedSyntax(language, node.type, location)
@@ -510,26 +571,27 @@ function localJavaScriptType(node, name, filename, source) {
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
  * @param {boolean} canonicalZeroRequired - Whether generated scalar output may contain signed zero.
+ * @param {JavaScriptConversionContext} context - Typed lexical conversion context.
  * @returns {import("../semantic/types.js").Statement} Semantic statement.
  */
-function convertStatement(node, language, filename, source, canonicalZeroRequired) {
-  if (node.type == "ReturnStatement") return convertReturn(node, language, filename, source)
-  if (node.type == "IfStatement") return convertIf(node, language, filename, source, canonicalZeroRequired)
+function convertStatement(node, language, filename, source, canonicalZeroRequired, context) {
+  if (node.type == "ReturnStatement") return convertReturn(node, language, filename, source, context)
+  if (node.type == "IfStatement") return convertIf(node, language, filename, source, canonicalZeroRequired, context)
   if (node.type == "VariableDeclaration" || node.type == "ExpressionStatement" && node.expression.type == "AssignmentExpression") {
-    return convertLocalStatement(node, language, filename, source)
+    return convertLocalStatement(node, language, filename, source, context)
   }
   if (node.type == "ExpressionStatement") {
     if (node.expression.type == "CallExpression" && node.expression.callee.type == "Identifier") {
       return {
         expression: /** @type {import("../semantic/types.js").CallExpression} */ (
-          convertExpression(node.expression, language, filename, source)
+          convertExpression(node.expression, language, filename, source, context)
         ),
         kind: "ExpressionStatement",
         location: nodeLocation(node, filename, source)
       }
     }
 
-    return convertPrint(node, language, filename, source, canonicalZeroRequired)
+    return convertPrint(node, language, filename, source, canonicalZeroRequired, context)
   }
 
   return unsupportedSyntax(language, node.type, nodeLocation(node, filename, source))
@@ -542,10 +604,11 @@ function convertStatement(node, language, filename, source, canonicalZeroRequire
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
  * @param {boolean} canonicalZeroRequired - Whether generated scalar output may contain signed zero.
+ * @param {JavaScriptConversionContext} context - Typed lexical conversion context.
  * @param {import("../semantic/types.js").SourceLocation} [location] - Location for a statement-array block.
  * @returns {import("../semantic/types.js").Block} Semantic block.
  */
-function convertBlock(input, language, filename, source, canonicalZeroRequired, location) {
+function convertBlock(input, language, filename, source, canonicalZeroRequired, context, location) {
   const statements = Array.isArray(input) ? input : input.body
   const directives = Array.isArray(input) ? [] : input.directives
   const blockLocation = location ?? nodeLocation(/** @type {import("@babel/types").BlockStatement} */ (input), filename, source)
@@ -557,7 +620,7 @@ function convertBlock(input, language, filename, source, canonicalZeroRequired, 
   return {
     kind: "Block",
     location: blockLocation,
-    statements: statements.map((statement) => convertStatement(statement, language, filename, source, canonicalZeroRequired))
+    statements: statements.map((statement) => convertStatement(statement, language, filename, source, canonicalZeroRequired, context))
   }
 }
 
@@ -667,6 +730,24 @@ function convertTypeScriptValueTypeNode(typeNode, subject, ownerLocation, filena
   if (sourceType) {
     return requireSourceScalarType("typescript", sourceType, subject, ownerLocation, nodeLocation(typeNode, filename, source))
   }
+  if (typeNode.type == "TSUnionType") {
+    if (typeNode.types.length != 2 || typeNode.types[1].type != "TSNullKeyword") {
+      return unsupportedSyntax(
+        "typescript",
+        typeNode.types.some((member) => member.type == "TSNullKeyword")
+          ? "arbitrary union type"
+          : "unsupported collection or scalar type",
+        nodeLocation(typeNode, filename, source)
+      )
+    }
+    const valueNode = typeNode.types[0]
+
+    return optionalType(
+      convertTypeScriptValueTypeNode(valueNode, subject, ownerLocation, filename, source),
+      nodeLocation(typeNode, filename, source),
+      nodeLocation(valueNode, filename, source)
+    )
+  }
   if (typeNode.type == "TSTypeOperator" && typeNode.operator == "readonly" && typeNode.typeAnnotation.type == "TSArrayType") {
     const elementNode = typeNode.typeAnnotation.elementType
 
@@ -730,15 +811,14 @@ function convertTypeScriptReturnType(annotation, subject, ownerLocation, filenam
 }
 
 /**
- * Converts a supported function declaration.
+ * Converts a supported function signature before any body expressions.
  * @param {import("@babel/types").FunctionDeclaration} node - Babel function.
  * @param {"javascript" | "typescript"} language - Frontend language.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
- * @param {boolean} canonicalZeroRequired - Whether generated scalar output may contain signed zero.
- * @returns {import("../semantic/types.js").FunctionDeclaration} Semantic function.
+ * @returns {JavaScriptFunctionSignature} Semantic function signature.
  */
-function convertFunction(node, language, filename, source, canonicalZeroRequired) {
+function convertFunctionSignature(node, language, filename, source) {
   const location = nodeLocation(node, filename, source)
 
   if (!node.id) return unsupportedSyntax(language, "anonymous function", location)
@@ -773,16 +853,42 @@ function convertFunction(node, language, filename, source, canonicalZeroRequired
   const returnType = language == "javascript"
     ? convertReturnType(documentedTypes?.returnType?.sourceType, language, `Function '${node.id.name}' return`, location, source, documentedTypes?.returnType?.location)
     : convertTypeScriptReturnType(returnAnnotation, `Function '${node.id.name}' return`, location, filename, source)
-  const body = convertBlock(node.body, language, filename, source, canonicalZeroRequired)
+  return {
+    location,
+    name: node.id.name,
+    nameLocation: identifierLocation(node.id, filename, source),
+    parameters,
+    returnType
+  }
+}
+
+/**
+ * Converts a supported function body using all already-proved signatures.
+ * @param {import("@babel/types").FunctionDeclaration} node - Babel function.
+ * @param {JavaScriptFunctionSignature} signature - Converted signature.
+ * @param {Map<string, JavaScriptFunctionSignature>} functions - Module signatures.
+ * @param {"javascript" | "typescript"} language - Frontend language.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @param {boolean} canonicalZeroRequired - Whether generated scalar output may contain signed zero.
+ * @returns {import("../semantic/types.js").FunctionDeclaration} Semantic function.
+ */
+function convertFunction(node, signature, functions, language, filename, source, canonicalZeroRequired) {
+  const context = {
+    bindings: new Map(signature.parameters.map((parameter) => [parameter.name, parameter.type])),
+    functions,
+    returnType: signature.returnType
+  }
+  const body = convertBlock(node.body, language, filename, source, canonicalZeroRequired, context)
 
   return withParserRanges({
     body,
     kind: "FunctionDeclaration",
-    location,
-    name: node.id.name,
-    parameters,
-    returnType
-  }, {name: identifierLocation(node.id, filename, source)})
+    location: signature.location,
+    name: signature.name,
+    parameters: signature.parameters,
+    returnType: signature.returnType
+  }, {name: signature.nameLocation})
 }
 
 /**
@@ -792,22 +898,26 @@ function convertFunction(node, language, filename, source, canonicalZeroRequired
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
  * @param {boolean} canonicalZeroRequired - Whether generated scalar output may contain signed zero.
+ * @param {JavaScriptConversionContext} context - Typed lexical conversion context.
  * @returns {import("../semantic/types.js").IfStatement} Semantic branch.
  */
-function convertIf(node, language, filename, source, canonicalZeroRequired) {
+function convertIf(node, language, filename, source, canonicalZeroRequired, context) {
   const location = nodeLocation(node, filename, source)
+  const condition = convertExpression(node.test, language, filename, source, context)
+  const consequentContext = {...context, bindings: new Map(context.bindings)}
+  const alternateContext = {...context, bindings: new Map(context.bindings)}
   const consequent = node.consequent.type == "BlockStatement"
-    ? convertBlock(node.consequent, language, filename, source, canonicalZeroRequired)
-    : convertBlock([node.consequent], language, filename, source, canonicalZeroRequired, nodeLocation(node.consequent, filename, source))
+    ? convertBlock(node.consequent, language, filename, source, canonicalZeroRequired, consequentContext)
+    : convertBlock([node.consequent], language, filename, source, canonicalZeroRequired, consequentContext, nodeLocation(node.consequent, filename, source))
   const alternate = node.alternate
     ? node.alternate.type == "BlockStatement"
-      ? convertBlock(node.alternate, language, filename, source, canonicalZeroRequired)
-      : convertBlock([node.alternate], language, filename, source, canonicalZeroRequired, nodeLocation(node.alternate, filename, source))
+      ? convertBlock(node.alternate, language, filename, source, canonicalZeroRequired, alternateContext)
+      : convertBlock([node.alternate], language, filename, source, canonicalZeroRequired, alternateContext, nodeLocation(node.alternate, filename, source))
     : undefined
 
   return {
     ...(alternate ? {alternate} : {}),
-    condition: convertExpression(node.test, language, filename, source),
+    condition,
     consequent,
     kind: "IfStatement",
     location
@@ -862,9 +972,10 @@ function hasCanonicalZeroReceiverWrapper(receiver, call) {
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
  * @param {boolean} canonicalZeroRequired - Whether this parsed module contains a sign-producing integer operation.
+ * @param {JavaScriptConversionContext} context - Typed lexical conversion context.
  * @returns {import("../semantic/types.js").PrintStatement} Print statement.
  */
-function convertPrint(node, language, filename, source, canonicalZeroRequired) {
+function convertPrint(node, language, filename, source, canonicalZeroRequired, context) {
   const location = nodeLocation(node, filename, source)
 
   if (node.type != "ExpressionStatement" || node.expression.type != "CallExpression") {
@@ -896,7 +1007,7 @@ function convertPrint(node, language, filename, source, canonicalZeroRequired) {
     argument = argument.callee.object
   }
 
-  return {expression: convertExpression(argument, language, filename, source), kind: "PrintStatement", location}
+  return {expression: convertExpression(argument, language, filename, source, context), kind: "PrintStatement", location}
 }
 
 /**
@@ -914,11 +1025,26 @@ export function parseJavaScriptTypeScript({filename, language, source}) {
   const canonicalZeroRequired = parserTreeRequiresCanonicalZero(file.program)
 
   rememberTokens(file, tokenIndex)
+  const nullCheckOptOut = language == "typescript"
+    ? file.comments?.find((comment) => comment.value.trim() == "@ts-nocheck")
+    : undefined
+
+  if (nullCheckOptOut) {
+    return unsupportedSyntax(language, "disabled TypeScript checking directive", locationFromOffsets(
+      filename,
+      source,
+      nullCheckOptOut.start ?? 0,
+      nullCheckOptOut.end ?? source.length
+    ))
+  }
   if (file.program.directives.length > 0) {
     return unsupportedSyntax(language, "top-level directive", nodeLocation(file.program.directives[0], filename, source))
   }
-  const functions = file.program.body.filter((node) => node.type == "FunctionDeclaration")
-    .map((node) => convertFunction(node, language, filename, source, canonicalZeroRequired))
+  const functionNodes = file.program.body.filter((node) => node.type == "FunctionDeclaration")
+  const signatures = functionNodes.map((node) => convertFunctionSignature(node, language, filename, source))
+  const functionSignatures = new Map(signatures.map((signature) => [signature.name, signature]))
+  const functions = functionNodes.map((node, index) =>
+    convertFunction(node, signatures[index], functionSignatures, language, filename, source, canonicalZeroRequired))
   const entryNodes = file.program.body.filter((node) => node.type != "FunctionDeclaration")
   const location = moduleLocation(filename, source)
 
@@ -929,7 +1055,15 @@ export function parseJavaScriptTypeScript({filename, language, source}) {
     entryNodes[0].start ?? 0,
     entryNodes.at(-1)?.end ?? source.length
   )
-  const entryBlock = convertBlock(entryNodes, language, filename, source, canonicalZeroRequired, entryLocation)
+  const entryBlock = convertBlock(
+    entryNodes,
+    language,
+    filename,
+    source,
+    canonicalZeroRequired,
+    {bindings: new Map(), functions: functionSignatures},
+    entryLocation
+  )
 
   return {
     entryPoint: {

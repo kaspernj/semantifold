@@ -4,9 +4,9 @@
 
 This folder is Semantifold's durable, dependency-ordered implementation backlog and delivered design record. The released baseline is `semantifold@0.3.0` / `v0.3.0` at commit `80e221d`; the current merged `master` baseline is PR 27 commit `78ff710081a6385ffc887a14c66f45b918998ff8`, and repository and external evidence is recorded in [SOURCES.md](SOURCES.md).
 
-Tasks 001–004 and 015–025 are delivered. The merged language expansion includes C++ at `8d672f3`, Rust at `eca13c0`, browser Wasm at `754d76d`, Swift at `80019a9`, Kotlin/JVM at `f468eb9`, and the Task 025 aggregate gate in PR 27 at `78ff710081a6385ffc887a14c66f45b918998ff8`. Semantifold models safe integer, Boolean, and Unicode string scalars; explicitly typed locals and assignment; typed unary/binary expressions; ordered lexical blocks; nested strict-Boolean conditionals; explicit returns; direct calls; and entry-point printing. The local Task 005 candidate adds general required signatures, resolved calls, recursion, and void functions for PHP, Ruby, JavaScript/JSDoc, TypeScript, and Java; coordinator review, TensorBuzz, and merge remain pending. The other eight source languages retain the delivered Tasks 001–004 exact-two/scalar-return profile, and browser Wasm remains target-only. Tasks 006–014 and 026–037 remain roadmap work.
+Tasks 001–004 and 015–025 are delivered. The merged language expansion includes C++ at `8d672f3`, Rust at `eca13c0`, browser Wasm at `754d76d`, Swift at `80019a9`, Kotlin/JVM at `f468eb9`, and the Task 025 aggregate gate in PR 27 at `78ff710081a6385ffc887a14c66f45b918998ff8`. Semantifold models safe integer, Boolean, and Unicode string scalars; explicitly typed locals and assignment; typed unary/binary expressions; ordered lexical blocks; nested strict-Boolean conditionals; explicit returns; direct calls; and entry-point printing. Local Task 005 and Task 006 candidates add general required calls/void and recursive immutable collections for PHP, Ruby, JavaScript/JSDoc, TypeScript, and Java. This Task 007 candidate adds explicit optional presence/absence plus conservative branch-local narrowing for the same cohort. Coordinator review, TensorBuzz, and merge remain pending. The other eight source languages retain the delivered Tasks 001–004 exact-two/scalar-return profile, and browser Wasm remains target-only. Tasks 008–014 and 026–037 remain roadmap work.
 
-The delivered language-baseline expansion keeps its small Tasks 001–004 IR contract. Task 005 is the next bounded semantic layer for the original five only; it does not make every platform, legacy bridge, or later language block semantic progress.
+The delivered language-baseline expansion keeps its small Tasks 001–004 IR contract. Local Tasks 005–007 are bounded original-five semantic layers; they do not make every platform, legacy bridge, or later language block semantic progress.
 
 ## Guiding principles
 
@@ -84,9 +84,9 @@ Swift is in this cohort because it is a modern general-purpose language independ
 
 ### Phase 1 — portable semantic expansion (P1, after Task 025)
 
-- [005 — General required function signatures and calls](005-general-function-signatures-and-calls.md)
-- [006 — Immutable lists and maps](006-immutable-lists-and-maps.md)
-- [007 — Optional values and presence narrowing](007-optional-values-and-presence-narrowing.md)
+- [005 — General required function signatures and calls](005-general-function-signatures-and-calls.md) — local acceptance passed; coordinator review/CI/merge pending
+- [006 — Immutable lists and maps](006-immutable-lists-and-maps.md) — local acceptance passed; coordinator review/CI/merge pending
+- [007 — Optional values and presence narrowing](007-optional-values-and-presence-narrowing.md) — local candidate; coordinator review/CI/merge pending
 - [008 — Ordered list iteration](008-collection-iteration.md)
 - [013 — Five-language compatibility acceptance](013-five-language-compatibility-acceptance.md)
 
@@ -167,6 +167,7 @@ An application target consumes semantic projects; it does not make Ruby, Python,
 | Tasks 001–004 language baseline | Tasks 016–020, 022–025 | Dart 029, Zig 031 | later semantic features |
 | Browser binary execution | none | Task 021 | Wasm source support or WASI |
 | General calls/void | Task 025 then Task 005 | adopted per language capability | every platform lane must block 005 |
+| Optional values/narrowing | Task 025 then Task 007 | adopted per language capability | nullable syntax or arbitrary unions |
 | Semantic source projects | Task 010 | iOS 026, Android 028, Flutter 030 | package-manager resolution |
 | Apple application delivery | none | Swift 022 then iOS 026 | embedded Ruby runtime or App Store delivery |
 | Objective-C compatibility | none | iOS 026 then bridge 027 | Objective-C frontend/backend or Objective-C++ |
@@ -232,7 +233,7 @@ Dependencies in task files are authoritative. Existing IDs remain stable; numeri
 | [025](025-core-language-baseline-acceptance.md) | delivered (L1) | — | Spanning Tasks 001–004 acceptance; merged as PR 27 at `78ff710081a6385ffc887a14c66f45b918998ff8` | 016–020, 022–024 |
 | [005](005-general-function-signatures-and-calls.md) | local acceptance passed (1) | P1 | Required arity/void/resolved direct calls; coordinator review/CI/merge pending | 001, 004, 025 |
 | [006](006-immutable-lists-and-maps.md) | 1 | P1 | Immutable lists/maps | 002, 003, 005 |
-| [007](007-optional-values-and-presence-narrowing.md) | 1 | P1 | Optionals/narrowing | 001, 003, 004, 025 |
+| [007](007-optional-values-and-presence-narrowing.md) | local candidate | P1 | Optionals/narrowing; coordinator review/CI/merge pending | 001, 003, 004, 025 |
 | [008](008-collection-iteration.md) | 1 | P1 | Ordered list iteration | 002, 004, 006 |
 | [009](009-closed-records-and-member-access.md) | 2 | P2 | Closed records/members | 002, 005, 006, 007 |
 | [010](010-multifile-modules-and-names.md) | 2 | P2 | Semantic projects/modules | 005, 009 |

@@ -36,6 +36,20 @@ export function mapType(keyType, valueType, location, keyLocation, valueLocation
 }
 
 /**
+ * Builds one recursive semantic optional type with parser-owned constituent ranges.
+ * @param {import("../semantic/types.js").SemanticValueType} valueType - Present-value type.
+ * @param {import("../semantic/types.js").SourceLocation} location - Complete type-expression range.
+ * @param {import("../semantic/types.js").SourceLocation} valueLocation - Present-value type range.
+ * @returns {import("../semantic/types.js").OptionalType} Optional type.
+ */
+export function optionalType(valueType, location, valueLocation) {
+  const type = {kind: /** @type {const} */ ("OptionalType"), valueType}
+
+  setParserRanges(type, {type: location, valueType: valueLocation})
+  return type
+}
+
+/**
  * Converts one parser/comment-parser-owned bounded type expression. This parser
  * recognizes only Task 006's concrete scalar/list/map grammar; it never scans
  * source outside the already-associated type token.
@@ -51,10 +65,47 @@ export function mapType(keyType, valueType, location, keyLocation, valueLocation
 export function documentedValueType({language, location, ownerLocation, source, sourceType, subject}) {
   if (!sourceType) return missingType(language, subject, ownerLocation)
 
+  if (language == "php" && sourceType.startsWith("?")) {
+    const valueText = sourceType.slice(1)
+    const valueLocation = locationFromOffsets(
+      location.filename,
+      source,
+      location.start.offset + 1,
+      location.end.offset
+    )
+
+    return optionalType(
+      documentedValueType({language, location: valueLocation, ownerLocation, source, sourceType: valueText, subject}),
+      location,
+      valueLocation
+    )
+  }
+  if (language == "php" && sourceType.includes("|")) {
+    return unsupportedSyntax(language, "arbitrary union type", location)
+  }
+  if (language == "javascript" && sourceType.endsWith("|null") && sourceType.indexOf("|") == sourceType.length - "|null".length) {
+    const valueText = sourceType.slice(0, -"|null".length)
+    const valueLocation = locationFromOffsets(
+      location.filename,
+      source,
+      location.start.offset,
+      location.start.offset + valueText.length
+    )
+
+    return optionalType(
+      documentedValueType({language, location: valueLocation, ownerLocation, source, sourceType: valueText, subject}),
+      location,
+      valueLocation
+    )
+  }
+  if (language == "javascript" && sourceType.includes("|")) {
+    return unsupportedSyntax(language, "arbitrary union type", location)
+  }
+
   const scalar = sourceScalarType(language, sourceType, location)
 
   if (scalar) return scalar
-  const collectionPrefixes = language == "ruby" ? ["[Array", "[Hash"] :
+  const collectionPrefixes = language == "ruby" ? ["[Array", "[Hash", "[Integer?", "[bool?", "[String?"] :
     language == "php" ? ["list", "array"] : ["ReadonlyArray", "ReadonlyMap"]
 
   if (!collectionPrefixes.some((prefix) => sourceType.startsWith(prefix))) {
@@ -124,7 +175,13 @@ class DocumentedTypeParser {
     const scalar = sourceScalarType(this.language, scalarSpelling, this.range(start, nameEnd))
 
     this.skipWhitespace()
-    if (scalar && this.text[this.offset] != "<" && this.text[this.offset] != "[") return scalar
+    if (scalar && this.text[this.offset] != "<" && this.text[this.offset] != "[") {
+      if (this.language == "ruby" && this.consume("?")) {
+        return optionalType(scalar, this.range(start, this.offset), this.typeRange(scalar, start, nameEnd))
+      }
+
+      return scalar
+    }
 
     const listName = this.language == "ruby" ? "Array" : this.language == "php" ? "list" : "ReadonlyArray"
     const mapName = this.language == "ruby" ? "Hash" : this.language == "php" ? "array" : "ReadonlyMap"
@@ -138,7 +195,13 @@ class DocumentedTypeParser {
     this.skipWhitespace()
     if (name == listName) {
       if (!this.consume(closing)) return this.failure()
-      return listType(first, this.range(start, this.offset), this.typeRange(first, start, firstEnd))
+      const type = listType(first, this.range(start, this.offset), this.typeRange(first, start, firstEnd))
+
+      if (this.language == "ruby" && this.consume("?")) {
+        return optionalType(type, this.range(start, this.offset), this.typeRange(type, start, firstEnd))
+      }
+
+      return type
     }
     if (!this.consume(",")) return this.failure()
     const second = this.parseNamedType()
@@ -150,13 +213,19 @@ class DocumentedTypeParser {
       return unsupportedSyntax(this.language, "map key type other than string", this.typeRange(first, start, firstEnd))
     }
 
-    return mapType(
+    const type = mapType(
       first,
       second,
       this.range(start, this.offset),
       this.typeRange(first, start, firstEnd),
       this.typeRange(second, firstEnd, secondEnd)
     )
+
+    if (this.language == "ruby" && this.consume("?")) {
+      return optionalType(type, this.range(start, this.offset), this.typeRange(type, start, secondEnd))
+    }
+
+    return type
   }
 
   /**
