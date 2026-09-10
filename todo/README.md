@@ -2,11 +2,11 @@
 
 ## Purpose and current baseline
 
-This folder is Semantifold's durable, dependency-ordered implementation backlog and delivered design record. The released baseline is `semantifold@0.3.0` / `v0.3.0` at commit `80e221d`; the current merged `master` baseline before Task 007 is PR 29 commit `7199418bd05d6234ae7a022ee26d93bb1ec935b3`, and repository and external evidence is recorded in [SOURCES.md](SOURCES.md).
+This folder is Semantifold's durable, dependency-ordered implementation backlog and delivered design record. The released baseline is `semantifold@0.3.0` / `v0.3.0` at commit `80e221d`; the current merged `master` baseline is Task 007's PR 30 commit `5f0b500ba4899873d75821e07dd9b9e3e197fbc5`, and repository and external evidence is recorded in [SOURCES.md](SOURCES.md).
 
-Tasks 001–006 and 015–025 are delivered. The merged language expansion includes C++ at `8d672f3`, Rust at `eca13c0`, browser Wasm at `754d76d`, Swift at `80019a9`, Kotlin/JVM at `f468eb9`, and the Task 025 aggregate gate in PR 27 at `78ff710081a6385ffc887a14c66f45b918998ff8`. Task 005 delivered general required calls and void functions for PHP, Ruby, JavaScript/JSDoc, TypeScript, and Java in PR 28 at `26982754e15b7e647662d2b094171e5f649b23b1`; Task 006 delivered recursive immutable collections for the same cohort in PR 29 at `7199418bd05d6234ae7a022ee26d93bb1ec935b3`. This Task 007 local candidate adds explicit optional presence/absence plus conservative branch-local narrowing for that cohort; coordinator review, TensorBuzz CI, and merge remain pending. The other eight source languages retain the delivered Tasks 001–004 exact-two/scalar-return profile, and browser Wasm remains target-only. Tasks 008–014 and 026–037 remain roadmap work.
+Tasks 001–007 and 015–025 are delivered. The merged language expansion includes C++ at `8d672f3`, Rust at `eca13c0`, browser Wasm at `754d76d`, Swift at `80019a9`, Kotlin/JVM at `f468eb9`, and the Task 025 aggregate gate in PR 27 at `78ff710081a6385ffc887a14c66f45b918998ff8`. Task 005 delivered general required calls and void functions for PHP, Ruby, JavaScript/JSDoc, TypeScript, and Java in PR 28 at `26982754e15b7e647662d2b094171e5f649b23b1`; Task 006 delivered recursive immutable collections for the same cohort in PR 29 at `7199418bd05d6234ae7a022ee26d93bb1ec935b3`; Task 007 delivered explicit optional presence/absence plus conservative branch-local narrowing in PR 30 at `5f0b500ba4899873d75821e07dd9b9e3e197fbc5`. Task 008 implements ordered list iteration for that same original-five cohort. The other eight source languages retain the delivered Tasks 001–004 exact-two/scalar-return profile, and browser Wasm remains target-only. Tasks 009–014 and 026–037 remain roadmap work.
 
-The delivered language-baseline expansion keeps its small Tasks 001–004 IR contract. Delivered Tasks 005 and 006 are bounded original-five semantic layers, and Task 007 is the next local candidate; none makes every platform, legacy bridge, or later language block semantic progress.
+The delivered language-baseline expansion keeps its small Tasks 001–004 IR contract. Tasks 005–008 are bounded original-five semantic layers; none makes every platform, legacy bridge, or later language block semantic progress.
 
 ## Guiding principles
 
@@ -86,8 +86,8 @@ Swift is in this cohort because it is a modern general-purpose language independ
 
 - [005 — General required function signatures and calls](005-general-function-signatures-and-calls.md) — delivered in PR 28 at `26982754e15b7e647662d2b094171e5f649b23b1`
 - [006 — Immutable lists and maps](006-immutable-lists-and-maps.md) — delivered in PR 29 at `7199418bd05d6234ae7a022ee26d93bb1ec935b3`
-- [007 — Optional values and presence narrowing](007-optional-values-and-presence-narrowing.md) — local candidate; coordinator review, TensorBuzz CI, and merge pending
-- [008 — Ordered list iteration](008-collection-iteration.md)
+- [007 — Optional values and presence narrowing](007-optional-values-and-presence-narrowing.md) — delivered in PR 30 at `5f0b500ba4899873d75821e07dd9b9e3e197fbc5`
+- [008 — Ordered list iteration](008-collection-iteration.md) — implemented
 - [013 — Five-language compatibility acceptance](013-five-language-compatibility-acceptance.md)
 
 Tasks 005 and 007 depend on Task 025; their descendants inherit that gate. New-language registration does not make every later semantic feature mandatory everywhere. Each feature names its required cohort and leaves other roles explicitly unsupported until a focused adoption task supplies a correct mapping. Task 013 remains the historical aggregate proof for Tasks 001–008 across PHP, Ruby, JavaScript/JSDoc, TypeScript, and Java only.
@@ -136,11 +136,11 @@ Legend: **implemented** describes the baseline, **core** gates Task 025, **later
 
 | Language/platform | Source frontend | Target role | Artifact profile | Parser/tool route | Initial scope |
 | --- | --- | --- | --- | --- | --- |
-| Ruby | implemented | implemented text | `.rb` | Prism | Tasks 001–004 |
-| JavaScript + JSDoc | implemented | implemented text | `.js` | Babel + comment parser | Tasks 001–004 |
-| TypeScript | implemented | implemented text | `.ts` | Babel | Tasks 001–004 |
-| PHP | implemented | implemented text | `.php` | `php-parser` | Tasks 001–004 |
-| Java | implemented | implemented text | `Main.java` | Lezer Java | Tasks 001–004 |
+| Ruby | implemented | implemented text | `.rb` | Prism | Tasks 001–008 |
+| JavaScript + JSDoc | implemented | implemented text | `.js` | Babel + comment parser | Tasks 001–008 |
+| TypeScript | implemented | implemented text | `.ts` | Babel | Tasks 001–008 |
+| PHP | implemented | implemented text | `.php` | `php-parser` | Tasks 001–008 |
+| Java | implemented | implemented text | `Main.java` | Lezer Java | Tasks 001–008 |
 | Python | implemented 016 | implemented text 016 | `program.py` | `tree-sitter@0.25.1` + official `tree-sitter-python@0.25.0` | Tasks 001–004 |
 | C# | implemented 017 | implemented managed project 017 | `Program.cs`, `Semantifold.csproj` | `tree-sitter@0.25.1` + official `tree-sitter-c-sharp@0.23.5`; .NET 10 | Tasks 001–004 |
 | Go | implemented 024 | implemented native module 024 | `go.mod`, `main.go` | `tree-sitter@0.25.1` + official `tree-sitter-go@0.25.0`; Go 1.26 | Tasks 001–004 |
@@ -168,6 +168,7 @@ An application target consumes semantic projects; it does not make Ruby, Python,
 | Browser binary execution | none | Task 021 | Wasm source support or WASI |
 | General calls/void | Task 025 then Task 005 | adopted per language capability | every platform lane must block 005 |
 | Optional values/narrowing | Task 025 then Task 007 | adopted per language capability | nullable syntax or arbitrary unions |
+| Ordered list iteration | Tasks 004 and 006 then Task 008 | adopted per language capability | map order, arbitrary loops, or iterator protocols |
 | Semantic source projects | Task 010 | iOS 026, Android 028, Flutter 030 | package-manager resolution |
 | Apple application delivery | none | Swift 022 then iOS 026 | embedded Ruby runtime or App Store delivery |
 | Objective-C compatibility | none | iOS 026 then bridge 027 | Objective-C frontend/backend or Objective-C++ |
@@ -233,8 +234,8 @@ Dependencies in task files are authoritative. Existing IDs remain stable; numeri
 | [025](025-core-language-baseline-acceptance.md) | delivered (L1) | — | Spanning Tasks 001–004 acceptance; merged as PR 27 at `78ff710081a6385ffc887a14c66f45b918998ff8` | 016–020, 022–024 |
 | [005](005-general-function-signatures-and-calls.md) | delivered | P1 | Required arity/void/resolved direct calls; merged as PR 28 at `26982754e15b7e647662d2b094171e5f649b23b1` | 001, 004, 025 |
 | [006](006-immutable-lists-and-maps.md) | delivered | P1 | Immutable lists/maps; merged as PR 29 at `7199418bd05d6234ae7a022ee26d93bb1ec935b3` | 002, 003, 005 |
-| [007](007-optional-values-and-presence-narrowing.md) | local candidate | P1 | Optionals/narrowing; coordinator review, TensorBuzz CI, and merge pending | 001, 003, 004, 025 |
-| [008](008-collection-iteration.md) | 1 | P1 | Ordered list iteration | 002, 004, 006 |
+| [007](007-optional-values-and-presence-narrowing.md) | delivered | P1 | Optionals/narrowing; merged as PR 30 at `5f0b500ba4899873d75821e07dd9b9e3e197fbc5` | 001, 003, 004, 025 |
+| [008](008-collection-iteration.md) | implemented | P1 | Ordered list iteration | 002, 004, 006 |
 | [009](009-closed-records-and-member-access.md) | 2 | P2 | Closed records/members | 002, 005, 006, 007 |
 | [010](010-multifile-modules-and-names.md) | 2 | P2 | Semantic projects/modules | 005, 009 |
 | [011](011-typed-errors-and-handling.md) | 2 | P2 | Typed errors | 004, 007, 009 |

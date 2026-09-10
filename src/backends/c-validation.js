@@ -73,7 +73,8 @@ export function validateCMemory(module) {
 
         for (const name of lengths.keys()) lengths.set(name, left.get(name) === right.get(name) ? left.get(name) : undefined)
         arena.bytes = leftArena.bytes < rightArena.bytes ? leftArena.bytes : rightArena.bytes
-      } else {
+      } else if (statement.kind == "ExpressionStatement" || statement.kind == "PrintStatement" ||
+        statement.kind == "ReturnStatement") {
         const expression = statement.expression
 
         if (expression) size(expression, lengths, arena)

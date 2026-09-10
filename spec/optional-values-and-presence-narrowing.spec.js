@@ -83,6 +83,18 @@ console.log(invalidated(null))
 }
 console.log(invalidatedAfterJoin(null, false))
 `, "UNCHECKED_OPTIONAL_UNWRAP")
+    rejects(`function invalidatedByAbruptLoopExit(seed: string | null, rewrite: boolean): string {
+  let value: string | null = seed
+  if (value !== null) {
+    const iterations: readonly number[] = [1]
+    for (const ignored of iterations) {
+      if (rewrite) { value = null; break }
+    }
+    return value
+  } else return "absent"
+}
+console.log(invalidatedByAbruptLoopExit("ready", true))
+`, "UNCHECKED_OPTIONAL_UNWRAP")
   })
 
   it("retains shadowing rejection and optional return completeness", () => {

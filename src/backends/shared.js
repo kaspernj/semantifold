@@ -30,6 +30,7 @@ const binaryOperationSyntax = Object.freeze({
 const task005Languages = new Set(["php", "ruby", "javascript", "typescript", "java"])
 const task006Languages = new Set(["php", "ruby", "javascript", "typescript", "java"])
 const task007Languages = new Set(["php", "ruby", "javascript", "typescript", "java"])
+const task008Languages = new Set(["php", "ruby", "javascript", "typescript", "java"])
 const javaObjectInstanceMethodSignatures = new Set([
   "clone()", "equals(Object)", "finalize()", "getClass()", "hashCode()", "notify()", "notifyAll()", "toString()",
   "wait()", "wait(long)", "wait(long,int)"
@@ -49,6 +50,7 @@ export function validateBackendModule(module, language) {
   if (!Array.isArray(module.functions) || !module.entryPoint || typeof module.entryPoint != "object" ||
     module.entryPoint.kind != "EntryPoint") unsupportedCapability(language, "missing or invalid module members", module.location)
   if (module.functions.length == 0) unsupportedCapability(language, "module without functions", module.location)
+  if (!task008Languages.has(language)) rejectIterationStatements(module, language)
   if (!task007Languages.has(language)) rejectOptionalTypes(module, language)
   if (!task006Languages.has(language)) rejectCollectionTypes(module, language)
   validateBlock(module.entryPoint.body, language, module.entryPoint.location)
@@ -101,6 +103,49 @@ export function validateBackendModule(module, language) {
 }
 
 /**
+ * Rejects Task 008 statements before a non-cohort backend reaches collection-type checks.
+ * @param {import("../semantic/types.js").SemanticModule} module - Candidate module.
+ * @param {import("../semantic/types.js").BackendLanguage} language - Target identity.
+ * @returns {void}
+ */
+function rejectIterationStatements(module, language) {
+  for (const declaration of module.functions) {
+    rejectBlockIteration(declaration && typeof declaration == "object" && !Array.isArray(declaration)
+      ? Reflect.get(declaration, "body")
+      : undefined, language)
+  }
+  rejectBlockIteration(module.entryPoint.body, language)
+}
+
+/**
+ * Finds a Task 008 node without descending through malformed or cyclic containers.
+ * @param {unknown} block - Candidate block.
+ * @param {import("../semantic/types.js").BackendLanguage} language - Target identity.
+ * @param {Set<object>} [seen] - Visited containers.
+ * @returns {void}
+ */
+function rejectBlockIteration(block, language, seen = new Set()) {
+  if (!block || typeof block != "object" || Array.isArray(block) || seen.has(block)) return
+  seen.add(block)
+  const statements = Reflect.get(block, "statements")
+
+  if (!Array.isArray(statements)) return
+  for (const statement of statements) {
+    if (!statement || typeof statement != "object" || Array.isArray(statement)) continue
+    const kind = Reflect.get(statement, "kind")
+    const location = diagnosticLocation(Reflect.get(statement, "location"), Reflect.get(block, "location"))
+
+    if (["ForEachStatement", "BreakStatement", "ContinueStatement"].includes(kind)) {
+      unsupportedCapability(language, "Task 008 ordered list iteration", location)
+    }
+    if (kind == "IfStatement") {
+      rejectBlockIteration(Reflect.get(statement, "consequent"), language, seen)
+      rejectBlockIteration(Reflect.get(statement, "alternate"), language, seen)
+    }
+  }
+}
+
+/**
  * Rejects Task 007 optional types before a non-cohort emitter allocates output.
  * @param {import("../semantic/types.js").SemanticModule} module - Candidate semantic module.
  * @param {import("../semantic/types.js").BackendLanguage} language - Target identity.
@@ -140,6 +185,12 @@ function rejectBlockOptionalTypes(block, language) {
     if (statement.kind == "IfStatement") {
       rejectBlockOptionalTypes(statement.consequent, language)
       if (statement.alternate) rejectBlockOptionalTypes(statement.alternate, language)
+    }
+    if (statement.kind == "ForEachStatement") {
+      if (containsOptionalType(statement.valueBinding?.type)) {
+        unsupportedCapability(language, "Task 007 optional iteration binding type", statement.valueBinding.location ?? statement.location)
+      }
+      rejectBlockOptionalTypes(statement.body, language)
     }
   }
 }
@@ -205,6 +256,12 @@ function rejectBlockCollectionTypes(block, language) {
       rejectBlockCollectionTypes(statement.consequent, language)
       if (statement.alternate) rejectBlockCollectionTypes(statement.alternate, language)
     }
+    if (statement.kind == "ForEachStatement") {
+      if (isCollectionType(statement.valueBinding?.type)) {
+        unsupportedCapability(language, "Task 006 immutable collection iteration binding type", statement.valueBinding.location ?? statement.location)
+      }
+      rejectBlockCollectionTypes(statement.body, language)
+    }
   }
 }
 
@@ -247,6 +304,10 @@ function validateScaffoldingNames(module, language) {
     if (statement.kind == "LocalDeclaration" && ownedEntryNames.has(statement.name)) {
       unsupportedCapability(language, `entry local '${statement.name}' captures backend scaffolding`, statement.location)
     }
+    if (statement.kind == "ForEachStatement" && ownedEntryNames.has(statement.valueBinding.name)) {
+      unsupportedCapability(language, `entry iteration binding '${statement.valueBinding.name}' captures backend scaffolding`,
+        statement.valueBinding.location)
+    }
   }
   for (const declaration of module.functions) {
     const targetName = language == "php" ? declaration.name.toLowerCase() : declaration.name
@@ -273,6 +334,10 @@ function validateScaffoldingNames(module, language) {
     for (const statement of allStatements(declaration.body)) {
       if (statement.kind == "LocalDeclaration" && ownedPrintReceiverNames.has(statement.name)) {
         unsupportedCapability(language, `function local '${statement.name}' captures backend scaffolding`, statement.location)
+      }
+      if (statement.kind == "ForEachStatement" && ownedPrintReceiverNames.has(statement.valueBinding.name)) {
+        unsupportedCapability(language, `function iteration binding '${statement.valueBinding.name}' captures backend scaffolding`,
+          statement.valueBinding.location)
       }
     }
   }
@@ -303,9 +368,11 @@ function validateJavaUtilFactoryNames(module) {
         }
       }
       const expression = statement.kind == "IfStatement" ? statement.condition :
+        statement.kind == "ForEachStatement" ? statement.list :
         statement.kind == "LocalDeclaration" ? statement.initializer :
           statement.kind == "AssignmentStatement" ? statement.expression :
-            statement.kind == "ReturnStatement" ? statement.expression : statement.expression
+            statement.kind == "ReturnStatement" ? statement.expression :
+              statement.kind == "ExpressionStatement" || statement.kind == "PrintStatement" ? statement.expression : undefined
 
       if (capture && expression && (expressionContainsKind(expression, "ListLiteral") ||
         expressionContainsKind(expression, "MapLiteral") || expressionContainsKind(expression, "OptionalNone") ||
@@ -315,6 +382,14 @@ function validateJavaUtilFactoryNames(module) {
       if (statement.kind == "IfStatement") {
         validateBlockNames(statement.consequent, capture, owner)
         if (statement.alternate) validateBlockNames(statement.alternate, capture, owner)
+      }
+      if (statement.kind == "ForEachStatement") {
+        const loopCapture = statement.valueBinding.name == "java" ? {
+          detail: `${owner} iteration binding 'java' captures java.util factory syntax`,
+          location: statement.valueBinding.location
+        } : capture
+
+        validateBlockNames(statement.body, loopCapture, owner)
       }
     }
   }
@@ -341,9 +416,11 @@ function moduleContainsExpressionKind(module, kind) {
   return [module.entryPoint.body, ...module.functions.map((declaration) => declaration.body)].some((block) =>
     allStatements(block).some((statement) => {
       const expression = statement.kind == "IfStatement" ? statement.condition :
+        statement.kind == "ForEachStatement" ? statement.list :
         statement.kind == "LocalDeclaration" ? statement.initializer :
           statement.kind == "AssignmentStatement" ? statement.expression :
-            statement.kind == "ReturnStatement" ? statement.expression : statement.expression
+            statement.kind == "ReturnStatement" ? statement.expression :
+              statement.kind == "ExpressionStatement" || statement.kind == "PrintStatement" ? statement.expression : undefined
 
       return expression ? expressionContainsKind(expression, kind) : false
     }))
@@ -418,9 +495,14 @@ function emittedJavaFunctionSignature(declaration) {
  * @returns {import("../semantic/types.js").Statement[]} Statements including nested branches.
  */
 function allStatements(block) {
-  return block.statements.flatMap((statement) => statement.kind == "IfStatement"
-    ? [statement, ...allStatements(statement.consequent), ...(statement.alternate ? allStatements(statement.alternate) : [])]
-    : [statement])
+  return block.statements.flatMap((statement) => {
+    if (statement.kind == "IfStatement") {
+      return [statement, ...allStatements(statement.consequent), ...(statement.alternate ? allStatements(statement.alternate) : [])]
+    }
+    if (statement.kind == "ForEachStatement") return [statement, ...allStatements(statement.body)]
+
+    return [statement]
+  })
 }
 
 /**
@@ -428,20 +510,25 @@ function allStatements(block) {
  * @param {unknown} block - Candidate block.
  * @param {import("../semantic/types.js").BackendLanguage} language - Backend language or binary target.
  * @param {import("../semantic/types.js").SourceLocation | undefined} ownerLocation - Enclosing location.
+ * @param {number} [loopDepth] - Number of enclosing list loops.
+ * @param {Set<object>} [activePath] - Blocks on the active recursive path.
  * @returns {void}
  */
-function validateBlock(block, language, ownerLocation) {
+function validateBlock(block, language, ownerLocation, loopDepth = 0, activePath = new Set()) {
   if (!block || typeof block != "object" || Array.isArray(block)) {
     return unsupportedCapability(language, "missing or invalid block", ownerLocation)
   }
 
   const candidate = /** @type {import("../semantic/types.js").Block} */ (block)
-  const location = candidate.location ?? ownerLocation
+  const location = diagnosticLocation(candidate.location, ownerLocation)
 
+  if (activePath.has(candidate)) unsupportedCapability(language, "cyclic block", location)
   if (candidate.kind != "Block") unsupportedCapability(language, `block ${String(Reflect.get(block, "kind"))}`, location)
   if (!Array.isArray(candidate.statements)) unsupportedCapability(language, "missing or invalid block statements", location)
+  const blockPath = new Set(activePath)
 
-  for (const statement of candidate.statements) validateStatement(statement, language, location)
+  blockPath.add(candidate)
+  for (const statement of candidate.statements) validateStatement(statement, language, location, loopDepth, blockPath)
 }
 
 /**
@@ -449,17 +536,18 @@ function validateBlock(block, language, ownerLocation) {
  * @param {unknown} statement - Candidate statement.
  * @param {import("../semantic/types.js").BackendLanguage} language - Backend language or binary target.
  * @param {import("../semantic/types.js").SourceLocation | undefined} ownerLocation - Enclosing body location.
+ * @param {number} [loopDepth] - Active loop nesting.
+ * @param {Set<object>} [activePath] - Active block containers.
  * @returns {void}
  */
-function validateStatement(statement, language, ownerLocation) {
+function validateStatement(statement, language, ownerLocation, loopDepth = 0, activePath = new Set()) {
   if (!statement || typeof statement != "object" || Array.isArray(statement)) {
     return unsupportedCapability(language, "missing or invalid statement", ownerLocation)
   }
 
   const kind = Reflect.get(statement, "kind")
-  const location = /** @type {import("../semantic/types.js").SourceLocation | undefined} */ (
-    Reflect.get(statement, "location") ?? ownerLocation
-  )
+  const ownLocation = Reflect.get(statement, "location")
+  const location = diagnosticLocation(ownLocation, ownerLocation)
 
   if (typeof kind != "string") return unsupportedCapability(language, "missing or invalid statement", location)
   if (kind == "LocalDeclaration") {
@@ -483,6 +571,9 @@ function validateStatement(statement, language, ownerLocation) {
     const expression = Reflect.get(statement, "expression")
 
     if (expression !== undefined) validateExpression(expression, language, location)
+    if (language == "ruby" && loopDepth > 0) {
+      unsupportedCapability(language, "return from an iteration body", location)
+    }
     return
   }
   if (kind == "ExpressionStatement") {
@@ -505,12 +596,109 @@ function validateStatement(statement, language, ownerLocation) {
     const branch = /** @type {import("../semantic/types.js").IfStatement} */ (statement)
 
     validateExpression(branch.condition, language, location)
-    validateBlock(branch.consequent, language, location)
-    if (Object.hasOwn(branch, "alternate")) validateBlock(branch.alternate, language, location)
+    validateBlock(branch.consequent, language, location, loopDepth, activePath)
+    if (Object.hasOwn(branch, "alternate")) validateBlock(branch.alternate, language, location, loopDepth, activePath)
+    return
+  }
+  if (kind == "BreakStatement" || kind == "ContinueStatement") {
+    if (!task008Languages.has(language)) unsupportedCapability(language, "Task 008 ordered list iteration", location)
+    requireSemanticLocation(ownLocation, language, `${kind} location`, ownerLocation)
+    const fields = Object.keys(/** @type {object} */ (statement)).filter((key) => key != "sourceProvenance").sort().join(",")
+
+    if (fields != "kind,location") unsupportedCapability(language, `malformed ${kind}`, location)
+    if (loopDepth == 0) unsupportedCapability(language, `${kind == "BreakStatement" ? "break" : "continue"} outside a loop`, location)
+    return
+  }
+  if (kind == "ForEachStatement") {
+    if (!task008Languages.has(language)) unsupportedCapability(language, "Task 008 ordered list iteration", location)
+    const loopLocation = requireSemanticLocation(ownLocation, language, "ForEachStatement location", ownerLocation)
+    const loop = /** @type {import("../semantic/types.js").ForEachStatement} */ (statement)
+    const fields = Object.keys(loop).filter((key) => key != "sourceProvenance").sort().join(",")
+
+    if (fields != "body,kind,list,location,valueBinding") unsupportedCapability(language, "malformed ForEachStatement", loopLocation)
+    if (!loop.list || typeof loop.list != "object" || Array.isArray(loop.list)) {
+      unsupportedCapability(language, "missing or invalid iteration collection", loopLocation)
+    }
+    requireSemanticLocation(Reflect.get(loop.list, "location"), language, "iteration collection location", loopLocation)
+    validateExpression(loop.list, language, loopLocation)
+    if (!loop.valueBinding || typeof loop.valueBinding != "object" || Array.isArray(loop.valueBinding)) {
+      unsupportedCapability(language, "missing or invalid iteration binding", loopLocation)
+    }
+    const binding = loop.valueBinding
+    const bindingLocation = requireSemanticLocation(Reflect.get(binding, "location"), language, "iteration binding location", loopLocation)
+    const bindingFields = Object.keys(binding).filter((key) => key != "sourceProvenance").sort().join(",")
+
+    if (binding.kind != "ValueBinding" || bindingFields != "kind,location,mutable,name,type") {
+      unsupportedCapability(language, "malformed iteration binding", bindingLocation)
+    }
+    if (binding.mutable !== false) unsupportedCapability(language, "mutable iteration binding", bindingLocation)
+    validateTargetBindingIdentifier(language, binding.name, "iteration binding", bindingLocation)
+    if (!loop.body || typeof loop.body != "object" || Array.isArray(loop.body)) {
+      unsupportedCapability(language, "missing or invalid iteration body", loopLocation)
+    }
+    requireSemanticLocation(Reflect.get(loop.body, "location"), language, "iteration body location", loopLocation)
+    validateBlock(loop.body, language, loopLocation, loopDepth + 1, activePath)
     return
   }
 
   unsupportedCapability(language, `statement ${kind}`, location)
+}
+
+/**
+ * Returns a complete semantic location suitable for diagnostic construction.
+ * @param {unknown} candidate - Preferred location.
+ * @param {unknown} fallback - Nearest enclosing location.
+ * @returns {import("../semantic/types.js").SourceLocation | undefined} Safe diagnostic location.
+ */
+function diagnosticLocation(candidate, fallback) {
+  if (isSemanticLocation(candidate)) return candidate
+  if (isSemanticLocation(fallback)) return fallback
+
+  return undefined
+}
+
+/**
+ * Requires one complete parser-neutral location before any backend or diagnostic consumes it.
+ * @param {unknown} candidate - Required location.
+ * @param {import("../semantic/types.js").BackendLanguage} language - Backend identity.
+ * @param {string} subject - Location owner for a deterministic diagnostic.
+ * @param {unknown} fallback - Nearest enclosing location.
+ * @returns {import("../semantic/types.js").SourceLocation} Validated location.
+ */
+function requireSemanticLocation(candidate, language, subject, fallback) {
+  if (!isSemanticLocation(candidate)) unsupportedCapability(language, `missing or invalid ${subject}`, diagnosticLocation(fallback, undefined))
+
+  return candidate
+}
+
+/**
+ * Checks a complete ordered UTF-16 source range.
+ * @param {unknown} location - Candidate source range.
+ * @returns {location is import("../semantic/types.js").SourceLocation} Whether the range is safe to consume.
+ */
+function isSemanticLocation(location) {
+  if (!location || typeof location != "object" || Array.isArray(location)) return false
+  const candidate = /** @type {{filename?: unknown, start?: unknown, end?: unknown}} */ (location)
+
+  if (typeof candidate.filename != "string" || candidate.filename.length == 0 ||
+    !isSemanticPoint(candidate.start) || !isSemanticPoint(candidate.end)) return false
+
+  return candidate.end.offset >= candidate.start.offset && candidate.end.line >= candidate.start.line &&
+    (candidate.end.line != candidate.start.line || candidate.end.column >= candidate.start.column)
+}
+
+/**
+ * Checks one complete one-based UTF-16 source point.
+ * @param {unknown} point - Candidate source point.
+ * @returns {point is import("../semantic/types.js").SourcePoint} Whether all coordinates are valid.
+ */
+function isSemanticPoint(point) {
+  if (!point || typeof point != "object" || Array.isArray(point)) return false
+  const candidate = /** @type {{offset?: unknown, line?: unknown, column?: unknown}} */ (point)
+
+  return Number.isSafeInteger(candidate.offset) && Number(candidate.offset) >= 0 &&
+    Number.isSafeInteger(candidate.line) && Number(candidate.line) >= 1 &&
+    Number.isSafeInteger(candidate.column) && Number(candidate.column) >= 1
 }
 
 /**
@@ -1057,6 +1245,9 @@ function blockContainsSignProducingOperation(block) {
       return expressionContainsSignProducingOperation(statement.condition) ||
         blockContainsSignProducingOperation(statement.consequent) ||
         Boolean(statement.alternate && blockContainsSignProducingOperation(statement.alternate))
+    }
+    if (statement.kind == "ForEachStatement") {
+      return expressionContainsSignProducingOperation(statement.list) || blockContainsSignProducingOperation(statement.body)
     }
     if (statement.kind == "LocalDeclaration") return expressionContainsSignProducingOperation(statement.initializer)
     if (statement.kind == "AssignmentStatement" || statement.kind == "ExpressionStatement" || statement.kind == "PrintStatement") {

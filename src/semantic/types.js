@@ -8,7 +8,7 @@
 /** @typedef {SemanticTypeName | "void"} FunctionReturnTypeName */
 /** @typedef {"IntegerNegate" | "BooleanNot"} SemanticUnaryOperation */
 /** @typedef {"IntegerAdd" | "IntegerSubtract" | "IntegerMultiply" | "BooleanAnd" | "BooleanOr" | "IntegerEqual" | "IntegerNotEqual" | "BooleanEqual" | "BooleanNotEqual" | "StringEqual" | "StringNotEqual" | "IntegerLessThan" | "IntegerLessThanOrEqual" | "IntegerGreaterThan" | "IntegerGreaterThanOrEqual" | "StringConcat"} SemanticBinaryOperation */
-/** @typedef {"function" | "parameter" | "local"} SemanticSymbolKind */
+/** @typedef {"function" | "parameter" | "local" | "iteration"} SemanticSymbolKind */
 /** @typedef {"declaration" | "read" | "write" | "call"} SemanticSymbolRole */
 /** @typedef {"parse" | "generate" | "restore" | "compile" | "link" | "validate" | "instantiate" | "execute"} AcceptanceStage */
 /** @typedef {"entry" | "source" | "manifest" | "support" | "mapping" | "resource" | "loader"} GeneratedArtifactRole */
@@ -40,6 +40,7 @@
  * @property {boolean} generalFunctionsAndCalls - Task 005 arbitrary required signatures, resolved direct calls, and void functions.
  * @property {boolean} immutableCollections - Task 006 recursive immutable lists/maps, total access, and size.
  * @property {boolean} optionalValues - Task 007 explicit optional values, presence tests, and guarded unwrap.
+ * @property {boolean} orderedListIteration - Task 008 ordered immutable-list iteration and nearest-loop control.
  */
 
 /**
@@ -540,8 +541,42 @@
  * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
  */
 
+/**
+ * @typedef ValueBinding
+ * @property {"ValueBinding"} kind - Iteration-binding discriminator.
+ * @property {string} name - Body-local binding name.
+ * @property {SemanticValueType} type - Exact list element type.
+ * @property {false} mutable - Iteration bindings are always immutable.
+ * @property {SourceLocation} location - Binding source location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
+ */
+
+/**
+ * @typedef ForEachStatement
+ * @property {"ForEachStatement"} kind - Ordered list-iteration discriminator.
+ * @property {Expression} list - List expression evaluated exactly once before traversal.
+ * @property {ValueBinding} valueBinding - Immutable binding scoped to the body.
+ * @property {Block} body - Loop body.
+ * @property {SourceLocation} location - Complete loop source location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
+ */
+
+/**
+ * @typedef BreakStatement
+ * @property {"BreakStatement"} kind - Nearest-loop break discriminator.
+ * @property {SourceLocation} location - Keyword source location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
+ */
+
+/**
+ * @typedef ContinueStatement
+ * @property {"ContinueStatement"} kind - Nearest-loop continue discriminator.
+ * @property {SourceLocation} location - Keyword source location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
+ */
+
 /** @typedef {LocalDeclaration | AssignmentStatement} LocalStatement */
-/** @typedef {LocalStatement | ExpressionStatement | IfStatement | ReturnStatement | PrintStatement} Statement */
+/** @typedef {LocalStatement | ExpressionStatement | IfStatement | ForEachStatement | BreakStatement | ContinueStatement | ReturnStatement | PrintStatement} Statement */
 
 /**
  * @typedef Block
@@ -589,7 +624,7 @@
  * @property {SemanticProvenance} [provenance] - Parser-authored source and identity index; optional for legacy caller-authored modules.
  */
 
-/** @typedef {SemanticModule | FunctionDeclaration | Parameter | Block | Statement | EntryPoint | Expression | MapEntry | SemanticValueType | FunctionReturnTypeReference} SemanticNode */
+/** @typedef {SemanticModule | FunctionDeclaration | Parameter | ValueBinding | Block | Statement | EntryPoint | Expression | MapEntry | SemanticValueType | FunctionReturnTypeReference} SemanticNode */
 /** @typedef {SemanticNode} SemanticNodeWithoutLocations */
 
 export {}

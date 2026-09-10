@@ -187,6 +187,7 @@ function emitStatement(writer, statement, indent, path) {
     writer.synthetic("\n", "line break", [statement], [path])
     return
   }
+  if (statement.kind != "IfStatement") throw new TypeError("Unsupported C# statement reached emission.")
   writer.mapped("if", {mappingKind: "anchor", node: statement, path})
   writer.synthetic(" ", "conditional spacing", [statement], [path])
   writer.mapped("(", {mappingKind: "anchor", node: statement, path})

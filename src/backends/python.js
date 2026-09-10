@@ -92,6 +92,7 @@ function emitStatement(writer, statement, indent, path) {
     writer.synthetic("\n", "line break", [statement], [path])
     return
   }
+  if (statement.kind != "PrintStatement") throw new TypeError("Unsupported Python statement reached emission.")
 
   writer.mapped("print", {mappingKind: "anchor", node: statement, path})
   writer.mapped("(", {mappingKind: "anchor", node: statement, path})

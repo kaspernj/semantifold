@@ -81,6 +81,28 @@ function emitStatement(writer, statement, indent, path, canonicalizeZero) {
   if (statement.kind == "LocalDeclaration" || statement.kind == "AssignmentStatement") return emitLocal(writer, statement, indent, path)
 
   writer.synthetic(indent, "indentation", [statement], [path])
+  if (statement.kind == "BreakStatement" || statement.kind == "ContinueStatement") {
+    writer.mapped(statement.kind == "BreakStatement" ? "break" : "continue", {mappingKind: "exact", node: statement, path})
+    writer.synthetic("\n", "line break", [statement], [path])
+    return
+  }
+  if (statement.kind == "ForEachStatement") {
+    writer.mapped("for", {mappingKind: "anchor", node: statement, path})
+    writer.synthetic(" (const ", "loop scaffolding", [statement], [path])
+    writer.mapped(statement.valueBinding.name, {
+      mappingKind: "exact", node: statement.valueBinding, path: `${path}/valueBinding`, role: "name"
+    })
+    writer.synthetic(" of ", "loop scaffolding", [statement], [path])
+    emitExpression(writer, statement.list, `${path}/list`, "javascript", identity)
+    writer.synthetic(") ", "loop scaffolding", [statement], [path])
+    writer.mapped("{", {mappingKind: "anchor", node: statement.body, path: `${path}/body`})
+    writer.synthetic("\n", "line break", [statement], [path])
+    emitBlock(writer, statement.body, `${indent}  `, `${path}/body`, canonicalizeZero)
+    writer.synthetic(indent, "indentation", [statement], [path])
+    writer.mapped("}", {mappingKind: "anchor", node: statement.body, path: `${path}/body`})
+    writer.synthetic("\n", "line break", [statement], [path])
+    return
+  }
   if (statement.kind == "ReturnStatement") {
     writer.mapped("return", {mappingKind: "anchor", node: statement, path})
     if (statement.expression) {

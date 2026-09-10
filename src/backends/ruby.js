@@ -71,6 +71,27 @@ function emitBlock(writer, block, indent, path) {
 function emitStatement(writer, statement, indent, path) {
   if (statement.kind == "LocalDeclaration" || statement.kind == "AssignmentStatement") return emitLocal(writer, statement, indent, path)
   writer.synthetic(indent, "indentation", [statement], [path])
+  if (statement.kind == "BreakStatement" || statement.kind == "ContinueStatement") {
+    writer.mapped(statement.kind == "BreakStatement" ? "break" : "next", {mappingKind: "exact", node: statement, path})
+    writer.synthetic("\n", "line break", [statement], [path])
+    return
+  }
+  if (statement.kind == "ForEachStatement") {
+    emitExpression(writer, statement.list, `${path}/list`, "ruby", identity)
+    writer.mapped(".each", {mappingKind: "anchor", node: statement, path})
+    writer.synthetic(" ", "loop spacing", [statement], [path])
+    writer.mapped("do", {mappingKind: "anchor", node: statement.body, path: `${path}/body`})
+    writer.synthetic(" |", "iteration binding delimiter", [statement.valueBinding], [`${path}/valueBinding`])
+    writer.mapped(statement.valueBinding.name, {
+      mappingKind: "exact", node: statement.valueBinding, path: `${path}/valueBinding`, role: "name"
+    })
+    writer.synthetic("|\n", "iteration binding delimiter", [statement.valueBinding], [`${path}/valueBinding`])
+    emitBlock(writer, statement.body, `${indent}  `, `${path}/body`)
+    writer.synthetic(indent, "indentation", [statement], [path])
+    writer.mapped("end", {mappingKind: "anchor", node: statement.body, path: `${path}/body`})
+    writer.synthetic("\n", "line break", [statement], [path])
+    return
+  }
   if (statement.kind == "ReturnStatement") {
     writer.mapped("return", {mappingKind: "anchor", node: statement, path})
     if (statement.expression) {

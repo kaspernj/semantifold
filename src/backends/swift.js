@@ -106,6 +106,7 @@ function emitStatement(writer, statement, indent, path) {
     writer.synthetic(")\n", "Swift print plumbing", [statement], [path])
     return
   }
+  if (statement.kind != "IfStatement") throw new TypeError("Unsupported Swift statement reached emission.")
 
   writer.mapped("if", {mappingKind: "anchor", node: statement, path})
   writer.synthetic(" ", "conditional spacing", [statement], [path])

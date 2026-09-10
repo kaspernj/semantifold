@@ -6,6 +6,48 @@ import {parserRangeFor, setParserRanges} from "../semantic/provenance.js"
 import {sourceScalarType} from "./scalars.js"
 
 /**
+ * Resolves the value presented to list iteration after canonical optional unwrap.
+ * Semantic validation remains responsible for requiring the matching presence proof.
+ * @param {import("../semantic/types.js").SemanticFunctionReturnType | undefined} type - Parser-resolved operand type.
+ * @returns {import("../semantic/types.js").SemanticFunctionReturnType | undefined} Iterated value type.
+ */
+export function iterationOperandType(type) {
+  return type?.kind == "OptionalType" ? type.valueType : type
+}
+
+/**
+ * Copies a resolved list element type for one parser-owned iteration binding.
+ * The binding location is its own deterministic derived type anchor.
+ * @param {import("../semantic/types.js").SemanticValueType} type - Resolved element type.
+ * @param {import("../semantic/types.js").SourceLocation} location - Binding token location.
+ * @returns {import("../semantic/types.js").SemanticValueType} Detached semantic type.
+ */
+export function iterationBindingType(type, location) {
+  if (type.kind == "TypeReference") {
+    const copied = {kind: /** @type {const} */ ("TypeReference"), name: type.name}
+
+    setParserRanges(copied, {type: location})
+    return copied
+  }
+  if (type.kind == "ListType") {
+    return listType(iterationBindingType(type.elementType, location), location, location)
+  }
+  if (type.kind == "MapType") {
+    const keyType = iterationBindingType(type.keyType, location)
+
+    return mapType(
+      /** @type {import("../semantic/types.js").TypeReference} */ (keyType),
+      iterationBindingType(type.valueType, location),
+      location,
+      location,
+      location
+    )
+  }
+
+  return optionalType(iterationBindingType(type.valueType, location), location, location)
+}
+
+/**
  * Builds one recursive semantic list type with parser-owned constituent ranges.
  * @param {import("../semantic/types.js").SemanticValueType} elementType - Element type.
  * @param {import("../semantic/types.js").SourceLocation} location - Complete type-expression range.

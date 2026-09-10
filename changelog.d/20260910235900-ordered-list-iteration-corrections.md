@@ -1,0 +1,1 @@
+Harden Task 008 loop flow across zero, repeated, and abruptly exited iterations; reject Ruby loop-body returns transactionally; preserve Java nested-list enhanced-for round trips; and validate every loop-owned source location before backend diagnostics or artifact generation.

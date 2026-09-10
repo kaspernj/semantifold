@@ -333,7 +333,7 @@ class FunctionEmitter {
         this.mappedOp(0x0f, statement, statementPath, "return instruction")
       } else if (statement.kind == "ExpressionStatement") {
         throw new TypeError("Wasm Task 005 expression statement reached emission.")
-      } else {
+      } else if (statement.kind == "IfStatement") {
         this.expression(statement.condition, `${statementPath}/condition`)
         this.mappedOp(0x04, statement.condition, `${statementPath}/condition`, "conditional instruction")
         this.syntheticImmediate([0x40], statement, statementPath, "empty conditional block type")
@@ -343,6 +343,8 @@ class FunctionEmitter {
           this.block(statement.alternate, `${statementPath}/alternate`)
         }
         this.mappedOp(0x0b, statement, statementPath, "conditional end")
+      } else {
+        throw new TypeError("Unsupported Wasm statement reached emission.")
       }
     }
   }
@@ -1339,7 +1341,7 @@ function analyzeScratchUse(module) {
           for (const result of expression(statement.expression, state, depth)) next.push({...result.state, returned: result.value})
         } else if (statement.kind == "ExpressionStatement") {
           throw new TypeError("Wasm Task 005 expression statement reached abstract execution.")
-        } else {
+        } else if (statement.kind == "IfStatement") {
           for (const condition of expression(statement.condition, state, depth)) {
             if (condition.value.knownBoolean !== false) {
               next.push(...withoutBranchLocals(block(statement.consequent, [cloneState(condition.state)], depth), condition.state.env))
@@ -1352,6 +1354,8 @@ function analyzeScratchUse(module) {
               next.push(...withoutBranchLocals(alternate, condition.state.env))
             }
           }
+        } else {
+          throw new TypeError("Unsupported Wasm statement reached abstract execution.")
         }
       }
       states = boundedStates(next, statement)

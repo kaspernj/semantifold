@@ -7,7 +7,7 @@ import {withAdaptedOperation} from "../semantic/operators.js"
 import {withParserRanges} from "../semantic/provenance.js"
 import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
 import {requireSourceReturnType, sourceScalarType} from "./scalars.js"
-import {listType, mapType, optionalType} from "./types.js"
+import {iterationBindingType, iterationOperandType, listType, mapType, optionalType} from "./types.js"
 
 /** @type {Readonly<Record<string, string>>} */
 const simpleStringEscapes = Object.freeze({
@@ -698,6 +698,22 @@ function convertLocalStatement(statement, filename, source, context) {
 function convertStatement(statement, filename, source, context) {
   if (statement.name == "ReturnStatement") return convertReturn(statement, filename, source, context)
   if (statement.name == "IfStatement") return convertIf(statement, filename, source, context)
+  if (statement.name == "EnhancedForStatement") return convertForEach(statement, filename, source, context)
+  if (statement.name == "BreakStatement" || statement.name == "ContinueStatement") {
+    const label = statement.getChild("Label")
+
+    if (label) return unsupportedSyntax("java", `labeled ${statement.name == "BreakStatement" ? "break" : "continue"}`,
+      nodeLocation(label, filename, source))
+    const keyword = requiredChild(statement, statement.name == "BreakStatement" ? "break" : "continue", filename, source)
+    const location = nodeLocation(keyword, filename, source)
+
+    return withParserRanges({
+      kind: /** @type {"BreakStatement" | "ContinueStatement"} */ (
+        statement.name == "BreakStatement" ? "BreakStatement" : "ContinueStatement"
+      ),
+      location
+    }, {keyword: location})
+  }
   if (statement.name == "LocalVariableDeclaration") return convertLocalStatement(statement, filename, source, context)
   if (statement.name == "ExpressionStatement") {
     if (statement.getChild("AssignmentExpression")) return convertLocalStatement(statement, filename, source, context)
@@ -723,6 +739,99 @@ function convertStatement(statement, filename, source, context) {
   }
 
   return unsupportedSyntax("java", statement.name, nodeLocation(statement, filename, source))
+}
+
+/**
+ * Converts exact Java enhanced-for syntax over one resolved `List<T>`.
+ * @param {import("@lezer/common").SyntaxNode} node - Enhanced-for statement.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @param {JavaConversionContext} context - Typed lexical context.
+ * @returns {import("../semantic/types.js").ForEachStatement} Semantic loop.
+ */
+function convertForEach(node, filename, source, context) {
+  const location = nodeLocation(node, filename, source)
+  const spec = node.getChild("ForSpec")
+  const body = directChildren(node).findLast((child) => child.name != "ForSpec" && child.name != "for")
+
+  if (!spec) return unsupportedSyntax("java", "enhanced for without specification", location)
+  if (!body || body.name != "Block") return unsupportedSyntax("java", "enhanced for without block body", body ? nodeLocation(body, filename, source) : location)
+  const children = directChildren(spec)
+  const colonIndex = children.findIndex((child) => child.name == ":")
+  const typeNode = colonIndex >= 2 ? children[colonIndex - 2] : undefined
+  const bindingNode = colonIndex >= 2 ? children[colonIndex - 1] : undefined
+  const collectionNode = colonIndex >= 0 ? children[colonIndex + 1] : undefined
+
+  if (!typeNode || !bindingNode || bindingNode.name != "Definition" || !collectionNode ||
+    children.filter((child) => child.name == ":").length != 1) {
+    const unsupported = bindingNode ?? collectionNode ?? spec
+
+    return unsupportedSyntax("java", "malformed enhanced for specification", nodeLocation(unsupported, filename, source))
+  }
+  if (children.some((child) => child.name == "Modifiers")) {
+    const modifiers = /** @type {import("@lezer/common").SyntaxNode} */ (children.find((child) => child.name == "Modifiers"))
+
+    return unsupportedSyntax("java", "enhanced for modifiers", nodeLocation(modifiers, filename, source))
+  }
+  const bindingLocation = nodeLocation(bindingNode, filename, source)
+  const declaredType = convertJavaTypeArgument(typeNode, `Iteration binding '${nodeText(bindingNode, source)}'`, bindingLocation, filename, source)
+  const collectionType = iterationOperandType(knownExpressionType(collectionNode, context, source))
+
+  if (!collectionType || collectionType.kind != "ListType" && collectionType.kind != "MapType") {
+    return missingType("java", "Iteration collection", nodeLocation(collectionNode, filename, source))
+  }
+  const valueBinding = withParserRanges({
+    kind: /** @type {const} */ ("ValueBinding"),
+    location: bindingLocation,
+    mutable: /** @type {const} */ (false),
+    name: nodeText(bindingNode, source),
+    type: declaredType
+  }, {name: bindingLocation})
+  const bodyContext = {...context, bindings: new Map(context.bindings)}
+
+  bodyContext.bindings.set(valueBinding.name, iterationBindingType(declaredType, bindingLocation))
+  return withParserRanges({
+    body: convertBlock(body, filename, source, bodyContext),
+    kind: /** @type {const} */ ("ForEachStatement"),
+    list: convertExpression(collectionNode, filename, source, context),
+    location,
+    valueBinding
+  }, {operator: nodeLocation(children[colonIndex], filename, source)})
+}
+
+/**
+ * Resolves expression types established by Java declarations and function signatures.
+ * @param {import("@lezer/common").SyntaxNode} node - Parser expression.
+ * @param {JavaConversionContext} context - Typed context.
+ * @param {string} source - Complete source.
+ * @returns {import("../semantic/types.js").SemanticFunctionReturnType | undefined} Known type.
+ */
+function knownExpressionType(node, context, source) {
+  if (node.name == "ParenthesizedExpression") {
+    const children = structuralChildren(node)
+
+    return children.length == 1 ? knownExpressionType(children[0], context, source) : undefined
+  }
+  if (node.name == "Identifier") return context.bindings.get(nodeText(node, source))
+  if (node.name == "MethodInvocation") {
+    const methodName = node.getChild("MethodName")
+    const argumentList = node.getChild("ArgumentList")
+    const receiver = structuralChildren(node).find((child) => child.name != "MethodName" && child.name != "ArgumentList")
+
+    if (methodName && !receiver) return context.functions.get(nodeText(methodName, source))?.returnType
+    if (methodName && receiver && argumentList && nodeText(methodName, source) == "get") {
+      const arguments_ = structuralChildren(argumentList)
+      const receiverType = knownExpressionType(receiver, context, source)
+
+      if (arguments_.length == 0 && receiver.name == "Identifier" && receiverType?.kind == "OptionalType") {
+        return receiverType.valueType
+      }
+      if (arguments_.length == 1 && receiverType?.kind == "ListType") return receiverType.elementType
+      if (arguments_.length == 1 && receiverType?.kind == "MapType") return receiverType.valueType
+    }
+  }
+
+  return undefined
 }
 
 /**

@@ -8,7 +8,7 @@ import {withAdaptedOperation} from "../semantic/operators.js"
 import {withParserRanges} from "../semantic/provenance.js"
 import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
 import {requireSourceReturnType, requireSourceScalarType} from "./scalars.js"
-import {documentedValueType, listType, mapType, optionalType} from "./types.js"
+import {documentedValueType, iterationBindingType, iterationOperandType, listType, mapType, optionalType} from "./types.js"
 
 /** @typedef {NonNullable<import("@babel/parser").ParseResult<import("@babel/types").File>["tokens"]>[number]} BabelToken */
 /** @typedef {{byStart: Map<number, BabelToken>, tokens: BabelToken[]}} BabelTokenIndex */
@@ -604,6 +604,15 @@ function localJavaScriptType(node, name, filename, source) {
 function convertStatement(node, language, filename, source, canonicalZeroRequired, context) {
   if (node.type == "ReturnStatement") return convertReturn(node, language, filename, source, context)
   if (node.type == "IfStatement") return convertIf(node, language, filename, source, canonicalZeroRequired, context)
+  if (node.type == "ForOfStatement") return convertForEach(node, language, filename, source, canonicalZeroRequired, context)
+  if (node.type == "BreakStatement" || node.type == "ContinueStatement") {
+    if (node.label) return unsupportedSyntax(language, `labeled ${node.type == "BreakStatement" ? "break" : "continue"}`,
+      nodeLocation(node.label, filename, source))
+    const keyword = node.type == "BreakStatement" ? "break" : "continue"
+    const location = tokenLocation(node, keyword, node.start ?? 0, node.end ?? source.length, filename, source)
+
+    return withParserRanges({kind: node.type, location}, {keyword: location})
+  }
   if (node.type == "VariableDeclaration" || node.type == "ExpressionStatement" && node.expression.type == "AssignmentExpression") {
     return convertLocalStatement(node, language, filename, source, context)
   }
@@ -622,6 +631,68 @@ function convertStatement(node, language, filename, source, canonicalZeroRequire
   }
 
   return unsupportedSyntax(language, node.type, nodeLocation(node, filename, source))
+}
+
+/**
+ * Converts the exact block-bodied `for (const value of list)` profile.
+ * @param {import("@babel/types").ForOfStatement} node - Babel for-of statement.
+ * @param {"javascript" | "typescript"} language - Frontend language.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @param {boolean} canonicalZeroRequired - Whether scalar output canonicalizes zero.
+ * @param {JavaScriptConversionContext} context - Typed lexical conversion context.
+ * @returns {import("../semantic/types.js").ForEachStatement} Semantic loop.
+ */
+function convertForEach(node, language, filename, source, canonicalZeroRequired, context) {
+  const location = nodeLocation(node, filename, source)
+
+  if (node.await) return unsupportedSyntax(language, "async for-of", location)
+  if (node.left.type != "VariableDeclaration") return unsupportedSyntax(language, "for-of assignment binding", nodeLocation(node.left, filename, source))
+  if (node.left.kind != "const") {
+    return unsupportedSyntax(language, `${node.left.kind} iteration binding`, tokenLocation(
+      node.left,
+      node.left.kind,
+      node.left.start ?? node.start ?? 0,
+      node.left.end ?? node.end ?? source.length,
+      filename,
+      source
+    ))
+  }
+  if (node.left.declarations.length != 1) return unsupportedSyntax(language, "multiple iteration bindings", nodeLocation(node.left, filename, source))
+  const declarator = node.left.declarations[0]
+
+  if (declarator.id.type != "Identifier") return unsupportedSyntax(language, declarator.id.type, nodeLocation(declarator.id, filename, source))
+  if (declarator.init) return unsupportedSyntax(language, "initialized iteration binding", nodeLocation(declarator, filename, source))
+  if (node.body.type != "BlockStatement") return unsupportedSyntax(language, "for-of without block body", nodeLocation(node.body, filename, source))
+  const collectionType = iterationOperandType(knownExpressionType(node.right, context))
+
+  if (!collectionType || collectionType.kind != "ListType" && collectionType.kind != "MapType") {
+    return missingType(language, "Iteration collection", nodeLocation(node.right, filename, source))
+  }
+  const bindingLocation = identifierLocation(declarator.id, filename, source)
+  const inferredType = collectionType.kind == "ListType" ? collectionType.elementType : collectionType.valueType
+  const bindingType = language == "typescript" && declarator.id.typeAnnotation
+    ? convertTypeScriptType(declarator.id.typeAnnotation, `Iteration binding '${declarator.id.name}'`, bindingLocation, filename, source)
+    : iterationBindingType(inferredType, bindingLocation)
+  const valueBinding = withParserRanges({
+    kind: /** @type {const} */ ("ValueBinding"),
+    location: bindingLocation,
+    mutable: /** @type {const} */ (false),
+    name: declarator.id.name,
+    type: bindingType
+  }, {name: bindingLocation})
+  const bodyContext = {...context, bindings: new Map(context.bindings)}
+
+  bodyContext.bindings.set(declarator.id.name, bindingType)
+  return withParserRanges({
+    body: convertBlock(node.body, language, filename, source, canonicalZeroRequired, bodyContext),
+    kind: /** @type {const} */ ("ForEachStatement"),
+    list: convertExpression(node.right, language, filename, source, context),
+    location,
+    valueBinding
+  }, {
+    operator: tokenLocation(node, "of", node.left.end ?? node.start ?? 0, node.right.start ?? node.end ?? source.length, filename, source)
+  })
 }
 
 /**
@@ -1115,6 +1186,7 @@ export function parseJavaScriptTypeScript({filename, language, source}) {
 function parseBabelSource({filename, language, source}) {
   try {
     return parseBabel(source, {
+      allowAwaitOutsideFunction: true,
       plugins: language == "typescript" ? ["typescript"] : [],
       sourceFilename: filename,
       sourceType: "script",

@@ -489,6 +489,8 @@ export function semanticEntries(module) {
       node.statements.forEach((child, index) => visit(child, `${path}/statements/${index}`, location))
     } else if (node.kind == "Parameter") {
       visit(node.type, `${path}/type`, location)
+    } else if (node.kind == "ValueBinding") {
+      visit(node.type, `${path}/type`, location)
     } else if (node.kind == "ListType") {
       visit(node.elementType, `${path}/elementType`, location)
     } else if (node.kind == "MapType") {
@@ -510,6 +512,10 @@ export function semanticEntries(module) {
       visit(node.condition, `${path}/condition`, location)
       visit(node.consequent, `${path}/consequent`, location)
       if (node.alternate) visit(node.alternate, `${path}/alternate`, location)
+    } else if (node.kind == "ForEachStatement") {
+      visit(node.list, `${path}/list`, location)
+      visit(node.valueBinding, `${path}/valueBinding`, location)
+      visit(node.body, `${path}/body`, location)
     } else if (node.kind == "EntryPoint") {
       visit(node.body, `${path}/body`, location)
     } else if (node.kind == "UnaryExpression") {
@@ -574,7 +580,7 @@ function resolveSymbols(module, records) {
 
   /**
    * Declares one canonical symbol.
-   * @param {import("./types.js").FunctionDeclaration | import("./types.js").Parameter | import("./types.js").LocalDeclaration} node - Declaration.
+   * @param {import("./types.js").FunctionDeclaration | import("./types.js").Parameter | import("./types.js").LocalDeclaration | import("./types.js").ValueBinding} node - Declaration.
    * @param {string} name - Symbol name.
    * @param {import("./types.js").SemanticSymbolKind} kind - Symbol kind.
    * @param {string} path - Declaration occurrence path.
@@ -629,6 +635,17 @@ function resolveSymbols(module, records) {
         visitExpression(statement.condition, scope, `${statementPath}/condition`)
         visitBlock(statement.consequent, scope, `${statementPath}/consequent`)
         if (statement.alternate) visitBlock(statement.alternate, scope, `${statementPath}/alternate`)
+      } else if (statement.kind == "ForEachStatement") {
+        visitExpression(statement.list, scope, `${statementPath}/list`)
+        const bodyScope = new Map(scope)
+
+        bodyScope.set(statement.valueBinding.name, declare(
+          statement.valueBinding,
+          statement.valueBinding.name,
+          "iteration",
+          `${statementPath}/valueBinding`
+        ))
+        visitBlock(statement.body, bodyScope, `${statementPath}/body`)
       }
     }
   }

@@ -120,6 +120,29 @@ function emitBlock(writer, block, indent, path) {
 function emitStatement(writer, statement, indent, path) {
   if (statement.kind == "LocalDeclaration" || statement.kind == "AssignmentStatement") return emitLocal(writer, statement, indent, path)
   writer.synthetic(indent, "indentation", [statement], [path])
+  if (statement.kind == "BreakStatement" || statement.kind == "ContinueStatement") {
+    writer.mapped(statement.kind == "BreakStatement" ? "break" : "continue", {mappingKind: "exact", node: statement, path})
+    writer.mapped(";", {mappingKind: "anchor", node: statement, path})
+    writer.synthetic("\n", "line break", [statement], [path])
+    return
+  }
+  if (statement.kind == "ForEachStatement") {
+    writer.mapped("foreach", {mappingKind: "anchor", node: statement, path})
+    writer.synthetic(" (", "loop scaffolding", [statement], [path])
+    emitExpression(writer, statement.list, `${path}/list`, "php", phpIdentifier)
+    writer.synthetic(" as ", "loop scaffolding", [statement], [path])
+    writer.mapped(`$${statement.valueBinding.name}`, {
+      mappingKind: "exact", node: statement.valueBinding, path: `${path}/valueBinding`, role: "name"
+    })
+    writer.synthetic(") ", "loop scaffolding", [statement], [path])
+    writer.mapped("{", {mappingKind: "anchor", node: statement.body, path: `${path}/body`})
+    writer.synthetic("\n", "line break", [statement], [path])
+    emitBlock(writer, statement.body, `${indent}    `, `${path}/body`)
+    writer.synthetic(indent, "indentation", [statement], [path])
+    writer.mapped("}", {mappingKind: "anchor", node: statement.body, path: `${path}/body`})
+    writer.synthetic("\n", "line break", [statement], [path])
+    return
+  }
   if (statement.kind == "ReturnStatement") {
     writer.mapped("return", {mappingKind: "anchor", node: statement, path})
     if (statement.expression) {
