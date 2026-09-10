@@ -7,7 +7,7 @@ import {withAdaptedOperation} from "../semantic/operators.js"
 import {withParserRanges} from "../semantic/provenance.js"
 import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
 import {requireSourceReturnType, sourceScalarType} from "./scalars.js"
-import {iterationBindingType, listType, mapType, optionalType} from "./types.js"
+import {iterationBindingType, iterationOperandType, listType, mapType, optionalType} from "./types.js"
 
 /** @type {Readonly<Record<string, string>>} */
 const simpleStringEscapes = Object.freeze({
@@ -775,7 +775,7 @@ function convertForEach(node, filename, source, context) {
   }
   const bindingLocation = nodeLocation(bindingNode, filename, source)
   const declaredType = convertJavaTypeArgument(typeNode, `Iteration binding '${nodeText(bindingNode, source)}'`, bindingLocation, filename, source)
-  const collectionType = knownExpressionType(collectionNode, context, source)
+  const collectionType = iterationOperandType(knownExpressionType(collectionNode, context, source))
 
   if (!collectionType || collectionType.kind != "ListType" && collectionType.kind != "MapType") {
     return missingType("java", "Iteration collection", nodeLocation(collectionNode, filename, source))
@@ -807,6 +807,11 @@ function convertForEach(node, filename, source, context) {
  * @returns {import("../semantic/types.js").SemanticFunctionReturnType | undefined} Known type.
  */
 function knownExpressionType(node, context, source) {
+  if (node.name == "ParenthesizedExpression") {
+    const children = structuralChildren(node)
+
+    return children.length == 1 ? knownExpressionType(children[0], context, source) : undefined
+  }
   if (node.name == "Identifier") return context.bindings.get(nodeText(node, source))
   if (node.name == "MethodInvocation") {
     const methodName = node.getChild("MethodName")
@@ -814,12 +819,15 @@ function knownExpressionType(node, context, source) {
     const receiver = structuralChildren(node).find((child) => child.name != "MethodName" && child.name != "ArgumentList")
 
     if (methodName && !receiver) return context.functions.get(nodeText(methodName, source))?.returnType
-    if (methodName && receiver && argumentList && nodeText(methodName, source) == "get" &&
-      structuralChildren(argumentList).length == 1) {
+    if (methodName && receiver && argumentList && nodeText(methodName, source) == "get") {
+      const arguments_ = structuralChildren(argumentList)
       const receiverType = knownExpressionType(receiver, context, source)
 
-      if (receiverType?.kind == "ListType") return receiverType.elementType
-      if (receiverType?.kind == "MapType") return receiverType.valueType
+      if (arguments_.length == 0 && receiver.name == "Identifier" && receiverType?.kind == "OptionalType") {
+        return receiverType.valueType
+      }
+      if (arguments_.length == 1 && receiverType?.kind == "ListType") return receiverType.elementType
+      if (arguments_.length == 1 && receiverType?.kind == "MapType") return receiverType.valueType
     }
   }
 

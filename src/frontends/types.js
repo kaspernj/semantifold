@@ -6,6 +6,16 @@ import {parserRangeFor, setParserRanges} from "../semantic/provenance.js"
 import {sourceScalarType} from "./scalars.js"
 
 /**
+ * Resolves the value presented to list iteration after canonical optional unwrap.
+ * Semantic validation remains responsible for requiring the matching presence proof.
+ * @param {import("../semantic/types.js").SemanticFunctionReturnType | undefined} type - Parser-resolved operand type.
+ * @returns {import("../semantic/types.js").SemanticFunctionReturnType | undefined} Iterated value type.
+ */
+export function iterationOperandType(type) {
+  return type?.kind == "OptionalType" ? type.valueType : type
+}
+
+/**
  * Copies a resolved list element type for one parser-owned iteration binding.
  * The binding location is its own deterministic derived type anchor.
  * @param {import("../semantic/types.js").SemanticValueType} type - Resolved element type.

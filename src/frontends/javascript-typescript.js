@@ -8,7 +8,7 @@ import {withAdaptedOperation} from "../semantic/operators.js"
 import {withParserRanges} from "../semantic/provenance.js"
 import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
 import {requireSourceReturnType, requireSourceScalarType} from "./scalars.js"
-import {documentedValueType, iterationBindingType, listType, mapType, optionalType} from "./types.js"
+import {documentedValueType, iterationBindingType, iterationOperandType, listType, mapType, optionalType} from "./types.js"
 
 /** @typedef {NonNullable<import("@babel/parser").ParseResult<import("@babel/types").File>["tokens"]>[number]} BabelToken */
 /** @typedef {{byStart: Map<number, BabelToken>, tokens: BabelToken[]}} BabelTokenIndex */
@@ -664,7 +664,7 @@ function convertForEach(node, language, filename, source, canonicalZeroRequired,
   if (declarator.id.type != "Identifier") return unsupportedSyntax(language, declarator.id.type, nodeLocation(declarator.id, filename, source))
   if (declarator.init) return unsupportedSyntax(language, "initialized iteration binding", nodeLocation(declarator, filename, source))
   if (node.body.type != "BlockStatement") return unsupportedSyntax(language, "for-of without block body", nodeLocation(node.body, filename, source))
-  const collectionType = knownExpressionType(node.right, context)
+  const collectionType = iterationOperandType(knownExpressionType(node.right, context))
 
   if (!collectionType || collectionType.kind != "ListType" && collectionType.kind != "MapType") {
     return missingType(language, "Iteration collection", nodeLocation(node.right, filename, source))

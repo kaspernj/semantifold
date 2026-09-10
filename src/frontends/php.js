@@ -8,7 +8,7 @@ import {withAdaptedOperation} from "../semantic/operators.js"
 import {withParserRanges} from "../semantic/provenance.js"
 import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
 import {requireSourceReturnType, requireSourceScalarType} from "./scalars.js"
-import {documentedValueType, iterationBindingType, optionalType} from "./types.js"
+import {documentedValueType, iterationBindingType, iterationOperandType, optionalType} from "./types.js"
 const parser = new PhpParser.Engine({
   ast: {withPositions: true},
   parser: {extractDoc: true, suppressErrors: false}
@@ -608,7 +608,7 @@ function convertForEach(node, filename, source, context) {
     return unsupportedSyntax("php", "foreach without block body", node.body ? nodeLocation(node.body, filename, source) : location)
   }
   const body = /** @type {import("php-parser").Block} */ (node.body)
-  const collectionType = knownExpressionType(node.source, context)
+  const collectionType = iterationOperandType(knownExpressionType(node.source, context))
 
   if (!collectionType || collectionType.kind != "ListType" && collectionType.kind != "MapType") {
     return missingType("php", "Iteration collection", nodeLocation(node.source, filename, source))

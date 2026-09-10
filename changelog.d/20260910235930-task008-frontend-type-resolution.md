@@ -1,0 +1,1 @@
+Allow guarded optional lists to reach canonical `OptionalUnwrap` iteration across the original five frontends, and recursively resolve parser-owned parentheses around supported Java enhanced-for collection expressions.

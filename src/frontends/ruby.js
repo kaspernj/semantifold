@@ -38,7 +38,7 @@ import {withAdaptedOperation} from "../semantic/operators.js"
 import {withParserRanges} from "../semantic/provenance.js"
 import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
 import {requireSourceReturnType} from "./scalars.js"
-import {documentedValueType, iterationBindingType} from "./types.js"
+import {documentedValueType, iterationBindingType, iterationOperandType} from "./types.js"
 const parsePrism = await loadPrism()
 /** @typedef {{name: string, nameLocation: import("../semantic/types.js").SourceLocation, parameters: import("../semantic/types.js").Parameter[], returnType: import("../semantic/types.js").SemanticFunctionReturnType, location: import("../semantic/types.js").SourceLocation}} RubyFunctionSignature */
 /** @typedef {{bindings: Map<string, import("../semantic/types.js").SemanticValueType>, functions: Map<string, RubyFunctionSignature>, loopDepth?: number, returnType?: import("../semantic/types.js").SemanticFunctionReturnType}} RubyConversionContext */
@@ -713,7 +713,7 @@ function convertForEach(node, comments, context, filename, source) {
 
   if (unsupportedParameter) return unsupportedSyntax("ruby", "each block parameter arity or shape", nodeLocation(unsupportedParameter, filename, source))
   const parameter = /** @type {RequiredParameterNode} */ (parameters.requireds[0])
-  const collectionType = knownExpressionType(node.receiver, context)
+  const collectionType = iterationOperandType(knownExpressionType(node.receiver, context))
 
   if (!collectionType || collectionType.kind != "ListType" && collectionType.kind != "MapType") {
     return missingType("ruby", "Iteration collection", nodeLocation(node.receiver, filename, source))
