@@ -1203,13 +1203,29 @@ function convertJavaScriptRecord(node, declaration, recordNames, filename, sourc
 
   if (!freeze || freeze.type != "ExpressionStatement" || freeze.expression.type != "CallExpression" || freeze.expression.optional ||
     freeze.expression.arguments.length != 1 || freeze.expression.arguments[0].type != "ThisExpression" ||
-    freeze.expression.callee.type != "MemberExpression" || freeze.expression.callee.computed || freeze.expression.callee.optional ||
-    freeze.expression.callee.object.type != "Identifier" || freeze.expression.callee.object.name != "Object" ||
-    freeze.expression.callee.property.type != "Identifier" || freeze.expression.callee.property.name != "freeze") {
+    !isJavaScriptRecordFreeze(freeze.expression)) {
     return unsupportedSyntax("javascript", "record constructor without final Object.freeze(this)", nodeLocation(freeze ?? constructor, filename, source))
   }
 
   return withParserRanges(declaration, {name: identifierLocation(node.id, filename, source)})
+}
+
+/**
+ * Recognizes the canonical source freeze or the generated identifier-free intrinsic owner.
+ * @param {import("@babel/types").CallExpression} expression - Final constructor call.
+ * @returns {boolean} Whether the call owns the native record-freeze operation.
+ */
+function isJavaScriptRecordFreeze(expression) {
+  const callee = expression.callee
+
+  if (callee.type != "MemberExpression" || callee.computed || callee.optional ||
+    callee.property.type != "Identifier" || callee.property.name != "freeze") return false
+  if (callee.object.type == "Identifier") return callee.object.name == "Object"
+  if (callee.object.type != "MemberExpression" || callee.object.computed || callee.object.optional ||
+    callee.object.property.type != "Identifier" || callee.object.property.name != "constructor") return false
+
+  return callee.object.object.type == "ObjectExpression" && callee.object.object.properties.length == 0 &&
+    callee.object.object.extra?.parenthesized === true
 }
 
 /**

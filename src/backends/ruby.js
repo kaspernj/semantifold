@@ -53,7 +53,7 @@ export function generateRuby(module, writer) {
       writer.mapped(field.name, {mappingKind: "exact", node: field, path: fieldPath, role: "name"})
       writer.synthetic("\n", "line break", [field], [fieldPath])
     })
-    writer.synthetic("    freeze\n  end\nend", "Ruby record immutability scaffolding", [record], [recordPath])
+    writer.synthetic("    ::Kernel.instance_method(:freeze).bind_call(self)\n  end\nend", "Ruby record immutability scaffolding", [record], [recordPath])
   })
   if (records.length > 0) writer.synthetic("\n\n", "record/function separator", [module])
 

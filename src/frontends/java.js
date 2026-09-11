@@ -233,7 +233,8 @@ function convertExpression(node, filename, source, context, expectedType) {
       return unsupportedSyntax("java", "unary expression", location)
     }
 
-    if (operator == "!" && operand.name == "MethodInvocation" && isEqualsInvocation(operand, source)) {
+    if (operator == "!" && operand.name == "MethodInvocation" && isEqualsInvocation(operand, source) &&
+      !isZeroArgumentRecordMemberInvocation(operand, source, context)) {
       return convertStringEquality(operand, true, location, nodeLocation(operatorNode, filename, source), filename, source, context)
     }
 
@@ -272,7 +273,7 @@ function convertExpression(node, filename, source, context, expectedType) {
   }
 
   if (node.name == "MethodInvocation") {
-    if (isEqualsInvocation(node, source)) {
+    if (isEqualsInvocation(node, source) && !isZeroArgumentRecordMemberInvocation(node, source, context)) {
       const methodName = requiredChild(node, "MethodName", filename, source)
 
       return convertStringEquality(node, false, location, nodeLocation(methodName, filename, source), filename, source, context)
@@ -446,6 +447,21 @@ function isEqualsInvocation(node, source) {
   const receivers = structuralChildren(node).filter((child) => child.name != "MethodName" && child.name != "ArgumentList")
 
   return methodName != null && nodeText(methodName, source) == "equals" && receivers.length == 1
+}
+
+/**
+ * Distinguishes a zero-argument nominal field accessor from Java string equality syntax.
+ * @param {import("@lezer/common").SyntaxNode} node - Method invocation node.
+ * @param {string} source - Complete source.
+ * @param {JavaConversionContext} context - Typed lexical conversion context.
+ * @returns {boolean} Whether this is a known record receiver with no arguments.
+ */
+function isZeroArgumentRecordMemberInvocation(node, source, context) {
+  const argumentList = node.getChild("ArgumentList")
+  const receiver = structuralChildren(node).find((child) => child.name != "MethodName" && child.name != "ArgumentList")
+
+  return argumentList != null && structuralChildren(argumentList).length == 0 && receiver != null &&
+    knownExpressionType(receiver, context, source)?.kind == "RecordType"
 }
 
 /**
