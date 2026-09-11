@@ -6,14 +6,14 @@ import os from "node:os"
 import path from "node:path"
 import {promisify} from "node:util"
 import {describe, expect, it} from "@velocious/testing"
-import {generate, parse} from "../index.js"
+import {discoverCanonicalToolchain, generate, parse} from "../index.js"
 import {semanticMeaning} from "./support/semantic-meaning.js"
 
 const execFileAsync = promisify(execFile)
 
 /**
  * Executes one focused generated record program through its real runtime.
- * @param {"javascript" | "ruby" | "java"} language - Runtime language.
+ * @param {"php" | "ruby" | "javascript" | "typescript" | "java"} language - Runtime language.
  * @param {string} source - Complete generated source.
  * @returns {Promise<string>} Standard output.
  */
@@ -21,6 +21,13 @@ async function execute(language, source) {
   const directory = await mkdtemp(path.join(os.tmpdir(), `semantifold-task009-collision-${language}-`))
 
   try {
+    if (language == "php") {
+      const filename = path.join(directory, "program.php")
+      const executable = (await discoverCanonicalToolchain("php82")).executable
+
+      await writeFile(filename, source)
+      return (await execFileAsync(executable, [filename])).stdout
+    }
     if (language == "javascript") {
       const filename = path.join(directory, "program.js")
 
@@ -33,6 +40,14 @@ async function execute(language, source) {
       await writeFile(filename, source)
       return (await execFileAsync("ruby", [filename])).stdout
     }
+    if (language == "typescript") {
+      const filename = path.join(directory, "program.ts")
+      const compiler = path.resolve("node_modules/.bin/tsc")
+
+      await writeFile(filename, source)
+      await execFileAsync(compiler, [filename, "--target", "ES2024", "--module", "nodenext", "--strict"], {cwd: directory})
+      return (await execFileAsync(process.execPath, [path.join(directory, "program.js")])).stdout
+    }
     const filename = path.join(directory, "Main.java")
 
     await writeFile(filename, source)
@@ -43,12 +58,10 @@ async function execute(language, source) {
   }
 }
 
-describe("closed record native collision runtime", () => {
-  it("keeps JavaScript record freezing independent from a field named Object", async () => {
-    const module = parse({
-      filename: "object-field.ts",
-      language: "typescript",
-      source: `class Box {
+const objectFieldModule = () => parse({
+  filename: "object-field.ts",
+  language: "typescript",
+  source: `class Box {
   constructor(readonly Object: string) {}
 }
 
@@ -59,10 +72,42 @@ function pass(box: Box): Box {
 const box: Box = new Box("safe")
 console.log(pass(box).Object)
 `
-    })
+})
+
+const equalsFieldModule = () => parse({
+  filename: "equals-field.ts",
+  language: "typescript",
+  source: `class Box {
+  constructor(readonly equals: string) {}
+}
+
+function pass(box: Box): Box {
+  return box
+}
+
+const box: Box = new Box("safe")
+console.log(pass(box).equals)
+`
+})
+
+describe("closed record native collision runtime", () => {
+  it("keeps JavaScript record freezing independent from a field named Object", async () => {
+    const module = objectFieldModule()
     const generated = generate({language: "javascript", module})
 
     expect(await execute("javascript", `${generated}\nconsole.log(Object.isFrozen(box))\n`)).toEqual("safe\ntrue\n")
+  })
+
+  it("executes the collision-sensitive record through PHP", async () => {
+    const generated = generate({language: "php", module: equalsFieldModule()})
+
+    expect(await execute("php", generated)).toEqual("safe\n")
+  })
+
+  it("compiles and executes the collision-sensitive record through TypeScript and Node", async () => {
+    const generated = generate({language: "typescript", module: objectFieldModule()})
+
+    expect(await execute("typescript", generated)).toEqual("safe\n")
   })
 
   it("keeps Ruby record freezing independent from a parameterized function named freeze", async () => {
