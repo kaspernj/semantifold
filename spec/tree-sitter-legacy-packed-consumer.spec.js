@@ -9,6 +9,7 @@ import {fileURLToPath} from "node:url"
 import {promisify} from "node:util"
 import {describe, expect, it} from "@velocious/testing"
 import {consumerSource, typeConsumerSource} from "./support/packed-consumer.js"
+import {packRootPackage} from "./support/root-package-pack.js"
 
 const rawExecuteFile = promisify(execFile)
 const executeFile = async (executable, args, options = {}) => {
@@ -142,9 +143,7 @@ describe("packed Semantifold legacy Tree-sitter boundary", () => {
       await writeFile(alternateConfig, "registry=https://global.invalid/\n@types:registry=https://scoped.invalid/\n")
       await writeFile(`${alternateConfig}.user`, "registry=https://user.invalid/\n")
       const sourceManifest = JSON.parse(await readFile(path.join(repositoryRoot, "package.json"), "utf8"))
-      const packed = await executeFile("npm", [
-        "pack", "--pack-destination", packDirectory, "--json"
-      ], {cwd: repositoryRoot, maxBuffer: 20 * 1024 * 1024})
+      const packed = await packRootPackage(executeFile, repositoryRoot, packDirectory)
       const packResult = parsePackResult(packed.stdout)
       const packedFiles = packResult.files.map(({path: filename}) => filename)
       const bundledPackages = new Set(packResult.bundled)
