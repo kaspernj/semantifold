@@ -122,11 +122,16 @@ function validateModuleTypes(module, fail, normalizeOperations) {
     functions.set(functionDeclaration.name, functionDeclaration)
   }
 
-  for (const functionDeclaration of module.functions) validateFunction(functionDeclaration, functions, records, fail, normalizeOperations)
+  const reservedValueNames = new Set([
+    ...functions.keys(),
+    ...[...records.values()].map((declaration) => declaration.name)
+  ])
 
-  const callableNames = new Set(functions.keys())
+  for (const functionDeclaration of module.functions) {
+    validateFunction(functionDeclaration, functions, records, reservedValueNames, fail, normalizeOperations)
+  }
 
-  const entryScope = createScope(undefined, module.entryPoint.body.statements, callableNames)
+  const entryScope = createScope(undefined, module.entryPoint.body.statements, reservedValueNames)
 
   validateBlock(module.entryPoint.body, entryScope, undefined, functions, records, fail, normalizeOperations)
 }
@@ -223,17 +228,18 @@ function validateDirectRecordRecursion(declarations, records, fail) {
  * @param {import("./types.js").FunctionDeclaration} declaration - Function declaration.
  * @param {Map<string, import("./types.js").FunctionDeclaration>} functions - Function signatures.
  * @param {RecordRegistry} records - Record declarations by identity.
+ * @param {Set<string>} reservedValueNames - Module functions and nominal constructors unavailable to lexical bindings.
  * @param {SemanticFail} fail - Diagnostic callback.
  * @param {boolean} normalizeOperations - Whether to replace transient frontend operation intent.
  * @returns {void}
  */
-function validateFunction(declaration, functions, records, fail, normalizeOperations) {
-  const scope = createScope(undefined, declaration.body.statements, new Set(functions.keys()))
+function validateFunction(declaration, functions, records, reservedValueNames, fail, normalizeOperations) {
+  const scope = createScope(undefined, declaration.body.statements, reservedValueNames)
 
   for (const parameter of declaration.parameters) {
     const type = validateValueTypeReference(parameter.type, parameter.location, fail, undefined, records)
 
-    declareBinding(parameter.name, {knownValue: undefined, mutable: false, type}, parameter.location, scope, fail)
+    declareBinding(parameter.name, {knownValue: undefined, mutable: false, type}, roleLocation(parameter, "name"), scope, fail)
   }
 
   const returnType = validateReturnTypeReference(declaration.returnType, declaration.location, fail, records)
@@ -276,7 +282,7 @@ function validateBlock(block, scope, returnType, functions, records, fail, norma
         knownValue: knownValueForExpression(statement.initializer, scope),
         mutable: statement.mutable,
         type: declaredType
-      }, statement.location, scope, fail)
+      }, roleLocation(statement, "name"), scope, fail)
       continue
     }
     if (statement.kind == "AssignmentStatement") {
@@ -429,7 +435,7 @@ function validateBlock(block, scope, returnType, functions, records, fail, norma
         knownValue: undefined,
         mutable: false,
         type: bindingType
-      }, statement.valueBinding.location, loopScope, fail)
+      }, roleLocation(statement.valueBinding, "name"), loopScope, fail)
       validateBlock(statement.body, loopScope, returnType, functions, records, fail, normalizeOperations, loopDepth + 1)
       for (const binding of assignedOuterBindings) {
         binding.knownValue = undefined

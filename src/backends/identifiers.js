@@ -147,7 +147,25 @@ const phpInvalidAssignedBindings = new Set(["GLOBALS", "this"])
 const reservedTypeNames = Object.freeze({
   java: new Set(["Boolean", "Integer", "Main", "Math", "Object", "String", "System"]),
   javascript: new Set(["Array", "Boolean", "Map", "Math", "Number", "Object", "Reflect", "String"]),
-  ruby: new Set(["Array", "BasicObject", "Class", "FalseClass", "Hash", "Integer", "Kernel", "Module", "NilClass", "Object", "String", "Symbol", "TrueClass"]),
+  php: new Set([
+    "allowdynamicproperties", "argumentcounterror", "arithmeticerror", "arrayaccess", "backedenum", "closure", "compileerror",
+    "countable", "divisionbyzeroerror", "error", "errorexception", "exception", "fiber", "fibererror", "generator",
+    "internaliterator", "iterator", "iteratoraggregate", "parseerror", "returntypewillchange", "sensitiveparameter",
+    "sensitiveparametervalue", "serializable", "stdclass", "stringable", "throwable", "traversable", "typeerror",
+    "unhandledmatcherror", "unitenum", "valueerror", "weakmap", "weakreference"
+  ]),
+  ruby: new Set([
+    "ArgumentError", "Array", "BasicObject", "Binding", "Class", "ClosedQueueError", "Comparable", "Complex", "Data", "Dir",
+    "Encoding", "EncodingError", "Enumerable", "Enumerator", "EOFError", "Errno", "Exception", "FalseClass", "Fiber",
+    "FiberError", "File", "FileTest", "Float", "FrozenError", "GC", "Hash", "IO", "IOError", "IndexError", "Integer",
+    "Interrupt", "Kernel", "KeyError", "LoadError", "LocalJumpError", "Marshal", "MatchData", "Math", "Method", "Module",
+    "Mutex", "NameError", "NilClass", "NoMemoryError", "NoMethodError", "NotImplementedError", "Numeric", "Object",
+    "ObjectSpace", "Proc", "Process", "Queue", "Ractor", "Random", "Range", "Rational", "Regexp", "RegexpError", "RubyVM",
+    "RuntimeError", "ScriptError", "SecurityError", "Signal", "SignalException", "SizedQueue", "StandardError", "StopIteration",
+    "String", "Struct", "Symbol", "SyntaxError", "SystemCallError", "SystemExit", "SystemStackError", "Thread", "ThreadError",
+    "ThreadGroup", "Time", "TracePoint", "TrueClass", "TypeError", "UnboundMethod", "UncaughtThrowError", "Warning",
+    "ZeroDivisionError"
+  ]),
   typescript: new Set(["Array", "Boolean", "Map", "Math", "Number", "Object", "ReadonlyArray", "ReadonlyMap", "Reflect", "String"])
 })
 
@@ -221,7 +239,7 @@ export function validateTargetTypeIdentifier(language, name, location) {
   }
   const reservedName = language == "php" ? name.toLowerCase() : name
 
-  if (reservedWords[language].has(reservedName) || reservedTypeNames[language]?.has(name)) {
+  if (reservedWords[language].has(reservedName) || reservedTypeNames[language]?.has(reservedName)) {
     unsupportedCapability(language, `record type identifier '${name}'`, location)
   }
 }

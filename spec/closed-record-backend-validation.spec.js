@@ -62,6 +62,28 @@ describe("closed record backend validation", () => {
     }
   })
 
+  it("rejects deterministic PHP and Ruby built-in type collisions before every output API", async () => {
+    for (const [language, name] of [
+      ["php", "Exception"],
+      ["php", "Traversable"],
+      ["ruby", "Exception"],
+      ["ruby", "Numeric"]
+    ]) {
+      for (const api of [generate, generateArtifact, generateArtifactSet]) {
+        const module = await moduleFromFixture()
+        const location = module.records[0].location
+
+        module.records[0].name = name
+        assert.throws(
+          () => api({language, module}),
+          (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
+            error.language == language && error.location === location &&
+            error.detail == `Backend cannot emit semantic capability 'record type identifier '${name}''.`
+        )
+      }
+    }
+  })
+
   it("rejects stale construction and member identities plus Java target file constraints", async () => {
     const constructionModule = await moduleFromFixture()
     const construction = /** @type {import("../src/semantic/types.js").LocalDeclaration} */ (

@@ -364,6 +364,7 @@ function isCollectionType(type) {
  * @returns {void}
  */
 function validateScaffoldingNames(module, language) {
+  validateRecordConstructorNames(module, language)
   const needsNativeMap = ["javascript", "typescript"].includes(language) && moduleContainsExpressionKind(module, "MapLiteral")
   const needsPhpCount = language == "php" && moduleContainsExpressionKind(module, "CollectionSizeExpression")
   const javascriptOwnedNames = new Set(["console", ...(needsNativeMap ? ["Map"] : [])])
@@ -424,6 +425,48 @@ function validateScaffoldingNames(module, language) {
     }
   }
   if (language == "java") validateJavaUtilFactoryNames(module)
+}
+
+/**
+ * Rejects JavaScript-family lexical bindings that can capture emitted bare record constructor names.
+ * @param {import("../semantic/types.js").SemanticModule} module - Validated-shape semantic module.
+ * @param {import("../semantic/types.js").BackendLanguage} language - Target language.
+ * @returns {void}
+ */
+function validateRecordConstructorNames(module, language) {
+  if (language != "javascript" && language != "typescript") return
+  const recordNames = new Set((module.records ?? []).map((record) => record.name))
+
+  /**
+   * Checks declarations nested beneath one owning block.
+   * @param {import("../semantic/types.js").Block} block - Block to inspect.
+   * @param {"entry" | "function"} owner - Owning scope kind.
+   * @returns {void}
+   */
+  const validateBlockNames = (block, owner) => {
+    for (const statement of allStatements(block)) {
+      if (statement.kind == "LocalDeclaration" && recordNames.has(statement.name)) {
+        unsupportedCapability(language, `${owner} local '${statement.name}' captures record constructor`, bindingNameLocation(statement))
+      }
+      if (statement.kind == "ForEachStatement" && recordNames.has(statement.valueBinding.name)) {
+        unsupportedCapability(
+          language,
+          `${owner} iteration binding '${statement.valueBinding.name}' captures record constructor`,
+          bindingNameLocation(statement.valueBinding)
+        )
+      }
+    }
+  }
+
+  validateBlockNames(module.entryPoint.body, "entry")
+  for (const declaration of module.functions) {
+    for (const parameter of declaration.parameters) {
+      if (recordNames.has(parameter.name)) {
+        unsupportedCapability(language, `function parameter '${parameter.name}' captures record constructor`, bindingNameLocation(parameter))
+      }
+    }
+    validateBlockNames(declaration.body, "function")
+  }
 }
 
 /**
@@ -551,6 +594,15 @@ function expressionContainsKind(expression, kind) {
  */
 function declarationNameLocation(declaration) {
   return declaration.sourceProvenance?.ranges.name ?? declaration.location
+}
+
+/**
+ * Returns a parser-backed binding-name location when one survived semantic adaptation.
+ * @param {import("../semantic/types.js").Parameter | import("../semantic/types.js").LocalDeclaration | import("../semantic/types.js").ValueBinding} binding - Semantic binding.
+ * @returns {import("../semantic/types.js").SourceLocation} Exact name or binding location.
+ */
+function bindingNameLocation(binding) {
+  return binding.sourceProvenance?.ranges.name ?? binding.location
 }
 
 /**

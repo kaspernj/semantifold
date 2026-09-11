@@ -29,6 +29,7 @@ This matrix records the original-five mappings researched for this conditional t
 - Add `RecordDeclaration {name, fields, location}`, `RecordField {name, type, location}`, `RecordType {declarationId}`, `RecordConstruction {record, arguments, location}`, and `MemberRead {receiver, field, location}`.
 - Records are nominal, closed, immutable product values. Field order defines constructor argument order; names are unique; all fields initialize exactly once; there are no hidden fields.
 - Resolve record type/construction/member names to declaration/field identity. Validate exact constructor arity/types and receiver field availability.
+- Reserve record declaration names from lexical parameters, locals, and iteration bindings so constructor lookup cannot be captured by a value binding.
 - Record equality, hashing, copying, destructuring, methods, and mutation are not implied. Task 003 scalar equality does not automatically extend to records.
 - A record field may use supported scalars, containers, optionals, or earlier record types. Reject direct value-recursive cycles unless mediated by `Optional`/container and explicitly proven representable.
 
@@ -43,7 +44,7 @@ This matrix records the original-five mappings researched for this conditional t
 ## Backend and target validation work
 
 - Emit the canonical declaration/construction/read form for each target, including all type documentation required for generated Ruby/JS/PHP to reparse.
-- Validate target class/type/field/constructor identifiers and collisions, recursive field types, reserved names, PHP runtime capability, and Java file/class constraints before emission.
+- Validate target class/type/field/constructor identifiers and collisions, recursive field types, reserved names (including deterministic PHP/Ruby built-in type collisions), the PHP 8.2-or-newer closed-record runtime profile, and Java file/class constraints before emission.
 - Emit no setters or extra public behavior. Runtime mutability loopholes in dynamic languages are outside accepted operations, but generated syntax should use the strongest practical immutability form.
 - Never lower a nominal record to an untyped map/object or erase an inaccessible field.
 
@@ -77,4 +78,4 @@ General classes, inheritance/interfaces/traits/mixins, methods, mutable/static/p
 
 ## Local implementation record — 2026-09-11
 
-The canonical Task 009 branch now contains the parser-neutral record contracts, original-five canonical frontends/backends, nominal validation and provenance, explicit non-cohort capability rejection, focused negative/equivalence/mapping coverage, and real PHP/Ruby/Node.js/TypeScript/Java execution including mediated recursion. This is local candidate evidence only. Coordinator-owned independent review, TensorBuzz CI for the exact candidate head, merge, and any release work remain pending.
+The canonical Task 009 branch now contains the parser-neutral record contracts, original-five canonical frontends/backends, nominal validation and provenance, record-constructor no-shadowing, deterministic PHP/Ruby built-in type collision rejection, explicit non-cohort capability rejection, focused negative/equivalence/mapping coverage, and real PHP 8.2+/Ruby/Node.js/TypeScript/Java execution including mediated recursion. This is local candidate evidence only. Coordinator-owned independent review, TensorBuzz CI for the exact candidate head, merge, and any release work remain pending.

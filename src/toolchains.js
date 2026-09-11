@@ -12,6 +12,7 @@ const defaultTimeoutMs = 10_000
 
 export const canonicalToolchains = deepFreeze({
   php: definition("php", "SEMANTIFOLD_PHP", ["--version"], /^PHP 8\./u),
+  php82: definition("php", "SEMANTIFOLD_PHP", ["--version"], /^PHP (?:8\.(?:[2-9]|[1-9][0-9]+)|(?:9|[1-9][0-9]+)\.[0-9]+)\./u),
   ruby: definition("ruby", "SEMANTIFOLD_RUBY", ["--version"], /^ruby 3\./u),
   node: definition("node", "SEMANTIFOLD_NODE", ["--version"], /^v24\./u),
   tsc: definition("tsc", "SEMANTIFOLD_TSC", ["--version"], /^Version 7\./u),

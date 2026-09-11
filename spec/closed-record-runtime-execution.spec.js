@@ -6,7 +6,7 @@ import os from "node:os"
 import path from "node:path"
 import {promisify} from "node:util"
 import {describe, expect, it} from "@velocious/testing"
-import {generate, parse} from "../index.js"
+import {discoverCanonicalToolchain, generate, parse} from "../index.js"
 
 const execFileAsync = promisify(execFile)
 const targets = ["php", "ruby", "javascript", "typescript", "java"]
@@ -17,9 +17,10 @@ async function execute(language, source) {
   try {
     if (language == "php" || language == "ruby") {
       const filename = path.join(directory, language == "php" ? "program.php" : "program.rb")
+      const executable = language == "php" ? (await discoverCanonicalToolchain("php82")).executable : language
 
       await writeFile(filename, source)
-      return (await execFileAsync(language, [filename])).stdout
+      return (await execFileAsync(executable, [filename])).stdout
     }
     if (language == "javascript") {
       const filename = path.join(directory, "program.js")

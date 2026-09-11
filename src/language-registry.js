@@ -326,7 +326,7 @@ const goFrontend = ({filename, source}) => parseGo({filename, source})
 
 const records = [
   language({
-    acceptance: {stages: ["parse", "generate", "execute"], toolchains: ["php"]},
+    acceptance: {stages: ["parse", "generate", "execute"], toolchains: ["php82"]},
     defaultFilename: "program.php",
     frontend: phpFrontend,
     id: "php",
