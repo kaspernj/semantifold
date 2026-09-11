@@ -42,9 +42,9 @@ export function generateJavaScript(module, writer) {
       writer.mapped(field.name, {mappingKind: "exact", node: field, path: fieldPath, role: "name"})
       writer.synthetic(" = ", "JavaScript record assignment scaffolding", [field], [fieldPath])
       writer.mapped(field.name, {mappingKind: "exact", node: field, path: fieldPath, role: "name"})
-      writer.synthetic("\n", "line break", [field], [fieldPath])
+      writer.synthetic(";\n", "JavaScript record assignment terminator", [field], [fieldPath])
     })
-    writer.synthetic("    Object.freeze(this)\n  }\n}", "JavaScript record immutability scaffolding", [record], [recordPath])
+    writer.synthetic("    ({}).constructor.freeze(this)\n  }\n}", "JavaScript record immutability scaffolding", [record], [recordPath])
   })
   if (records.length > 0) writer.synthetic("\n\n", "record/function separator", [module])
 

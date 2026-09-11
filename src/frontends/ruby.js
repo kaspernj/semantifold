@@ -9,6 +9,7 @@ import {
   BreakNode,
   CallNode,
   ClassNode,
+  ConstantPathNode,
   ConstantReadNode,
   DefNode,
   ElseNode,
@@ -29,6 +30,7 @@ import {
   RedoNode,
   ReturnNode,
   RetryNode,
+  SelfNode,
   StatementsNode,
   StringNode,
   SymbolNode,
@@ -1068,11 +1070,31 @@ function convertRubyRecord(node, declaration, recordNames, comments, filename, s
   }
   const freeze = initializerStatements.at(-1)
 
-  if (!(freeze instanceof CallNode) || freeze.receiver || freeze.name != "freeze" || freeze.arguments_ || freeze.block) {
+  if (!isRubyRecordFreeze(freeze)) {
     return unsupportedSyntax("ruby", "record initializer without final freeze", nodeLocation(freeze ?? initializer, filename, source))
   }
 
   return withParserRanges(declaration, {name: nodeLocation(node.constantPath, filename, source)})
+}
+
+/**
+ * Recognizes canonical source freezing or the generated root-owned Kernel implementation binding.
+ * @param {import("@ruby/prism").Node | undefined} node - Final initializer statement.
+ * @returns {boolean} Whether the statement owns the native record-freeze operation.
+ */
+function isRubyRecordFreeze(node) {
+  if (!(node instanceof CallNode) || node.block) return false
+  if (!node.receiver) return node.name == "freeze" && !node.arguments_
+  if (node.name != "bind_call" || !node.callOperatorLoc || node.arguments_?.arguments_.length != 1 ||
+    !(node.arguments_.arguments_[0] instanceof SelfNode) || !(node.receiver instanceof CallNode)) return false
+  const method = node.receiver
+
+  if (method.name != "instance_method" || !method.callOperatorLoc || method.block ||
+    method.arguments_?.arguments_.length != 1 || !(method.arguments_.arguments_[0] instanceof SymbolNode) ||
+    !(method.receiver instanceof ConstantPathNode)) return false
+
+  return method.receiver.parent == null && method.receiver.delimiterLoc != null && method.receiver.name == "Kernel" &&
+    method.arguments_.arguments_[0].unescaped.value == "freeze"
 }
 
 /**
