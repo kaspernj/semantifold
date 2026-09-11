@@ -1,6 +1,6 @@
 # 009 — Closed records and member access
 
-- Status: `implemented locally; coordinator review, TensorBuzz CI, and merge pending`
+- Status: `delivered through PRs 34/35; PR 35 merged as f828063f052a0be518cc320f280f4b68e399a88b`
 - Phase/priority: Phase 2 / P2 (conditional)
 - Dependencies: [002-local-declarations-and-assignment.md](002-local-declarations-and-assignment.md), [005-general-function-signatures-and-calls.md](005-general-function-signatures-and-calls.md), [006-immutable-lists-and-maps.md](006-immutable-lists-and-maps.md), [007-optional-values-and-presence-narrowing.md](007-optional-values-and-presence-narrowing.md)
 
@@ -76,6 +76,6 @@ General classes, inheritance/interfaces/traits/mixins, methods, mutable/static/p
 - Every backend emits a closed immutable profile or fails before output; no map/object erasure occurs.
 - Focused shape/resolution specs and real registered-runtime semantic round trips pass with docs/changelog updates.
 
-## Local implementation record — 2026-09-11
+## Delivery record — 2026-09-11
 
-The canonical Task 009 branch now contains the parser-neutral record contracts, original-five canonical frontends/backends, nominal validation and provenance, record-constructor no-shadowing, optional-record member dispatch for fields named `length`/`size`, deterministic PHP 8.2+ built-in type collision rejection, strict external-IR `records` nullability, explicit non-cohort capability rejection, focused negative/equivalence/mapping coverage, and real PHP 8.2+/Ruby/Node.js/TypeScript/Java execution including mediated recursion. This is local candidate evidence only. Coordinator-owned independent review, TensorBuzz CI for the exact candidate head, merge, and any release work remain pending.
+Task 009 delivered the parser-neutral record contracts, original-five canonical frontends/backends, nominal validation and provenance, record-constructor no-shadowing, optional-record member dispatch for fields named `length`/`size`, deterministic PHP 8.2+ built-in type collision rejection, strict external-IR `records` nullability, explicit non-cohort capability rejection, focused negative/equivalence/mapping coverage, and real PHP 8.2+/Ruby/Node.js/TypeScript/Java execution including mediated recursion through PRs 34/35. PR 35 supplied the JavaScript/Ruby/Java collision hardening and merged as `f828063f052a0be518cc320f280f4b68e399a88b`.

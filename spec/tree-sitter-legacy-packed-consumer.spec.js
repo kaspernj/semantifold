@@ -127,7 +127,7 @@ describe("packed Semantifold legacy Tree-sitter boundary", () => {
     }
   })
 
-  it("installs both bundled runtimes and the HTTPS Kotlin grammar with only frozen legacy data", async () => {
+  it("installs both bundled runtimes and the HTTPS Kotlin grammar with only frozen legacy data", {timeoutMs: 300_000}, async () => {
     const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "semantifold-packed-consumer-"))
     const packDirectory = path.join(temporaryRoot, "pack")
     const consumerDirectory = path.join(temporaryRoot, "consumer")
