@@ -1113,12 +1113,21 @@ function convertPrint(node, filename, source, context) {
  * @param {object} input - Parser input.
  * @param {string} input.filename - Source filename.
  * @param {string} input.source - Source text.
+ * @param {{isEntry: boolean, functions: Map<string, import("../semantic/types.js").FunctionDeclaration>, records: Map<string, import("../semantic/types.js").RecordDeclaration>}} [input.program] - Resolved program imports and entry role.
  * @returns {import("../semantic/types.js").SemanticModule} Semantic module.
  */
-export function parsePhp({filename, source}) {
+export function parsePhp({filename, source, program: programContext}) {
   const program = parsePhpProgram(filename, source)
   validateDeclareNodes(program.children, filename, source)
-  const recordNodes = /** @type {import("php-parser").Class[]} */ (program.children.filter((node) => node.kind == "class"))
+  let body = program.children
+
+  if (programContext) {
+    inspectPhpModule({filename, source})
+    const namespace = /** @type {import("php-parser").Namespace} */ (body.find((node) => node.kind == "namespace"))
+
+    body = namespace.children.filter((node) => node.kind != "usegroup" && !isPhpRequireOnce(node))
+  }
+  const recordNodes = /** @type {import("php-parser").Class[]} */ (body.filter((node) => node.kind == "class"))
   const recordDeclarations = recordNodes.map((node, index) => ({
     fields: [],
     id: `record:${index}`,
@@ -1126,18 +1135,29 @@ export function parsePhp({filename, source}) {
     location: nodeLocation(node, filename, source),
     name: typeof node.name == "string" ? node.name : node.name.name
   }))
-  const recordNames = new Map(recordDeclarations.map((declaration) => [declaration.name, declaration]))
-  const recordsById = new Map(recordDeclarations.map((declaration) => [/** @type {string} */ (declaration.id), declaration]))
+  const recordNames = new Map(programContext?.records ?? [])
+  for (const declaration of recordDeclarations) recordNames.set(declaration.name, declaration)
+  const recordsById = new Map([...recordNames.values()].map((declaration) => [/** @type {string} */ (declaration.id), declaration]))
   const records = recordNodes.map((node, index) => convertPhpRecord(node, recordDeclarations[index], recordNames, filename, source))
-  const functionNodes = /** @type {import("php-parser").Function[]} */ (program.children.filter((node) => node.kind == "function"))
+  const functionNodes = /** @type {import("php-parser").Function[]} */ (body.filter((node) => node.kind == "function"))
   const signatures = functionNodes.map((node) => convertFunctionSignature(node, filename, source, recordNames))
-  const functionSignatures = new Map(signatures.map((signature) => [signature.name, signature]))
+  const functionSignatures = new Map([...(programContext?.functions ?? [])].map(([localName, declaration]) => [localName, {
+    location: declaration.location,
+    name: localName,
+    nameLocation: declaration.location,
+    parameters: declaration.parameters,
+    returnType: declaration.returnType
+  }]))
+  for (const signature of signatures) functionSignatures.set(signature.name, signature)
   const functions = functionNodes.map((node, index) =>
     convertFunction(node, signatures[index], functionSignatures, recordNames, recordsById, filename, source))
-  const executableNodes = program.children.filter((node) => !["class", "function", "declare", "noop"].includes(node.kind))
+  const executableNodes = body.filter((node) => !["class", "function", "declare", "noop"].includes(node.kind))
   const location = moduleLocation(filename, source)
 
-  if (functions.length == 0) return unsupportedSyntax("php", "module without a function", location)
+  if (!programContext && functions.length == 0) return unsupportedSyntax("php", "module without a function", location)
+  if (programContext && !programContext.isEntry && executableNodes.length > 0) {
+    return unsupportedSyntax("php", "top-level side effect outside the selected entry module", nodeLocation(executableNodes[0], filename, source))
+  }
   const first = executableNodes[0]
   const last = executableNodes.at(-1) ?? first
   const entryLocation = first
@@ -1167,6 +1187,113 @@ export function parsePhp({filename, source}) {
     location,
     ...(records.length > 0 ? {records} : {})
   }
+}
+
+/**
+ * Reads the canonical parser-owned PHP namespace, use bindings, and literal require_once edges.
+ * @param {object} input - Parser input.
+ * @param {string} input.filename - Source filename.
+ * @param {string} input.source - Source text.
+ * @returns {{bindings: {importedName: string, localName: string, location: import("../semantic/types.js").SourceLocation, nativeName: string, symbolKind: import("../semantic/types.js").SemanticDeclarationKind, typeOnly: false}[], imports: {importedName: string, localName: string, location: import("../semantic/types.js").SourceLocation, namespace: true, pathLocation: import("../semantic/types.js").SourceLocation, specifier: string, typeOnly: false}[], exports: {exportedName: string, localName: string, location: import("../semantic/types.js").SourceLocation, typeOnly: false}[], nativeName: string}} Parser-owned PHP module header.
+ */
+export function inspectPhpModule({filename, source}) {
+  const program = parsePhpProgram(filename, source)
+
+  validateDeclareNodes(program.children, filename, source)
+  const namespaces = program.children.filter((node) => node.kind == "namespace")
+  const invalidOuter = program.children.find((node) => !["declare", "namespace", "noop"].includes(node.kind))
+  const namespace = /** @type {import("php-parser").Namespace | undefined} */ (namespaces[0])
+
+  if (!namespace || namespaces.length != 1 || namespace.withBrackets || typeof namespace.name != "string" || invalidOuter) {
+    return unsupportedSyntax("php", "one canonical unbracketed namespace",
+      nodeLocation(invalidOuter ?? namespaces[1] ?? namespace ?? program, filename, source))
+  }
+  const bindings = []
+
+  for (const node of namespace.children.filter((child) => child.kind == "usegroup")) {
+    const group = /** @type {import("php-parser").UseGroup} */ (node)
+
+    if (group.name !== null || ![null, "function"].includes(group.type) || group.items.length == 0) {
+      return unsupportedSyntax("php", "grouped, constant, or empty use declaration", nodeLocation(group, filename, source))
+    }
+    for (const item of group.items) {
+      if (item.type !== null || typeof item.name != "string" || !item.name.includes("\\")) {
+        return unsupportedSyntax("php", "grouped or unqualified use item", nodeLocation(item, filename, source))
+      }
+      const importedName = item.name.split("\\").at(-1)
+      const alias = item.alias
+
+      if (!importedName || alias && alias.kind != "identifier") {
+        return unsupportedSyntax("php", "invalid use alias", nodeLocation(item, filename, source))
+      }
+      bindings.push({
+        importedName,
+        localName: alias ? alias.name : importedName,
+        location: nodeLocation(item, filename, source),
+        nativeName: item.name,
+        symbolKind: /** @type {import("../semantic/types.js").SemanticDeclarationKind} */ (group.type == "function" ? "function" : "record"),
+        typeOnly: /** @type {const} */ (false)
+      })
+    }
+  }
+  const imports = namespace.children.filter(isPhpIncludeStatement).map((node) => {
+    if (!isPhpRequireOnce(node)) {
+      return unsupportedSyntax("php", "include/require outside literal require_once __DIR__ profile", nodeLocation(node, filename, source))
+    }
+    const statement = /** @type {import("php-parser").ExpressionStatement} */ (node)
+    const include = /** @type {import("php-parser").Include} */ (statement.expression)
+    const target = /** @type {import("php-parser").Bin} */ (include.target)
+    const path = /** @type {import("php-parser").String} */ (target.right)
+
+    if (!path.value.startsWith("/") || path.value.includes("\0")) {
+      return unsupportedSyntax("php", "unsafe require_once path", nodeLocation(path, filename, source))
+    }
+
+    return {
+      importedName: "*",
+      localName: "",
+      location: nodeLocation(node, filename, source),
+      namespace: /** @type {const} */ (true),
+      pathLocation: nodeLocation(path, filename, source),
+      specifier: `.${path.value}`,
+      typeOnly: /** @type {const} */ (false)
+    }
+  })
+  const exports = namespace.children.flatMap((node) => {
+    if (node.kind != "class" && node.kind != "function") return []
+    const declaration = /** @type {import("php-parser").Class | import("php-parser").Function} */ (node)
+    const name = typeof declaration.name == "string" ? declaration.name : declaration.name.name
+
+    return [{exportedName: name, localName: name, location: nodeLocation(node, filename, source), typeOnly: /** @type {const} */ (false)}]
+  })
+
+  return {bindings, exports, imports, nativeName: namespace.name}
+}
+
+/**
+ * Reports whether a PHP statement is any include/require expression.
+ * @param {import("php-parser").Node} node - Candidate statement.
+ * @returns {boolean} Whether the node is an include expression statement.
+ */
+function isPhpIncludeStatement(node) {
+  return node.kind == "expressionstatement" &&
+    /** @type {import("php-parser").ExpressionStatement} */ (node).expression.kind == "include"
+}
+
+/**
+ * Reports whether a PHP statement is the canonical literal project load edge.
+ * @param {import("php-parser").Node} node - Candidate statement.
+ * @returns {boolean} Whether the node is a supported require-once statement.
+ */
+function isPhpRequireOnce(node) {
+  if (!isPhpIncludeStatement(node)) return false
+  const statement = /** @type {import("php-parser").ExpressionStatement} */ (node)
+  const include = /** @type {import("php-parser").Include} */ (statement.expression)
+  const target = include.target.kind == "bin" ? /** @type {import("php-parser").Bin} */ (include.target) : undefined
+  const left = target?.left.kind == "magic" ? /** @type {import("php-parser").Magic} */ (target.left) : undefined
+
+  return include.once && include.require && target?.type == "." &&
+    left?.value == "__DIR__" && target.right.kind == "string"
 }
 
 /**

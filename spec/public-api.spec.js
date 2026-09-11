@@ -12,6 +12,7 @@ import {
   generate,
   generateArtifact,
   generateArtifactSet,
+  generateProgramArtifactSet,
   generatedPositionFor,
   getNodeProvenance,
   getSymbolProvenance,
@@ -19,6 +20,7 @@ import {
   mappingFromSourceMap,
   originalPositionFor,
   parse,
+  parseProgram,
   parseByteMapping,
   parseMapping,
   primaryLocation,
@@ -42,6 +44,8 @@ describe("public API", () => {
     expect(typeof generate).toEqual("function")
     expect(typeof generateArtifact).toEqual("function")
     expect(typeof generateArtifactSet).toEqual("function")
+    expect(typeof parseProgram).toEqual("function")
+    expect(typeof generateProgramArtifactSet).toEqual("function")
     expect(Array.isArray(languageCapabilities)).toBeTrue()
     expect(languageCapabilities.filter(({features}) => features.optionalValues).map(({id}) => id))
       .toEqual(["php", "ruby", "javascript", "typescript", "java"])

@@ -21,6 +21,7 @@ import {
   InterpolatedStringNode,
   LocalVariableReadNode,
   LocalVariableWriteNode,
+  ModuleNode,
   NextNode,
   NilNode,
   OrNode,
@@ -248,9 +249,10 @@ function convertExpression(node, filename, source, context, expectedType, preser
     })
   }
 
-  if (node instanceof CallNode && node.receiver instanceof ConstantReadNode && node.name == "new" &&
+  if (node instanceof CallNode && (node.receiver instanceof ConstantReadNode || node.receiver instanceof ConstantPathNode) && node.name == "new" &&
     node.callOperatorLoc && !node.block) {
-    const declaration = context.recordNames.get(node.receiver.name)
+    const recordName = constantPathName(node.receiver)
+    const declaration = context.recordNames.get(recordName)
 
     if (!declaration) return unsupportedSyntax("ruby", "construction of a non-record class", nodeLocation(node.receiver, filename, source))
     return withParserRanges({
@@ -358,6 +360,20 @@ function convertExpression(node, filename, source, context, expectedType, preser
       totality: /** @type {const} */ ("fail-on-absence")
     }, {operator: prismLocation(node.messageLoc ?? node.location, filename, source)})
   }
+  if (node instanceof CallNode && node.receiver instanceof ConstantReadNode && node.callOperatorLoc && !node.block) {
+    const callee = `${node.receiver.name}.${node.name}`
+    const signature = context.functions.get(callee)
+
+    if (signature) {
+      return withParserRanges({
+        arguments: (node.arguments_?.arguments_ ?? []).map((argument, index) =>
+          convertExpression(argument, filename, source, context, signature.parameters[index]?.type)),
+        callee,
+        kind: /** @type {const} */ ("CallExpression"),
+        location
+      }, {callee: prismLocation(node.messageLoc ?? node.location, filename, source)})
+    }
+  }
   if (node instanceof CallNode && node.receiver && node.name == "size" && !node.arguments_ && node.callOperatorLoc && !node.block) {
     const receiverType = knownValueExpressionType(node.receiver, context)
 
@@ -424,6 +440,9 @@ function knownExpressionType(node, context) {
   }
   if (node instanceof LocalVariableReadNode) return context.bindings.get(node.name)
   if (node instanceof CallNode && !node.receiver) return context.functions.get(node.name)?.returnType
+  if (node instanceof CallNode && node.receiver instanceof ConstantReadNode) {
+    return context.functions.get(`${node.receiver.name}.${node.name}`)?.returnType
+  }
   if (node instanceof CallNode && node.receiver && node.name == "[]") {
     const collectionType = knownValueExpressionType(node.receiver, context)
 
@@ -434,8 +453,8 @@ function knownExpressionType(node, context) {
 
     if (collectionType?.kind == "MapType") return collectionType.valueType
   }
-  if (node instanceof CallNode && node.receiver instanceof ConstantReadNode && node.name == "new") {
-    const declaration = context.recordNames.get(node.receiver.name)
+  if (node instanceof CallNode && (node.receiver instanceof ConstantReadNode || node.receiver instanceof ConstantPathNode) && node.name == "new") {
+    const declaration = context.recordNames.get(constantPathName(node.receiver))
 
     if (declaration?.id) return {declarationId: declaration.id, kind: "RecordType"}
   }
@@ -1184,9 +1203,10 @@ function convertPrint(node, filename, source, context) {
  * @param {object} input - Parser input.
  * @param {string} input.filename - Source filename.
  * @param {string} input.source - Source text.
+ * @param {{isEntry: boolean, functions: Map<string, import("../semantic/types.js").FunctionDeclaration>, records: Map<string, import("../semantic/types.js").RecordDeclaration>}} [input.program] - Resolved program imports and entry role.
  * @returns {import("../semantic/types.js").SemanticModule} Semantic module.
  */
-export function parseRuby({filename, source}) {
+export function parseRuby({filename, source, program}) {
   const result = parsePrism(source, {filepath: filename})
 
   if (result.errors.length > 0) {
@@ -1198,7 +1218,22 @@ export function parseRuby({filename, source}) {
 
   if (!(result.value instanceof ProgramNode)) throw new Error("Prism returned a non-program root.")
 
-  const body = result.value.statements.body
+  let body = result.value.statements.body
+
+  if (program) {
+    inspectRubyModule({filename, source})
+    const moduleNode = /** @type {ModuleNode} */ (body.find((node) => node instanceof ModuleNode))
+
+    body = moduleNode.body instanceof StatementsNode ? moduleNode.body.body : []
+    const moduleFunctionNodes = body.filter(isModuleFunctionMarker)
+    const definitions = body.filter((node) => node instanceof DefNode)
+
+    if (definitions.length > 0 && (moduleFunctionNodes.length != 1 || body.indexOf(moduleFunctionNodes[0]) > body.indexOf(definitions[0]))) {
+      return unsupportedSyntax("ruby", "module functions outside one leading module_function profile",
+        nodeLocation(moduleFunctionNodes[1] ?? definitions[0], filename, source))
+    }
+    body = body.filter((node) => !isModuleFunctionMarker(node))
+  }
   const recordNodes = body.filter((node) => node instanceof ClassNode)
   const recordDeclarations = recordNodes.map((node, index) => ({
     fields: [],
@@ -1207,19 +1242,30 @@ export function parseRuby({filename, source}) {
     location: nodeLocation(node, filename, source),
     name: node.name
   }))
-  const recordNames = new Map(recordDeclarations.map((declaration) => [declaration.name, declaration]))
-  const recordsById = new Map(recordDeclarations.map((declaration) => [/** @type {string} */ (declaration.id), declaration]))
+  const recordNames = new Map(program?.records ?? [])
+  for (const declaration of recordDeclarations) recordNames.set(declaration.name, declaration)
+  const recordsById = new Map([...recordNames.values()].map((declaration) => [/** @type {string} */ (declaration.id), declaration]))
   const records = recordNodes.map((node, index) =>
     convertRubyRecord(node, recordDeclarations[index], recordNames, result.comments, filename, source))
   const functionNodes = body.filter((node) => node instanceof DefNode)
   const signatures = functionNodes.map((node) => convertFunctionSignature(node, result.comments, filename, source, recordNames))
-  const functionSignatures = new Map(signatures.map((signature) => [signature.name, signature]))
+  const functionSignatures = new Map([...(program?.functions ?? [])].map(([localName, declaration]) => [localName, {
+    location: declaration.location,
+    name: localName,
+    nameLocation: declaration.location,
+    parameters: declaration.parameters,
+    returnType: declaration.returnType
+  }]))
+  for (const signature of signatures) functionSignatures.set(signature.name, signature)
   const functions = functionNodes.map((node, index) =>
     convertFunction(node, signatures[index], functionSignatures, recordNames, recordsById, result.comments, filename, source))
   const entryNodes = body.filter((node) => !(node instanceof DefNode) && !(node instanceof ClassNode))
   const location = moduleLocation(filename, source)
 
-  if (functions.length == 0) return unsupportedSyntax("ruby", "module without a function", location)
+  if (!program && functions.length == 0) return unsupportedSyntax("ruby", "module without a function", location)
+  if (program && !program.isEntry && entryNodes.length > 0) {
+    return unsupportedSyntax("ruby", "top-level side effect outside the selected entry module", nodeLocation(entryNodes[0], filename, source))
+  }
   const firstEntry = entryNodes[0]
   const entryLocation = firstEntry ? locationFromOffsets(
     filename,
@@ -1248,4 +1294,99 @@ export function parseRuby({filename, source}) {
     location,
     ...(records.length > 0 ? {records} : {})
   }
+}
+
+/**
+ * Reads the canonical parser-owned Ruby module and literal require-relative edges.
+ * @param {object} input - Parser input.
+ * @param {string} input.filename - Source filename.
+ * @param {string} input.source - Source text.
+ * @returns {{imports: {importedName: string, localName: string, location: import("../semantic/types.js").SourceLocation, namespace: true, pathLocation: import("../semantic/types.js").SourceLocation, specifier: string, typeOnly: false}[], exports: {exportedName: string, localName: string, location: import("../semantic/types.js").SourceLocation, typeOnly: false}[], nativeName: string}} Parser-owned Ruby module header.
+ */
+export function inspectRubyModule({filename, source}) {
+  const result = parsePrism(source, {filepath: filename})
+
+  if (result.errors.length > 0) {
+    const error = result.errors[0]
+    const location = locationFromOffsets(filename, source, error.location.startOffset, error.location.startOffset + error.location.length)
+
+    throw new SemantifoldDiagnostic({code: "PARSE_ERROR", language: "ruby", location, message: error.message})
+  }
+  if (!(result.value instanceof ProgramNode)) throw new Error("Prism returned a non-program root.")
+  const body = result.value.statements.body
+  const modules = body.filter((node) => node instanceof ModuleNode)
+  const invalid = body.find((node) => !(node instanceof ModuleNode) && !isRequireRelative(node))
+
+  if (modules.length != 1 || !(modules[0].constantPath instanceof ConstantReadNode) || invalid) {
+    return unsupportedSyntax("ruby", "one simple module with literal require_relative declarations",
+      nodeLocation(invalid ?? modules[1] ?? modules[0] ?? result.value, filename, source))
+  }
+  const imports = body.filter(isRequireRelative).map((node) => {
+    const call = /** @type {CallNode} */ (node)
+    const argument = /** @type {StringNode} */ (call.arguments_?.arguments_[0])
+
+    if (!argument.unescaped.validEncoding || argument.unescaped.encoding != "utf-8" || argument.isForcedBinaryEncoding()) {
+      return unsupportedSyntax("ruby", "non-UTF-8 require_relative path", nodeLocation(argument, filename, source))
+    }
+
+    return {
+      importedName: "*",
+      kind: /** @type {const} */ ("Import"),
+      localName: "",
+      location: nodeLocation(call, filename, source),
+      namespace: /** @type {const} */ (true),
+      pathLocation: nodeLocation(argument, filename, source),
+      specifier: argument.unescaped.value,
+      typeOnly: /** @type {const} */ (false)
+    }
+  })
+  const moduleBody = modules[0].body instanceof StatementsNode ? modules[0].body.body : []
+  const exports = moduleBody.flatMap((node) => {
+    if (node instanceof DefNode || node instanceof ClassNode) {
+      return [{
+        exportedName: node.name,
+        localName: node.name,
+        location: nodeLocation(node instanceof ClassNode ? node.constantPath : node, filename, source),
+        typeOnly: /** @type {const} */ (false)
+      }]
+    }
+    return []
+  })
+
+  return {exports, imports, nativeName: modules[0].name}
+}
+
+/**
+ * Reports whether a Ruby node is one canonical literal relative load edge.
+ * @param {import("@ruby/prism").Node} node - Candidate call.
+ * @returns {boolean} Whether the node is a supported require-relative call.
+ */
+function isRequireRelative(node) {
+  return node instanceof CallNode && !node.receiver && !node.block && node.name == "require_relative" &&
+    node.arguments_?.arguments_.length == 1 && node.arguments_.arguments_[0] instanceof StringNode
+}
+
+/**
+ * Reports whether a Ruby node is the canonical module-function marker.
+ * @param {import("@ruby/prism").Node} node - Candidate marker.
+ * @returns {boolean} Whether the node is a bare module-function call.
+ */
+function isModuleFunctionMarker(node) {
+  return node instanceof CallNode && !node.receiver && !node.block && node.name == "module_function" && !node.arguments_
+}
+
+/**
+ * Builds a parser-owned simple Ruby constant path without inspecting source text.
+ * @param {ConstantReadNode | ConstantPathNode} node - Constant path.
+ * @returns {string} Qualified constant name.
+ */
+function constantPathName(node) {
+  if (node instanceof ConstantReadNode) return node.name
+  if (typeof node.name != "string") throw new Error("Prism returned a constant path without a name.")
+  if (!node.parent) return node.name
+  if (!(node.parent instanceof ConstantReadNode) && !(node.parent instanceof ConstantPathNode)) {
+    throw new Error("Prism returned an unsupported constant-path parent.")
+  }
+
+  return `${constantPathName(node.parent)}::${node.name}`
 }

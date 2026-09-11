@@ -1,0 +1,1 @@
+Add explicit original-five multi-source semantic programs with stable module/declaration identities, resolved named imports/exports, entry selection, acyclic dependency ordering, parser-owned provenance, transactional mapped project artifact generation, canonical PHP/Ruby/ESM/Java layouts, and real five-toolchain execution while preserving every single-module API.

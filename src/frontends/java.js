@@ -405,6 +405,20 @@ function convertExpression(node, filename, source, context, expectedType) {
       }, {operator: nodeLocation(methodName, filename, source)})
     }
 
+    if (receiver) {
+      const qualifiedName = `${receiverText}.${method}`
+      const qualifiedSignature = context.functions.get(qualifiedName)
+
+      if (qualifiedSignature) {
+        const arguments_ = argumentNodes.map((child, index) =>
+          convertExpression(child, filename, source, context, qualifiedSignature.parameters[index]?.type))
+
+        return withParserRanges({arguments: arguments_, callee: qualifiedName, kind: /** @type {const} */ ("CallExpression"), location}, {
+          callee: nodeLocation(methodName, filename, source)
+        })
+      }
+    }
+
     if (receiver && argumentNodes.length == 0) {
       if (["getClass", "hashCode", "toString", "clone", "notify", "notifyAll", "wait"].includes(method)) {
         return unsupportedSyntax("java", "reflective or Object member access", nodeLocation(methodName, filename, source))
@@ -880,6 +894,12 @@ function knownExpressionType(node, context, source) {
     const receiver = structuralChildren(node).find((child) => child.name != "MethodName" && child.name != "ArgumentList")
 
     if (methodName && !receiver) return context.functions.get(nodeText(methodName, source))?.returnType
+    if (methodName && receiver) {
+      const qualified = `${nodeText(receiver, source)}.${nodeText(methodName, source)}`
+      const returnType = context.functions.get(qualified)?.returnType
+
+      if (returnType) return returnType
+    }
     if (methodName && receiver && argumentList && nodeText(methodName, source) == "get") {
       const arguments_ = structuralChildren(argumentList)
       const receiverType = knownExpressionType(receiver, context, source)
@@ -1052,15 +1072,18 @@ function declarationType(node) {
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
  * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} recordNames - Record declarations by source name.
+ * @param {boolean} [publicProgramFunction] - Whether the canonical project profile requires public visibility.
  * @returns {JavaFunctionSignature} Semantic function signature.
  */
-function convertFunctionSignature(node, filename, source, recordNames) {
+function convertFunctionSignature(node, filename, source, recordNames, publicProgramFunction = false) {
   const location = nodeLocation(node, filename, source)
   const modifiers = node.getChild("Modifiers")
   const modifierNames = modifiers ? structuralChildren(modifiers).map((modifier) => modifier.name) : []
 
-  if (modifierNames.join(" ") != "private static") {
-    return unsupportedSyntax("java", "non-private-static semantic function", modifiers ? nodeLocation(modifiers, filename, source) : location)
+  const requiredModifiers = publicProgramFunction ? "public static" : "private static"
+
+  if (modifierNames.join(" ") != requiredModifiers) {
+    return unsupportedSyntax("java", `semantic function without ${requiredModifiers}`, modifiers ? nodeLocation(modifiers, filename, source) : location)
   }
   const typeParameters = node.getChild("TypeParameters")
   const throws = node.getChild("Throws")
@@ -1143,14 +1166,15 @@ function convertFunction(node, signature, functions, recordNames, records, filen
  * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} recordNames - Records by source name.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
+ * @param {boolean} [publicProgramRecord] - Whether the canonical project profile requires public visibility.
  * @returns {import("../semantic/types.js").RecordDeclaration} Semantic record.
  */
-function convertJavaRecord(node, declaration, recordNames, filename, source) {
+function convertJavaRecord(node, declaration, recordNames, filename, source, publicProgramRecord = false) {
   const location = nodeLocation(node, filename, source)
   const modifiers = node.getChild("Modifiers")
   const modifierNames = modifiers ? structuralChildren(modifiers).map((modifier) => modifier.name) : []
 
-  if (modifierNames.join(" ") != "final" || node.getChild("Superclass") || node.getChild("SuperInterfaces") ||
+  if (modifierNames.join(" ") != (publicProgramRecord ? "public final" : "final") || node.getChild("Superclass") || node.getChild("SuperInterfaces") ||
     node.getChild("TypeParameters")) return unsupportedSyntax("java", "noncanonical record class modifiers", location)
   const classBody = requiredChild(node, "ClassBody", filename, source)
   const members = structuralChildren(classBody)
@@ -1191,7 +1215,11 @@ function convertJavaRecord(node, declaration, recordNames, filename, source) {
   const body = requiredChild(constructor, "ConstructorBody", filename, source)
   const assignments = structuralChildren(body)
 
-  if (nodeText(constructorName, source) != declaration.name || constructor.getChild("Modifiers") || constructor.getChild("Throws") ||
+  const constructorModifiers = constructor.getChild("Modifiers")
+  const constructorModifierNames = constructorModifiers ? structuralChildren(constructorModifiers).map((modifier) => modifier.name) : []
+
+  if (nodeText(constructorName, source) != declaration.name ||
+    constructorModifierNames.join(" ") != (publicProgramRecord ? "public" : "") || constructor.getChild("Throws") ||
     constructor.getChild("TypeParameters") || parameters.length != declaration.fields.length || assignments.length != declaration.fields.length) {
     return unsupportedSyntax("java", "noncanonical record constructor", nodeLocation(constructor, filename, source))
   }
@@ -1227,7 +1255,10 @@ function convertJavaRecord(node, declaration, recordNames, filename, source) {
     const accessorType = convertType(declarationType(accessor), `Record accessor '${field.name}'`,
       nodeLocation(accessor, filename, source), filename, source, recordNames)
 
-    if (accessor.getChild("Modifiers") || accessor.getChild("Throws") || accessor.getChild("TypeParameters") ||
+    const accessorModifiers = accessor.getChild("Modifiers")
+    const accessorModifierNames = accessorModifiers ? structuralChildren(accessorModifiers).map((modifier) => modifier.name) : []
+
+    if (accessorModifierNames.join(" ") != (publicProgramRecord ? "public" : "") || accessor.getChild("Throws") || accessor.getChild("TypeParameters") ||
       nodeText(name, source) != field.name || structuralChildren(parameters).length != 0 || statements.length != 1 ||
       statements[0].name != "ReturnStatement" || !returned || nodeText(returned, source) != `this.${field.name}` ||
       JSON.stringify(accessorType) != JSON.stringify(field.type)) {
@@ -1379,9 +1410,10 @@ function convertPrint(statement, filename, source, context) {
  * @param {object} input - Parser input.
  * @param {string} input.filename - Source filename.
  * @param {string} input.source - Source text.
+ * @param {{isEntry: boolean, functions: Map<string, import("../semantic/types.js").FunctionDeclaration>, records: Map<string, import("../semantic/types.js").RecordDeclaration>}} [input.program] - Resolved program imports and entry role.
  * @returns {import("../semantic/types.js").SemanticModule} Semantic module.
  */
-export function parseJava({filename, source}) {
+export function parseJava({filename, source, program}) {
   const tree = parser.parse(source)
   const error = descendants(tree.topNode, "⚠")[0]
 
@@ -1396,6 +1428,8 @@ export function parseJava({filename, source}) {
       message: "Java parser reported invalid syntax."
     })
   }
+
+  if (program) return parseJavaProgramModule(tree.topNode, filename, source, program)
 
   const programMembers = structuralChildren(tree.topNode)
   const classDeclarations = programMembers.filter((member) => member.name == "ClassDeclaration")
@@ -1447,4 +1481,138 @@ export function parseJava({filename, source}) {
   const entryPoint = convertEntryPoint(mainMethod, filename, source, functionSignatures, recordNames, recordsById)
 
   return {entryPoint, functions, kind: "Module", location, ...(records.length > 0 ? {records} : {})}
+}
+
+/**
+ * Converts one already-qualified canonical Java compilation unit.
+ * @param {import("@lezer/common").SyntaxNode} root - Error-free Program node.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source text.
+ * @param {{isEntry: boolean, functions: Map<string, import("../semantic/types.js").FunctionDeclaration>, records: Map<string, import("../semantic/types.js").RecordDeclaration>}} program - Resolved program imports and entry role.
+ * @returns {import("../semantic/types.js").SemanticModule} Semantic module.
+ */
+function parseJavaProgramModule(root, filename, source, program) {
+  inspectJavaModule({filename, source})
+  const classDeclaration = /** @type {import("@lezer/common").SyntaxNode} */ (structuralChildren(root).find((node) => node.name == "ClassDeclaration"))
+  const classBody = requiredChild(classDeclaration, "ClassBody", filename, source)
+  const members = structuralChildren(classBody)
+  const mainMethods = members.filter((method) => method.name == "MethodDeclaration" &&
+    nodeText(requiredChild(method, "Definition", filename, source), source) == "main")
+  const isRecord = members.some((member) => member.name == "FieldDeclaration" || member.name == "ConstructorDeclaration")
+  const location = moduleLocation(filename, source)
+
+  if (program.isEntry && mainMethods.length != 1) return unsupportedSyntax("java", "selected entry class without one main method", location)
+  if (!program.isEntry && mainMethods.length > 0) return unsupportedSyntax("java", "main method outside the selected entry module", nodeLocation(mainMethods[0], filename, source))
+  if (isRecord && mainMethods.length > 0) return unsupportedSyntax("java", "record class containing main", nodeLocation(classDeclaration, filename, source))
+
+  const recordDeclarations = isRecord ? [{
+    fields: [],
+    id: "record:0",
+    kind: /** @type {const} */ ("RecordDeclaration"),
+    location: nodeLocation(classDeclaration, filename, source),
+    name: nodeText(requiredChild(classDeclaration, "Definition", filename, source), source)
+  }] : []
+  const recordNames = new Map(program.records)
+
+  for (const declaration of recordDeclarations) recordNames.set(declaration.name, declaration)
+  const recordsById = new Map([...recordNames.values()].map((declaration) => [/** @type {string} */ (declaration.id), declaration]))
+  const records = recordDeclarations.map((declaration) =>
+    convertJavaRecord(classDeclaration, declaration, recordNames, filename, source, true))
+  const functionMethods = isRecord ? [] : members.filter((member) => member.name == "MethodDeclaration" && !mainMethods.includes(member))
+  const signatures = functionMethods.map((method) => convertFunctionSignature(method, filename, source, recordNames, true))
+  const functionSignatures = new Map([...program.functions].map(([localName, declaration]) => [localName, {
+    location: declaration.location,
+    name: localName,
+    nameLocation: declaration.location,
+    parameters: declaration.parameters,
+    returnType: declaration.returnType
+  }]))
+
+  for (const signature of signatures) functionSignatures.set(signature.name, signature)
+  const functions = functionMethods.map((method, index) =>
+    convertFunction(method, signatures[index], functionSignatures, recordNames, recordsById, filename, source))
+  const emptyBlock = {kind: /** @type {const} */ ("Block"), location, statements: []}
+  const entryPoint = program.isEntry
+    ? convertEntryPoint(mainMethods[0], filename, source, functionSignatures, recordNames, recordsById)
+    : {body: emptyBlock, kind: /** @type {const} */ ("EntryPoint"), location}
+
+  return {entryPoint, functions, kind: "Module", location, ...(records.length > 0 ? {records} : {})}
+}
+
+/**
+ * Reads direct package/import/class nodes from the pinned Lezer grammar.
+ * @param {object} input - Parser input.
+ * @param {string} input.filename - Source filename.
+ * @param {string} input.source - Source text.
+ * @returns {{imports: {importedName: string, localName: string, location: import("../semantic/types.js").SourceLocation, namespace: true, pathLocation: import("../semantic/types.js").SourceLocation, specifier: string, typeOnly: false}[], exports: {exportedName: string, localName: string, location: import("../semantic/types.js").SourceLocation, typeOnly: false}[], nativeName: string}} Parser-owned Java module header.
+ */
+export function inspectJavaModule({filename, source}) {
+  const tree = parser.parse(source)
+  const error = descendants(tree.topNode, "⚠")[0]
+
+  if (error) {
+    throw new SemantifoldDiagnostic({
+      code: "PARSE_ERROR",
+      language: "java",
+      location: nodeLocation(error, filename, source),
+      message: "Java parser reported invalid syntax."
+    })
+  }
+  const members = structuralChildren(tree.topNode)
+  const packages = members.filter((node) => node.name == "PackageDeclaration")
+  const importsNodes = members.filter((node) => node.name == "ImportDeclaration")
+  const classes = members.filter((node) => node.name == "ClassDeclaration")
+  const invalid = members.find((node) => !["PackageDeclaration", "ImportDeclaration", "ClassDeclaration"].includes(node.name))
+  const packageNode = packages[0]
+  const classNode = classes[0]
+
+  if (!packageNode || packages.length != 1 || !classNode || classes.length != 1 || invalid ||
+    members.indexOf(packageNode) != 0 || members.indexOf(classNode) != members.length - 1) {
+    return unsupportedSyntax("java", "one package followed by imports and one public class",
+      nodeLocation(invalid ?? packages[1] ?? classes[1] ?? tree.topNode, filename, source))
+  }
+  const packageNameNode = packageNode.getChild("ScopedIdentifier") ?? packageNode.getChild("Identifier")
+  const classNameNode = requiredChild(classNode, "Definition", filename, source)
+  const modifiers = classNode.getChild("Modifiers")
+  const modifierNames = modifiers ? structuralChildren(modifiers).map(({name}) => name) : []
+  const packageName = packageNameNode ? nodeText(packageNameNode, source) : ""
+  const className = nodeText(classNameNode, source)
+  const expectedSuffix = `${packageName.replaceAll(".", "/")}/${className}.java`
+
+  if (!packageNameNode || modifierNames.join(" ") != "public final" || !filename.endsWith(expectedSuffix)) {
+    return unsupportedSyntax("java", "package/path/public-class contract", nodeLocation(classNode, filename, source))
+  }
+  const imports = importsNodes.map((node) => {
+    const name = node.getChild("ScopedIdentifier") ?? node.getChild("Identifier")
+
+    if (!name || node.getChild("static") || node.getChild("Asterisk")) {
+      return unsupportedSyntax("java", "static or wildcard import", nodeLocation(node, filename, source))
+    }
+    const specifier = nodeText(name, source)
+
+    return {
+      importedName: "*",
+      localName: specifier.split(".").at(-1) ?? "",
+      location: nodeLocation(node, filename, source),
+      namespace: /** @type {const} */ (true),
+      pathLocation: nodeLocation(name, filename, source),
+      specifier,
+      typeOnly: /** @type {const} */ (false)
+    }
+  })
+  const classBody = requiredChild(classNode, "ClassBody", filename, source)
+  const classMembers = structuralChildren(classBody)
+  const recordClass = classMembers.some((member) => member.name == "FieldDeclaration" || member.name == "ConstructorDeclaration")
+  const exports = recordClass
+    ? [{exportedName: className, localName: className, location: nodeLocation(classNameNode, filename, source), typeOnly: /** @type {const} */ (false)}]
+    : classMembers.flatMap((member) => {
+      if (member.name != "MethodDeclaration") return []
+      const name = requiredChild(member, "Definition", filename, source)
+
+      if (nodeText(name, source) == "main") return []
+
+      return [{exportedName: nodeText(name, source), localName: nodeText(name, source), location: nodeLocation(name, filename, source), typeOnly: /** @type {const} */ (false)}]
+    })
+
+  return {exports, imports, nativeName: `${packageName}.${className}`}
 }

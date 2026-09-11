@@ -41,20 +41,24 @@ const javaObjectInstanceMethodSignatures = new Set([
  * Checks the intentionally narrow backend contract.
  * @param {import("../semantic/types.js").SemanticModule} module - Semantic module.
  * @param {import("../semantic/types.js").BackendLanguage} language - Backend language or binary target.
+ * @param {{externalDeclarationIds?: Set<string>, program?: boolean, visibleFunctions?: Map<string, import("../semantic/types.js").FunctionDeclaration>, visibleRecords?: Map<string, import("../semantic/types.js").RecordDeclaration>}} [options] - Resolved program validation context.
  * @returns {void}
  */
-export function validateBackendModule(module, language) {
+export function validateBackendModule(module, language, options = {}) {
   if (!module || typeof module != "object" || Array.isArray(module)) {
     return unsupportedCapability(language, "missing or invalid module", undefined)
   }
   if (module.kind != "Module") unsupportedCapability(language, module.kind, module.location)
   if (!Array.isArray(module.functions) || !module.entryPoint || typeof module.entryPoint != "object" ||
     module.entryPoint.kind != "EntryPoint") unsupportedCapability(language, "missing or invalid module members", module.location)
-  if (module.functions.length == 0) unsupportedCapability(language, "module without functions", module.location)
   const declaredRecords = module.records
   const records = declaredRecords === undefined ? [] : declaredRecords
 
   if (!Array.isArray(records)) unsupportedCapability(language, "missing or invalid record declarations", module.location)
+  if (module.functions.length == 0 && (!options.program ||
+    records.length == 0 && module.entryPoint.body?.statements?.length == 0)) {
+    unsupportedCapability(language, "module without declarations or executable entry", module.location)
+  }
   if (records.length > 0 && !task009Languages.has(language)) {
     unsupportedCapability(language, "Task 009 closed records", records[0]?.location ?? module.location)
   }
@@ -62,7 +66,7 @@ export function validateBackendModule(module, language) {
   if (!task008Languages.has(language)) rejectIterationStatements(module, language)
   if (!task007Languages.has(language)) rejectOptionalTypes(module, language)
   if (!task006Languages.has(language)) rejectCollectionTypes(module, language)
-  validateBlock(module.entryPoint.body, language, module.entryPoint.location)
+  validateBlock(module.entryPoint.body, language, module.entryPoint.location, 0, new Set(), options.externalDeclarationIds)
   const declarationIds = new Set()
   const declarationNames = new Set()
   const targetDeclarationNames = new Set()
@@ -85,7 +89,7 @@ export function validateBackendModule(module, language) {
       unsupportedCapability(language, `target function-name collision '${functionDeclaration.name}'`, functionDeclaration.location)
     }
     targetDeclarationNames.add(targetDeclarationName)
-    if (typeof functionDeclaration.id != "string" || !/^function:[0-9]+$/u.test(functionDeclaration.id) ||
+    if (typeof functionDeclaration.id != "string" || !/^(?:[a-z][a-z0-9._-]*#)?function:[0-9]+$/u.test(functionDeclaration.id) ||
       declarationIds.has(functionDeclaration.id)) {
       unsupportedCapability(language, "duplicate or invalid function declaration identity", functionDeclaration.location)
     }
@@ -98,7 +102,7 @@ export function validateBackendModule(module, language) {
       functionDeclaration.returnType.name == "void") {
       unsupportedCapability(language, "Task 005 void function return", functionDeclaration.location)
     }
-    validateBlock(functionDeclaration.body, language, functionDeclaration.location)
+    validateBlock(functionDeclaration.body, language, functionDeclaration.location, 0, new Set(), options.externalDeclarationIds)
 
     for (const parameter of functionDeclaration.parameters) {
       if (!parameter || typeof parameter != "object" || Array.isArray(parameter) || parameter.kind != "Parameter") {
@@ -108,7 +112,7 @@ export function validateBackendModule(module, language) {
     }
   }
   validateScaffoldingNames(module, language)
-  validateBackendTypes(module, language)
+  validateBackendTypes(module, language, {functions: options.visibleFunctions, records: options.visibleRecords})
 }
 
 /**
@@ -144,7 +148,8 @@ function validateRecordTargets(records, functions, language, moduleLocation) {
     }
     requireSemanticLocation(record.location, language, "record declaration location", moduleLocation)
     validateTargetTypeIdentifier(language, record.name, record.location)
-    if (record.id != `record:${recordIndex}` || declarationIds.has(record.id)) {
+    if (typeof record.id != "string" || !new RegExp(`^(?:[a-z][a-z0-9._-]*#)?record:${recordIndex}$`, "u").test(record.id) ||
+      declarationIds.has(record.id)) {
       unsupportedCapability(language, "duplicate or invalid record declaration identity", record.location)
     }
     declarationIds.add(record.id)
@@ -651,9 +656,10 @@ function allStatements(block) {
  * @param {import("../semantic/types.js").SourceLocation | undefined} ownerLocation - Enclosing location.
  * @param {number} [loopDepth] - Number of enclosing list loops.
  * @param {Set<object>} [activePath] - Blocks on the active recursive path.
+ * @param {Set<string>} [externalDeclarationIds] - Resolved declarations whose source spelling is target-independent.
  * @returns {void}
  */
-function validateBlock(block, language, ownerLocation, loopDepth = 0, activePath = new Set()) {
+function validateBlock(block, language, ownerLocation, loopDepth = 0, activePath = new Set(), externalDeclarationIds = new Set()) {
   if (!block || typeof block != "object" || Array.isArray(block)) {
     return unsupportedCapability(language, "missing or invalid block", ownerLocation)
   }
@@ -667,7 +673,9 @@ function validateBlock(block, language, ownerLocation, loopDepth = 0, activePath
   const blockPath = new Set(activePath)
 
   blockPath.add(candidate)
-  for (const statement of candidate.statements) validateStatement(statement, language, location, loopDepth, blockPath)
+  for (const statement of candidate.statements) {
+    validateStatement(statement, language, location, loopDepth, blockPath, externalDeclarationIds)
+  }
 }
 
 /**
@@ -677,9 +685,10 @@ function validateBlock(block, language, ownerLocation, loopDepth = 0, activePath
  * @param {import("../semantic/types.js").SourceLocation | undefined} ownerLocation - Enclosing body location.
  * @param {number} [loopDepth] - Active loop nesting.
  * @param {Set<object>} [activePath] - Active block containers.
+ * @param {Set<string>} [externalDeclarationIds] - Resolved declarations whose source spelling is target-independent.
  * @returns {void}
  */
-function validateStatement(statement, language, ownerLocation, loopDepth = 0, activePath = new Set()) {
+function validateStatement(statement, language, ownerLocation, loopDepth = 0, activePath = new Set(), externalDeclarationIds = new Set()) {
   if (!statement || typeof statement != "object" || Array.isArray(statement)) {
     return unsupportedCapability(language, "missing or invalid statement", ownerLocation)
   }
@@ -696,20 +705,20 @@ function validateStatement(statement, language, ownerLocation, loopDepth = 0, ac
       unsupportedCapability(language, "local declaration with invalid mutability", location)
     }
     validateTargetBindingIdentifier(language, declaration.name, "local", location)
-    validateExpression(declaration.initializer, language, location)
+    validateExpression(declaration.initializer, language, location, false, new Set(), externalDeclarationIds)
     return
   }
   if (kind == "AssignmentStatement") {
     const assignment = /** @type {import("../semantic/types.js").AssignmentStatement} */ (statement)
 
     validateAssignmentTarget(assignment.target, language, location)
-    validateExpression(assignment.expression, language, location)
+    validateExpression(assignment.expression, language, location, false, new Set(), externalDeclarationIds)
     return
   }
   if (kind == "ReturnStatement") {
     const expression = Reflect.get(statement, "expression")
 
-    if (expression !== undefined) validateExpression(expression, language, location)
+    if (expression !== undefined) validateExpression(expression, language, location, false, new Set(), externalDeclarationIds)
     if (language == "ruby" && loopDepth > 0) {
       unsupportedCapability(language, "return from an iteration body", location)
     }
@@ -724,19 +733,21 @@ function validateStatement(statement, language, ownerLocation, loopDepth = 0, ac
     if (!expression || typeof expression != "object" || Reflect.get(expression, "kind") != "CallExpression") {
       unsupportedCapability(language, "expression statement other than a direct call", location)
     }
-    validateExpression(expression, language, location)
+    validateExpression(expression, language, location, false, new Set(), externalDeclarationIds)
     return
   }
   if (kind == "PrintStatement") {
-    validateExpression(Reflect.get(statement, "expression"), language, location)
+    validateExpression(Reflect.get(statement, "expression"), language, location, false, new Set(), externalDeclarationIds)
     return
   }
   if (kind == "IfStatement") {
     const branch = /** @type {import("../semantic/types.js").IfStatement} */ (statement)
 
-    validateExpression(branch.condition, language, location)
-    validateBlock(branch.consequent, language, location, loopDepth, activePath)
-    if (Object.hasOwn(branch, "alternate")) validateBlock(branch.alternate, language, location, loopDepth, activePath)
+    validateExpression(branch.condition, language, location, false, new Set(), externalDeclarationIds)
+    validateBlock(branch.consequent, language, location, loopDepth, activePath, externalDeclarationIds)
+    if (Object.hasOwn(branch, "alternate")) {
+      validateBlock(branch.alternate, language, location, loopDepth, activePath, externalDeclarationIds)
+    }
     return
   }
   if (kind == "BreakStatement" || kind == "ContinueStatement") {
@@ -759,7 +770,7 @@ function validateStatement(statement, language, ownerLocation, loopDepth = 0, ac
       unsupportedCapability(language, "missing or invalid iteration collection", loopLocation)
     }
     requireSemanticLocation(Reflect.get(loop.list, "location"), language, "iteration collection location", loopLocation)
-    validateExpression(loop.list, language, loopLocation)
+    validateExpression(loop.list, language, loopLocation, false, new Set(), externalDeclarationIds)
     if (!loop.valueBinding || typeof loop.valueBinding != "object" || Array.isArray(loop.valueBinding)) {
       unsupportedCapability(language, "missing or invalid iteration binding", loopLocation)
     }
@@ -776,7 +787,7 @@ function validateStatement(statement, language, ownerLocation, loopDepth = 0, ac
       unsupportedCapability(language, "missing or invalid iteration body", loopLocation)
     }
     requireSemanticLocation(Reflect.get(loop.body, "location"), language, "iteration body location", loopLocation)
-    validateBlock(loop.body, language, loopLocation, loopDepth + 1, activePath)
+    validateBlock(loop.body, language, loopLocation, loopDepth + 1, activePath, externalDeclarationIds)
     return
   }
 
@@ -869,9 +880,10 @@ function validateAssignmentTarget(target, language, ownerLocation) {
  * @param {import("../semantic/types.js").SourceLocation | undefined} ownerLocation - Nearest owning node location.
  * @param {boolean} [allowJavaNegatedMinimumOperand] - Whether Java may use 2147483648 only beneath integer negation.
  * @param {Set<object>} [activePath] - Ancestors on the current recursive validation path.
+ * @param {Set<string>} [externalDeclarationIds] - Resolved declarations whose source spelling is target-independent.
  * @returns {void}
  */
-function validateExpression(expression, language, ownerLocation, allowJavaNegatedMinimumOperand = false, activePath = new Set()) {
+function validateExpression(expression, language, ownerLocation, allowJavaNegatedMinimumOperand = false, activePath = new Set(), externalDeclarationIds = new Set()) {
   if (!expression || typeof expression != "object" || Array.isArray(expression)) {
     return unsupportedCapability(language, "missing or invalid expression", ownerLocation)
   }
@@ -916,7 +928,7 @@ function validateExpression(expression, language, ownerLocation, allowJavaNegate
     if (fields != expectedFields) unsupportedCapability(language, `malformed ${candidate.kind}`, location)
     if (candidate.kind == "OptionalNone") return
     if (candidate.kind == "OptionalSome") {
-      validateExpression(candidate.value, language, location, false, expressionPath)
+      validateExpression(candidate.value, language, location, false, expressionPath, externalDeclarationIds)
       return
     }
     const operation = /** @type {import("../semantic/types.js").OptionalIsPresent | import("../semantic/types.js").OptionalUnwrap} */ (candidate)
@@ -924,14 +936,16 @@ function validateExpression(expression, language, ownerLocation, allowJavaNegate
     if (!operation.operand || operation.operand.kind != "IdentifierExpression") {
       unsupportedCapability(language, `${candidate.kind} without a simple identifier operand`, location)
     }
-    validateExpression(operation.operand, language, location, false, expressionPath)
+    validateExpression(operation.operand, language, location, false, expressionPath, externalDeclarationIds)
     return
   }
   if (["ListLiteral", "MapLiteral", "ListIndexExpression", "MapLookupExpression", "CollectionSizeExpression"].includes(candidate.kind)) {
     if (!task006Languages.has(language)) unsupportedCapability(language, "Task 006 immutable collections", location)
     if (candidate.kind == "ListLiteral") {
       if (!isDenseArray(candidate.elements)) unsupportedCapability(language, "missing or sparse list elements", location)
-      for (const element of candidate.elements) validateExpression(element, language, location, false, expressionPath)
+      for (const element of candidate.elements) {
+        validateExpression(element, language, location, false, expressionPath, externalDeclarationIds)
+      }
       return
     }
     if (candidate.kind == "MapLiteral") {
@@ -943,8 +957,8 @@ function validateExpression(expression, language, ownerLocation, allowJavaNegate
         if (!entry || entry.kind != "MapEntry" || !entry.key || entry.key.kind != "StringLiteral") {
           unsupportedCapability(language, "missing or invalid map entry", entry?.location ?? location)
         }
-        validateExpression(entry.key, language, entry.location, false, expressionPath)
-        validateExpression(entry.value, language, entry.location, false, expressionPath)
+        validateExpression(entry.key, language, entry.location, false, expressionPath, externalDeclarationIds)
+        validateExpression(entry.value, language, entry.location, false, expressionPath, externalDeclarationIds)
       }
       return
     }
@@ -952,28 +966,34 @@ function validateExpression(expression, language, ownerLocation, allowJavaNegate
       if (candidate.totality == "fail-on-absence" && language != "java") {
         unsupportedCapability(language, "list access depends on Java-specific bounds failure", location)
       }
-      validateExpression(candidate.collection, language, location, false, expressionPath)
-      validateExpression(candidate.index, language, location, false, expressionPath)
+      validateExpression(candidate.collection, language, location, false, expressionPath, externalDeclarationIds)
+      validateExpression(candidate.index, language, location, false, expressionPath, externalDeclarationIds)
       return
     }
     if (candidate.kind == "MapLookupExpression") {
       if (candidate.totality == "fail-on-absence" && language != "ruby") {
         unsupportedCapability(language, "map lookup depends on Ruby fetch absence failure", location)
       }
-      validateExpression(candidate.collection, language, location, false, expressionPath)
-      validateExpression(candidate.key, language, location, false, expressionPath)
+      validateExpression(candidate.collection, language, location, false, expressionPath, externalDeclarationIds)
+      validateExpression(candidate.key, language, location, false, expressionPath, externalDeclarationIds)
       return
     }
     if (candidate.kind == "CollectionSizeExpression") {
       if (candidate.collectionKind != "list" && candidate.collectionKind != "map") {
         unsupportedCapability(language, "collection size without a validated receiver kind", location)
       }
-      validateExpression(candidate.collection, language, location, false, expressionPath)
+      validateExpression(candidate.collection, language, location, false, expressionPath, externalDeclarationIds)
       return
     }
   }
   if (candidate.kind == "CallExpression") {
-    validateTargetIdentifier(language, candidate.callee, "callee", location)
+    const declarationId = candidate.resolution && typeof candidate.resolution == "object" && !Array.isArray(candidate.resolution)
+      ? Reflect.get(candidate.resolution, "declarationId")
+      : undefined
+
+    if (typeof declarationId != "string" || !externalDeclarationIds.has(declarationId)) {
+      validateTargetIdentifier(language, candidate.callee, "callee", location)
+    }
     if (!candidate.resolution || typeof candidate.resolution != "object" || Array.isArray(candidate.resolution)) {
       unsupportedCapability(language, "missing or invalid resolved call signature", location)
     }
@@ -983,7 +1003,9 @@ function validateExpression(expression, language, ownerLocation, allowJavaNegate
     if (!task005Languages.has(language) && candidate.arguments.length != 2) {
       unsupportedCapability(language, "call argument count other than two", location)
     }
-    for (const argument of candidate.arguments) validateExpression(argument, language, location, false, expressionPath)
+    for (const argument of candidate.arguments) {
+      validateExpression(argument, language, location, false, expressionPath, externalDeclarationIds)
+    }
     return
   }
   if (candidate.kind == "RecordConstruction") {
@@ -993,7 +1015,9 @@ function validateExpression(expression, language, ownerLocation, allowJavaNegate
       typeof candidate.record.declarationId != "string" || !isDenseArray(candidate.arguments)) {
       unsupportedCapability(language, "malformed RecordConstruction", location)
     }
-    for (const argument of candidate.arguments) validateExpression(argument, language, location, false, expressionPath)
+    for (const argument of candidate.arguments) {
+      validateExpression(argument, language, location, false, expressionPath, externalDeclarationIds)
+    }
     return
   }
   if (candidate.kind == "MemberRead") {
@@ -1002,14 +1026,15 @@ function validateExpression(expression, language, ownerLocation, allowJavaNegate
     if (fields != "field,kind,location,receiver" || typeof candidate.field != "string") {
       unsupportedCapability(language, "malformed MemberRead", location)
     }
-    validateExpression(candidate.receiver, language, location, false, expressionPath)
+    validateExpression(candidate.receiver, language, location, false, expressionPath, externalDeclarationIds)
     return
   }
   if (candidate.kind == "UnaryExpression") {
     if (!Object.hasOwn(unaryOperationSyntax, String(candidate.operation))) {
       unsupportedCapability(language, `unary operation ${String(candidate.operation)}`, location)
     }
-    validateExpression(candidate.operand, language, location, candidate.operation == "IntegerNegate", expressionPath)
+    validateExpression(candidate.operand, language, location, candidate.operation == "IntegerNegate", expressionPath,
+      externalDeclarationIds)
     validateKnownTargetInteger(candidate, language, location)
     return
   }
@@ -1017,8 +1042,8 @@ function validateExpression(expression, language, ownerLocation, allowJavaNegate
     if (!Object.hasOwn(binaryOperationSyntax, String(candidate.operation))) {
       unsupportedCapability(language, `binary operation ${String(candidate.operation)}`, location)
     }
-    validateExpression(candidate.left, language, location, false, expressionPath)
-    validateExpression(candidate.right, language, location, false, expressionPath)
+    validateExpression(candidate.left, language, location, false, expressionPath, externalDeclarationIds)
+    validateExpression(candidate.right, language, location, false, expressionPath, externalDeclarationIds)
     validateKnownTargetInteger(candidate, language, location)
     return
   }
@@ -1087,7 +1112,11 @@ function knownIntegerValue(expression) {
  */
 export function emitType(writer, type, path, language, javaBoxed = false) {
   if (type.kind == "RecordType") {
-    writer.mapped(writer.recordForId(type.declarationId).name, {mappingKind: "exact", node: type, path, role: "type"})
+    const record = writer.recordForId(type.declarationId)
+
+    writer.mapped(writer.recordNameForId(type.declarationId), {
+      mappingKind: "exact", name: record.name, node: type, path, role: "type"
+    })
     return
   }
   if (type.kind == "TypeReference") {
@@ -1255,7 +1284,9 @@ export function emitExpression(writer, expression, path, language, emitIdentifie
     return
   }
   if (expression.kind == "CallExpression") {
-    writer.mapped(expression.callee, {mappingKind: "exact", node: expression, path, role: "callee"})
+    writer.mapped(writer.callNameFor(expression), {
+      mappingKind: "exact", name: expression.callee, node: expression, path, role: "callee"
+    })
     writer.mapped("(", {mappingKind: "anchor", node: expression, path})
     expression.arguments.forEach((argument, index) => {
       if (index > 0) writer.synthetic(", ", "argument separator", [expression], [path])
@@ -1266,9 +1297,10 @@ export function emitExpression(writer, expression, path, language, emitIdentifie
   }
   if (expression.kind == "RecordConstruction") {
     const record = writer.recordForId(expression.record.declarationId)
-    const prefix = language == "ruby" ? `${record.name}.new(` : `new ${record.name}(`
+    const targetName = writer.recordNameForId(expression.record.declarationId)
+    const prefix = language == "ruby" ? `${targetName}.new(` : `new ${targetName}(`
 
-    writer.mapped(prefix, {mappingKind: "exact", node: expression, path, role: "record"})
+    writer.mapped(prefix, {mappingKind: "exact", name: record.name, node: expression, path, role: "record"})
     expression.arguments.forEach((argument, index) => {
       if (index > 0) writer.synthetic(", ", "record argument separator", [expression], [path])
       emitExpression(writer, argument, `${path}/arguments/${index}`, language, emitIdentifier)

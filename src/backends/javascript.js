@@ -12,10 +12,13 @@ export function generateJavaScript(module, writer) {
   const canonicalizeZero = requiresCanonicalZeroRendering(module)
   const records = module.records ?? []
 
+  emitProgramImports(module, writer)
+
   records.forEach((record, recordIndex) => {
     const recordPath = `/records/${recordIndex}`
 
     if (recordIndex > 0) writer.synthetic("\n\n", "record declaration separator", [record], [recordPath])
+    if (writer.isDirectlyExported(record.id)) writer.synthetic("export ", "ESM record export", [record], [recordPath])
     writer.mapped("class", {mappingKind: "anchor", node: record, path: recordPath})
     writer.synthetic(" ", "record declaration spacing", [record], [recordPath])
     writer.mapped(record.name, {mappingKind: "exact", node: record, path: recordPath, role: "name"})
@@ -64,6 +67,7 @@ export function generateJavaScript(module, writer) {
     writer.synthetic(" * @returns {", "JavaScript type scaffolding", [declaration])
     emitType(writer, declaration.returnType, `/functions/${functionIndex}/returnType`, "javascript")
     writer.synthetic("} Semantic result.\n */\n", "JavaScript type scaffolding", [declaration])
+    if (writer.isDirectlyExported(declaration.id)) writer.synthetic("export ", "ESM function export", [declaration])
     writer.mapped("function", {mappingKind: "anchor", node: declaration})
     writer.synthetic(" ", "function spacing", [declaration])
     writer.mapped(declaration.name, {mappingKind: "exact", node: declaration, role: "name"})
@@ -86,8 +90,67 @@ export function generateJavaScript(module, writer) {
     writer.mapped("}", {mappingKind: "anchor", node: declaration})
   })
 
-  writer.synthetic("\n\n", "entry-point separator", [module.entryPoint])
-  emitBlock(writer, module.entryPoint.body, "", "/entryPoint/body", canonicalizeZero)
+  emitAliasedExports(module, writer)
+  if (!writer.program || writer.isProgramEntry()) {
+    writer.synthetic("\n\n", "entry-point separator", [module.entryPoint])
+    emitBlock(writer, module.entryPoint.body, "", "/entryPoint/body", canonicalizeZero)
+  }
+}
+
+/**
+ * Emits grouped named ESM imports for a program module.
+ * @param {import("../semantic/types.js").SemanticModule} module - Current module.
+ * @param {import("./writer.js").SourceWriter} writer - Source-aware writer.
+ */
+function emitProgramImports(module, writer) {
+  if (!writer.program) return
+  const imports = /** @type {import("../semantic/types.js").SemanticProgramModule} */ (/** @type {unknown} */ (module)).imports
+  const moduleIds = [...new Set(imports.map(({moduleId}) => moduleId))]
+
+  for (const moduleId of moduleIds) {
+    const selected = imports.filter((item) => item.moduleId == moduleId)
+
+    writer.synthetic("import {", "ESM import declaration", selected)
+    selected.forEach((item, index) => {
+      const itemPath = `/imports/${imports.indexOf(item)}`
+      const localName = writer.importNameFor(item)
+
+      if (index) writer.synthetic(", ", "ESM import separator", selected)
+      writer.mapped(item.importedName, {mappingKind: "exact", node: item, path: itemPath, role: "importedName"})
+      if (localName != item.importedName) {
+        writer.synthetic(" as ", "ESM import alias", [item], [itemPath])
+        writer.mapped(localName, {mappingKind: "exact", node: item, path: itemPath, role: "localName"})
+      }
+    })
+    writer.synthetic("} from ", "ESM import source", selected)
+    writer.mapped(JSON.stringify(writer.relativeModuleSpecifier(moduleId, ".js")), {
+      mappingKind: "anchor", node: selected[0], path: `/imports/${imports.indexOf(selected[0])}`, role: "path"
+    })
+    writer.synthetic("\n", "ESM import terminator", selected)
+  }
+  if (moduleIds.length > 0) writer.synthetic("\n", "ESM import separator", [module])
+}
+
+/**
+ * Emits explicit ESM export clauses for source aliases.
+ * @param {import("../semantic/types.js").SemanticModule} module - Current module.
+ * @param {import("./writer.js").SourceWriter} writer - Source-aware writer.
+ */
+function emitAliasedExports(module, writer) {
+  if (!writer.program) return
+  const programModule = /** @type {import("../semantic/types.js").SemanticProgramModule} */ (/** @type {unknown} */ (module))
+  const aliases = programModule.exports.filter((item) => !writer.isDirectlyExported(item.declarationId))
+
+  if (aliases.length == 0) return
+  writer.synthetic("\n\nexport {", "ESM aliased exports", [module])
+  aliases.forEach((item, index) => {
+    if (index) writer.synthetic(", ", "ESM export separator", [module])
+    const declaration = [...programModule.functions, ...programModule.records ?? []].find(({id}) => id == item.declarationId)
+
+    if (!declaration) throw new RangeError(`Unknown exported declaration '${item.declarationId}'.`)
+    writer.synthetic(`${declaration.name} as ${item.exportedName}`, "ESM aliased export", [declaration])
+  })
+  writer.synthetic("}", "ESM aliased export close", [module])
 }
 
 /**

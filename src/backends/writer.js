@@ -2,6 +2,44 @@
 
 import {createGenerationIndex} from "../semantic/provenance.js"
 
+/**
+ * Converts a logical module identity to its canonical target type segment.
+ * @param {string} id - Logical module identity.
+ * @returns {string} Portable target class/module name.
+ */
+function moduleClassName(id) {
+  return id.split(/[._-]+/u).map((part) => `${part[0].toUpperCase()}${part.slice(1)}`).join("")
+}
+
+/**
+ * Looks up one declaration name in its owning program module.
+ * @param {Partial<import("../semantic/types.js").SemanticProgramModule>} module - Owning module.
+ * @param {string} declarationId - Stable declaration identity.
+ * @returns {string} Declaration name.
+ */
+function declarationName(module, declarationId) {
+  const declaration = [...module.functions ?? [], ...module.records ?? []].find(({id}) => id == declarationId)
+
+  if (!declaration) throw new RangeError(`Unknown program declaration '${declarationId}'.`)
+
+  return declaration.name
+}
+
+/**
+ * Chooses an unqualified target binding without treating a source-profile qualifier as semantic identity.
+ * @param {import("../semantic/types.js").SemanticProgram} program - Owning program.
+ * @param {import("../semantic/types.js").SemanticProgramModule} module - Importing module.
+ * @param {import("../semantic/types.js").SemanticImport} imported - Resolved import.
+ * @returns {string} Target-local binding spelling.
+ */
+export function programImportName(program, module, imported) {
+  const source = program.sources.find(({filename}) => filename == module.sourceFilename)
+
+  if (!source) throw new RangeError(`Program module '${module.id}' has no registered source.`)
+
+  return source.language == "ruby" || source.language == "java" ? imported.importedName : imported.localName
+}
+
 /** Source-aware deterministic generated-output builder. */
 export class SourceWriter {
   /**
@@ -10,16 +48,28 @@ export class SourceWriter {
    * @param {string} options.filename - Output filename.
    * @param {import("../semantic/types.js").GeneratedTextLanguage} options.language - Output text language.
    * @param {import("../semantic/types.js").SemanticModule} options.module - Semantic module.
+   * @param {import("../semantic/types.js").SemanticProgram} [options.program] - Owning multi-file program.
+   * @param {Map<string, string>} [options.programPaths] - Planned artifact path by module identity.
    * @param {{filename: string, content: string, language?: import("../semantic/types.js").SemanticLanguage}[]} [options.sources] - Caller-provided sources.
    */
-  constructor({filename, language, module, sources}) {
+  constructor({filename, language, module, program, programPaths, sources}) {
     const index = createGenerationIndex(module, sources)
 
     this.filename = filename
     this.language = language
+    this.module = module
+    this.program = program
+    this.programPaths = programPaths
     this.index = index
-    this.records = new Map((module.records ?? []).map((record) => [record.id, record]))
-    this.fields = new Map((module.records ?? []).flatMap((record) => record.fields.map((field) => [field.id, field])))
+    const programRecords = program?.modules.flatMap((programModule) => programModule.records ?? []) ?? module.records ?? []
+
+    this.records = new Map(programRecords.map((record) => [record.id, record]))
+    this.fields = new Map(programRecords.flatMap((record) => record.fields.map((field) => [field.id, field])))
+    /** @type {Map<string, import("../semantic/types.js").SemanticProgramModule>} */
+    this.declarationModules = new Map(program?.modules.flatMap((programModule) => [
+      ...(programModule.records ?? []).map((declaration) => /** @type {const} */ ([/** @type {string} */ (declaration.id), programModule])),
+      ...programModule.functions.map((declaration) => /** @type {const} */ ([/** @type {string} */ (declaration.id), programModule]))
+    ]) ?? [])
     /** @type {string[]} */
     this.parts = []
     /** @type {import("../semantic/types.js").SemantifoldMappingSpan[]} */
@@ -57,6 +107,118 @@ export class SourceWriter {
     if (!record) throw new RangeError(`Unknown validated record identity '${declarationId}'.`)
 
     return record
+  }
+
+  /**
+   * Returns the target spelling for a nominal record identity.
+   * @param {string} declarationId - Stable record declaration identity.
+   * @returns {string} Target record spelling.
+   */
+  recordNameForId(declarationId) {
+    const record = this.recordForId(declarationId)
+    const owner = this.declarationModules.get(declarationId)
+    const imported = this.#programModule()?.imports.find((item) => item.declarationId == declarationId)
+
+    if (this.program && owner && owner.id != Reflect.get(this.module, "id") && this.language == "ruby") {
+      return `${moduleClassName(owner.id)}::${record.name}`
+    }
+    if (imported && (this.language == "javascript" || this.language == "typescript" || this.language == "php")) {
+      return this.importNameFor(imported)
+    }
+
+    return record.name
+  }
+
+  /**
+   * Returns the target spelling for a resolved function call.
+   * @param {import("../semantic/types.js").CallExpression} expression - Resolved call.
+   * @returns {string} Target call name.
+   */
+  callNameFor(expression) {
+    const declarationId = expression.resolution?.declarationId
+    const owner = declarationId ? this.declarationModules.get(declarationId) : undefined
+    const imported = declarationId ? this.#programModule()?.imports.find((item) => item.declarationId == declarationId) : undefined
+
+    if (!declarationId || !this.program || !owner || owner.id == Reflect.get(this.module, "id")) return expression.callee
+    if (this.language == "ruby" || this.language == "java") return `${moduleClassName(owner.id)}.${declarationName(owner, declarationId)}`
+    if (imported) return this.importNameFor(imported)
+
+    return declarationName(owner, declarationId)
+  }
+
+  /**
+   * Returns the target-local binding for one resolved import.
+   * @param {import("../semantic/types.js").SemanticImport} imported - Resolved import.
+   * @returns {string} Emitted import name.
+   */
+  importNameFor(imported) {
+    const module = this.#programModule()
+
+    if (!this.program || !module) throw new RangeError("Import names require a validated semantic program.")
+
+    return programImportName(this.program, module, imported)
+  }
+
+  /**
+   * Reports whether one local declaration is exported by the current program module.
+   * @param {string | undefined} declarationId - Declaration identity.
+   * @returns {boolean} Whether it has a same-name program export.
+   */
+  isDirectlyExported(declarationId) {
+    const module = /** @type {Partial<import("../semantic/types.js").SemanticProgramModule>} */ (this.module)
+
+    return typeof declarationId == "string" && Boolean(module.exports?.some((item) =>
+      item.declarationId == declarationId && item.exportedName == declarationName(module, declarationId)))
+  }
+
+  /**
+   * Returns whether this is the selected program entry module.
+   * @returns {boolean} Whether this writer owns the selected entry.
+   */
+  isProgramEntry() {
+    return this.program?.entryModule == Reflect.get(this.module, "id")
+  }
+
+  /**
+   * Returns the canonical class/module segment for a logical module identity.
+   * @param {string} moduleId - Logical module identity.
+   * @returns {string} Target class/module name.
+   */
+  programModuleName(moduleId) {
+    if (!this.program?.modules.some(({id}) => id == moduleId)) throw new RangeError(`Unknown program module '${moduleId}'.`)
+
+    return moduleClassName(moduleId)
+  }
+
+  /**
+   * Finds the current module in the complete program.
+   * @returns {import("../semantic/types.js").SemanticProgramModule | undefined} Current program module.
+   */
+  #programModule() {
+    if (!this.program) return undefined
+
+    return this.program.modules.find(({id}) => id == Reflect.get(this.module, "id"))
+  }
+
+  /**
+   * Returns a relative ESM/require specifier for a planned dependency artifact.
+   * @param {string} moduleId - Dependency module identity.
+   * @param {string} [extension] - Optional replacement extension.
+   * @returns {string} Relative POSIX specifier.
+   */
+  relativeModuleSpecifier(moduleId, extension) {
+    const targetPath = this.programPaths?.get(moduleId)
+
+    if (!targetPath) throw new RangeError(`Unknown planned module path '${moduleId}'.`)
+    const adjustedTarget = extension ? targetPath.replace(/\.[^./]+$/u, extension) : targetPath
+    const from = this.filename.split("/").slice(0, -1)
+    const to = adjustedTarget.split("/")
+    let common = 0
+
+    while (common < from.length && common < to.length && from[common] == to[common]) common++
+    const relative = [...from.slice(common).map(() => ".."), ...to.slice(common)].join("/")
+
+    return relative.startsWith(".") ? relative : `./${relative}`
   }
 
   /**

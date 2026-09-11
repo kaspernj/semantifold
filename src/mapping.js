@@ -766,9 +766,9 @@ export function validateMapping(value) {
       typeof symbol.name != "string" || symbol.name.length == 0 || !["record", "field", "function", "parameter", "local", "iteration"].includes(symbol.kind) ||
       !nodeIds.has(symbol.declarationNodeId) || !Array.isArray(symbol.references) ||
       symbol.semanticDeclarationId !== undefined && (typeof symbol.semanticDeclarationId != "string" || !(
-        symbol.kind == "function" && /^function:[0-9]+$/u.test(symbol.semanticDeclarationId) ||
-        symbol.kind == "record" && /^record:[0-9]+$/u.test(symbol.semanticDeclarationId) ||
-        symbol.kind == "field" && /^record:[0-9]+:field:[0-9]+$/u.test(symbol.semanticDeclarationId)
+        symbol.kind == "function" && /^(?:[a-z][a-z0-9._-]*#)?function:[0-9]+$/u.test(symbol.semanticDeclarationId) ||
+        symbol.kind == "record" && /^(?:[a-z][a-z0-9._-]*#)?record:[0-9]+$/u.test(symbol.semanticDeclarationId) ||
+        symbol.kind == "field" && /^(?:[a-z][a-z0-9._-]*#)?record:[0-9]+:field:[0-9]+$/u.test(symbol.semanticDeclarationId)
       ))) {
       throw new TypeError("Malformed or duplicate semantic symbol identity.")
     }
