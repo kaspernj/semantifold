@@ -3,7 +3,7 @@
 import assert from "node:assert/strict"
 import {readFile} from "node:fs/promises"
 import {describe, it} from "@velocious/testing"
-import {generate, parse, SemantifoldDiagnostic} from "../index.js"
+import {generate, generateArtifact, generateArtifactSet, parse, SemantifoldDiagnostic} from "../index.js"
 
 /**
  * Loads a fresh valid semantic module.
@@ -53,6 +53,28 @@ function corruptField(owner, field, malformed) {
 }
 
 describe("backend shape validation", () => {
+  it("rejects null records while retaining omitted and undefined compatibility before every output API", async () => {
+    for (const api of [generate, generateArtifact, generateArtifactSet]) {
+      for (const compatible of ["omitted", "undefined"]) {
+        const module = await validModule()
+
+        if (compatible == "omitted") Reflect.deleteProperty(module, "records")
+        else Reflect.set(module, "records", undefined)
+        assert.doesNotThrow(() => api({language: "javascript", module}), compatible)
+      }
+      const module = await validModule()
+      const location = module.location
+
+      Reflect.set(module, "records", null)
+      assert.throws(
+        () => api({language: "javascript", module}),
+        (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
+          error.language == "javascript" && error.location === location &&
+          error.detail == "Backend cannot emit semantic capability 'missing or invalid record declarations'."
+      )
+    }
+  })
+
   it("rejects Java integer literals outside the signed 32-bit range", async () => {
     for (const value of [2147483648, -2147483649]) {
       const module = await validModule()

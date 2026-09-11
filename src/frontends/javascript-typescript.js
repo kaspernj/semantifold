@@ -297,7 +297,7 @@ function convertExpression(node, language, filename, source, context = {bindings
 
   if (node.type == "MemberExpression" && !node.optional && node.object.type != "Super") {
     if (node.computed) {
-      if (knownExpressionType(node.object, context)?.kind == "RecordType") {
+      if (knownValueExpressionType(node.object, context)?.kind == "RecordType") {
         return unsupportedSyntax(language, "computed record member access", nodeLocation(node.property, filename, source))
       }
       if (node.property.type == "PrivateName") return unsupportedSyntax(language, node.property.type, location)
@@ -313,7 +313,7 @@ function convertExpression(node, language, filename, source, context = {bindings
       })
     }
     if (node.property.type == "Identifier" && ["length", "size"].includes(node.property.name)) {
-      const receiverType = knownExpressionType(node.object, context)
+      const receiverType = knownValueExpressionType(node.object, context)
 
       if (receiverType?.kind == "RecordType") {
         return withParserRanges({
@@ -471,26 +471,39 @@ function knownExpressionType(node, context) {
     if (declaration?.id) return {declarationId: declaration.id, kind: "RecordType"}
   }
   if (node.type == "MemberExpression" && !node.computed && node.object.type != "Super" && node.property.type == "Identifier") {
-    const receiver = knownExpressionType(node.object, context)
+    const receiver = knownValueExpressionType(node.object, context)
     const declaration = receiver?.kind == "RecordType" ? context.records.get(receiver.declarationId) : undefined
     const memberName = node.property.name
 
     return declaration?.fields.find((field) => field.name == memberName)?.type
   }
   if (node.type == "MemberExpression" && node.computed && node.object.type != "Super") {
-    const collectionType = knownExpressionType(node.object, context)
+    const collectionType = knownValueExpressionType(node.object, context)
 
     if (collectionType?.kind == "ListType") return collectionType.elementType
   }
   if (node.type == "CallExpression" && node.callee.type == "MemberExpression" &&
     !node.callee.computed && node.callee.object.type != "Super" &&
     node.callee.property.type == "Identifier" && node.callee.property.name == "get") {
-    const collectionType = knownExpressionType(node.callee.object, context)
+    const collectionType = knownValueExpressionType(node.callee.object, context)
 
     if (collectionType?.kind == "MapType") return collectionType.valueType
   }
 
   return undefined
+}
+
+/**
+ * Resolves the value type produced by the frontend's implicit optional-binding unwrap.
+ * Semantic validation separately proves that the unwrap occurs only on a present path.
+ * @param {import("@babel/types").Expression} node - Parser-owned expression.
+ * @param {JavaScriptConversionContext} context - Typed lexical context.
+ * @returns {import("../semantic/types.js").SemanticFunctionReturnType | undefined} Converted value type.
+ */
+function knownValueExpressionType(node, context) {
+  const type = knownExpressionType(node, context)
+
+  return node.type == "Identifier" && type?.kind == "OptionalType" ? type.valueType : type
 }
 
 /**

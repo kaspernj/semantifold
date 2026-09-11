@@ -66,6 +66,12 @@ describe("closed record backend validation", () => {
     for (const [language, name] of [
       ["php", "Exception"],
       ["php", "Traversable"],
+      ["php", "DateTime"],
+      ["php", "DaTeTiMe"],
+      ["php", "LogicException"],
+      ["php", "SplFixedArray"],
+      ["php", "ReflectionClass"],
+      ["php", "PDO"],
       ["ruby", "Exception"],
       ["ruby", "Numeric"]
     ]) {

@@ -132,6 +132,14 @@ function convertExpression(node, filename, source, context, expectedType, preser
     return unsupportedSyntax("ruby", "call block", nodeLocation(node.block, filename, source))
   }
 
+  if (node instanceof CallNode && node.callOperatorLoc && slicePrismSource(
+    source,
+    node.callOperatorLoc.startOffset,
+    node.callOperatorLoc.startOffset + node.callOperatorLoc.length
+  ) == "&.") {
+    return unsupportedSyntax("ruby", "safe navigation", prismLocation(node.callOperatorLoc, filename, source))
+  }
+
   if (node instanceof ParenthesesNode && node.body instanceof StatementsNode && node.body.body.length == 1) {
     return convertExpression(node.body.body[0], filename, source, context, expectedType, preserveOptional)
   }
@@ -349,7 +357,7 @@ function convertExpression(node, filename, source, context, expectedType, preser
     }, {operator: prismLocation(node.messageLoc ?? node.location, filename, source)})
   }
   if (node instanceof CallNode && node.receiver && node.name == "size" && !node.arguments_ && node.callOperatorLoc && !node.block) {
-    const receiverType = knownExpressionType(node.receiver, context)
+    const receiverType = knownValueExpressionType(node.receiver, context)
 
     if (receiverType?.kind == "RecordType") {
       return withParserRanges({
@@ -415,12 +423,12 @@ function knownExpressionType(node, context) {
   if (node instanceof LocalVariableReadNode) return context.bindings.get(node.name)
   if (node instanceof CallNode && !node.receiver) return context.functions.get(node.name)?.returnType
   if (node instanceof CallNode && node.receiver && node.name == "[]") {
-    const collectionType = knownExpressionType(node.receiver, context)
+    const collectionType = knownValueExpressionType(node.receiver, context)
 
     if (collectionType?.kind == "ListType") return collectionType.elementType
   }
   if (node instanceof CallNode && node.receiver && node.name == "fetch") {
-    const collectionType = knownExpressionType(node.receiver, context)
+    const collectionType = knownValueExpressionType(node.receiver, context)
 
     if (collectionType?.kind == "MapType") return collectionType.valueType
   }
@@ -430,13 +438,29 @@ function knownExpressionType(node, context) {
     if (declaration?.id) return {declarationId: declaration.id, kind: "RecordType"}
   }
   if (node instanceof CallNode && node.receiver && node.callOperatorLoc && !node.arguments_) {
-    const receiver = knownExpressionType(node.receiver, context)
+    const receiver = knownValueExpressionType(node.receiver, context)
     const declaration = receiver?.kind == "RecordType" ? context.records.get(receiver.declarationId) : undefined
 
     return declaration?.fields.find((field) => field.name == node.name)?.type
   }
 
   return undefined
+}
+
+/**
+ * Resolves the value type produced by the frontend's implicit optional-binding unwrap.
+ * Semantic validation separately proves that the unwrap occurs only on a present path.
+ * @param {import("@ruby/prism").Node} node - Parser-owned expression.
+ * @param {RubyConversionContext} context - Typed lexical context.
+ * @returns {import("../semantic/types.js").SemanticFunctionReturnType | undefined} Converted value type.
+ */
+function knownValueExpressionType(node, context) {
+  if (node instanceof ParenthesesNode && node.body instanceof StatementsNode && node.body.body.length == 1) {
+    return knownValueExpressionType(node.body.body[0], context)
+  }
+  const type = knownExpressionType(node, context)
+
+  return node instanceof LocalVariableReadNode && type?.kind == "OptionalType" ? type.valueType : type
 }
 
 /**

@@ -51,7 +51,8 @@ export function validateBackendModule(module, language) {
   if (!Array.isArray(module.functions) || !module.entryPoint || typeof module.entryPoint != "object" ||
     module.entryPoint.kind != "EntryPoint") unsupportedCapability(language, "missing or invalid module members", module.location)
   if (module.functions.length == 0) unsupportedCapability(language, "module without functions", module.location)
-  const records = module.records ?? []
+  const declaredRecords = module.records
+  const records = declaredRecords === undefined ? [] : declaredRecords
 
   if (!Array.isArray(records)) unsupportedCapability(language, "missing or invalid record declarations", module.location)
   if (records.length > 0 && !task009Languages.has(language)) {
