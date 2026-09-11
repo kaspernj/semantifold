@@ -750,8 +750,7 @@ export function parseCSharp({filename, source}) {
     entryPoint: convertMain(mainNodes[0], context, filename, source),
     functions: members.slice(0, -1).map((member) => convertFunction(member, context, filename, source)),
     kind: /** @type {const} */ ("Module"),
-    location,
-    records: []
+    location
   }
   const unusedMarker = comments.find((comment) => comment.text == immutableMarker && !context.usedImmutableMarkers.has(comment))
 

@@ -759,8 +759,7 @@ export function parseGo({filename, source}) {
     entryPoint: convertMain(mainNodes[0], baseContext, filename, source),
     functions: members.slice(0, -1).map((member) => convertFunction(member, baseContext, filename, source)),
     kind: /** @type {const} */ ("Module"),
-    location,
-    records: []
+    location
   }
   const invalidMarker = comments.find((comment) => comment.text == immutableMarker && !baseContext.usedMarkers.has(comment))
 

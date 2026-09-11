@@ -851,8 +851,7 @@ class SwiftReader {
         statements: this.statementList(entries)}, kind: /** @type {const} */ ("EntryPoint"), location: this.location(root)},
       functions: declarations.map((declaration) => this.function(declaration)),
       kind: /** @type {const} */ ("Module"),
-      location: this.location(root),
-      records: []
+      location: this.location(root)
     }
 
     validateParsedModule(module, "swift")

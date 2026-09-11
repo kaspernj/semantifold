@@ -666,7 +666,7 @@ class RustReader {
 
     this.shape(main, ["fn", name, parameters, body])
     this.shape(parameters, ["(", ")"])
-    const module = validateParsedModule({kind: "Module", location: this.location(root), records: [], functions: definitions.map(node => this.function(node)),
+    const module = validateParsedModule({kind: "Module", location: this.location(root), functions: definitions.map(node => this.function(node)),
       entryPoint: {kind: "EntryPoint", location: this.location(main), body: this.block(body)}}, "rust")
 
     this.functions = new Map(module.functions.map(declaration => [

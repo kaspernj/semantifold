@@ -520,7 +520,7 @@ export class CReader {
     this.shape(include, ["#include", header])
     if (header.type != "string_literal" || this.text(header) != '"semantifold_runtime.h"') this.fail(include, "support header include")
     if (definitions.length < 2) this.fail(root, "semantic function and main required")
-    const module = {kind: /** @type {const} */ ("Module"), location: this.location(root), records: [], functions: definitions.slice(0, -1).map((node) => this.function(node)),
+    const module = {kind: /** @type {const} */ ("Module"), location: this.location(root), functions: definitions.slice(0, -1).map((node) => this.function(node)),
       entryPoint: this.main(definitions[definitions.length - 1])}
 
     if (this.generated) validateNativeGraph(module)

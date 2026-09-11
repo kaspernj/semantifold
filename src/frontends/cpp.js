@@ -551,7 +551,7 @@ export class CppReader {
 
     if (definitions.some((node) => node.type != "function_definition")) this.fail(root, "translation unit members")
     if (definitions.length < 2) this.fail(root, "semantic function and main required")
-    const module = {kind: /** @type {const} */ ("Module"), location: this.location(root), records: [], functions: definitions.slice(0, -1).map((node) => this.function(node)),
+    const module = {kind: /** @type {const} */ ("Module"), location: this.location(root), functions: definitions.slice(0, -1).map((node) => this.function(node)),
       entryPoint: this.main(definitions[definitions.length - 1])}
 
     if (this.generated) validateNativeGraph(module, "cpp")
