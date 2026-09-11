@@ -9,6 +9,7 @@
 /** @typedef {"IntegerNegate" | "BooleanNot"} SemanticUnaryOperation */
 /** @typedef {"IntegerAdd" | "IntegerSubtract" | "IntegerMultiply" | "BooleanAnd" | "BooleanOr" | "IntegerEqual" | "IntegerNotEqual" | "BooleanEqual" | "BooleanNotEqual" | "StringEqual" | "StringNotEqual" | "IntegerLessThan" | "IntegerLessThanOrEqual" | "IntegerGreaterThan" | "IntegerGreaterThanOrEqual" | "StringConcat"} SemanticBinaryOperation */
 /** @typedef {"record" | "field" | "function" | "parameter" | "local" | "iteration"} SemanticSymbolKind */
+/** @typedef {"record" | "function"} SemanticDeclarationKind */
 /** @typedef {"declaration" | "type" | "construct" | "member" | "read" | "write" | "call"} SemanticSymbolRole */
 /** @typedef {"parse" | "generate" | "restore" | "compile" | "link" | "validate" | "instantiate" | "execute"} AcceptanceStage */
 /** @typedef {"entry" | "source" | "manifest" | "support" | "mapping" | "resource" | "loader"} GeneratedArtifactRole */
@@ -671,7 +672,53 @@
  * @property {SemanticProvenance} [provenance] - Parser-authored source and identity index; optional for legacy caller-authored modules.
  */
 
-/** @typedef {SemanticModule | RecordDeclaration | RecordField | FunctionDeclaration | Parameter | ValueBinding | Block | Statement | EntryPoint | Expression | MapEntry | SemanticValueType | FunctionReturnTypeReference} SemanticNode */
+/**
+ * @typedef SemanticImport
+ * @property {"Import"} kind - Node discriminator.
+ * @property {string} moduleId - Stable imported semantic module identity.
+ * @property {string} importedName - Exported declaration name in the source module.
+ * @property {string} localName - Binding name visible in the importing module.
+ * @property {SemanticDeclarationKind} symbolKind - Imported declaration namespace.
+ * @property {string} declarationId - Stable resolved declaration identity.
+ * @property {boolean} typeOnly - Whether source syntax admitted only type-position use.
+ * @property {SourceLocation} location - Complete import declaration/specifier location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned import ranges.
+ */
+
+/**
+ * @typedef SemanticExport
+ * @property {"Export"} kind - Node discriminator.
+ * @property {string} exportedName - Name visible to importing modules.
+ * @property {SemanticDeclarationKind} symbolKind - Exported declaration namespace.
+ * @property {string} declarationId - Stable exported declaration identity.
+ * @property {SourceLocation} location - Complete export declaration/specifier location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned export ranges.
+ */
+
+/**
+ * @typedef SemanticProgramModule
+ * @property {"Module"} kind - Node discriminator.
+ * @property {string} id - Stable caller-supplied logical module identity.
+ * @property {string} sourceFilename - Explicit source filename; never an implicit read request.
+ * @property {RecordDeclaration[]} [records] - Top-level nominal record declarations.
+ * @property {FunctionDeclaration[]} functions - Top-level functions.
+ * @property {SemanticImport[]} imports - Resolved imports in source order.
+ * @property {SemanticExport[]} exports - Resolved exports in source order.
+ * @property {EntryPoint} [entryPoint] - Sole executable entry point, present only on the selected module.
+ * @property {SourceLocation} location - Source location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
+ * @property {SemanticProvenance} [provenance] - Parser-authored source and identity index.
+ */
+
+/**
+ * @typedef SemanticProgram
+ * @property {"Program"} kind - Node discriminator.
+ * @property {SemanticProgramModule[]} modules - Dependency-first deterministic module order.
+ * @property {string} entryModule - Stable identity of the sole entry module.
+ * @property {RegisteredSource[]} sources - Caller-order complete source registry.
+ */
+
+/** @typedef {SemanticModule | SemanticProgramModule | SemanticImport | SemanticExport | RecordDeclaration | RecordField | FunctionDeclaration | Parameter | ValueBinding | Block | Statement | EntryPoint | Expression | MapEntry | SemanticValueType | FunctionReturnTypeReference} SemanticNode */
 /** @typedef {SemanticNode} SemanticNodeWithoutLocations */
 
 export {}

@@ -1,6 +1,6 @@
 # 010 — Multi-file modules and names
 
-- Status: `todo`
+- Status: `implemented locally; independent review / exact-head TensorBuzz CI / merge pending`
 - Phase/priority: Phase 2 / P2 (conditional)
 - Dependencies: [005-general-function-signatures-and-calls.md](005-general-function-signatures-and-calls.md), [009-closed-records-and-member-access.md](009-closed-records-and-member-access.md)
 

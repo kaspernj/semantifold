@@ -10,12 +10,35 @@ import {emitExpression, emitType} from "./shared.js"
  */
 export function generateJava(module, writer) {
   const records = module.records ?? []
+  const programModule = writer.program?.modules.find(({id}) => id == Reflect.get(module, "id"))
+
+  if (programModule) {
+    writer.synthetic(`package semantifold.generated.${programModule.id};\n`, "Java program package", [module])
+    const imports = new Map(programModule.imports.map((imported) => {
+      const owner = /** @type {import("../semantic/types.js").SemanticProgramModule} */ (
+        writer.program?.modules.find(({id}) => id == imported.moduleId))
+      const record = owner.records?.find(({id}) => id == imported.declarationId)
+      const name = record?.name ?? writer.programModuleName(owner.id)
+
+      return [`semantifold.generated.${owner.id}.${name}`, imported]
+    }))
+
+    for (const [name, imported] of imports) {
+      const importPath = `/imports/${programModule.imports.indexOf(imported)}`
+
+      writer.synthetic("import ", "Java program import", [imported], [importPath])
+      writer.mapped(name, {mappingKind: "anchor", node: imported, path: importPath, role: "path"})
+      writer.synthetic(";\n", "Java program import terminator", [imported], [importPath])
+    }
+    writer.synthetic("\n", "Java program header separator", [module])
+  }
 
   records.forEach((record, recordIndex) => {
     const recordPath = `/records/${recordIndex}`
 
     if (recordIndex > 0) writer.synthetic("\n\n", "record declaration separator", [record], [recordPath])
-    writer.mapped("final class", {mappingKind: "anchor", node: record, path: recordPath})
+    writer.mapped(programModule && writer.isExported(record.id) ? "public final class" : "final class",
+      {mappingKind: "anchor", node: record, path: recordPath})
     writer.synthetic(" ", "record declaration spacing", [record], [recordPath])
     writer.mapped(record.name, {mappingKind: "exact", node: record, path: recordPath, role: "name"})
     writer.synthetic(" {\n", "Java record class scaffolding", [record], [recordPath])
@@ -28,7 +51,7 @@ export function generateJava(module, writer) {
       writer.mapped(field.name, {mappingKind: "exact", node: field, path: fieldPath, role: "name"})
       writer.synthetic(";\n", "Java record storage scaffolding", [field], [fieldPath])
     })
-    writer.synthetic("\n  ", "Java record constructor spacing", [record], [recordPath])
+    writer.synthetic(programModule ? "\n  public " : "\n  ", "Java record constructor spacing", [record], [recordPath])
     writer.mapped(record.name, {mappingKind: "exact", node: record, path: recordPath, role: "name"})
     writer.synthetic("(", "Java record constructor scaffolding", [record], [recordPath])
     record.fields.forEach((field, fieldIndex) => {
@@ -53,7 +76,7 @@ export function generateJava(module, writer) {
     record.fields.forEach((field, fieldIndex) => {
       const fieldPath = `${recordPath}/fields/${fieldIndex}`
 
-      writer.synthetic("\n  ", "Java record accessor spacing", [field], [fieldPath])
+      writer.synthetic(programModule ? "\n  public " : "\n  ", "Java record accessor spacing", [field], [fieldPath])
       emitType(writer, field.type, `${fieldPath}/type`, "java")
       writer.synthetic(" ", "Java record accessor spacing", [field], [fieldPath])
       writer.mapped(field.name, {mappingKind: "exact", node: field, path: fieldPath, role: "name"})
@@ -63,14 +86,23 @@ export function generateJava(module, writer) {
     })
     writer.synthetic("}", "Java record class scaffolding", [record], [recordPath])
   })
+  if (programModule && records.length > 0) {
+    writer.synthetic("\n", "Java source terminator", [module])
+    return
+  }
   if (records.length > 0) writer.synthetic("\n\n", "record/Main separator", [module])
-  writer.synthetic("public final class Main {\n", "Java class scaffolding", [module])
+  const className = programModule
+    ? writer.isProgramEntry() ? "Main" : writer.programModuleName(programModule.id)
+    : "Main"
+
+  writer.synthetic(`public final class ${className} {\n`, "Java class scaffolding", [module])
 
   module.functions.forEach((declaration, functionIndex) => {
     if (functionIndex > 0) writer.synthetic("\n\n", "declaration separator", [declaration])
 
     writer.synthetic("  ", "indentation", [declaration])
-    writer.mapped("private static", {mappingKind: "anchor", node: declaration})
+    writer.mapped(programModule && writer.isExported(declaration.id) ? "public static" : "private static",
+      {mappingKind: "anchor", node: declaration})
     writer.synthetic(" ", "method spacing", [declaration])
     emitType(writer, declaration.returnType, `/functions/${functionIndex}/returnType`, "java")
     writer.synthetic(" ", "method spacing", [declaration])
@@ -94,19 +126,21 @@ export function generateJava(module, writer) {
     writer.mapped("}", {mappingKind: "anchor", node: declaration})
   })
 
-  writer.synthetic("\n\n", "entry-point separator", [module.entryPoint])
-  writer.synthetic("  ", "indentation", [module.entryPoint])
-  writer.mapped("public static void main", {mappingKind: "anchor", node: module.entryPoint})
-  writer.mapped("(", {mappingKind: "anchor", node: module.entryPoint})
-  writer.synthetic("String[] args", "Java entry-point signature", [module.entryPoint])
-  writer.mapped(")", {mappingKind: "anchor", node: module.entryPoint})
-  writer.synthetic(" ", "method spacing", [module.entryPoint])
-  writer.mapped("{", {mappingKind: "anchor", node: module.entryPoint})
-  writer.synthetic("\n", "line break", [module.entryPoint])
+  if (!programModule || writer.isProgramEntry()) {
+    writer.synthetic("\n\n", "entry-point separator", [module.entryPoint])
+    writer.synthetic("  ", "indentation", [module.entryPoint])
+    writer.mapped("public static void main", {mappingKind: "anchor", node: module.entryPoint})
+    writer.mapped("(", {mappingKind: "anchor", node: module.entryPoint})
+    writer.synthetic("String[] args", "Java entry-point signature", [module.entryPoint])
+    writer.mapped(")", {mappingKind: "anchor", node: module.entryPoint})
+    writer.synthetic(" ", "method spacing", [module.entryPoint])
+    writer.mapped("{", {mappingKind: "anchor", node: module.entryPoint})
+    writer.synthetic("\n", "line break", [module.entryPoint])
 
-  emitBlock(writer, module.entryPoint.body, "    ", "/entryPoint/body")
-  writer.synthetic("  ", "indentation", [module.entryPoint])
-  writer.mapped("}", {mappingKind: "anchor", node: module.entryPoint})
+    emitBlock(writer, module.entryPoint.body, "    ", "/entryPoint/body")
+    writer.synthetic("  ", "indentation", [module.entryPoint])
+    writer.mapped("}", {mappingKind: "anchor", node: module.entryPoint})
+  }
   writer.synthetic("\n}\n", "Java class scaffolding", [module])
 }
 

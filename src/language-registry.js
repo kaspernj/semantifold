@@ -38,7 +38,7 @@ const registryKeys = new Set([
 ])
 
 /** @typedef {"frontend" | "textBackend" | "binaryBackend" | "applicationBackend" | "interoperability"} RegistryRole */
-/** @typedef {(input: {filename: string, source: string}) => import("./semantic/types.js").SemanticModule} Frontend */
+/** @typedef {(input: {filename: string, source: string, program?: {isEntry: boolean, functions: Map<string, import("./semantic/types.js").FunctionDeclaration>, records: Map<string, import("./semantic/types.js").RecordDeclaration>}}) => import("./semantic/types.js").SemanticModule} Frontend */
 /** @typedef {(...values: unknown[]) => unknown} RegistryImplementation */
 
 /**
@@ -274,31 +274,31 @@ export function createLanguageRegistry(candidateRecords) {
  * PHP registry frontend wrapper.
  * @type {Frontend}
  */
-const phpFrontend = ({filename, source}) => parsePhp({filename, source})
+const phpFrontend = ({filename, program, source}) => parsePhp({filename, program, source})
 
 /**
  * Ruby registry frontend wrapper.
  * @type {Frontend}
  */
-const rubyFrontend = ({filename, source}) => parseRuby({filename, source})
+const rubyFrontend = ({filename, program, source}) => parseRuby({filename, program, source})
 
 /**
  * JavaScript registry frontend wrapper.
  * @type {Frontend}
  */
-const javaScriptFrontend = ({filename, source}) => parseJavaScriptTypeScript({filename, language: "javascript", source})
+const javaScriptFrontend = ({filename, program, source}) => parseJavaScriptTypeScript({filename, language: "javascript", program, source})
 
 /**
  * TypeScript registry frontend wrapper.
  * @type {Frontend}
  */
-const typeScriptFrontend = ({filename, source}) => parseJavaScriptTypeScript({filename, language: "typescript", source})
+const typeScriptFrontend = ({filename, program, source}) => parseJavaScriptTypeScript({filename, language: "typescript", program, source})
 
 /**
  * Java registry frontend wrapper.
  * @type {Frontend}
  */
-const javaFrontend = ({filename, source}) => parseJava({filename, source})
+const javaFrontend = ({filename, program, source}) => parseJava({filename, program, source})
 
 /**
  * Kotlin registry frontend wrapper.

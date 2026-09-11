@@ -11,6 +11,24 @@ import {emitExpression, emitType} from "./shared.js"
 export function generateRuby(module, writer) {
   const records = module.records ?? []
 
+  if (writer.program) {
+    const programModule = /** @type {import("../semantic/types.js").SemanticProgramModule} */ (/** @type {unknown} */ (module))
+
+    for (const moduleId of [...new Set(programModule.imports.map((item) => item.moduleId))]) {
+      const relative = writer.relativeModuleSpecifier(moduleId).replace(/\.rb$/u, "").replace(/^\.\//u, "")
+      const imported = /** @type {import("../semantic/types.js").SemanticImport} */ (
+        programModule.imports.find((item) => item.moduleId == moduleId))
+      const importPath = `/imports/${programModule.imports.indexOf(imported)}`
+
+      writer.synthetic("require_relative ", "Ruby require-relative edge", [imported], [importPath])
+      writer.mapped(JSON.stringify(relative), {mappingKind: "anchor", node: imported, path: importPath, role: "path"})
+      writer.synthetic("\n", "Ruby require-relative terminator", [imported], [importPath])
+    }
+    if (programModule.imports.length > 0) writer.synthetic("\n", "Ruby require/module separator", [module])
+    writer.synthetic(`module ${writer.programModuleName(programModule.id)}\n`, "Ruby semantic module wrapper", [module])
+    if (module.functions.length > 0) writer.synthetic("module_function\n\n", "Ruby module-function profile", [module])
+  }
+
   records.forEach((record, recordIndex) => {
     const recordPath = `/records/${recordIndex}`
 
@@ -92,8 +110,25 @@ export function generateRuby(module, writer) {
     writer.mapped("end", {mappingKind: "anchor", node: declaration})
   })
 
-  writer.synthetic("\n\n", "entry-point separator", [module.entryPoint])
-  emitBlock(writer, module.entryPoint.body, "", "/entryPoint/body")
+  if (writer.program) {
+    const privateRecords = records.filter((record) => !writer.isExported(record.id))
+    const privateFunctions = module.functions.filter((declaration) => !writer.isExported(declaration.id))
+
+    for (const record of privateRecords) {
+      writer.synthetic("\nprivate_constant :", "Ruby private semantic record", [record])
+      writer.mapped(record.name, {mappingKind: "exact", node: record, role: "name"})
+    }
+    for (const declaration of privateFunctions) {
+      writer.synthetic("\nprivate_class_method :", "Ruby private semantic function", [declaration])
+      writer.mapped(declaration.name, {mappingKind: "exact", node: declaration, role: "name"})
+    }
+  }
+
+  if (!writer.program || writer.isProgramEntry()) {
+    writer.synthetic("\n\n", "entry-point separator", [module.entryPoint])
+    emitBlock(writer, module.entryPoint.body, "", "/entryPoint/body")
+  }
+  if (writer.program) writer.synthetic("\nend\n", "Ruby semantic module close", [module])
 }
 
 /**

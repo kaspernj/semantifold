@@ -1,7 +1,9 @@
 // @ts-check
 
 import {parseSource} from "./src/frontends/index.js"
+import {parseProgramSource} from "./src/frontends/program.js"
 import {generateArtifactSource, generateSource} from "./src/backends/index.js"
+import {generateProgramArtifacts} from "./src/backends/program.js"
 import {createGeneratedArtifactSet as constructArtifactSet} from "./src/artifacts.js"
 import {SemantifoldDiagnostic, unsupportedCapability} from "./src/diagnostic.js"
 import {languageRegistry} from "./src/language-registry.js"
@@ -45,6 +47,17 @@ export function parse(input) {
 }
 
 /**
+ * Parses a complete explicit multi-source project into one resolved semantic program.
+ * @param {object} input - Program parse request.
+ * @param {string} input.entryModule - Stable identity of the sole entry module.
+ * @param {{filename: string, id: string, language: import("./src/semantic/types.js").SemanticLanguage, source: string}[]} input.sources - Complete caller-supplied source set.
+ * @returns {import("./src/semantic/types.js").SemanticProgram} Semantic program.
+ */
+export function parseProgram(input) {
+  return parseProgramSource(input)
+}
+
+/**
  * Generates target-language source from a shared semantic module.
  * @param {object} input - Generation request.
  * @param {import("./src/semantic/types.js").SemanticLanguage} input.language - Target language.
@@ -68,6 +81,17 @@ export function generate(input) {
  */
 export function generateArtifact(input) {
   return generateArtifactSource(input)
+}
+
+/**
+ * Generates a deterministic mapped artifact set for a complete semantic program.
+ * @param {object} input - Program generation request.
+ * @param {import("./src/semantic/types.js").SemanticLanguage} input.language - Original-five target language.
+ * @param {import("./src/semantic/types.js").SemanticProgram} input.program - Complete resolved program.
+ * @returns {import("./src/semantic/types.js").GeneratedArtifactSet} Complete generated set.
+ */
+export function generateProgramArtifactSet(input) {
+  return generateProgramArtifacts(input)
 }
 
 /**

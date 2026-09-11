@@ -455,7 +455,7 @@ function requireProvenance(module) {
 
 /**
  * Traverses public semantic nodes in one stable order.
- * @param {import("./types.js").SemanticModule} module - Semantic module.
+ * @param {import("./types.js").SemanticModule | import("./types.js").SemanticProgramModule} module - Semantic module.
  * @returns {{node: import("./types.js").SemanticNode, ownerLocation: import("./types.js").SourceLocation, path: string}[]} Entries.
  */
 export function semanticEntries(module) {
@@ -479,9 +479,15 @@ export function semanticEntries(module) {
     entries.push({node, ownerLocation: location, path})
 
     if (node.kind == "Module") {
+      if ("imports" in node) {
+        node.imports.forEach((child, index) => visit(child, `/imports/${index}`, location))
+      }
       (node.records ?? []).forEach((child, index) => visit(child, `/records/${index}`, location))
       node.functions.forEach((child, index) => visit(child, `/functions/${index}`, location))
-      visit(node.entryPoint, "/entryPoint", location)
+      if ("exports" in node) {
+        node.exports.forEach((child, index) => visit(child, `/exports/${index}`, location))
+      }
+      if (node.entryPoint) visit(node.entryPoint, "/entryPoint", location)
     } else if (node.kind == "RecordDeclaration") {
       node.fields.forEach((child, index) => visit(child, `${path}/fields/${index}`, location))
     } else if (node.kind == "RecordField") {

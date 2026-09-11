@@ -34,11 +34,12 @@ const task005Languages = new Set(["php", "ruby", "javascript", "typescript", "ja
  * Enforces the coherent release-candidate semantic subset after adaptation.
  * @param {import("./types.js").SemanticModule} module - Adapted semantic module.
  * @param {import("./types.js").SemanticLanguage} language - Source language.
+ * @param {{functions?: Map<string, import("./types.js").FunctionDeclaration>, records?: Map<string, import("./types.js").RecordDeclaration>}} [visible] - Program imports visible during validation.
  * @returns {import("./types.js").SemanticModule} Validated module.
  */
-export function validateParsedModule(module, language) {
+export function validateParsedModule(module, language, visible = {}) {
   validateModuleShape(module, language, (detail, location) => unsupportedSyntax(language, detail, location))
-  validateModuleTypes(module, (code, detail, location) => semanticFailure(language, code, detail, location), true)
+  validateModuleTypes(module, (code, detail, location) => semanticFailure(language, code, detail, location), true, visible)
 
   return module
 }
@@ -47,10 +48,11 @@ export function validateParsedModule(module, language) {
  * Validates scalar types and bindings for a caller-supplied semantic module before emission.
  * @param {import("./types.js").SemanticModule} module - Semantic module.
  * @param {import("./types.js").BackendLanguage} language - Backend language or binary target.
+ * @param {{functions?: Map<string, import("./types.js").FunctionDeclaration>, records?: Map<string, import("./types.js").RecordDeclaration>}} [visible] - Resolved program imports.
  * @returns {void}
  */
-export function validateBackendTypes(module, language) {
-  validateModuleTypes(module, (_code, detail, location) => unsupportedCapability(language, detail, location), false)
+export function validateBackendTypes(module, language, visible = {}) {
+  validateModuleTypes(module, (_code, detail, location) => unsupportedCapability(language, detail, location), false, visible)
 }
 
 /**
@@ -101,17 +103,18 @@ function validateBlockShape(block, detail, fail) {
  * @param {import("./types.js").SemanticModule} module - Semantic module.
  * @param {SemanticFail} fail - Diagnostic callback.
  * @param {boolean} normalizeOperations - Whether to replace transient frontend operation intent.
+ * @param {{functions?: Map<string, import("./types.js").FunctionDeclaration>, records?: Map<string, import("./types.js").RecordDeclaration>}} [visible] - Program imports visible during validation.
  * @returns {void}
  */
-function validateModuleTypes(module, fail, normalizeOperations) {
-  const records = validateRecordDeclarations(module.records ?? [], fail, normalizeOperations)
+function validateModuleTypes(module, fail, normalizeOperations, visible = {}) {
+  const records = validateRecordDeclarations(module.records ?? [], fail, normalizeOperations, visible.records)
   /** @type {Map<string, import("./types.js").FunctionDeclaration>} */
-  const functions = new Map()
-  const declarationIds = new Set()
+  const functions = new Map(visible.functions ?? [])
+  const declarationIds = new Set([...functions.values()].flatMap(({id}) => typeof id == "string" ? [id] : []))
 
   for (const [index, functionDeclaration] of module.functions.entries()) {
     if (normalizeOperations) functionDeclaration.id = `function:${index}`
-    if (typeof functionDeclaration.id != "string" || !/^function:[0-9]+$/u.test(functionDeclaration.id) ||
+    if (typeof functionDeclaration.id != "string" || !/^(?:[a-z][a-z0-9._-]*#)?function:[0-9]+$/u.test(functionDeclaration.id) ||
       declarationIds.has(functionDeclaration.id)) {
       fail("DUPLICATE_BINDING", "Duplicate or invalid function declaration identity.", functionDeclaration.location)
     }
@@ -141,12 +144,13 @@ function validateModuleTypes(module, fail, normalizeOperations) {
  * @param {unknown} declarations - Candidate ordered declarations.
  * @param {SemanticFail} fail - Diagnostic callback.
  * @param {boolean} normalizeOperations - Whether parser-authored identities are assigned.
+ * @param {Map<string, import("./types.js").RecordDeclaration>} [visibleRecords] - Imported record declarations by identity.
  * @returns {RecordRegistry} Validated declarations by identity.
  */
-function validateRecordDeclarations(declarations, fail, normalizeOperations) {
+function validateRecordDeclarations(declarations, fail, normalizeOperations, visibleRecords = new Map()) {
   if (!Array.isArray(declarations)) return fail("TYPE_MISMATCH", "Record declarations must be an ordered array.", /** @type {never} */ (undefined))
   /** @type {RecordRegistry} */
-  const records = new Map()
+  const records = new Map(visibleRecords)
   const names = new Set()
 
   for (let recordIndex = 0; recordIndex < declarations.length; recordIndex += 1) {
@@ -156,7 +160,7 @@ function validateRecordDeclarations(declarations, fail, normalizeOperations) {
       return fail("TYPE_MISMATCH", "Malformed record declaration.", declaration?.location)
     }
     if (normalizeOperations) declaration.id = `record:${recordIndex}`
-    if (typeof declaration.id != "string" || !/^record:[0-9]+$/u.test(declaration.id) || records.has(declaration.id)) {
+    if (typeof declaration.id != "string" || !/^(?:[a-z][a-z0-9._-]*#)?record:[0-9]+$/u.test(declaration.id) || records.has(declaration.id)) {
       fail("DUPLICATE_RECORD", "Duplicate or invalid record declaration identity.", declaration.location)
     }
     if (names.has(declaration.name)) {
@@ -1092,7 +1096,7 @@ function validTypeIdentity(type, allowVoid, seen = new Set()) {
     valid = validTypeIdentity(candidate.valueType, false, seen) &&
       !(candidate.valueType && typeof candidate.valueType == "object" && Reflect.get(candidate.valueType, "kind") == "OptionalType")
   } else if (candidate.kind == "RecordType" && Object.keys(candidate).sort().join(",") == "declarationId,kind") {
-    valid = typeof candidate.declarationId == "string" && /^record:[0-9]+$/u.test(candidate.declarationId)
+    valid = typeof candidate.declarationId == "string" && /^(?:[a-z][a-z0-9._-]*#)?record:[0-9]+$/u.test(candidate.declarationId)
   }
   seen.delete(type)
 

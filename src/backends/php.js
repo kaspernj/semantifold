@@ -9,7 +9,8 @@ import {emitExpression, emitType} from "./shared.js"
  * @returns {void}
  */
 export function generatePhp(module, writer) {
-  writer.synthetic("<?php\ndeclare(strict_types=1);\n\n", "PHP program scaffolding", [module])
+  if (writer.program) emitProgramHeader(module, writer)
+  else writer.synthetic("<?php\ndeclare(strict_types=1);\n\n", "PHP program scaffolding", [module])
   const records = module.records ?? []
 
   records.forEach((record, recordIndex) => {
@@ -100,8 +101,47 @@ export function generatePhp(module, writer) {
     writer.mapped("}", {mappingKind: "anchor", node: declaration})
   })
 
-  writer.synthetic("\n\n", "entry-point separator", [module.entryPoint])
-  emitBlock(writer, module.entryPoint.body, "", "/entryPoint/body")
+  if (!writer.program || writer.isProgramEntry()) {
+    writer.synthetic("\n\n", "entry-point separator", [module.entryPoint])
+    emitBlock(writer, module.entryPoint.body, "", "/entryPoint/body")
+  }
+}
+
+/**
+ * Emits one canonical namespace, explicit imports, and matching literal load edges.
+ * @param {import("../semantic/types.js").SemanticModule} module - Current program module.
+ * @param {import("./writer.js").SourceWriter} writer - Source-aware writer.
+ */
+function emitProgramHeader(module, writer) {
+  const programModule = /** @type {import("../semantic/types.js").SemanticProgramModule} */ (/** @type {unknown} */ (module))
+
+  writer.synthetic(`<?php\ndeclare(strict_types=1);\nnamespace Semantifold\\Generated\\${writer.programModuleName(programModule.id)};\n`,
+    "PHP semantic namespace", [module])
+  for (const imported of programModule.imports) {
+    const dependency = writer.programModuleName(imported.moduleId)
+    const prefix = imported.symbolKind == "function" ? "use function" : "use"
+    const importPath = `/imports/${programModule.imports.indexOf(imported)}`
+    const localName = writer.importNameFor(imported)
+
+    writer.synthetic(`${prefix} Semantifold\\Generated\\${dependency}\\`, "PHP semantic import", [imported], [importPath])
+    writer.mapped(imported.importedName, {mappingKind: "exact", node: imported, path: importPath, role: "importedName"})
+    if (localName != imported.importedName) {
+      writer.synthetic(" as ", "PHP semantic import alias", [imported], [importPath])
+      writer.mapped(localName, {mappingKind: "exact", node: imported, path: importPath, role: "localName"})
+    }
+    writer.synthetic(";\n", "PHP semantic import terminator", [imported], [importPath])
+  }
+  for (const moduleId of [...new Set(programModule.imports.map((item) => item.moduleId))]) {
+    const relative = writer.relativeModuleSpecifier(moduleId).replace(/^\.\//u, "")
+    const imported = /** @type {import("../semantic/types.js").SemanticImport} */ (
+      programModule.imports.find((item) => item.moduleId == moduleId))
+    const importPath = `/imports/${programModule.imports.indexOf(imported)}`
+
+    writer.synthetic("require_once __DIR__ . ", "PHP require-once edge", [imported], [importPath])
+    writer.mapped(JSON.stringify(`/${relative}`), {mappingKind: "anchor", node: imported, path: importPath, role: "path"})
+    writer.synthetic(";\n", "PHP require-once terminator", [imported], [importPath])
+  }
+  writer.synthetic("\n", "PHP namespace/declaration separator", [module])
 }
 
 /**

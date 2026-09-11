@@ -37,6 +37,8 @@ Node IDs follow deterministic semantic occurrence order, node paths are JSON Poi
 
 Each semantic node also carries its own JSON-safe `sourceProvenance` record. That object association—not an array position, old JSON Pointer, or caller-controlled ID—is the source of provenance after a semantic transformation. Reordering, inserting, deleting, serializing, or cloning nodes therefore moves their source ranges with them. Generation rebuilds current paths and registry-local node/symbol IDs; cloned nodes receive distinct generated identities even when they intentionally share one original origin.
 
+`parseProgram()` rebases every module onto one complete caller-order source registry. Program import/export nodes retain their parser declaration origin plus available `declaration`, `path`, `importedName`, `localName`, and `exportedName` token roles. Each generated module artifact rebuilds occurrence paths including `/imports/N` and `/exports/N`; target-native import names and paths therefore map back to the correct original header tokens even when the target uses a different qualified spelling. Synthetic module/package wrappers remain explicitly synthetic with related module context.
+
 Origins are a closed union:
 
 ```js
