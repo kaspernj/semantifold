@@ -1042,6 +1042,38 @@ function parsePhpProgram(filename, source) {
   try {
     return parser.parseCode(source, filename)
   } catch (error) {
-    return parseFailure("php", error)
+    return parseFailure("php", error, phpParserFailureLocation(error, filename, source))
   }
+}
+
+/**
+ * Normalizes php-parser's one-based line and zero-based column when present.
+ * A module range remains the deterministic fallback for opaque parser errors.
+ * @param {unknown} error - Native parser error.
+ * @param {string} filename - Requested source filename.
+ * @param {string} source - Complete source.
+ * @returns {import("../semantic/types.js").SourceLocation} Failure range.
+ */
+function phpParserFailureLocation(error, filename, source) {
+  if (!error || typeof error != "object") return moduleLocation(filename, source)
+  const line = Reflect.get(error, "lineNumber")
+  const column = Reflect.get(error, "columnNumber")
+
+  if (typeof line != "number" || !Number.isSafeInteger(line) || line < 1 ||
+    typeof column != "number" || !Number.isSafeInteger(column) || column < 0) {
+    return moduleLocation(filename, source)
+  }
+  let lineStart = 0
+
+  for (let current = 1; current < line; current++) {
+    const newline = source.indexOf("\n", lineStart)
+
+    if (newline < 0) return moduleLocation(filename, source)
+    lineStart = newline + 1
+  }
+  const lineEnd = source.indexOf("\n", lineStart)
+  const boundedEnd = lineEnd < 0 ? source.length : lineEnd
+  const offset = Math.min(lineStart + column, boundedEnd)
+
+  return locationFromOffsets(filename, source, offset, Math.min(offset + 1, source.length))
 }

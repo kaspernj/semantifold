@@ -1,6 +1,6 @@
 # 008 — Ordered list iteration
 
-- Status: `implemented`
+- Status: `delivered in PR #31 at 275711332157bbe8d2af6f4189e7849f344bf31f`
 - Phase/priority: Phase 1 / P1
 - Dependencies: [002-local-declarations-and-assignment.md](002-local-declarations-and-assignment.md), [004-statement-sequencing-and-conditionals.md](004-statement-sequencing-and-conditionals.md), [006-immutable-lists-and-maps.md](006-immutable-lists-and-maps.md)
 
@@ -84,3 +84,4 @@ Map iteration/entry bindings (deferred to [014-ordered-map-iteration.md](014-ord
 - Focused specs cover exact frontend acceptance/exclusions, semantic scope/type/flow failures, malformed and cyclic caller IR, transactional target rejection, provenance/mappings, one-time evaluation, generation/reparse equivalence, and real PHP, Ruby, Node.js, strict TypeScript, and Java execution. Missing required tools fail rather than skip; aggregate suite execution remains CI-owned.
 - The bounded post-review correction makes loop flow conservative for every nested assignment to an outer mutable binding, including abrupt exits, while retaining facts for unassigned bindings. Ruby target preflight rejects nonlocal returns in iteration bodies, Java derives nested collection-access types from parser structure for enhanced-for round trips, and all loop-owned locations are validated before diagnostics or writers consume them.
 - The frontend follow-up resolves guarded optional-list iteration through canonical `OptionalUnwrap` in all five source profiles without bypassing Task 007 presence validation, and makes Java enhanced-for type inference recurse through parser-owned parentheses.
+- Coordinator review and exact-head TensorBuzz CI completed before PR #31 merged as `275711332157bbe8d2af6f4189e7849f344bf31f`.

@@ -45,15 +45,17 @@ export class SemantifoldDiagnostic extends Error {
  * Throws a normalized parser diagnostic while preserving the parser error.
  * @param {import("./semantic/types.js").SemanticLanguage} language - Frontend language.
  * @param {unknown} error - Opaque parser error, narrowed immediately.
+ * @param {import("./semantic/types.js").SourceLocation | undefined} [location] - Normalized parser failure range.
  * @returns {never} Always throws.
  */
-export function parseFailure(language, error) {
+export function parseFailure(language, error, location) {
   const cause = error instanceof Error ? error : new Error(String(error))
 
   throw new SemantifoldDiagnostic({
     cause,
     code: "PARSE_ERROR",
     language,
+    location,
     message: cause.message
   })
 }
