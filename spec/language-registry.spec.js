@@ -29,6 +29,7 @@ describe("language role registry", () => {
       expect(Object.isFrozen(descriptor.acceptance)).toBeTrue()
       if (descriptor.id == "wasm") {
         expect(descriptor.features).toEqual({
+          closedRecords: false,
           generalFunctionsAndCalls: false,
           immutableCollections: false,
           optionalValues: false,
@@ -54,6 +55,7 @@ describe("language role registry", () => {
         textBackend: true
       })
       expect(descriptor.features).toEqual({
+        closedRecords: originalFive.includes(descriptor.id),
         generalFunctionsAndCalls: originalFive.includes(descriptor.id),
         immutableCollections: originalFive.includes(descriptor.id),
         optionalValues: originalFive.includes(descriptor.id),
@@ -108,8 +110,8 @@ console.log(choose(true, "no"))
       [{...record, id: ""}],
       [{...record, artifactMultiplicity: "many"}],
       [{...record, surprise: true}],
-      [{...record, features: {generalFunctionsAndCalls: "yes", immutableCollections: false, optionalValues: false, orderedListIteration: false}}],
-      [{...record, features: {generalFunctionsAndCalls: false, immutableCollections: false}}],
+      [{...record, features: {closedRecords: false, generalFunctionsAndCalls: "yes", immutableCollections: false, optionalValues: false, orderedListIteration: false}}],
+      [{...record, features: {closedRecords: false, generalFunctionsAndCalls: false, immutableCollections: false}}],
       [{...record, acceptance: {stages: ["execute", "parse"], toolchains: []}}],
       [{...record, acceptance: {stages: ["parse", "parse"], toolchains: []}}],
       [{...record, mapping: {binaryRanges: false, richText: true, sourceMapV3: false}}],

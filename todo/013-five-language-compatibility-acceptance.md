@@ -1,6 +1,6 @@
 # 013 — Five-language compatibility acceptance
 
-- Status: `implemented locally` (coordinator review, TensorBuzz CI, and merge pending)
+- Status: `delivered through PRs 32/33 at a78e513aa9929d8baaf1761079d5f486575bc8f0`
 - Phase/priority: Phase 1 / P1 legacy terminal acceptance
 - Dependencies: [001-portable-scalar-values-and-types.md](001-portable-scalar-values-and-types.md), [002-local-declarations-and-assignment.md](002-local-declarations-and-assignment.md), [003-typed-operators-and-expressions.md](003-typed-operators-and-expressions.md), [004-statement-sequencing-and-conditionals.md](004-statement-sequencing-and-conditionals.md), [005-general-function-signatures-and-calls.md](005-general-function-signatures-and-calls.md), [006-immutable-lists-and-maps.md](006-immutable-lists-and-maps.md), [007-optional-values-and-presence-narrowing.md](007-optional-values-and-presence-narrowing.md), [008-collection-iteration.md](008-collection-iteration.md)
 

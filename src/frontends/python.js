@@ -684,6 +684,7 @@ export function parsePython({filename, source}) {
     entryPoint: {body: entryBlock, kind: "EntryPoint", location: entryLocation},
     functions,
     kind: "Module",
-    location
+    location,
+    records: []
   }
 }

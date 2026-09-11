@@ -9,6 +9,54 @@ import {emitExpression, emitType} from "./shared.js"
  * @returns {void}
  */
 export function generateRuby(module, writer) {
+  const records = module.records ?? []
+
+  records.forEach((record, recordIndex) => {
+    const recordPath = `/records/${recordIndex}`
+
+    if (recordIndex > 0) writer.synthetic("\n\n", "record declaration separator", [record], [recordPath])
+    writer.mapped("class", {mappingKind: "anchor", node: record, path: recordPath})
+    writer.synthetic(" ", "record declaration spacing", [record], [recordPath])
+    writer.mapped(record.name, {mappingKind: "exact", node: record, path: recordPath, role: "name"})
+    writer.synthetic("\n", "line break", [record], [recordPath])
+    record.fields.forEach((field, fieldIndex) => {
+      const fieldPath = `${recordPath}/fields/${fieldIndex}`
+
+      writer.synthetic("  # @type [", "Ruby record field type scaffolding", [field], [fieldPath])
+      emitType(writer, field.type, `${fieldPath}/type`, "ruby")
+      writer.synthetic("]\n  attr_reader :", "Ruby record reader scaffolding", [field], [fieldPath])
+      writer.mapped(field.name, {mappingKind: "exact", node: field, path: fieldPath, role: "name"})
+      writer.synthetic("\n", "line break", [field], [fieldPath])
+    })
+    writer.synthetic("\n", "record constructor separator", [record], [recordPath])
+    record.fields.forEach((field, fieldIndex) => {
+      const fieldPath = `${recordPath}/fields/${fieldIndex}`
+
+      writer.synthetic("  # @param ", "Ruby record constructor type scaffolding", [field], [fieldPath])
+      writer.mapped(field.name, {mappingKind: "exact", node: field, path: fieldPath, role: "name"})
+      writer.synthetic(" [", "Ruby record constructor type scaffolding", [field], [fieldPath])
+      emitType(writer, field.type, `${fieldPath}/type`, "ruby")
+      writer.synthetic("]\n", "Ruby record constructor type scaffolding", [field], [fieldPath])
+    })
+    writer.synthetic("  def initialize(", "Ruby record constructor scaffolding", [record], [recordPath])
+    record.fields.forEach((field, fieldIndex) => {
+      if (fieldIndex) writer.synthetic(", ", "record field separator", [record], [recordPath])
+      writer.mapped(field.name, {mappingKind: "exact", node: field, path: `${recordPath}/fields/${fieldIndex}`, role: "name"})
+    })
+    writer.synthetic(")\n", "Ruby record constructor scaffolding", [record], [recordPath])
+    record.fields.forEach((field, fieldIndex) => {
+      const fieldPath = `${recordPath}/fields/${fieldIndex}`
+
+      writer.synthetic("    @", "Ruby record storage scaffolding", [field], [fieldPath])
+      writer.mapped(field.name, {mappingKind: "exact", node: field, path: fieldPath, role: "name"})
+      writer.synthetic(" = ", "Ruby record storage scaffolding", [field], [fieldPath])
+      writer.mapped(field.name, {mappingKind: "exact", node: field, path: fieldPath, role: "name"})
+      writer.synthetic("\n", "line break", [field], [fieldPath])
+    })
+    writer.synthetic("    freeze\n  end\nend", "Ruby record immutability scaffolding", [record], [recordPath])
+  })
+  if (records.length > 0) writer.synthetic("\n\n", "record/function separator", [module])
+
   module.functions.forEach((declaration, functionIndex) => {
     if (functionIndex > 0) writer.synthetic("\n\n", "declaration separator", [declaration])
 

@@ -143,6 +143,14 @@ const phpInvalidParameterBindings = new Set([
 ])
 const phpInvalidAssignedBindings = new Set(["GLOBALS", "this"])
 
+/** @type {Readonly<Partial<Record<import("../semantic/types.js").BackendLanguage, Set<string>>>>} */
+const reservedTypeNames = Object.freeze({
+  java: new Set(["Boolean", "Integer", "Main", "Math", "Object", "String", "System"]),
+  javascript: new Set(["Array", "Boolean", "Map", "Math", "Number", "Object", "Reflect", "String"]),
+  ruby: new Set(["Array", "BasicObject", "Class", "FalseClass", "Hash", "Integer", "Kernel", "Module", "NilClass", "Object", "String", "Symbol", "TrueClass"]),
+  typescript: new Set(["Array", "Boolean", "Map", "Math", "Number", "Object", "ReadonlyArray", "ReadonlyMap", "Reflect", "String"])
+})
+
 /**
  * Validates an identifier against the target backend's deliberately narrow lexical contract.
  * @param {import("../semantic/types.js").BackendLanguage} language - Target language.
@@ -197,6 +205,24 @@ export function validateTargetBindingIdentifier(language, name, role, location) 
 
   if (invalidTypeScriptBinding || invalidPhpVariable || invalidRubyBinding) {
     unsupportedCapability(language, `${role} identifier '${name}'`, location)
+  }
+}
+
+/**
+ * Validates a nominal record/type declaration name for the original-five targets.
+ * @param {import("../semantic/types.js").BackendLanguage} language - Backend language.
+ * @param {unknown} name - Candidate type name.
+ * @param {import("../semantic/types.js").SourceLocation | undefined} location - Declaration location.
+ * @returns {void}
+ */
+export function validateTargetTypeIdentifier(language, name, location) {
+  if (typeof name != "string" || !/^[A-Z][A-Za-z0-9_]*$/u.test(name)) {
+    unsupportedCapability(language, `record type identifier '${String(name)}'`, location)
+  }
+  const reservedName = language == "php" ? name.toLowerCase() : name
+
+  if (reservedWords[language].has(reservedName) || reservedTypeNames[language]?.has(name)) {
+    unsupportedCapability(language, `record type identifier '${name}'`, location)
   }
 }
 

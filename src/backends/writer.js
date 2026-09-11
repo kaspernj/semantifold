@@ -18,6 +18,8 @@ export class SourceWriter {
     this.filename = filename
     this.language = language
     this.index = index
+    this.records = new Map((module.records ?? []).map((record) => [record.id, record]))
+    this.fields = new Map((module.records ?? []).flatMap((record) => record.fields.map((field) => [field.id, field])))
     /** @type {string[]} */
     this.parts = []
     /** @type {import("../semantic/types.js").SemantifoldMappingSpan[]} */
@@ -42,6 +44,32 @@ export class SourceWriter {
    */
   occurrencePath(node) {
     return this.index.recordFor(node).path
+  }
+
+  /**
+   * Resolves a validated nominal declaration identity for target emission.
+   * @param {string} declarationId - Semantic record identity.
+   * @returns {import("../semantic/types.js").RecordDeclaration} Record declaration.
+   */
+  recordForId(declarationId) {
+    const record = this.records.get(declarationId)
+
+    if (!record) throw new RangeError(`Unknown validated record identity '${declarationId}'.`)
+
+    return record
+  }
+
+  /**
+   * Resolves a validated field identity for target emission.
+   * @param {string} fieldId - Semantic field identity.
+   * @returns {import("../semantic/types.js").RecordField} Record field.
+   */
+  fieldForId(fieldId) {
+    const field = this.fields.get(fieldId)
+
+    if (!field) throw new RangeError(`Unknown validated field identity '${fieldId}'.`)
+
+    return field
   }
 
   /**

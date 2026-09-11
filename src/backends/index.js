@@ -38,6 +38,10 @@ export function generateArtifactSource({language, filename, mapDirective = "none
   if (record.artifactMultiplicity != "single") unsupportedRole(language, "single-text backend", module?.location)
   if (filename === undefined) filename = record.defaultFilename
   if (sourceMapFilename === undefined) sourceMapFilename = `${filename}.map`
+  if (Array.isArray(module?.records) && module.records.length > 0 && !record.features.closedRecords) {
+    unsupportedCapability(/** @type {import("../semantic/types.js").BackendLanguage} */ (language),
+      "Task 009 closed records", module.records[0].location ?? module.location)
+  }
   if (language == "cpp" || language == "kotlin" || language == "swift") validateNativeGraph(module, language)
   validateBackendModule(module, /** @type {import("../semantic/types.js").BackendLanguage} */ (language))
 

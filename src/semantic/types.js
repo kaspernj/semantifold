@@ -8,8 +8,8 @@
 /** @typedef {SemanticTypeName | "void"} FunctionReturnTypeName */
 /** @typedef {"IntegerNegate" | "BooleanNot"} SemanticUnaryOperation */
 /** @typedef {"IntegerAdd" | "IntegerSubtract" | "IntegerMultiply" | "BooleanAnd" | "BooleanOr" | "IntegerEqual" | "IntegerNotEqual" | "BooleanEqual" | "BooleanNotEqual" | "StringEqual" | "StringNotEqual" | "IntegerLessThan" | "IntegerLessThanOrEqual" | "IntegerGreaterThan" | "IntegerGreaterThanOrEqual" | "StringConcat"} SemanticBinaryOperation */
-/** @typedef {"function" | "parameter" | "local" | "iteration"} SemanticSymbolKind */
-/** @typedef {"declaration" | "read" | "write" | "call"} SemanticSymbolRole */
+/** @typedef {"record" | "field" | "function" | "parameter" | "local" | "iteration"} SemanticSymbolKind */
+/** @typedef {"declaration" | "type" | "construct" | "member" | "read" | "write" | "call"} SemanticSymbolRole */
 /** @typedef {"parse" | "generate" | "restore" | "compile" | "link" | "validate" | "instantiate" | "execute"} AcceptanceStage */
 /** @typedef {"entry" | "source" | "manifest" | "support" | "mapping" | "resource" | "loader"} GeneratedArtifactRole */
 
@@ -41,6 +41,7 @@
  * @property {boolean} immutableCollections - Task 006 recursive immutable lists/maps, total access, and size.
  * @property {boolean} optionalValues - Task 007 explicit optional values, presence tests, and guarded unwrap.
  * @property {boolean} orderedListIteration - Task 008 ordered immutable-list iteration and nearest-loop control.
+ * @property {boolean} closedRecords - Task 009 nominal closed immutable records, construction, and member reads.
  */
 
 /**
@@ -156,7 +157,7 @@
  * @property {string} name - Semantic symbol name.
  * @property {SemanticSymbolKind} kind - Symbol category.
  * @property {string} declarationNodeId - Declaring node identity.
- * @property {string} [semanticDeclarationId] - Function declaration identity when kind is function.
+ * @property {string} [semanticDeclarationId] - Stable semantic declaration identity for record, field, and function symbols.
  * @property {SourceLocation} location - Exact declaration-name range.
  * @property {SemanticSymbolReference[]} references - Ordered resolved references.
  */
@@ -314,7 +315,14 @@
  * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned outer and constituent ranges.
  */
 
-/** @typedef {TypeReference | ListType | MapType | OptionalType} SemanticValueType */
+/**
+ * @typedef RecordType
+ * @property {"RecordType"} kind - Nominal record-type discriminator.
+ * @property {string} declarationId - Stable module-local record declaration identity.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned type-name range.
+ */
+
+/** @typedef {TypeReference | ListType | MapType | OptionalType | RecordType} SemanticValueType */
 
 /**
  * @typedef FunctionReturnTypeReference
@@ -325,7 +333,7 @@
 
 /** @typedef {SemanticValueType | FunctionReturnTypeReference} SemanticFunctionReturnType */
 
-/** @typedef {SemanticTypeName | {kind: "ListType", elementType: SemanticTypeIdentity} | {kind: "MapType", keyType: SemanticTypeIdentity, valueType: SemanticTypeIdentity} | {kind: "OptionalType", valueType: SemanticTypeIdentity}} SemanticTypeIdentity */
+/** @typedef {SemanticTypeName | {kind: "ListType", elementType: SemanticTypeIdentity} | {kind: "MapType", keyType: SemanticTypeIdentity, valueType: SemanticTypeIdentity} | {kind: "OptionalType", valueType: SemanticTypeIdentity} | {kind: "RecordType", declarationId: string}} SemanticTypeIdentity */
 /** @typedef {SemanticTypeIdentity | "void"} FunctionReturnTypeIdentity */
 
 /**
@@ -493,7 +501,25 @@
  * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
  */
 
-/** @typedef {IdentifierExpression | IntegerLiteral | BooleanLiteral | StringLiteral | OptionalNone | OptionalSome | OptionalIsPresent | OptionalUnwrap | ListLiteral | MapLiteral | ListIndexExpression | MapLookupExpression | CollectionSizeExpression | UnaryExpression | BinaryExpression | CallExpression} Expression */
+/**
+ * @typedef RecordConstruction
+ * @property {"RecordConstruction"} kind - Nominal record construction.
+ * @property {RecordType} record - Resolved record declaration identity.
+ * @property {Expression[]} arguments - Complete field-ordered constructor arguments.
+ * @property {SourceLocation} location - Complete construction source location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned record-name range.
+ */
+
+/**
+ * @typedef MemberRead
+ * @property {"MemberRead"} kind - Nominal immutable record-field read.
+ * @property {Expression} receiver - Record-valued receiver.
+ * @property {string} field - Stable resolved field identity after frontend validation.
+ * @property {SourceLocation} location - Complete member-read source location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned member-name range.
+ */
+
+/** @typedef {IdentifierExpression | IntegerLiteral | BooleanLiteral | StringLiteral | OptionalNone | OptionalSome | OptionalIsPresent | OptionalUnwrap | ListLiteral | MapLiteral | ListIndexExpression | MapLookupExpression | CollectionSizeExpression | UnaryExpression | BinaryExpression | CallExpression | RecordConstruction | MemberRead} Expression */
 
 /**
  * @typedef LocalDeclaration
@@ -599,6 +625,26 @@
  */
 
 /**
+ * @typedef RecordField
+ * @property {"RecordField"} kind - Closed record-field discriminator.
+ * @property {string} [id] - Stable module-local field identity, required after frontend validation.
+ * @property {string} name - Field name.
+ * @property {SemanticValueType} type - Exact field type.
+ * @property {SourceLocation} location - Field declaration source location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned name/type ranges.
+ */
+
+/**
+ * @typedef RecordDeclaration
+ * @property {"RecordDeclaration"} kind - Nominal closed immutable record declaration.
+ * @property {string} [id] - Stable module-local declaration identity, required after frontend validation.
+ * @property {string} name - Record name.
+ * @property {RecordField[]} fields - Ordered unique visible fields.
+ * @property {SourceLocation} location - Complete declaration source location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned declaration-name range.
+ */
+
+/**
  * @typedef PrintStatement
  * @property {"PrintStatement"} kind - Node discriminator.
  * @property {Expression} expression - Printed expression.
@@ -617,6 +663,7 @@
 /**
  * @typedef SemanticModule
  * @property {"Module"} kind - Node discriminator.
+ * @property {RecordDeclaration[]} records - Top-level nominal record declarations in source order.
  * @property {FunctionDeclaration[]} functions - Top-level functions.
  * @property {EntryPoint} entryPoint - Executable entry point.
  * @property {SourceLocation} location - Source location.
@@ -624,7 +671,7 @@
  * @property {SemanticProvenance} [provenance] - Parser-authored source and identity index; optional for legacy caller-authored modules.
  */
 
-/** @typedef {SemanticModule | FunctionDeclaration | Parameter | ValueBinding | Block | Statement | EntryPoint | Expression | MapEntry | SemanticValueType | FunctionReturnTypeReference} SemanticNode */
+/** @typedef {SemanticModule | RecordDeclaration | RecordField | FunctionDeclaration | Parameter | ValueBinding | Block | Statement | EntryPoint | Expression | MapEntry | SemanticValueType | FunctionReturnTypeReference} SemanticNode */
 /** @typedef {SemanticNode} SemanticNodeWithoutLocations */
 
 export {}

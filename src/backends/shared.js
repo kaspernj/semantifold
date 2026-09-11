@@ -3,7 +3,7 @@
 import {unsupportedCapability} from "../diagnostic.js"
 import {isDenseArray} from "../array.js"
 import {validateBackendTypes} from "../semantic/validate.js"
-import {validateTargetBindingIdentifier, validateTargetIdentifier} from "./identifiers.js"
+import {validateTargetBindingIdentifier, validateTargetIdentifier, validateTargetTypeIdentifier} from "./identifiers.js"
 import {emitScalarType, emitStringLiteral} from "./scalars.js"
 
 /** @type {Readonly<Record<import("../semantic/types.js").SemanticUnaryOperation, string>>} */
@@ -31,6 +31,7 @@ const task005Languages = new Set(["php", "ruby", "javascript", "typescript", "ja
 const task006Languages = new Set(["php", "ruby", "javascript", "typescript", "java"])
 const task007Languages = new Set(["php", "ruby", "javascript", "typescript", "java"])
 const task008Languages = new Set(["php", "ruby", "javascript", "typescript", "java"])
+const task009Languages = new Set(["php", "ruby", "javascript", "typescript", "java"])
 const javaObjectInstanceMethodSignatures = new Set([
   "clone()", "equals(Object)", "finalize()", "getClass()", "hashCode()", "notify()", "notifyAll()", "toString()",
   "wait()", "wait(long)", "wait(long,int)"
@@ -50,6 +51,13 @@ export function validateBackendModule(module, language) {
   if (!Array.isArray(module.functions) || !module.entryPoint || typeof module.entryPoint != "object" ||
     module.entryPoint.kind != "EntryPoint") unsupportedCapability(language, "missing or invalid module members", module.location)
   if (module.functions.length == 0) unsupportedCapability(language, "module without functions", module.location)
+  const records = module.records ?? []
+
+  if (!Array.isArray(records)) unsupportedCapability(language, "missing or invalid record declarations", module.location)
+  if (records.length > 0 && !task009Languages.has(language)) {
+    unsupportedCapability(language, "Task 009 closed records", records[0]?.location ?? module.location)
+  }
+  validateRecordTargets(records, module.functions, language, module.location)
   if (!task008Languages.has(language)) rejectIterationStatements(module, language)
   if (!task007Languages.has(language)) rejectOptionalTypes(module, language)
   if (!task006Languages.has(language)) rejectCollectionTypes(module, language)
@@ -100,6 +108,80 @@ export function validateBackendModule(module, language) {
   }
   validateScaffoldingNames(module, language)
   validateBackendTypes(module, language)
+}
+
+/**
+ * Validates every nominal record identifier, identity, field, and target collision before output allocation.
+ * @param {import("../semantic/types.js").RecordDeclaration[]} records - Candidate records.
+ * @param {import("../semantic/types.js").FunctionDeclaration[]} functions - Candidate functions.
+ * @param {import("../semantic/types.js").BackendLanguage} language - Target language.
+ * @param {import("../semantic/types.js").SourceLocation | undefined} moduleLocation - Module fallback location.
+ * @returns {void}
+ */
+function validateRecordTargets(records, functions, language, moduleLocation) {
+  const declarationIds = new Set()
+  const targetNames = new Set()
+
+  for (const declaration of functions) {
+    if (!declaration || typeof declaration != "object" || Array.isArray(declaration)) continue
+    const name = Reflect.get(declaration, "name")
+
+    if (typeof name != "string") continue
+    targetNames.add(language == "php" ? name.toLowerCase() : name)
+  }
+
+  for (let recordIndex = 0; recordIndex < records.length; recordIndex += 1) {
+    const record = records[recordIndex]
+    const location = diagnosticLocation(record?.location, moduleLocation)
+    const recordKeys = record && typeof record == "object" && !Array.isArray(record)
+      ? Object.keys(record).filter((key) => key != "sourceProvenance").sort().join(",")
+      : ""
+
+    if (!record || typeof record != "object" || Array.isArray(record) || record.kind != "RecordDeclaration" ||
+      recordKeys != "fields,id,kind,location,name" || !isDenseArray(record.fields)) {
+      unsupportedCapability(language, "missing or invalid record declaration", location)
+    }
+    requireSemanticLocation(record.location, language, "record declaration location", moduleLocation)
+    validateTargetTypeIdentifier(language, record.name, record.location)
+    if (record.id != `record:${recordIndex}` || declarationIds.has(record.id)) {
+      unsupportedCapability(language, "duplicate or invalid record declaration identity", record.location)
+    }
+    declarationIds.add(record.id)
+    const targetName = language == "php" ? record.name.toLowerCase() : record.name
+
+    if (targetNames.has(targetName)) unsupportedCapability(language, `record declaration collision '${record.name}'`, record.location)
+    targetNames.add(targetName)
+    const fieldNames = new Set()
+
+    for (let fieldIndex = 0; fieldIndex < record.fields.length; fieldIndex += 1) {
+      const field = record.fields[fieldIndex]
+      const fieldLocation = diagnosticLocation(field?.location, record.location)
+      const fieldKeys = field && typeof field == "object" && !Array.isArray(field)
+        ? Object.keys(field).filter((key) => key != "sourceProvenance").sort().join(",")
+        : ""
+
+      if (!field || typeof field != "object" || Array.isArray(field) || field.kind != "RecordField" ||
+        fieldKeys != "id,kind,location,name,type") {
+        unsupportedCapability(language, "missing or invalid record field", fieldLocation)
+      }
+      requireSemanticLocation(field.location, language, "record field location", record.location)
+      if (field.id != `${record.id}:field:${fieldIndex}`) {
+        unsupportedCapability(language, "duplicate or invalid record field identity", field.location)
+      }
+      validateTargetIdentifier(language, field.name, "record field", field.location)
+      const collision = language == "javascript" && ["constructor", "prototype", "__proto__"].includes(field.name) ||
+        language == "typescript" && ["constructor", "prototype", "__proto__"].includes(field.name) ||
+        language == "php" && field.name.toLowerCase().startsWith("__") ||
+        language == "ruby" && ["initialize", "freeze", "send", "public_send", "method", "singleton_class"].includes(field.name) ||
+        language == "java" && javaObjectInstanceMethodSignatures.has(`${field.name}()`)
+
+      if (collision) unsupportedCapability(language, `record field collision '${field.name}'`, field.location)
+      const normalized = language == "php" ? field.name.toLowerCase() : field.name
+
+      if (fieldNames.has(normalized)) unsupportedCapability(language, `duplicate target record field '${field.name}'`, field.location)
+      fieldNames.add(normalized)
+    }
+  }
 }
 
 /**
@@ -439,6 +521,10 @@ function expressionContainsKind(expression, kind) {
     return expressionContainsKind(expression.left, kind) || expressionContainsKind(expression.right, kind)
   }
   if (expression.kind == "CallExpression") return expression.arguments.some((argument) => expressionContainsKind(argument, kind))
+  if (expression.kind == "RecordConstruction") {
+    return expression.arguments.some((argument) => expressionContainsKind(argument, kind))
+  }
+  if (expression.kind == "MemberRead") return expressionContainsKind(expression.receiver, kind)
   if (expression.kind == "ListLiteral") return expression.elements.some((element) => expressionContainsKind(element, kind))
   if (expression.kind == "MapLiteral") {
     return expression.entries.some((entry) => expressionContainsKind(entry.key, kind) || expressionContainsKind(entry.value, kind))
@@ -847,6 +933,25 @@ function validateExpression(expression, language, ownerLocation, allowJavaNegate
     for (const argument of candidate.arguments) validateExpression(argument, language, location, false, expressionPath)
     return
   }
+  if (candidate.kind == "RecordConstruction") {
+    const fields = Object.keys(candidate).filter((key) => key != "sourceProvenance").sort().join(",")
+
+    if (fields != "arguments,kind,location,record" || !candidate.record || candidate.record.kind != "RecordType" ||
+      typeof candidate.record.declarationId != "string" || !isDenseArray(candidate.arguments)) {
+      unsupportedCapability(language, "malformed RecordConstruction", location)
+    }
+    for (const argument of candidate.arguments) validateExpression(argument, language, location, false, expressionPath)
+    return
+  }
+  if (candidate.kind == "MemberRead") {
+    const fields = Object.keys(candidate).filter((key) => key != "sourceProvenance").sort().join(",")
+
+    if (fields != "field,kind,location,receiver" || typeof candidate.field != "string") {
+      unsupportedCapability(language, "malformed MemberRead", location)
+    }
+    validateExpression(candidate.receiver, language, location, false, expressionPath)
+    return
+  }
   if (candidate.kind == "UnaryExpression") {
     if (!Object.hasOwn(unaryOperationSyntax, String(candidate.operation))) {
       unsupportedCapability(language, `unary operation ${String(candidate.operation)}`, location)
@@ -928,6 +1033,10 @@ function knownIntegerValue(expression) {
  * @returns {void}
  */
 export function emitType(writer, type, path, language, javaBoxed = false) {
+  if (type.kind == "RecordType") {
+    writer.mapped(writer.recordForId(type.declarationId).name, {mappingKind: "exact", node: type, path, role: "type"})
+    return
+  }
   if (type.kind == "TypeReference") {
     const spelling = language == "java" && javaBoxed
       ? type.name == "integer" ? "Integer" : type.name == "boolean" ? "Boolean" : type.name == "string" ? "String" : "void"
@@ -1100,6 +1209,26 @@ export function emitExpression(writer, expression, path, language, emitIdentifie
       emitExpression(writer, argument, `${path}/arguments/${index}`, language, emitIdentifier)
     })
     writer.mapped(")", {mappingKind: "anchor", node: expression, path})
+    return
+  }
+  if (expression.kind == "RecordConstruction") {
+    const record = writer.recordForId(expression.record.declarationId)
+    const prefix = language == "ruby" ? `${record.name}.new(` : `new ${record.name}(`
+
+    writer.mapped(prefix, {mappingKind: "exact", node: expression, path, role: "record"})
+    expression.arguments.forEach((argument, index) => {
+      if (index > 0) writer.synthetic(", ", "record argument separator", [expression], [path])
+      emitExpression(writer, argument, `${path}/arguments/${index}`, language, emitIdentifier)
+    })
+    writer.mapped(")", {mappingKind: "anchor", node: expression, path})
+    return
+  }
+  if (expression.kind == "MemberRead") {
+    emitExpression(writer, expression.receiver, `${path}/receiver`, language, emitIdentifier)
+    const field = writer.fieldForId(expression.field)
+    const spelling = language == "php" ? `->${field.name}` : language == "java" ? `.${field.name}()` : `.${field.name}`
+
+    writer.mapped(spelling, {mappingKind: "exact", node: expression, path, role: "member"})
     return
   }
 
@@ -1277,6 +1406,10 @@ function expressionContainsSignProducingOperation(expression) {
   if (expression.kind == "CallExpression") {
     return expression.arguments.some((argument) => expressionContainsSignProducingOperation(argument))
   }
+  if (expression.kind == "RecordConstruction") {
+    return expression.arguments.some((argument) => expressionContainsSignProducingOperation(argument))
+  }
+  if (expression.kind == "MemberRead") return expressionContainsSignProducingOperation(expression.receiver)
   if (expression.kind == "ListLiteral") return expression.elements.some((element) => expressionContainsSignProducingOperation(element))
   if (expression.kind == "MapLiteral") {
     return expression.entries.some((entry) => expressionContainsSignProducingOperation(entry.key) ||

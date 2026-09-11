@@ -10,6 +10,28 @@ import {emitExpression, emitType, requiresCanonicalZeroRendering} from "./shared
  */
 export function generateTypeScript(module, writer) {
   const canonicalizeZero = requiresCanonicalZeroRendering(module)
+  const records = module.records ?? []
+
+  records.forEach((record, recordIndex) => {
+    const recordPath = `/records/${recordIndex}`
+
+    if (recordIndex > 0) writer.synthetic("\n\n", "record declaration separator", [record], [recordPath])
+    writer.mapped("class", {mappingKind: "anchor", node: record, path: recordPath})
+    writer.synthetic(" ", "record declaration spacing", [record], [recordPath])
+    writer.mapped(record.name, {mappingKind: "exact", node: record, path: recordPath, role: "name"})
+    writer.synthetic(" {\n  constructor(", "TypeScript record constructor scaffolding", [record], [recordPath])
+    record.fields.forEach((field, fieldIndex) => {
+      const fieldPath = `${recordPath}/fields/${fieldIndex}`
+
+      if (fieldIndex) writer.synthetic(", ", "record field separator", [record], [recordPath])
+      writer.synthetic("readonly ", "TypeScript readonly field scaffolding", [field], [fieldPath])
+      writer.mapped(field.name, {mappingKind: "exact", node: field, path: fieldPath, role: "name"})
+      writer.synthetic(": ", "type separator", [field], [fieldPath])
+      emitType(writer, field.type, `${fieldPath}/type`, "typescript")
+    })
+    writer.synthetic(") {}\n}", "TypeScript record constructor scaffolding", [record], [recordPath])
+  })
+  if (records.length > 0) writer.synthetic("\n\n", "record/function separator", [module])
 
   module.functions.forEach((declaration, functionIndex) => {
     if (functionIndex > 0) writer.synthetic("\n\n", "declaration separator", [declaration])

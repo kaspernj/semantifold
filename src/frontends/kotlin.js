@@ -677,7 +677,7 @@ class KotlinReader {
     }
     const module = {
       entryPoint: this.main(semanticParts[mainIndex]), functions: declarations.map((declaration) => this.function(declaration)),
-      kind: /** @type {const} */ ("Module"), location: this.location(root)
+      kind: /** @type {const} */ ("Module"), location: this.location(root), records: []
     }
 
     validateParsedModule(module, "kotlin")

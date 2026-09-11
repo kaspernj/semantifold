@@ -8,12 +8,12 @@ import {withAdaptedOperation} from "../semantic/operators.js"
 import {withParserRanges} from "../semantic/provenance.js"
 import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
 import {requireSourceReturnType, requireSourceScalarType} from "./scalars.js"
-import {documentedValueType, iterationBindingType, iterationOperandType, listType, mapType, optionalType} from "./types.js"
+import {documentedValueType, iterationBindingType, iterationOperandType, listType, mapType, optionalType, recordType} from "./types.js"
 
 /** @typedef {NonNullable<import("@babel/parser").ParseResult<import("@babel/types").File>["tokens"]>[number]} BabelToken */
 /** @typedef {{byStart: Map<number, BabelToken>, tokens: BabelToken[]}} BabelTokenIndex */
 /** @typedef {{name: string, nameLocation: import("../semantic/types.js").SourceLocation, parameters: import("../semantic/types.js").Parameter[], returnType: import("../semantic/types.js").SemanticFunctionReturnType, location: import("../semantic/types.js").SourceLocation}} JavaScriptFunctionSignature */
-/** @typedef {{bindings: Map<string, import("../semantic/types.js").SemanticValueType>, functions: Map<string, JavaScriptFunctionSignature>, returnType?: import("../semantic/types.js").SemanticFunctionReturnType}} JavaScriptConversionContext */
+/** @typedef {{bindings: Map<string, import("../semantic/types.js").SemanticValueType>, functions: Map<string, JavaScriptFunctionSignature>, recordNames: Map<string, import("../semantic/types.js").RecordDeclaration>, records: Map<string, import("../semantic/types.js").RecordDeclaration>, returnType?: import("../semantic/types.js").SemanticFunctionReturnType}} JavaScriptConversionContext */
 
 /** @type {WeakMap<object, BabelTokenIndex>} */
 const nodeTokens = new WeakMap()
@@ -148,7 +148,7 @@ function commentTagLocation(comment, tag, field, filename, source) {
  * @param {boolean} [preserveOptional] - Whether an optional identifier remains wrapped.
  * @returns {import("../semantic/types.js").Expression} Semantic expression.
  */
-function convertExpression(node, language, filename, source, context = {bindings: new Map(), functions: new Map()}, expectedType, preserveOptional = false) {
+function convertExpression(node, language, filename, source, context = {bindings: new Map(), functions: new Map(), recordNames: new Map(), records: new Map()}, expectedType, preserveOptional = false) {
   const location = nodeLocation(node, filename, source)
 
   if (node.type == "Identifier" && node.name == "undefined") {
@@ -226,6 +226,7 @@ function convertExpression(node, language, filename, source, context = {bindings
   }
 
   if (node.type == "NewExpression" && node.callee.type == "Identifier" && node.callee.name == "Map") {
+    if (expectedType?.kind == "RecordType") return unsupportedSyntax(language, "Map used as a structural record substitute", location)
     if (node.typeArguments || node.typeParameters || node.arguments.length > 1) {
       return unsupportedSyntax(language, "generic or invalid Map construction", location)
     }
@@ -275,8 +276,30 @@ function convertExpression(node, language, filename, source, context = {bindings
     return withParserRanges({entries, kind: /** @type {const} */ ("MapLiteral"), location}, {literal: location})
   }
 
+  if (node.type == "NewExpression" && node.callee.type == "Identifier" && context.recordNames.has(node.callee.name)) {
+    if (node.typeArguments || node.typeParameters) return unsupportedSyntax(language, "generic record construction", location)
+    const declaration = /** @type {import("../semantic/types.js").RecordDeclaration} */ (context.recordNames.get(node.callee.name))
+    const arguments_ = node.arguments.map((argument, index) => {
+      if (argument.type == "SpreadElement" || argument.type == "ArgumentPlaceholder") {
+        return unsupportedSyntax(language, argument.type, nodeLocation(argument, filename, source))
+      }
+
+      return convertExpression(argument, language, filename, source, context, declaration.fields[index]?.type)
+    })
+
+    return withParserRanges({
+      arguments: arguments_,
+      kind: /** @type {const} */ ("RecordConstruction"),
+      location,
+      record: recordType(/** @type {string} */ (declaration.id), identifierLocation(node.callee, filename, source))
+    }, {record: identifierLocation(node.callee, filename, source)})
+  }
+
   if (node.type == "MemberExpression" && !node.optional && node.object.type != "Super") {
     if (node.computed) {
+      if (knownExpressionType(node.object, context)?.kind == "RecordType") {
+        return unsupportedSyntax(language, "computed record member access", nodeLocation(node.property, filename, source))
+      }
       if (node.property.type == "PrivateName") return unsupportedSyntax(language, node.property.type, location)
 
       return withParserRanges({
@@ -290,12 +313,30 @@ function convertExpression(node, language, filename, source, context = {bindings
       })
     }
     if (node.property.type == "Identifier" && ["length", "size"].includes(node.property.name)) {
+      const receiverType = knownExpressionType(node.object, context)
+
+      if (receiverType?.kind == "RecordType") {
+        return withParserRanges({
+          field: node.property.name,
+          kind: /** @type {const} */ ("MemberRead"),
+          location,
+          receiver: convertExpression(node.object, language, filename, source, context)
+        }, {member: identifierLocation(node.property, filename, source)})
+      }
       return withParserRanges({
         collection: convertExpression(node.object, language, filename, source, context),
         collectionKind: /** @type {"list" | "map"} */ (node.property.name == "length" ? "list" : "map"),
         kind: /** @type {const} */ ("CollectionSizeExpression"),
         location
       }, {operator: identifierLocation(node.property, filename, source)})
+    }
+    if (node.property.type == "Identifier") {
+      return withParserRanges({
+        field: node.property.name,
+        kind: /** @type {const} */ ("MemberRead"),
+        location,
+        receiver: convertExpression(node.object, language, filename, source, context)
+      }, {member: identifierLocation(node.property, filename, source)})
     }
   }
 
@@ -424,6 +465,18 @@ function knownExpressionType(node, context) {
   if (node.type == "CallExpression" && node.callee.type == "Identifier") {
     return context.functions.get(node.callee.name)?.returnType
   }
+  if (node.type == "NewExpression" && node.callee.type == "Identifier") {
+    const declaration = context.recordNames.get(node.callee.name)
+
+    if (declaration?.id) return {declarationId: declaration.id, kind: "RecordType"}
+  }
+  if (node.type == "MemberExpression" && !node.computed && node.object.type != "Super" && node.property.type == "Identifier") {
+    const receiver = knownExpressionType(node.object, context)
+    const declaration = receiver?.kind == "RecordType" ? context.records.get(receiver.declarationId) : undefined
+    const memberName = node.property.name
+
+    return declaration?.fields.find((field) => field.name == memberName)?.type
+  }
   if (node.type == "MemberExpression" && node.computed && node.object.type != "Super") {
     const collectionType = knownExpressionType(node.object, context)
 
@@ -509,8 +562,8 @@ function convertLocalStatement(node, language, filename, source, context) {
     if (!declarator.init) return unsupportedSyntax(language, "uninitialized declaration", declaratorLocation)
 
     const type = language == "typescript"
-      ? convertTypeScriptType(declarator.id.typeAnnotation, `Local '${declarator.id.name}'`, declaratorLocation, filename, source)
-      : localJavaScriptType(node, declarator.id.name, filename, source)
+      ? convertTypeScriptType(declarator.id.typeAnnotation, `Local '${declarator.id.name}'`, declaratorLocation, filename, source, context.recordNames)
+      : localJavaScriptType(node, declarator.id.name, filename, source, context.recordNames)
 
     const semantic = withParserRanges({
       initializer: convertExpression(declarator.init, language, filename, source, context, type),
@@ -560,9 +613,10 @@ function convertLocalStatement(node, language, filename, source, context) {
  * @param {string} name - Local name.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} recordNames - Record declarations by source name.
  * @returns {import("../semantic/types.js").SemanticValueType} Semantic type.
  */
-function localJavaScriptType(node, name, filename, source) {
+function localJavaScriptType(node, name, filename, source, recordNames) {
   const comment = node.leadingComments?.at(-1)
   const location = nodeLocation(node, filename, source)
 
@@ -587,7 +641,8 @@ function localJavaScriptType(node, name, filename, source) {
     `Local '${name}'`,
     location,
     source,
-    tag ? commentTagLocation(comment, tag, "type", filename, source) : location
+    tag ? commentTagLocation(comment, tag, "type", filename, source) : location,
+    recordNames
   )
 }
 
@@ -672,7 +727,7 @@ function convertForEach(node, language, filename, source, canonicalZeroRequired,
   const bindingLocation = identifierLocation(declarator.id, filename, source)
   const inferredType = collectionType.kind == "ListType" ? collectionType.elementType : collectionType.valueType
   const bindingType = language == "typescript" && declarator.id.typeAnnotation
-    ? convertTypeScriptType(declarator.id.typeAnnotation, `Iteration binding '${declarator.id.name}'`, bindingLocation, filename, source)
+    ? convertTypeScriptType(declarator.id.typeAnnotation, `Iteration binding '${declarator.id.name}'`, bindingLocation, filename, source, context.recordNames)
     : iterationBindingType(inferredType, bindingLocation)
   const valueBinding = withParserRanges({
     kind: /** @type {const} */ ("ValueBinding"),
@@ -770,12 +825,13 @@ function jsdocTypes(node, filename, source) {
  * @param {import("../semantic/types.js").SourceLocation} location - Source location.
  * @param {string} source - Complete parser input.
  * @param {import("../semantic/types.js").SourceLocation} [typeLocation] - Exact type token location.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} [recordNames] - Record declarations by source name.
  * @returns {import("../semantic/types.js").SemanticValueType} Semantic type.
  */
-function convertType(sourceType, language, subject, location, source, typeLocation = location) {
+function convertType(sourceType, language, subject, location, source, typeLocation = location, recordNames = new Map()) {
   if (language != "javascript") return requireSourceScalarType(language, sourceType, subject, location, typeLocation)
 
-  return documentedValueType({language, location: typeLocation, ownerLocation: location, source, sourceType, subject})
+  return documentedValueType({language, location: typeLocation, ownerLocation: location, records: recordNames, source, sourceType, subject})
 }
 
 /**
@@ -786,12 +842,13 @@ function convertType(sourceType, language, subject, location, source, typeLocati
  * @param {import("../semantic/types.js").SourceLocation} location - Function location.
  * @param {string} source - Complete parser input.
  * @param {import("../semantic/types.js").SourceLocation} [typeLocation] - Exact annotation location.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} [recordNames] - Record declarations by source name.
  * @returns {import("../semantic/types.js").SemanticFunctionReturnType} Semantic return type.
  */
-function convertReturnType(sourceType, language, subject, location, source, typeLocation = location) {
+function convertReturnType(sourceType, language, subject, location, source, typeLocation = location, recordNames = new Map()) {
   if (sourceType == "void") return requireSourceReturnType(language, sourceType, subject, location, typeLocation)
 
-  return convertType(sourceType, language, subject, location, source, typeLocation)
+  return convertType(sourceType, language, subject, location, source, typeLocation, recordNames)
 }
 
 /**
@@ -801,15 +858,16 @@ function convertReturnType(sourceType, language, subject, location, source, type
  * @param {import("../semantic/types.js").SourceLocation} ownerLocation - Owning declaration location.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} [recordNames] - Record declarations by source name.
  * @returns {import("../semantic/types.js").SemanticValueType} Semantic type.
  */
-function convertTypeScriptType(annotation, subject, ownerLocation, filename, source) {
+function convertTypeScriptType(annotation, subject, ownerLocation, filename, source, recordNames = new Map()) {
   if (!annotation) return missingType("typescript", subject, ownerLocation)
   if (annotation.type != "TSTypeAnnotation") {
     return unsupportedSyntax("typescript", "unsupported scalar type", nodeLocation(annotation, filename, source))
   }
 
-  return convertTypeScriptValueTypeNode(annotation.typeAnnotation, subject, ownerLocation, filename, source)
+  return convertTypeScriptValueTypeNode(annotation.typeAnnotation, subject, ownerLocation, filename, source, recordNames)
 }
 
 /**
@@ -819,14 +877,21 @@ function convertTypeScriptType(annotation, subject, ownerLocation, filename, sou
  * @param {import("../semantic/types.js").SourceLocation} ownerLocation - Owning declaration.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} [recordNames] - Record declarations by source name.
  * @returns {import("../semantic/types.js").SemanticValueType} Semantic value type.
  */
-function convertTypeScriptValueTypeNode(typeNode, subject, ownerLocation, filename, source) {
+function convertTypeScriptValueTypeNode(typeNode, subject, ownerLocation, filename, source, recordNames = new Map()) {
   const sourceType = typeNode.type == "TSNumberKeyword" ? "number" :
     typeNode.type == "TSBooleanKeyword" ? "boolean" : typeNode.type == "TSStringKeyword" ? "string" : undefined
 
   if (sourceType) {
     return requireSourceScalarType("typescript", sourceType, subject, ownerLocation, nodeLocation(typeNode, filename, source))
+  }
+  if (typeNode.type == "TSTypeReference" && typeNode.typeName.type == "Identifier" && !typeNode.typeParameters &&
+    recordNames.has(typeNode.typeName.name)) {
+    const declaration = /** @type {import("../semantic/types.js").RecordDeclaration} */ (recordNames.get(typeNode.typeName.name))
+
+    return recordType(/** @type {string} */ (declaration.id), nodeLocation(typeNode, filename, source))
   }
   if (typeNode.type == "TSUnionType") {
     if (typeNode.types.length != 2 || typeNode.types[1].type != "TSNullKeyword") {
@@ -841,7 +906,7 @@ function convertTypeScriptValueTypeNode(typeNode, subject, ownerLocation, filena
     const valueNode = typeNode.types[0]
 
     return optionalType(
-      convertTypeScriptValueTypeNode(valueNode, subject, ownerLocation, filename, source),
+      convertTypeScriptValueTypeNode(valueNode, subject, ownerLocation, filename, source, recordNames),
       nodeLocation(typeNode, filename, source),
       nodeLocation(valueNode, filename, source)
     )
@@ -850,7 +915,7 @@ function convertTypeScriptValueTypeNode(typeNode, subject, ownerLocation, filena
     const elementNode = typeNode.typeAnnotation.elementType
 
     return listType(
-      convertTypeScriptValueTypeNode(elementNode, subject, ownerLocation, filename, source),
+      convertTypeScriptValueTypeNode(elementNode, subject, ownerLocation, filename, source, recordNames),
       nodeLocation(typeNode, filename, source),
       nodeLocation(elementNode, filename, source)
     )
@@ -861,20 +926,20 @@ function convertTypeScriptValueTypeNode(typeNode, subject, ownerLocation, filena
 
     if (typeNode.typeName.name == "ReadonlyArray" && parameters.length == 1) {
       return listType(
-        convertTypeScriptValueTypeNode(parameters[0], subject, ownerLocation, filename, source),
+        convertTypeScriptValueTypeNode(parameters[0], subject, ownerLocation, filename, source, recordNames),
         nodeLocation(typeNode, filename, source),
         nodeLocation(parameters[0], filename, source)
       )
     }
     if (typeNode.typeName.name == "ReadonlyMap" && parameters.length == 2) {
-      const keyType = convertTypeScriptValueTypeNode(parameters[0], subject, ownerLocation, filename, source)
+      const keyType = convertTypeScriptValueTypeNode(parameters[0], subject, ownerLocation, filename, source, recordNames)
 
       if (keyType.kind != "TypeReference") {
         return unsupportedSyntax("typescript", "map key type other than string", nodeLocation(parameters[0], filename, source))
       }
       return mapType(
         keyType,
-        convertTypeScriptValueTypeNode(parameters[1], subject, ownerLocation, filename, source),
+        convertTypeScriptValueTypeNode(parameters[1], subject, ownerLocation, filename, source, recordNames),
         nodeLocation(typeNode, filename, source),
         nodeLocation(parameters[0], filename, source),
         nodeLocation(parameters[1], filename, source)
@@ -892,9 +957,10 @@ function convertTypeScriptValueTypeNode(typeNode, subject, ownerLocation, filena
  * @param {import("../semantic/types.js").SourceLocation} ownerLocation - Function location.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} [recordNames] - Record declarations by source name.
  * @returns {import("../semantic/types.js").SemanticFunctionReturnType} Semantic return type.
  */
-function convertTypeScriptReturnType(annotation, subject, ownerLocation, filename, source) {
+function convertTypeScriptReturnType(annotation, subject, ownerLocation, filename, source, recordNames = new Map()) {
   if (!annotation) return requireSourceReturnType("typescript", undefined, subject, ownerLocation)
   if (annotation.type != "TSTypeAnnotation") {
     return unsupportedSyntax("typescript", "unsupported return type", nodeLocation(annotation, filename, source))
@@ -905,7 +971,7 @@ function convertTypeScriptReturnType(annotation, subject, ownerLocation, filenam
     return requireSourceReturnType("typescript", "void", subject, ownerLocation, nodeLocation(typeNode, filename, source))
   }
 
-  return convertTypeScriptValueTypeNode(typeNode, subject, ownerLocation, filename, source)
+  return convertTypeScriptValueTypeNode(typeNode, subject, ownerLocation, filename, source, recordNames)
 }
 
 /**
@@ -914,9 +980,10 @@ function convertTypeScriptReturnType(annotation, subject, ownerLocation, filenam
  * @param {"javascript" | "typescript"} language - Frontend language.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} recordNames - Record declarations by source name.
  * @returns {JavaScriptFunctionSignature} Semantic function signature.
  */
-function convertFunctionSignature(node, language, filename, source) {
+function convertFunctionSignature(node, language, filename, source, recordNames) {
   const location = nodeLocation(node, filename, source)
 
   if (!node.id) return unsupportedSyntax(language, "anonymous function", location)
@@ -933,8 +1000,8 @@ function convertFunctionSignature(node, language, filename, source) {
 
     const documentedType = documentedTypes?.parameters.get(parameter.name)
     const type = language == "javascript"
-      ? convertType(documentedType?.sourceType, language, `Parameter '${parameter.name}'`, parameterLocation, source, documentedType?.location)
-      : convertTypeScriptType(parameter.typeAnnotation, `Parameter '${parameter.name}'`, parameterLocation, filename, source)
+      ? convertType(documentedType?.sourceType, language, `Parameter '${parameter.name}'`, parameterLocation, source, documentedType?.location, recordNames)
+      : convertTypeScriptType(parameter.typeAnnotation, `Parameter '${parameter.name}'`, parameterLocation, filename, source, recordNames)
 
     return withParserRanges({
       kind: /** @type {const} */ ("Parameter"),
@@ -949,8 +1016,8 @@ function convertFunctionSignature(node, language, filename, source) {
   if (extraDocumentedParameter) return unsupportedSyntax(language, `annotation for unknown parameter '${extraDocumentedParameter}'`, location)
   const returnAnnotation = node.returnType
   const returnType = language == "javascript"
-    ? convertReturnType(documentedTypes?.returnType?.sourceType, language, `Function '${node.id.name}' return`, location, source, documentedTypes?.returnType?.location)
-    : convertTypeScriptReturnType(returnAnnotation, `Function '${node.id.name}' return`, location, filename, source)
+    ? convertReturnType(documentedTypes?.returnType?.sourceType, language, `Function '${node.id.name}' return`, location, source, documentedTypes?.returnType?.location, recordNames)
+    : convertTypeScriptReturnType(returnAnnotation, `Function '${node.id.name}' return`, location, filename, source, recordNames)
   return {
     location,
     name: node.id.name,
@@ -965,16 +1032,20 @@ function convertFunctionSignature(node, language, filename, source) {
  * @param {import("@babel/types").FunctionDeclaration} node - Babel function.
  * @param {JavaScriptFunctionSignature} signature - Converted signature.
  * @param {Map<string, JavaScriptFunctionSignature>} functions - Module signatures.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} recordNames - Record declarations by name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} records - Record declarations by identity.
  * @param {"javascript" | "typescript"} language - Frontend language.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
  * @param {boolean} canonicalZeroRequired - Whether generated scalar output may contain signed zero.
  * @returns {import("../semantic/types.js").FunctionDeclaration} Semantic function.
  */
-function convertFunction(node, signature, functions, language, filename, source, canonicalZeroRequired) {
+function convertFunction(node, signature, functions, recordNames, records, language, filename, source, canonicalZeroRequired) {
   const context = {
     bindings: new Map(signature.parameters.map((parameter) => [parameter.name, parameter.type])),
     functions,
+    recordNames,
+    records,
     returnType: signature.returnType
   }
   const body = convertBlock(node.body, language, filename, source, canonicalZeroRequired, context)
@@ -987,6 +1058,145 @@ function convertFunction(node, signature, functions, language, filename, source,
     parameters: signature.parameters,
     returnType: signature.returnType
   }, {name: signature.nameLocation})
+}
+
+/**
+ * Converts one exact TypeScript readonly constructor-parameter record profile.
+ * @param {import("@babel/types").ClassDeclaration} node - Class declaration.
+ * @param {import("../semantic/types.js").RecordDeclaration} declaration - Predeclared nominal identity.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} recordNames - All record declarations by name.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @returns {import("../semantic/types.js").RecordDeclaration} Semantic record declaration.
+ */
+function convertTypeScriptRecord(node, declaration, recordNames, filename, source) {
+  const location = nodeLocation(node, filename, source)
+  const implements_ = Reflect.get(node, "implements")
+  const mixins = Reflect.get(node, "mixins")
+
+  if (!node.id) return unsupportedSyntax("typescript", "anonymous record class", location)
+  if (node.superClass || (Array.isArray(implements_) && implements_.length) || node.decorators?.length || node.typeParameters || node.superTypeParameters ||
+    Reflect.get(node, "abstract") || Reflect.get(node, "declare") || (Array.isArray(mixins) && mixins.length)) {
+    return unsupportedSyntax("typescript", "record inheritance, decoration, or modifier", location)
+  }
+  if (node.body.body.length != 1 || node.body.body[0].type != "ClassMethod") {
+    const extra = node.body.body[1] ?? node.body.body[0] ?? node.body
+
+    return unsupportedSyntax("typescript", "record class body outside one constructor", nodeLocation(extra, filename, source))
+  }
+  const constructor = node.body.body[0]
+
+  if (constructor.kind != "constructor" || constructor.computed || constructor.static || constructor.async || constructor.generator ||
+    constructor.key.type != "Identifier" || constructor.key.name != "constructor" || constructor.decorators?.length ||
+    constructor.returnType || constructor.typeParameters || Reflect.get(constructor, "accessibility") ||
+    constructor.body.body.length != 0 || constructor.body.directives.length != 0) {
+    return unsupportedSyntax("typescript", "noncanonical record constructor", nodeLocation(constructor, filename, source))
+  }
+  declaration.fields = constructor.params.map((parameter) => {
+    const fieldLocation = nodeLocation(parameter, filename, source)
+
+    if (parameter.type != "TSParameterProperty" || parameter.readonly !== true || parameter.accessibility || parameter.override ||
+      parameter.parameter.type != "Identifier" || parameter.parameter.optional || parameter.parameter.decorators?.length) {
+      return unsupportedSyntax("typescript", "record field outside readonly parameter-property profile", fieldLocation)
+    }
+    const identifier = parameter.parameter
+    const field = {
+      kind: /** @type {const} */ ("RecordField"),
+      location: fieldLocation,
+      name: identifier.name,
+      type: convertTypeScriptType(identifier.typeAnnotation, `Record field '${identifier.name}'`, fieldLocation, filename, source, recordNames)
+    }
+
+    return withParserRanges(field, {name: identifierLocation(identifier, filename, source)})
+  })
+
+  return withParserRanges(declaration, {name: identifierLocation(node.id, filename, source)})
+}
+
+/**
+ * Converts one exact JSDoc constructor/readonly-assignment/freeze record profile.
+ * @param {import("@babel/types").ClassDeclaration} node - Class declaration.
+ * @param {import("../semantic/types.js").RecordDeclaration} declaration - Predeclared nominal identity.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} recordNames - Record declarations by name.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @returns {import("../semantic/types.js").RecordDeclaration} Semantic record declaration.
+ */
+function convertJavaScriptRecord(node, declaration, recordNames, filename, source) {
+  const location = nodeLocation(node, filename, source)
+  const implements_ = Reflect.get(node, "implements")
+  const mixins = Reflect.get(node, "mixins")
+
+  if (!node.id) return unsupportedSyntax("javascript", "anonymous record class", location)
+  if (node.superClass || node.decorators?.length || node.typeParameters || node.superTypeParameters ||
+    (Array.isArray(implements_) && implements_.length) || (Array.isArray(mixins) && mixins.length)) {
+    return unsupportedSyntax("javascript", "record inheritance or decoration", location)
+  }
+  if (node.body.body.length != 1 || node.body.body[0].type != "ClassMethod") {
+    return unsupportedSyntax("javascript", "record class body outside one constructor", nodeLocation(node.body.body[1] ?? node.body.body[0] ?? node.body, filename, source))
+  }
+  const constructor = node.body.body[0]
+
+  if (constructor.kind != "constructor" || constructor.computed || constructor.static || constructor.async || constructor.generator ||
+    constructor.key.type != "Identifier" || constructor.key.name != "constructor" || constructor.decorators?.length ||
+    constructor.returnType || constructor.typeParameters || constructor.body.directives.length) {
+    return unsupportedSyntax("javascript", "noncanonical record constructor", nodeLocation(constructor, filename, source))
+  }
+  const parameters = constructor.params
+
+  if (parameters.some((parameter) => parameter.type != "Identifier" || parameter.optional || parameter.decorators?.length)) {
+    const invalid = parameters.find((parameter) => parameter.type != "Identifier" || parameter.optional || parameter.decorators?.length)
+
+    return unsupportedSyntax("javascript", "noncanonical record constructor parameter", nodeLocation(invalid ?? constructor, filename, source))
+  }
+  const documented = jsdocTypes(/** @type {import("@babel/types").FunctionDeclaration} */ (/** @type {unknown} */ (constructor)), filename, source)
+
+  if (documented.returnType || documented.parameters.size != parameters.length || constructor.body.body.length != parameters.length + 1) {
+    return unsupportedSyntax("javascript", "incomplete record constructor profile", nodeLocation(constructor, filename, source))
+  }
+  declaration.fields = parameters.map((parameter, index) => {
+    const identifier = /** @type {import("@babel/types").Identifier} */ (parameter)
+    const statement = constructor.body.body[index]
+    const documentedType = documented.parameters.get(identifier.name)
+
+    if (!documentedType || statement.type != "ExpressionStatement" || statement.expression.type != "AssignmentExpression" ||
+      statement.expression.operator != "=" || statement.expression.left.type != "MemberExpression" || statement.expression.left.computed ||
+      statement.expression.left.object.type != "ThisExpression" || statement.expression.left.property.type != "Identifier" ||
+      statement.expression.left.property.name != identifier.name || statement.expression.right.type != "Identifier" ||
+      statement.expression.right.name != identifier.name) {
+      return unsupportedSyntax("javascript", "record field not initialized exactly once", nodeLocation(statement, filename, source))
+    }
+    const readonlyComment = statement.leadingComments?.at(-1)
+    const gap = readonlyComment ? source.slice(readonlyComment.end ?? 0, statement.start ?? 0) : ""
+    const tags = readonlyComment?.type == "CommentBlock" && readonlyComment.value.startsWith("*")
+      ? parseComment(`/*${readonlyComment.value}*/`)[0]?.tags ?? []
+      : []
+
+    if (!readonlyComment || !/^\s*$/u.test(gap) || tags.length != 1 || tags[0].tag != "readonly" ||
+      tags[0].name || tags[0].type || tags[0].description) {
+      return unsupportedSyntax("javascript", "record field without exact @readonly annotation", nodeLocation(statement, filename, source))
+    }
+    const field = {
+      kind: /** @type {const} */ ("RecordField"),
+      location: nodeLocation(statement, filename, source),
+      name: identifier.name,
+      type: convertType(documentedType.sourceType, "javascript", `Record field '${identifier.name}'`,
+        nodeLocation(identifier, filename, source), source, documentedType.location, recordNames)
+    }
+
+    return withParserRanges(field, {name: identifierLocation(statement.expression.left.property, filename, source)})
+  })
+  const freeze = constructor.body.body.at(-1)
+
+  if (!freeze || freeze.type != "ExpressionStatement" || freeze.expression.type != "CallExpression" || freeze.expression.optional ||
+    freeze.expression.arguments.length != 1 || freeze.expression.arguments[0].type != "ThisExpression" ||
+    freeze.expression.callee.type != "MemberExpression" || freeze.expression.callee.computed || freeze.expression.callee.optional ||
+    freeze.expression.callee.object.type != "Identifier" || freeze.expression.callee.object.name != "Object" ||
+    freeze.expression.callee.property.type != "Identifier" || freeze.expression.callee.property.name != "freeze") {
+    return unsupportedSyntax("javascript", "record constructor without final Object.freeze(this)", nodeLocation(freeze ?? constructor, filename, source))
+  }
+
+  return withParserRanges(declaration, {name: identifierLocation(node.id, filename, source)})
 }
 
 /**
@@ -1138,12 +1348,25 @@ export function parseJavaScriptTypeScript({filename, language, source}) {
   if (file.program.directives.length > 0) {
     return unsupportedSyntax(language, "top-level directive", nodeLocation(file.program.directives[0], filename, source))
   }
+  const recordNodes = file.program.body.filter((node) => node.type == "ClassDeclaration")
+  const recordDeclarations = recordNodes.map((node, index) => ({
+    fields: [],
+    id: `record:${index}`,
+    kind: /** @type {const} */ ("RecordDeclaration"),
+    location: nodeLocation(node, filename, source),
+    name: node.id?.name ?? ""
+  }))
+  const recordNames = new Map(recordDeclarations.map((declaration) => [declaration.name, declaration]))
+  const recordsById = new Map(recordDeclarations.map((declaration) => [/** @type {string} */ (declaration.id), declaration]))
+  const records = recordNodes.map((node, index) => language == "typescript"
+    ? convertTypeScriptRecord(node, recordDeclarations[index], recordNames, filename, source)
+    : convertJavaScriptRecord(node, recordDeclarations[index], recordNames, filename, source))
   const functionNodes = file.program.body.filter((node) => node.type == "FunctionDeclaration")
-  const signatures = functionNodes.map((node) => convertFunctionSignature(node, language, filename, source))
+  const signatures = functionNodes.map((node) => convertFunctionSignature(node, language, filename, source, recordNames))
   const functionSignatures = new Map(signatures.map((signature) => [signature.name, signature]))
   const functions = functionNodes.map((node, index) =>
-    convertFunction(node, signatures[index], functionSignatures, language, filename, source, canonicalZeroRequired))
-  const entryNodes = file.program.body.filter((node) => node.type != "FunctionDeclaration")
+    convertFunction(node, signatures[index], functionSignatures, recordNames, recordsById, language, filename, source, canonicalZeroRequired))
+  const entryNodes = file.program.body.filter((node) => node.type != "FunctionDeclaration" && node.type != "ClassDeclaration")
   const location = moduleLocation(filename, source)
 
   if (functions.length == 0) return unsupportedSyntax(language, "module without a function", location)
@@ -1159,7 +1382,7 @@ export function parseJavaScriptTypeScript({filename, language, source}) {
     filename,
     source,
     canonicalZeroRequired,
-    {bindings: new Map(), functions: functionSignatures},
+    {bindings: new Map(), functions: functionSignatures, recordNames, records: recordsById},
     entryLocation
   )
 
@@ -1171,7 +1394,8 @@ export function parseJavaScriptTypeScript({filename, language, source}) {
     },
     functions,
     kind: "Module",
-    location
+    location,
+    records
   }
 }
 
@@ -1187,7 +1411,7 @@ function parseBabelSource({filename, language, source}) {
   try {
     return parseBabel(source, {
       allowAwaitOutsideFunction: true,
-      plugins: language == "typescript" ? ["typescript"] : [],
+      plugins: language == "typescript" ? ["decorators-legacy", "typescript"] : ["decorators-legacy"],
       sourceFilename: filename,
       sourceType: "script",
       tokens: true
