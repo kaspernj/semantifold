@@ -1297,7 +1297,7 @@ export function emitExpression(writer, expression, path, language, emitIdentifie
   }
   if (expression.kind == "RecordConstruction") {
     const record = writer.recordForId(expression.record.declarationId)
-    const targetName = writer.recordNameForId(expression.record.declarationId)
+    const targetName = writer.recordNameForId(expression.record.declarationId, true)
     const prefix = language == "ruby" ? `${targetName}.new(` : `new ${targetName}(`
 
     writer.mapped(prefix, {mappingKind: "exact", name: record.name, node: expression, path, role: "record"})

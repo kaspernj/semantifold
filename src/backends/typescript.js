@@ -118,7 +118,7 @@ function emitProgramImports(module, writer) {
 function emitAliasedExports(module, writer) {
   if (!writer.program) return
   const programModule = /** @type {import("../semantic/types.js").SemanticProgramModule} */ (/** @type {unknown} */ (module))
-  const aliases = programModule.exports.filter((item) => !writer.isDirectlyExported(item.declarationId))
+  const aliases = programModule.exports.filter((item) => !writer.isDirectExport(item))
 
   if (aliases.length == 0) return
   writer.synthetic("\n\nexport {", "ESM aliased exports", [module])

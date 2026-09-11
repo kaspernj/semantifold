@@ -165,8 +165,8 @@ console.log(exposed())
     }
   })
 
-  it("maps an aliased ESM exported name to its SemanticExport token in rich and v3 lookups", () => {
-    const librarySource = `function label(): string { return "Ada" }
+  it("maps a direct-plus-alias ESM exported name to its SemanticExport token in rich and v3 lookups", () => {
+    const librarySource = `export function label(): string { return "Ada" }
 export {label as display}
 `
     const program = parseProgram({

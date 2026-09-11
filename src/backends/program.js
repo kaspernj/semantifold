@@ -326,7 +326,10 @@ function validateProgram(candidate, language) {
       }
       importedTargetNames.add(name)
     }
-    const typeOnlyDeclarationIds = new Set(module.imports.filter(({typeOnly}) => typeOnly).map(({declarationId}) => declarationId))
+    const valueDeclarationIds = new Set(module.imports.filter(({typeOnly}) => !typeOnly).map(({declarationId}) => declarationId))
+    const typeOnlyDeclarationIds = new Set(module.imports
+      .filter(({declarationId, typeOnly}) => typeOnly && !valueDeclarationIds.has(declarationId))
+      .map(({declarationId}) => declarationId))
     const valueConstruction = findTypeOnlyValueConstruction(module, typeOnlyDeclarationIds)
 
     if (valueConstruction) {

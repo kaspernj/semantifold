@@ -141,6 +141,60 @@ describe("multi-file generated project execution", () => {
     }
   })
 
+  it("executes direct-plus-alias exports and mixed type/value record imports", async () => {
+    const program = parseProgram({
+      entryModule: "main",
+      sources: [{
+        filename: "main.ts",
+        id: "main",
+        language: "typescript",
+        source: `import type {User as UserType} from "./model.js"
+import {User as UserValue} from "./model.js"
+import {display} from "./library.js"
+const user: UserType = new UserValue("Ada")
+console.log(display(user))
+`
+      }, {
+        filename: "library.ts",
+        id: "library",
+        language: "typescript",
+        source: `import type {User} from "./model.js"
+export function label(user: User): string { return user.name }
+export {label as display}
+`
+      }, {
+        filename: "model.ts",
+        id: "model",
+        language: "typescript",
+        source: "export class User { constructor(readonly name: string) {} }\n"
+      }]
+    })
+    const node = await discoverCanonicalToolchain("node")
+    const tsc = await discoverCanonicalToolchain("tsc")
+    const javascript = await runAcceptanceStages({
+      artifacts: generateProgramArtifactSet({language: "javascript", program}),
+      stages: [{arguments: ["main.js"], stage: "execute", tool: node}],
+      target: "javascript",
+      timeoutMs: 20_000
+    })
+    const typescript = await runAcceptanceStages({
+      artifacts: generateProgramArtifactSet({language: "typescript", program}),
+      stages: [{
+        arguments: [
+          "--target", "ES2024", "--module", "ES2022", "--moduleResolution", "bundler", "--outDir", "dist",
+          "model.ts", "library.ts", "main.ts"
+        ],
+        stage: "compile",
+        tool: tsc
+      }, {arguments: ["dist/main.js"], stage: "execute", tool: node}],
+      target: "typescript",
+      timeoutMs: 20_000
+    })
+
+    expect(javascript.stages.at(-1)?.stdout).toEqual("Ada\n")
+    expect(typescript.stages.at(-1)?.stdout).toEqual("Ada\n")
+  })
+
   it("makes non-exported Ruby helpers inaccessible through the native module", async () => {
     const ruby = await discoverCanonicalToolchain("ruby")
     const artifacts = withProbe(

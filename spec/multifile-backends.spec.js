@@ -65,6 +65,68 @@ describe("multi-file program backends", () => {
     expect(String(typescript.artifacts.find(({path}) => path == "main.ts")?.content)).toInclude("import {display as show}")
   })
 
+  it("preserves an alias when its declaration is also exported directly", () => {
+    const program = semantifold.parseProgram({
+      entryModule: "main",
+      sources: [{
+        filename: "main.ts",
+        id: "main",
+        language: "typescript",
+        source: "import {display} from \"./library.js\"\nconsole.log(display())\n"
+      }, {
+        filename: "library.ts",
+        id: "library",
+        language: "typescript",
+        source: `export function label(): string { return "Ada" }
+export {label as display}
+`
+      }]
+    })
+
+    for (const language of ["javascript", "typescript"]) {
+      const set = semantifold.generateProgramArtifactSet({
+        language: /** @type {"javascript" | "typescript"} */ (language),
+        program
+      })
+      const extension = language == "javascript" ? "js" : "ts"
+      const library = String(set.artifacts.find(({path}) => path == `library.${extension}`)?.content)
+
+      expect(library).toInclude("export function label")
+      expect(library).toInclude("export {label as display}")
+    }
+  })
+
+  it("uses a value binding when the same record also has a type-only import", () => {
+    const program = semantifold.parseProgram({
+      entryModule: "main",
+      sources: [{
+        filename: "main.ts",
+        id: "main",
+        language: "typescript",
+        source: `import type {User as UserType} from "./model.js"
+import {User as UserValue} from "./model.js"
+const user: UserType = new UserValue("Ada")
+console.log(user.name)
+`
+      }, {
+        filename: "model.ts",
+        id: "model",
+        language: "typescript",
+        source: "export class User { constructor(readonly name: string) {} }\n"
+      }]
+    })
+    const typescript = semantifold.generateProgramArtifactSet({language: "typescript", program})
+    const javascript = semantifold.generateProgramArtifactSet({language: "javascript", program})
+    const typescriptMain = String(typescript.artifacts.find(({path}) => path == "main.ts")?.content)
+    const javascriptMain = String(javascript.artifacts.find(({path}) => path == "main.js")?.content)
+
+    expect(typescriptMain).toInclude("import type {User as UserType}")
+    expect(typescriptMain).toInclude("import {User as UserValue}")
+    expect(typescriptMain).toInclude("const user: UserType = new UserValue(\"Ada\")")
+    expect(javascriptMain).toInclude("User as UserValue")
+    expect(javascriptMain).toInclude("const user = new UserValue(\"Ada\")")
+  })
+
   it("emits PHP import aliases for local semantic bindings", () => {
     const program = semantifold.parseProgram({
       entryModule: "main",

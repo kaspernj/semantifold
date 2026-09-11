@@ -112,12 +112,14 @@ export class SourceWriter {
   /**
    * Returns the target spelling for a nominal record identity.
    * @param {string} declarationId - Stable record declaration identity.
+   * @param {boolean} [valuePosition] - Whether the binding must exist at runtime.
    * @returns {string} Target record spelling.
    */
-  recordNameForId(declarationId) {
+  recordNameForId(declarationId, valuePosition = false) {
     const record = this.recordForId(declarationId)
     const owner = this.declarationModules.get(declarationId)
-    const imported = this.#programModule()?.imports.find((item) => item.declarationId == declarationId)
+    const imported = this.#programModule()?.imports.find((item) =>
+      item.declarationId == declarationId && (!valuePosition || !item.typeOnly))
 
     if (this.program && owner && owner.id != Reflect.get(this.module, "id") && this.language == "ruby") {
       return `${moduleClassName(owner.id)}::${record.name}`
@@ -169,6 +171,15 @@ export class SourceWriter {
 
     return typeof declarationId == "string" && Boolean(module.exports?.some((item) =>
       item.declarationId == declarationId && item.exportedName == declarationName(module, declarationId)))
+  }
+
+  /**
+   * Reports whether one export edge uses its declaration's emitted name.
+   * @param {import("../semantic/types.js").SemanticExport} exported - Current export edge.
+   * @returns {boolean} Whether this edge is represented by the declaration prefix.
+   */
+  isDirectExport(exported) {
+    return exported.exportedName == declarationName(this.module, exported.declarationId)
   }
 
   /**
