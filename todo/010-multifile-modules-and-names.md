@@ -1,6 +1,6 @@
 # 010 — Multi-file modules and names
 
-- Status: `implemented locally; independent review / exact-head TensorBuzz CI / merge pending`
+- Status: `delivered in PR #37 at ba386ee85bdadd3772819215903d44dff4ad0c23`
 - Phase/priority: Phase 2 / P2 (conditional)
 - Dependencies: [005-general-function-signatures-and-calls.md](005-general-function-signatures-and-calls.md), [009-closed-records-and-member-access.md](009-closed-records-and-member-access.md)
 
@@ -8,7 +8,7 @@
 
 Introduce a multi-file semantic program with explicit module identities, exports/imports, qualified symbol resolution, entry-module selection, and multi-artifact generation. Map the same dependency graph to Ruby modules/requires, ESM, PHP namespaces/requires, and Java packages/imports without implementing package managers.
 
-## Current evidence and gap
+## Prior evidence and gap
 
 The public `parse` API accepts one filename/source and returns one `SemanticModule`; `generate` returns one compatibility source string and `generateArtifact` returns one named artifact with rich/v3 mappings. Provenance already supports a versioned multi-source registry and generation accepts caller-assembled multi-source IR, but there is no semantic program graph or multi-artifact layout. Java defaults to `Main.java`, Babel parses with `sourceType: "script"`, and frontends reject imports/packages/namespaces. [`../docs/goals.md`](../docs/goals.md) lists multi-file modules as a candidate. File layout and resolution cannot be hidden in one target artifact.
 

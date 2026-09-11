@@ -8,8 +8,8 @@
 /** @typedef {SemanticTypeName | "void"} FunctionReturnTypeName */
 /** @typedef {"IntegerNegate" | "BooleanNot"} SemanticUnaryOperation */
 /** @typedef {"IntegerAdd" | "IntegerSubtract" | "IntegerMultiply" | "BooleanAnd" | "BooleanOr" | "IntegerEqual" | "IntegerNotEqual" | "BooleanEqual" | "BooleanNotEqual" | "StringEqual" | "StringNotEqual" | "IntegerLessThan" | "IntegerLessThanOrEqual" | "IntegerGreaterThan" | "IntegerGreaterThanOrEqual" | "StringConcat"} SemanticBinaryOperation */
-/** @typedef {"record" | "field" | "function" | "parameter" | "local" | "iteration"} SemanticSymbolKind */
-/** @typedef {"record" | "function"} SemanticDeclarationKind */
+/** @typedef {"record" | "error" | "field" | "function" | "parameter" | "local" | "iteration" | "catch"} SemanticSymbolKind */
+/** @typedef {"record" | "error" | "function"} SemanticDeclarationKind */
 /** @typedef {"declaration" | "type" | "construct" | "member" | "read" | "write" | "call"} SemanticSymbolRole */
 /** @typedef {"parse" | "generate" | "restore" | "compile" | "link" | "validate" | "instantiate" | "execute"} AcceptanceStage */
 /** @typedef {"entry" | "source" | "manifest" | "support" | "mapping" | "resource" | "loader"} GeneratedArtifactRole */
@@ -43,6 +43,7 @@
  * @property {boolean} optionalValues - Task 007 explicit optional values, presence tests, and guarded unwrap.
  * @property {boolean} orderedListIteration - Task 008 ordered immutable-list iteration and nearest-loop control.
  * @property {boolean} closedRecords - Task 009 nominal closed immutable records, construction, and member reads.
+ * @property {boolean} typedErrors - Task 011 nominal unchecked errors, raises, and exact typed catches.
  */
 
 /**
@@ -323,7 +324,15 @@
  * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned type-name range.
  */
 
+/**
+ * @typedef ErrorType
+ * @property {"ErrorType"} kind - Nominal unchecked-error type discriminator.
+ * @property {string} declarationId - Stable error declaration identity.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned type-name range.
+ */
+
 /** @typedef {TypeReference | ListType | MapType | OptionalType | RecordType} SemanticValueType */
+/** @typedef {SemanticValueType | ErrorType} SemanticBindingType */
 
 /**
  * @typedef FunctionReturnTypeReference
@@ -520,7 +529,15 @@
  * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned member-name range.
  */
 
-/** @typedef {IdentifierExpression | IntegerLiteral | BooleanLiteral | StringLiteral | OptionalNone | OptionalSome | OptionalIsPresent | OptionalUnwrap | ListLiteral | MapLiteral | ListIndexExpression | MapLookupExpression | CollectionSizeExpression | UnaryExpression | BinaryExpression | CallExpression | RecordConstruction | MemberRead} Expression */
+/**
+ * @typedef ErrorMessageRead
+ * @property {"ErrorMessageRead"} kind - The sole portable error member operation.
+ * @property {IdentifierExpression} receiver - Catch binding whose immutable message is read.
+ * @property {SourceLocation} location - Complete message-read source location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned message-member range.
+ */
+
+/** @typedef {IdentifierExpression | IntegerLiteral | BooleanLiteral | StringLiteral | OptionalNone | OptionalSome | OptionalIsPresent | OptionalUnwrap | ListLiteral | MapLiteral | ListIndexExpression | MapLookupExpression | CollectionSizeExpression | UnaryExpression | BinaryExpression | CallExpression | RecordConstruction | MemberRead | ErrorMessageRead} Expression */
 
 /**
  * @typedef LocalDeclaration
@@ -602,8 +619,46 @@
  * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
  */
 
+/**
+ * @typedef ErrorConstruction
+ * @property {"ErrorConstruction"} kind - Construction of one declared unchecked error.
+ * @property {ErrorType} error - Exact nominal error type.
+ * @property {Expression} message - Sole immutable string payload.
+ * @property {SourceLocation} location - Complete construction source location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned type and message ranges.
+ */
+
+/**
+ * @typedef RaiseStatement
+ * @property {"RaiseStatement"} kind - Abrupt unchecked-error propagation.
+ * @property {ErrorConstruction} error - Exact constructed semantic error.
+ * @property {SourceLocation} location - Complete raise source location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned raise range.
+ */
+
+/**
+ * @typedef CatchBinding
+ * @property {"CatchBinding"} kind - Exact-handler binding discriminator.
+ * @property {string} name - Handler-local binding name.
+ * @property {ErrorType} type - Exact caught nominal error type.
+ * @property {false} mutable - Catch bindings are immutable.
+ * @property {SourceLocation} location - Binding source location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned binding range.
+ */
+
+/**
+ * @typedef TryStatement
+ * @property {"TryStatement"} kind - One body and one exact typed handler.
+ * @property {Block} body - Protected body.
+ * @property {ErrorType} catchType - Exact caught nominal error type.
+ * @property {CatchBinding} catchBinding - Immutable handler-local binding.
+ * @property {Block} catchBody - Handler body.
+ * @property {SourceLocation} location - Complete try/handler source location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned try/catch ranges.
+ */
+
 /** @typedef {LocalDeclaration | AssignmentStatement} LocalStatement */
-/** @typedef {LocalStatement | ExpressionStatement | IfStatement | ForEachStatement | BreakStatement | ContinueStatement | ReturnStatement | PrintStatement} Statement */
+/** @typedef {LocalStatement | ExpressionStatement | IfStatement | ForEachStatement | BreakStatement | ContinueStatement | ReturnStatement | PrintStatement | RaiseStatement | TryStatement} Statement */
 
 /**
  * @typedef Block
@@ -646,6 +701,15 @@
  */
 
 /**
+ * @typedef ErrorDeclaration
+ * @property {"ErrorDeclaration"} kind - Nominal unchecked error with one immutable string message.
+ * @property {string} [id] - Stable module-local declaration identity, required after frontend validation.
+ * @property {string} name - Error type name.
+ * @property {SourceLocation} location - Complete declaration source location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned declaration-name range.
+ */
+
+/**
  * @typedef PrintStatement
  * @property {"PrintStatement"} kind - Node discriminator.
  * @property {Expression} expression - Printed expression.
@@ -665,6 +729,7 @@
  * @typedef SemanticModule
  * @property {"Module"} kind - Node discriminator.
  * @property {RecordDeclaration[]} [records] - Top-level nominal record declarations in source order; omitted when empty.
+ * @property {ErrorDeclaration[]} [errors] - Top-level nominal unchecked error declarations in source order; omitted when empty.
  * @property {FunctionDeclaration[]} functions - Top-level functions.
  * @property {EntryPoint} entryPoint - Executable entry point.
  * @property {SourceLocation} location - Source location.
@@ -701,6 +766,7 @@
  * @property {string} id - Stable caller-supplied logical module identity.
  * @property {string} sourceFilename - Explicit source filename; never an implicit read request.
  * @property {RecordDeclaration[]} [records] - Top-level nominal record declarations.
+ * @property {ErrorDeclaration[]} [errors] - Top-level nominal unchecked error declarations.
  * @property {FunctionDeclaration[]} functions - Top-level functions.
  * @property {SemanticImport[]} imports - Resolved imports in source order.
  * @property {SemanticExport[]} exports - Resolved exports in source order.
@@ -718,7 +784,7 @@
  * @property {RegisteredSource[]} sources - Caller-order complete source registry.
  */
 
-/** @typedef {SemanticModule | SemanticProgramModule | SemanticImport | SemanticExport | RecordDeclaration | RecordField | FunctionDeclaration | Parameter | ValueBinding | Block | Statement | EntryPoint | Expression | MapEntry | SemanticValueType | FunctionReturnTypeReference} SemanticNode */
+/** @typedef {SemanticModule | SemanticProgramModule | SemanticImport | SemanticExport | RecordDeclaration | ErrorDeclaration | RecordField | FunctionDeclaration | Parameter | ValueBinding | CatchBinding | Block | Statement | EntryPoint | Expression | ErrorConstruction | ErrorType | MapEntry | SemanticValueType | FunctionReturnTypeReference} SemanticNode */
 /** @typedef {SemanticNode} SemanticNodeWithoutLocations */
 
 export {}

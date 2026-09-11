@@ -38,7 +38,7 @@ const registryKeys = new Set([
 ])
 
 /** @typedef {"frontend" | "textBackend" | "binaryBackend" | "applicationBackend" | "interoperability"} RegistryRole */
-/** @typedef {(input: {filename: string, source: string, program?: {isEntry: boolean, functions: Map<string, import("./semantic/types.js").FunctionDeclaration>, records: Map<string, import("./semantic/types.js").RecordDeclaration>}}) => import("./semantic/types.js").SemanticModule} Frontend */
+/** @typedef {(input: {filename: string, source: string, program?: {isEntry: boolean, functions: Map<string, import("./semantic/types.js").FunctionDeclaration>, records: Map<string, import("./semantic/types.js").RecordDeclaration>, errors?: Map<string, import("./semantic/types.js").ErrorDeclaration>, valueRecords?: Map<string, import("./semantic/types.js").RecordDeclaration>}}) => import("./semantic/types.js").SemanticModule} Frontend */
 /** @typedef {(...values: unknown[]) => unknown} RegistryImplementation */
 
 /**
@@ -107,16 +107,18 @@ export function createLanguageRegistry(candidateRecords) {
       generalFunctionsAndCalls: false,
       immutableCollections: false,
       optionalValues: false,
-      orderedListIteration: false
+      orderedListIteration: false,
+      typedErrors: false
     }
 
     if (!isPlainObject(featuresCandidate) ||
-      Object.keys(featuresCandidate).sort().join(",") != "closedRecords,generalFunctionsAndCalls,immutableCollections,optionalValues,orderedListIteration" ||
+      Object.keys(featuresCandidate).sort().join(",") != "closedRecords,generalFunctionsAndCalls,immutableCollections,optionalValues,orderedListIteration,typedErrors" ||
       typeof featuresCandidate.closedRecords != "boolean" ||
       typeof featuresCandidate.generalFunctionsAndCalls != "boolean" ||
       typeof featuresCandidate.immutableCollections != "boolean" ||
       typeof featuresCandidate.optionalValues != "boolean" ||
-      typeof featuresCandidate.orderedListIteration != "boolean") {
+      typeof featuresCandidate.orderedListIteration != "boolean" ||
+      typeof featuresCandidate.typedErrors != "boolean") {
       invalidRegistry(`Registry record '${id}' has an invalid feature declaration.`, id)
     }
     const features = deepFreeze(/** @type {import("./semantic/types.js").LanguageFeatureCapabilities} */ ({
@@ -124,7 +126,8 @@ export function createLanguageRegistry(candidateRecords) {
       generalFunctionsAndCalls: featuresCandidate.generalFunctionsAndCalls,
       immutableCollections: featuresCandidate.immutableCollections,
       optionalValues: featuresCandidate.optionalValues,
-      orderedListIteration: featuresCandidate.orderedListIteration
+      orderedListIteration: featuresCandidate.orderedListIteration,
+      typedErrors: featuresCandidate.typedErrors
     }))
     const mappingCandidate = candidate.mapping
 
@@ -425,7 +428,7 @@ const records = [
     artifactMultiplicity: "multiple",
     binaryBackend: generateBrowserWasm,
     defaultFilename: "program.wasm",
-    features: {closedRecords: false, generalFunctionsAndCalls: false, immutableCollections: false, optionalValues: false, orderedListIteration: false},
+    features: {closedRecords: false, generalFunctionsAndCalls: false, immutableCollections: false, optionalValues: false, orderedListIteration: false, typedErrors: false},
     id: "wasm",
     mapping: {binaryRanges: true, richText: true, sourceMapV3: true},
     mediaType: "application/wasm",
@@ -453,7 +456,8 @@ function language(values) {
       generalFunctionsAndCalls: ["php", "ruby", "javascript", "typescript", "java"].includes(String(values.id)),
       immutableCollections: ["php", "ruby", "javascript", "typescript", "java"].includes(String(values.id)),
       optionalValues: ["php", "ruby", "javascript", "typescript", "java"].includes(String(values.id)),
-      orderedListIteration: ["php", "ruby", "javascript", "typescript", "java"].includes(String(values.id))
+      orderedListIteration: ["php", "ruby", "javascript", "typescript", "java"].includes(String(values.id)),
+      typedErrors: ["php", "ruby", "javascript", "typescript", "java"].includes(String(values.id))
     },
     mapping: {binaryRanges: false, richText: true, sourceMapV3: true},
     roundTrip: true,

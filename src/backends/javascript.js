@@ -11,8 +11,21 @@ import {emitExpression, emitType, requiresCanonicalZeroRendering} from "./shared
 export function generateJavaScript(module, writer) {
   const canonicalizeZero = requiresCanonicalZeroRendering(module)
   const records = module.records ?? []
+  const errors = module.errors ?? []
 
   emitProgramImports(module, writer)
+
+  errors.forEach((error, errorIndex) => {
+    const path = `/errors/${errorIndex}`
+
+    if (errorIndex > 0) writer.synthetic("\n\n", "error declaration separator", [error], [path])
+    if (writer.isDirectlyExported(error.id)) writer.synthetic("export ", "ESM error export", [error], [path])
+    writer.mapped("class", {mappingKind: "anchor", node: error, path})
+    writer.synthetic(" ", "error declaration spacing", [error], [path])
+    writer.mapped(error.name, {mappingKind: "exact", node: error, path, role: "name"})
+    writer.synthetic(" extends Error {}", "JavaScript unchecked error scaffolding", [error], [path])
+  })
+  if (errors.length > 0) writer.synthetic("\n\n", "error/declaration separator", [module])
 
   records.forEach((record, recordIndex) => {
     const recordPath = `/records/${recordIndex}`
@@ -145,7 +158,7 @@ function emitAliasedExports(module, writer) {
   writer.synthetic("\n\nexport {", "ESM aliased exports", [module])
   aliases.forEach((item, index) => {
     if (index) writer.synthetic(", ", "ESM export separator", [module])
-    const declaration = [...programModule.functions, ...programModule.records ?? []].find(({id}) => id == item.declarationId)
+    const declaration = [...programModule.functions, ...programModule.records ?? [], ...programModule.errors ?? []].find(({id}) => id == item.declarationId)
 
     if (!declaration) throw new RangeError(`Unknown exported declaration '${item.declarationId}'.`)
     const exportPath = `/exports/${programModule.exports.indexOf(item)}`
@@ -204,6 +217,47 @@ function emitStatement(writer, statement, indent, path, canonicalizeZero) {
     emitBlock(writer, statement.body, `${indent}  `, `${path}/body`, canonicalizeZero)
     writer.synthetic(indent, "indentation", [statement], [path])
     writer.mapped("}", {mappingKind: "anchor", node: statement.body, path: `${path}/body`})
+    writer.synthetic("\n", "line break", [statement], [path])
+    return
+  }
+  if (statement.kind == "RaiseStatement") {
+    const type = statement.error.error
+    const error = writer.errorForId(type.declarationId)
+
+    writer.mapped("throw", {mappingKind: "anchor", node: statement, path})
+    writer.synthetic(" new ", "error construction scaffolding", [statement.error], [`${path}/error`])
+    writer.mapped(writer.errorNameForId(type.declarationId), {mappingKind: "exact", name: error.name, node: statement.error, path: `${path}/error`, role: "type"})
+    writer.synthetic("(", "error construction open", [statement.error], [`${path}/error`])
+    emitExpression(writer, statement.error.message, `${path}/error/message`, "javascript", identity)
+    writer.synthetic(")\n", "error construction close", [statement.error], [`${path}/error`])
+    return
+  }
+  if (statement.kind == "TryStatement") {
+    const caught = writer.errorForId(statement.catchType.declarationId)
+    const targetName = writer.errorNameForId(statement.catchType.declarationId)
+
+    writer.mapped("try", {mappingKind: "anchor", node: statement, path})
+    writer.synthetic(" ", "try spacing", [statement], [path])
+    writer.mapped("{", {mappingKind: "anchor", node: statement.body, path: `${path}/body`})
+    writer.synthetic("\n", "line break", [statement], [path])
+    emitBlock(writer, statement.body, `${indent}  `, `${path}/body`, canonicalizeZero)
+    writer.synthetic(indent, "indentation", [statement], [path])
+    writer.mapped("}", {mappingKind: "anchor", node: statement.body, path: `${path}/body`})
+    writer.synthetic(" ", "catch spacing", [statement], [path])
+    writer.mapped("catch", {mappingKind: "anchor", node: statement, path, role: "catch"})
+    writer.synthetic(" (", "catch binding scaffolding", [statement.catchBinding], [`${path}/catchBinding`])
+    writer.mapped(statement.catchBinding.name, {mappingKind: "exact", node: statement.catchBinding, path: `${path}/catchBinding`, role: "name"})
+    writer.synthetic(") {\n", "catch binding scaffolding", [statement.catchBinding], [`${path}/catchBinding`])
+    writer.synthetic(`${indent}  if (!(`, "exact catch guard", [statement], [path])
+    writer.mapped(statement.catchBinding.name, {mappingKind: "exact", node: statement.catchBinding, path: `${path}/catchBinding`, role: "name"})
+    writer.synthetic(" instanceof ", "exact catch guard", [statement], [path])
+    writer.mapped(targetName, {mappingKind: "exact", name: caught.name, node: statement.catchType, path: `${path}/catchType`, role: "type"})
+    writer.synthetic(`)) {\n${indent}    throw `, "unmatched error propagation", [statement], [path])
+    writer.mapped(statement.catchBinding.name, {mappingKind: "exact", node: statement.catchBinding, path: `${path}/catchBinding`, role: "name"})
+    writer.synthetic(`\n${indent}  }\n`, "unmatched error propagation", [statement], [path])
+    emitBlock(writer, statement.catchBody, `${indent}  `, `${path}/catchBody`, canonicalizeZero)
+    writer.synthetic(indent, "indentation", [statement], [path])
+    writer.mapped("}", {mappingKind: "anchor", node: statement.catchBody, path: `${path}/catchBody`})
     writer.synthetic("\n", "line break", [statement], [path])
     return
   }

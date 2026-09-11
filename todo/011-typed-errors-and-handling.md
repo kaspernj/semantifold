@@ -1,6 +1,6 @@
 # 011 — Typed errors and handling
 
-- Status: `todo`
+- Status: `implemented locally; independent review / exact-head TensorBuzz CI / merge pending`
 - Phase/priority: Phase 2 / P2 (conditional)
 - Dependencies: [004-statement-sequencing-and-conditionals.md](004-statement-sequencing-and-conditionals.md), [007-optional-values-and-presence-narrowing.md](007-optional-values-and-presence-narrowing.md), [009-closed-records-and-member-access.md](009-closed-records-and-member-access.md)
 
@@ -8,7 +8,7 @@
 
 Add one portable typed unchecked error declaration, construction/raise, and `try` with one typed catch binding. Preserve abrupt completion and unmatched-error propagation without approximating each language's full exception system.
 
-## Current evidence and gap
+## Prior evidence and gap
 
 The semantic IR models only return as abrupt completion. There is no error value/type, throw/raise, try/catch/rescue, handler binding, propagation, or finally semantics. Java checked exceptions, JavaScript arbitrary thrown values, PHP `Throwable`, and Ruby's class hierarchy/default rescue behavior are materially different. Task 009's nominal closed data provides a place for a typed error payload.
 
@@ -75,3 +75,11 @@ Checked effects/exceptions, arbitrary thrown values, multiple/union/broad catche
 - Canonical source profiles account for all parser children; arbitrary/broad target exception behavior is rejected.
 - Generated JS/TS typed guards and all other target handlers reparse to equivalent semantics.
 - Focused flow/diagnostic and real registered-runtime handling tests pass with docs/changelog updates.
+
+## Implementation delivery record — 2026-09-11
+
+The implementation adds parser-neutral nominal error declarations/types, exact string-message construction, abrupt raise, one exact immutable catch binding, message reads, unmatched propagation, and internal fixed-point direct-call effects. All original-five parser adapters accept only the language profiles above; all original-five backends validate before writer allocation, generate canonical target syntax, and reparse to the same meaning. JavaScript and TypeScript retain the required guard/rethrow boundary. Task 010 programs preserve module-qualified error identities and error-only Java public-class layout.
+
+Focused specs cover semantic flow and malformed IR, parser acceptance/rejection, all five generation/reparse routes, public registry truthfulness, provenance/mapping identities, and a five-module project executed through real PHP, Ruby, Node, `tsc` plus Node, and `javac` plus Java. The runtime proof retains exported error identity while demonstrating normal return, transitive call effects, exact handling, and propagation from an inner handler to a different outer nominal handler. Kotlin, Python, C#, Go, C, C++, Rust, Swift, and browser Wasm remain explicit transactional `UNSUPPORTED_CAPABILITY` targets.
+
+No checked exception declarations, arbitrary values, multiple or broad handlers, `finally`/`ensure`, async rejection, result translation, standard-library facade/provider work, pairwise rewrites, package publication, versioning, releases, or deployment behavior is added. Independent review, exact-head TensorBuzz CI, merge, and any later publication remain coordinator-owned.

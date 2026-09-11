@@ -10,6 +10,7 @@ import {emitExpression, emitType} from "./shared.js"
  */
 export function generateRuby(module, writer) {
   const records = module.records ?? []
+  const errors = module.errors ?? []
 
   if (writer.program) {
     const programModule = /** @type {import("../semantic/types.js").SemanticProgramModule} */ (/** @type {unknown} */ (module))
@@ -28,6 +29,17 @@ export function generateRuby(module, writer) {
     writer.synthetic(`module ${writer.programModuleName(programModule.id)}\n`, "Ruby semantic module wrapper", [module])
     if (module.functions.length > 0) writer.synthetic("module_function\n\n", "Ruby module-function profile", [module])
   }
+
+  errors.forEach((error, index) => {
+    const path = `/errors/${index}`
+
+    if (index > 0) writer.synthetic("\n\n", "error declaration separator", [error], [path])
+    writer.mapped("class", {mappingKind: "anchor", node: error, path})
+    writer.synthetic(" ", "error declaration spacing", [error], [path])
+    writer.mapped(error.name, {mappingKind: "exact", node: error, path, role: "name"})
+    writer.synthetic(" < StandardError\nend", "Ruby unchecked error scaffolding", [error], [path])
+  })
+  if (errors.length > 0) writer.synthetic("\n\n", "error/declaration separator", [module])
 
   records.forEach((record, recordIndex) => {
     const recordPath = `/records/${recordIndex}`
@@ -111,12 +123,12 @@ export function generateRuby(module, writer) {
   })
 
   if (writer.program) {
-    const privateRecords = records.filter((record) => !writer.isExported(record.id))
+    const privateNominals = [...errors, ...records].filter((declaration) => !writer.isExported(declaration.id))
     const privateFunctions = module.functions.filter((declaration) => !writer.isExported(declaration.id))
 
-    for (const record of privateRecords) {
-      writer.synthetic("\nprivate_constant :", "Ruby private semantic record", [record])
-      writer.mapped(record.name, {mappingKind: "exact", node: record, role: "name"})
+    for (const declaration of privateNominals) {
+      writer.synthetic("\nprivate_constant :", "Ruby private semantic nominal declaration", [declaration])
+      writer.mapped(declaration.name, {mappingKind: "exact", node: declaration, role: "name"})
     }
     for (const declaration of privateFunctions) {
       writer.synthetic("\nprivate_class_method :", "Ruby private semantic function", [declaration])
@@ -172,6 +184,37 @@ function emitStatement(writer, statement, indent, path) {
     emitBlock(writer, statement.body, `${indent}  `, `${path}/body`)
     writer.synthetic(indent, "indentation", [statement], [path])
     writer.mapped("end", {mappingKind: "anchor", node: statement.body, path: `${path}/body`})
+    writer.synthetic("\n", "line break", [statement], [path])
+    return
+  }
+  if (statement.kind == "RaiseStatement") {
+    const type = statement.error.error
+    const error = writer.errorForId(type.declarationId)
+
+    writer.mapped("raise", {mappingKind: "anchor", node: statement, path})
+    writer.synthetic(" ", "raise spacing", [statement], [path])
+    writer.mapped(writer.errorNameForId(type.declarationId), {mappingKind: "exact", name: error.name, node: statement.error, path: `${path}/error`, role: "type"})
+    writer.synthetic(", ", "error message separator", [statement.error], [`${path}/error`])
+    emitExpression(writer, statement.error.message, `${path}/error/message`, "ruby", identity)
+    writer.synthetic("\n", "line break", [statement], [path])
+    return
+  }
+  if (statement.kind == "TryStatement") {
+    const caught = writer.errorForId(statement.catchType.declarationId)
+
+    writer.mapped("begin", {mappingKind: "anchor", node: statement, path})
+    writer.synthetic("\n", "line break", [statement], [path])
+    emitBlock(writer, statement.body, `${indent}  `, `${path}/body`)
+    writer.synthetic(indent, "indentation", [statement], [path])
+    writer.mapped("rescue", {mappingKind: "anchor", node: statement, path, role: "catch"})
+    writer.synthetic(" ", "rescue spacing", [statement], [path])
+    writer.mapped(writer.errorNameForId(statement.catchType.declarationId), {mappingKind: "exact", name: caught.name, node: statement.catchType, path: `${path}/catchType`, role: "type"})
+    writer.synthetic(" => ", "catch binding separator", [statement.catchBinding], [`${path}/catchBinding`])
+    writer.mapped(statement.catchBinding.name, {mappingKind: "exact", node: statement.catchBinding, path: `${path}/catchBinding`, role: "name"})
+    writer.synthetic("\n", "line break", [statement], [path])
+    emitBlock(writer, statement.catchBody, `${indent}  `, `${path}/catchBody`)
+    writer.synthetic(indent, "indentation", [statement], [path])
+    writer.mapped("end", {mappingKind: "anchor", node: statement.catchBody, path: `${path}/catchBody`})
     writer.synthetic("\n", "line break", [statement], [path])
     return
   }

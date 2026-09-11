@@ -1,0 +1,1 @@
+Add exact nominal typed unchecked errors, raises, one typed handler, message reads, propagation, multi-file identity, and original-five generation/runtime support. Other registered targets now report the capability as unsupported explicitly.

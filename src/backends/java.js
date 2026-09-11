@@ -10,6 +10,7 @@ import {emitExpression, emitType} from "./shared.js"
  */
 export function generateJava(module, writer) {
   const records = module.records ?? []
+  const errors = module.errors ?? []
   const programModule = writer.program?.modules.find(({id}) => id == Reflect.get(module, "id"))
 
   if (programModule) {
@@ -18,7 +19,8 @@ export function generateJava(module, writer) {
       const owner = /** @type {import("../semantic/types.js").SemanticProgramModule} */ (
         writer.program?.modules.find(({id}) => id == imported.moduleId))
       const record = owner.records?.find(({id}) => id == imported.declarationId)
-      const name = record?.name ?? writer.programModuleName(owner.id)
+      const error = owner.errors?.find(({id}) => id == imported.declarationId)
+      const name = record?.name ?? error?.name ?? writer.programModuleName(owner.id)
 
       return [`semantifold.generated.${owner.id}.${name}`, imported]
     }))
@@ -32,6 +34,21 @@ export function generateJava(module, writer) {
     }
     writer.synthetic("\n", "Java program header separator", [module])
   }
+
+  errors.forEach((error, index) => {
+    const path = `/errors/${index}`
+
+    if (index > 0) writer.synthetic("\n\n", "error declaration separator", [error], [path])
+    writer.mapped(programModule && writer.isExported(error.id) ? "public final class" : "final class",
+      {mappingKind: "anchor", node: error, path})
+    writer.synthetic(" ", "error declaration spacing", [error], [path])
+    writer.mapped(error.name, {mappingKind: "exact", node: error, path, role: "name"})
+    writer.synthetic(" extends RuntimeException {\n  ", "Java unchecked error scaffolding", [error], [path])
+    if (programModule) writer.synthetic("public ", "Java exported error constructor", [error], [path])
+    writer.mapped(error.name, {mappingKind: "exact", node: error, path, role: "name"})
+    writer.synthetic("(String message) {\n    super(message);\n  }\n}", "Java unchecked error scaffolding", [error], [path])
+  })
+  if (errors.length > 0) writer.synthetic("\n\n", "error/declaration separator", [module])
 
   records.forEach((record, recordIndex) => {
     const recordPath = `/records/${recordIndex}`
@@ -86,7 +103,7 @@ export function generateJava(module, writer) {
     })
     writer.synthetic("}", "Java record class scaffolding", [record], [recordPath])
   })
-  if (programModule && records.length > 0) {
+  if (programModule && records.length + errors.length > 0) {
     writer.synthetic("\n", "Java source terminator", [module])
     return
   }
@@ -189,6 +206,43 @@ function emitStatement(writer, statement, indent, path) {
     emitBlock(writer, statement.body, `${indent}  `, `${path}/body`)
     writer.synthetic(indent, "indentation", [statement], [path])
     writer.mapped("}", {mappingKind: "anchor", node: statement.body, path: `${path}/body`})
+    writer.synthetic("\n", "line break", [statement], [path])
+    return
+  }
+  if (statement.kind == "RaiseStatement") {
+    const type = statement.error.error
+    const error = writer.errorForId(type.declarationId)
+
+    writer.mapped("throw", {mappingKind: "anchor", node: statement, path})
+    writer.synthetic(" new ", "error construction scaffolding", [statement.error], [`${path}/error`])
+    writer.mapped(writer.errorNameForId(type.declarationId), {mappingKind: "exact", name: error.name, node: statement.error, path: `${path}/error`, role: "type"})
+    writer.synthetic("(", "error construction open", [statement.error], [`${path}/error`])
+    emitExpression(writer, statement.error.message, `${path}/error/message`, "java", identity)
+    writer.synthetic(");\n", "error construction close", [statement.error], [`${path}/error`])
+    return
+  }
+  if (statement.kind == "TryStatement") {
+    const caught = writer.errorForId(statement.catchType.declarationId)
+
+    writer.mapped("try", {mappingKind: "anchor", node: statement, path})
+    writer.synthetic(" ", "try spacing", [statement], [path])
+    writer.mapped("{", {mappingKind: "anchor", node: statement.body, path: `${path}/body`})
+    writer.synthetic("\n", "line break", [statement], [path])
+    emitBlock(writer, statement.body, `${indent}  `, `${path}/body`)
+    writer.synthetic(indent, "indentation", [statement], [path])
+    writer.mapped("}", {mappingKind: "anchor", node: statement.body, path: `${path}/body`})
+    writer.synthetic(" ", "catch spacing", [statement], [path])
+    writer.mapped("catch", {mappingKind: "anchor", node: statement, path, role: "catch"})
+    writer.synthetic(" (", "catch binding scaffolding", [statement.catchBinding], [`${path}/catchBinding`])
+    writer.mapped(writer.errorNameForId(statement.catchType.declarationId), {mappingKind: "exact", name: caught.name, node: statement.catchType, path: `${path}/catchType`, role: "type"})
+    writer.synthetic(" ", "catch binding spacing", [statement.catchBinding], [`${path}/catchBinding`])
+    writer.mapped(statement.catchBinding.name, {mappingKind: "exact", node: statement.catchBinding, path: `${path}/catchBinding`, role: "name"})
+    writer.synthetic(") ", "catch binding scaffolding", [statement.catchBinding], [`${path}/catchBinding`])
+    writer.mapped("{", {mappingKind: "anchor", node: statement.catchBody, path: `${path}/catchBody`})
+    writer.synthetic("\n", "line break", [statement], [path])
+    emitBlock(writer, statement.catchBody, `${indent}  `, `${path}/catchBody`)
+    writer.synthetic(indent, "indentation", [statement], [path])
+    writer.mapped("}", {mappingKind: "anchor", node: statement.catchBody, path: `${path}/catchBody`})
     writer.synthetic("\n", "line break", [statement], [path])
     return
   }

@@ -8,11 +8,12 @@ import {parserRangeFor} from "./provenance.js"
 const task005Languages = new Set(["php", "ruby", "javascript", "typescript", "java"])
 
 /** @typedef {Map<string, import("./types.js").RecordDeclaration>} RecordRegistry */
+/** @typedef {Map<string, import("./types.js").ErrorDeclaration>} ErrorRegistry */
 
 /**
  * @typedef Binding
  * @property {boolean} mutable - Whether assignment is allowed.
- * @property {import("./types.js").SemanticValueType} type - Binding type.
+ * @property {import("./types.js").SemanticBindingType} type - Binding type.
  * @property {import("./types.js").Expression | undefined} knownValue - Current statically known immutable value.
  */
 
@@ -34,7 +35,7 @@ const task005Languages = new Set(["php", "ruby", "javascript", "typescript", "ja
  * Enforces the coherent release-candidate semantic subset after adaptation.
  * @param {import("./types.js").SemanticModule} module - Adapted semantic module.
  * @param {import("./types.js").SemanticLanguage} language - Source language.
- * @param {{functions?: Map<string, import("./types.js").FunctionDeclaration>, records?: Map<string, import("./types.js").RecordDeclaration>}} [visible] - Program imports visible during validation.
+ * @param {{functions?: Map<string, import("./types.js").FunctionDeclaration>, records?: Map<string, import("./types.js").RecordDeclaration>, errors?: Map<string, import("./types.js").ErrorDeclaration>, callEffects?: Map<string, Set<string>>}} [visible] - Program imports visible during validation.
  * @returns {import("./types.js").SemanticModule} Validated module.
  */
 export function validateParsedModule(module, language, visible = {}) {
@@ -48,7 +49,7 @@ export function validateParsedModule(module, language, visible = {}) {
  * Validates scalar types and bindings for a caller-supplied semantic module before emission.
  * @param {import("./types.js").SemanticModule} module - Semantic module.
  * @param {import("./types.js").BackendLanguage} language - Backend language or binary target.
- * @param {{functions?: Map<string, import("./types.js").FunctionDeclaration>, records?: Map<string, import("./types.js").RecordDeclaration>}} [visible] - Resolved program imports.
+ * @param {{functions?: Map<string, import("./types.js").FunctionDeclaration>, records?: Map<string, import("./types.js").RecordDeclaration>, errors?: Map<string, import("./types.js").ErrorDeclaration>, callEffects?: Map<string, Set<string>>}} [visible] - Resolved program imports.
  * @returns {void}
  */
 export function validateBackendTypes(module, language, visible = {}) {
@@ -87,7 +88,7 @@ function validateBlockShape(block, detail, fail) {
   }
 
   for (const statement of block.statements) {
-    if (!["AssignmentStatement", "BreakStatement", "ContinueStatement", "ExpressionStatement", "ForEachStatement", "IfStatement", "LocalDeclaration", "PrintStatement", "ReturnStatement"].includes(statement.kind)) {
+    if (!["AssignmentStatement", "BreakStatement", "ContinueStatement", "ExpressionStatement", "ForEachStatement", "IfStatement", "LocalDeclaration", "PrintStatement", "RaiseStatement", "ReturnStatement", "TryStatement"].includes(statement.kind)) {
       fail(`${detail} statement ${statement.kind}`, statement.location)
     }
     if (statement.kind == "IfStatement") {
@@ -95,6 +96,10 @@ function validateBlockShape(block, detail, fail) {
       if (statement.alternate) validateBlockShape(statement.alternate, "if alternate", fail)
     }
     if (statement.kind == "ForEachStatement") validateBlockShape(statement.body, "for-each body", fail)
+    if (statement.kind == "TryStatement") {
+      validateBlockShape(statement.body, "try body", fail)
+      validateBlockShape(statement.catchBody, "catch body", fail)
+    }
   }
 }
 
@@ -103,11 +108,12 @@ function validateBlockShape(block, detail, fail) {
  * @param {import("./types.js").SemanticModule} module - Semantic module.
  * @param {SemanticFail} fail - Diagnostic callback.
  * @param {boolean} normalizeOperations - Whether to replace transient frontend operation intent.
- * @param {{functions?: Map<string, import("./types.js").FunctionDeclaration>, records?: Map<string, import("./types.js").RecordDeclaration>}} [visible] - Program imports visible during validation.
+ * @param {{functions?: Map<string, import("./types.js").FunctionDeclaration>, records?: Map<string, import("./types.js").RecordDeclaration>, errors?: Map<string, import("./types.js").ErrorDeclaration>, callEffects?: Map<string, Set<string>>}} [visible] - Program imports visible during validation.
  * @returns {void}
  */
 function validateModuleTypes(module, fail, normalizeOperations, visible = {}) {
   const records = validateRecordDeclarations(module.records ?? [], fail, normalizeOperations, visible.records)
+  const errors = validateErrorDeclarations(module.errors ?? [], fail, normalizeOperations, visible.errors)
   /** @type {Map<string, import("./types.js").FunctionDeclaration>} */
   const functions = new Map(visible.functions ?? [])
   const declarationIds = new Set([...functions.values()].flatMap(({id}) => typeof id == "string" ? [id] : []))
@@ -127,16 +133,79 @@ function validateModuleTypes(module, fail, normalizeOperations, visible = {}) {
 
   const reservedValueNames = new Set([
     ...functions.keys(),
-    ...[...records.values()].map((declaration) => declaration.name)
+    ...[...records.values()].map((declaration) => declaration.name),
+    ...[...errors.values()].map((declaration) => declaration.name)
   ])
 
+  const nominalNames = new Set()
+
+  for (const declaration of [...module.records ?? [], ...module.errors ?? []]) {
+    if (nominalNames.has(declaration.name)) {
+      fail("DUPLICATE_BINDING", `Duplicate nominal declaration '${declaration.name}'.`, roleLocation(declaration, "name"))
+    }
+    nominalNames.add(declaration.name)
+  }
+  const localFunctionNames = new Set(module.functions.map(({name}) => name))
+  const callEffects = inferCallEffects(functions, visible.callEffects, localFunctionNames)
+
   for (const functionDeclaration of module.functions) {
-    validateFunction(functionDeclaration, functions, records, reservedValueNames, fail, normalizeOperations)
+    validateFunction(functionDeclaration, functions, records, errors, callEffects, reservedValueNames, fail, normalizeOperations)
   }
 
   const entryScope = createScope(undefined, module.entryPoint.body.statements, reservedValueNames)
 
-  validateBlock(module.entryPoint.body, entryScope, undefined, functions, records, fail, normalizeOperations)
+  validateBlock(module.entryPoint.body, entryScope, undefined, functions, records, errors, callEffects, fail, normalizeOperations)
+}
+
+/**
+ * Derives validator-only unchecked-error effects for a validated module's local functions.
+ * These effects never enter semantic function declarations or public signatures.
+ * @param {import("./types.js").SemanticModule} module - Validated semantic module.
+ * @param {{functions?: Map<string, import("./types.js").FunctionDeclaration>, callEffects?: Map<string, Set<string>>}} [visible] - Imported functions and already-resolved effects by local binding.
+ * @returns {Map<string, Set<string>>} Local function effects by source-visible name.
+ */
+export function moduleUncheckedErrorEffects(module, visible = {}) {
+  const functions = new Map(visible.functions ?? [])
+
+  for (const declaration of module.functions) functions.set(declaration.name, declaration)
+  const localFunctionNames = new Set(module.functions.map(({name}) => name))
+  const effects = inferCallEffects(functions, visible.callEffects, localFunctionNames)
+
+  return new Map(module.functions.map((declaration) => [declaration.name, new Set(effects.get(declaration.name) ?? [])]))
+}
+
+/**
+ * Validates nominal unchecked-error declarations.
+ * @param {unknown} declarations - Candidate declarations.
+ * @param {SemanticFail} fail - Diagnostic callback.
+ * @param {boolean} normalizeOperations - Whether parser-authored identities are assigned.
+ * @param {Map<string, import("./types.js").ErrorDeclaration>} [visibleErrors] - Imported error declarations by identity.
+ * @returns {ErrorRegistry} Validated declarations by identity.
+ */
+function validateErrorDeclarations(declarations, fail, normalizeOperations, visibleErrors = new Map()) {
+  if (!Array.isArray(declarations)) return fail("TYPE_MISMATCH", "Error declarations must be an ordered array.", /** @type {never} */ (undefined))
+  /** @type {ErrorRegistry} */
+  const errors = new Map(visibleErrors)
+  const names = new Set()
+
+  for (let index = 0; index < declarations.length; index += 1) {
+    const declaration = declarations[index]
+
+    if (!declaration || declaration.kind != "ErrorDeclaration") {
+      return fail("TYPE_MISMATCH", "Malformed error declaration.", declaration?.location)
+    }
+    if (normalizeOperations) declaration.id = `error:${index}`
+    if (typeof declaration.id != "string" || !/^(?:[a-z][a-z0-9._-]*#)?error:[0-9]+$/u.test(declaration.id) || errors.has(declaration.id)) {
+      fail("DUPLICATE_ERROR", "Duplicate or invalid error declaration identity.", declaration.location)
+    }
+    if (typeof declaration.name != "string" || names.has(declaration.name)) {
+      fail("DUPLICATE_ERROR", `Duplicate or invalid error '${String(declaration.name)}'.`, roleLocation(declaration, "name"))
+    }
+    names.add(declaration.name)
+    errors.set(declaration.id, declaration)
+  }
+
+  return errors
 }
 
 /**
@@ -232,12 +301,14 @@ function validateDirectRecordRecursion(declarations, records, fail) {
  * @param {import("./types.js").FunctionDeclaration} declaration - Function declaration.
  * @param {Map<string, import("./types.js").FunctionDeclaration>} functions - Function signatures.
  * @param {RecordRegistry} records - Record declarations by identity.
+ * @param {ErrorRegistry} errors - Error declarations by identity.
+ * @param {Map<string, Set<string>>} callEffects - Internally inferred unchecked-error effects.
  * @param {Set<string>} reservedValueNames - Module functions and nominal constructors unavailable to lexical bindings.
  * @param {SemanticFail} fail - Diagnostic callback.
  * @param {boolean} normalizeOperations - Whether to replace transient frontend operation intent.
  * @returns {void}
  */
-function validateFunction(declaration, functions, records, reservedValueNames, fail, normalizeOperations) {
+function validateFunction(declaration, functions, records, errors, callEffects, reservedValueNames, fail, normalizeOperations) {
   const scope = createScope(undefined, declaration.body.statements, reservedValueNames)
 
   for (const parameter of declaration.parameters) {
@@ -247,9 +318,9 @@ function validateFunction(declaration, functions, records, reservedValueNames, f
   }
 
   const returnType = validateReturnTypeReference(declaration.returnType, declaration.location, fail, records)
-  const returns = validateBlock(declaration.body, scope, returnType, functions, records, fail, normalizeOperations)
+  const returns = validateBlock(declaration.body, scope, returnType, functions, records, errors, callEffects, fail, normalizeOperations)
 
-  if (!isVoidType(returnType) && !returns) {
+  if (!isVoidType(returnType) && returns.normal) {
     fail("MISSING_RETURN", `Function '${declaration.name}' does not return on every reachable path.`, declaration.location)
   }
 }
@@ -261,16 +332,19 @@ function validateFunction(declaration, functions, records, reservedValueNames, f
  * @param {import("./types.js").SemanticFunctionReturnType | undefined} returnType - Function return type, absent for entry points.
  * @param {Map<string, import("./types.js").FunctionDeclaration>} functions - Function signatures.
  * @param {RecordRegistry} records - Record declarations by identity.
+ * @param {ErrorRegistry} errors - Error declarations by identity.
+ * @param {Map<string, Set<string>>} callEffects - Internally inferred unchecked-error effects.
  * @param {SemanticFail} fail - Diagnostic callback.
  * @param {boolean} normalizeOperations - Whether to replace transient frontend operation intent.
  * @param {number} [loopDepth] - Number of active semantic loops.
- * @returns {boolean} Whether every path through the block completes abruptly.
+ * @returns {{normal: boolean, raises: Set<string>}} Reachable normal continuation and escaping error identities.
  */
-function validateBlock(block, scope, returnType, functions, records, fail, normalizeOperations, loopDepth = 0) {
-  let alwaysReturns = false
+function validateBlock(block, scope, returnType, functions, records, errors, callEffects, fail, normalizeOperations, loopDepth = 0) {
+  let normal = true
+  const raises = new Set()
 
   for (const statement of block.statements) {
-    if (alwaysReturns) fail("UNREACHABLE_STATEMENT", "Statement is unreachable.", statement.location)
+    if (!normal) fail("UNREACHABLE_STATEMENT", "Statement is unreachable.", statement.location)
 
     if (statement.kind == "LocalDeclaration") {
       const declaredType = validateValueTypeReference(statement.type, statement.location, fail, undefined, records)
@@ -287,10 +361,15 @@ function validateBlock(block, scope, returnType, functions, records, fail, norma
         mutable: statement.mutable,
         type: declaredType
       }, roleLocation(statement, "name"), scope, fail)
+      addExpressionEffects(raises, statement.initializer, callEffects)
       continue
     }
     if (statement.kind == "AssignmentStatement") {
       const binding = resolveBinding(statement.target.name, statement.target.location, scope, fail)
+
+      if (binding.type.kind == "ErrorType") {
+        fail("IMMUTABLE_ASSIGNMENT", `Cannot assign to immutable catch binding '${statement.target.name}'.`, statement.target.location)
+      }
       const expressionType = inferValueExpressionType(
         statement.expression, scope, functions, records, fail, normalizeOperations, "an assignment", binding.type
       )
@@ -303,6 +382,7 @@ function validateBlock(block, scope, returnType, functions, records, fail, norma
       }
       binding.knownValue = knownValueForExpression(statement.expression, scope)
       scope.presenceProofs.delete(binding)
+      addExpressionEffects(raises, statement.expression, callEffects)
       continue
     }
     if (statement.kind == "PrintStatement") {
@@ -311,6 +391,7 @@ function validateBlock(block, scope, returnType, functions, records, fail, norma
       if (printedType.kind != "TypeReference") {
         fail("TYPE_MISMATCH", "Collections and records cannot be printed directly.", statement.expression.location)
       }
+      addExpressionEffects(raises, statement.expression, callEffects)
       continue
     }
     if (statement.kind == "ExpressionStatement") {
@@ -322,6 +403,7 @@ function validateBlock(block, scope, returnType, functions, records, fail, norma
       if (expressionType != "void") {
         fail("TYPE_MISMATCH", "Expression statements may contain only void calls.", statement.expression.location)
       }
+      addExpressionEffects(raises, statement.expression, callEffects)
       continue
     }
     if (statement.kind == "BreakStatement" || statement.kind == "ContinueStatement") {
@@ -330,7 +412,7 @@ function validateBlock(block, scope, returnType, functions, records, fail, norma
 
         fail(`ILLEGAL_${control.toUpperCase()}_CONTEXT`, `${control[0].toUpperCase()}${control.slice(1)} statement outside a loop.`, statement.location)
       }
-      alwaysReturns = true
+      normal = false
       continue
     }
     if (statement.kind == "ReturnStatement") {
@@ -358,7 +440,8 @@ function validateBlock(block, scope, returnType, functions, records, fail, norma
           fail("TYPE_MISMATCH", `Return type ${typeDescription(actualType)}; expected ${typeDescription(returnType)}.`, statement.expression.location)
         }
       }
-      alwaysReturns = true
+      if (statement.expression) addExpressionEffects(raises, statement.expression, callEffects)
+      normal = false
       continue
     }
     if (statement.kind == "IfStatement") {
@@ -373,31 +456,31 @@ function validateBlock(block, scope, returnType, functions, records, fail, norma
       const alternateScope = createScope(scope, statement.alternate?.statements ?? [])
       applyPresenceNarrowing(statement.condition, scope, consequentScope, true)
       applyPresenceNarrowing(statement.condition, scope, alternateScope, false)
-      const consequentReturns = validateBlock(statement.consequent, consequentScope, returnType, functions, records, fail, normalizeOperations, loopDepth)
+      const consequentReturns = validateBlock(statement.consequent, consequentScope, returnType, functions, records, errors, callEffects, fail, normalizeOperations, loopDepth)
       const consequentKnownValues = visibleBindings.map((binding) => binding.knownValue)
 
       visibleBindings.forEach((binding, index) => {
         binding.knownValue = initialKnownValues[index]
       })
-      let alternateReturns = false
+      let alternateReturns = {normal: true, raises: new Set()}
 
       if (statement.alternate) {
-        alternateReturns = validateBlock(statement.alternate, alternateScope, returnType, functions, records, fail, normalizeOperations, loopDepth)
+        alternateReturns = validateBlock(statement.alternate, alternateScope, returnType, functions, records, errors, callEffects, fail, normalizeOperations, loopDepth)
       }
       const alternateKnownValues = visibleBindings.map((binding) => binding.knownValue)
 
       visibleBindings.forEach((binding, index) => {
-        if (consequentReturns && !alternateReturns) binding.knownValue = alternateKnownValues[index]
-        else if (!consequentReturns && alternateReturns) binding.knownValue = consequentKnownValues[index]
-        else if (!consequentReturns && !alternateReturns && consequentKnownValues[index] === alternateKnownValues[index]) {
+        if (!consequentReturns.normal && alternateReturns.normal) binding.knownValue = alternateKnownValues[index]
+        else if (consequentReturns.normal && !alternateReturns.normal) binding.knownValue = consequentKnownValues[index]
+        else if (consequentReturns.normal && alternateReturns.normal && consequentKnownValues[index] === alternateKnownValues[index]) {
           binding.knownValue = consequentKnownValues[index]
         } else binding.knownValue = undefined
       })
-      const continuingProofs = consequentReturns && !alternateReturns
+      const continuingProofs = !consequentReturns.normal && alternateReturns.normal
         ? alternateScope.presenceProofs
-        : !consequentReturns && alternateReturns
+        : consequentReturns.normal && !alternateReturns.normal
           ? consequentScope.presenceProofs
-          : !consequentReturns && !alternateReturns
+          : consequentReturns.normal && alternateReturns.normal
             ? new Set([...consequentScope.presenceProofs].filter((binding) => alternateScope.presenceProofs.has(binding)))
             : new Set()
       const visibleSet = new Set(visibleBindings)
@@ -406,7 +489,10 @@ function validateBlock(block, scope, returnType, functions, records, fail, norma
       for (const binding of continuingProofs) {
         if (visibleSet.has(binding)) scope.presenceProofs.add(binding)
       }
-      alwaysReturns = consequentReturns && alternateReturns
+      addExpressionEffects(raises, statement.condition, callEffects)
+      addAll(raises, consequentReturns.raises)
+      addAll(raises, alternateReturns.raises)
+      normal = consequentReturns.normal || alternateReturns.normal
       continue
     }
     if (statement.kind == "ForEachStatement") {
@@ -440,7 +526,64 @@ function validateBlock(block, scope, returnType, functions, records, fail, norma
         mutable: false,
         type: bindingType
       }, roleLocation(statement.valueBinding, "name"), loopScope, fail)
-      validateBlock(statement.body, loopScope, returnType, functions, records, fail, normalizeOperations, loopDepth + 1)
+      const bodyFlow = validateBlock(statement.body, loopScope, returnType, functions, records, errors, callEffects, fail, normalizeOperations, loopDepth + 1)
+      addExpressionEffects(raises, statement.list, callEffects)
+      addAll(raises, bodyFlow.raises)
+      for (const binding of assignedOuterBindings) {
+        binding.knownValue = undefined
+        scope.presenceProofs.delete(binding)
+      }
+      continue
+    }
+    if (statement.kind == "RaiseStatement") {
+      if (!statement.error || statement.error.kind != "ErrorConstruction") {
+        fail("NON_ERROR_RAISE", "Raise requires one constructed semantic error.", statement.location)
+      }
+      const raisedType = validateErrorType(statement.error.error, statement.error.location, errors, fail)
+      const messageType = inferValueExpressionType(
+        statement.error.message, scope, functions, records, fail, normalizeOperations, "an error message", scalarType("string")
+      )
+
+      if (!isScalarType(messageType, "string")) {
+        fail("NON_ERROR_RAISE", `Error message type ${typeDescription(messageType)}; expected string.`, statement.error.message.location)
+      }
+      addExpressionEffects(raises, statement.error.message, callEffects)
+      raises.add(raisedType.declarationId)
+      normal = false
+      continue
+    }
+    if (statement.kind == "TryStatement") {
+      const caughtType = validateErrorType(statement.catchType, statement.location, errors, fail)
+
+      if (!statement.catchBinding || statement.catchBinding.kind != "CatchBinding" || statement.catchBinding.mutable !== false) {
+        fail("INVALID_ERROR_HANDLER", "Catch requires one immutable typed binding.", statement.catchBinding?.location ?? statement.location)
+      }
+      const bindingType = validateErrorType(statement.catchBinding.type, statement.catchBinding.location, errors, fail)
+
+      if (bindingType.declarationId != caughtType.declarationId) {
+        fail("INVALID_ERROR_HANDLER", "Catch binding type must exactly match its handler type.", statement.catchBinding.location)
+      }
+      const assignedOuterBindings = outerMutableBindingsAssignedBy(statement.body, scope)
+
+      outerMutableBindingsAssignedBy(statement.catchBody, scope, assignedOuterBindings)
+      const bodyScope = createScope(scope, statement.body.statements)
+      const bodyFlow = validateBlock(statement.body, bodyScope, returnType, functions, records, errors, callEffects, fail, normalizeOperations, loopDepth)
+      const catchScope = createScope(scope, statement.catchBody.statements)
+
+      declareBinding(statement.catchBinding.name, {
+        knownValue: undefined,
+        mutable: false,
+        type: bindingType
+      }, roleLocation(statement.catchBinding, "name"), catchScope, fail)
+      const catchFlow = validateBlock(statement.catchBody, catchScope, returnType, functions, records, errors, callEffects, fail, normalizeOperations, loopDepth)
+
+      if (!bodyFlow.raises.has(caughtType.declarationId)) {
+        fail("UNREACHABLE_HANDLER", `Handler for '${errors.get(caughtType.declarationId)?.name}' cannot be reached.`, typeLocation(statement.catchType, statement.location))
+      }
+      bodyFlow.raises.delete(caughtType.declarationId)
+      addAll(raises, bodyFlow.raises)
+      addAll(raises, catchFlow.raises)
+      normal = bodyFlow.normal || catchFlow.normal
       for (const binding of assignedOuterBindings) {
         binding.knownValue = undefined
         scope.presenceProofs.delete(binding)
@@ -453,7 +596,150 @@ function validateBlock(block, scope, returnType, functions, records, fail, norma
     fail("UNSUPPORTED_STATEMENT", unexpected.kind, unexpected.location)
   }
 
-  return alwaysReturns
+  return {normal, raises}
+}
+
+/**
+ * Validates one exact nominal error type.
+ * @param {unknown} type - Candidate type.
+ * @param {import("./types.js").SourceLocation} location - Owning location.
+ * @param {ErrorRegistry} errors - Visible error declarations.
+ * @param {SemanticFail} fail - Diagnostic callback.
+ * @returns {import("./types.js").ErrorType} Validated type.
+ */
+function validateErrorType(type, location, errors, fail) {
+  if (!type || typeof type != "object" || Array.isArray(type)) {
+    return fail("UNKNOWN_ERROR", "Handler or raise is missing an exact error type.", location)
+  }
+  const candidate = /** @type {import("./types.js").ErrorType} */ (type)
+
+  if (candidate.kind != "ErrorType" ||
+    Object.keys(candidate).filter((key) => key != "sourceProvenance").sort().join(",") != "declarationId,kind" ||
+    typeof candidate.declarationId != "string" || !errors.has(candidate.declarationId)) {
+    fail("UNKNOWN_ERROR", `Unknown error declaration '${String(candidate.declarationId)}'.`, typeLocation(candidate, location))
+  }
+
+  return candidate
+}
+
+/**
+ * Adds every source value to one set.
+ * @param {Set<string>} target - Destination identities.
+ * @param {Set<string>} source - Source identities.
+ * @returns {void}
+ */
+function addAll(target, source) {
+  for (const value of source) target.add(value)
+}
+
+/**
+ * Adds unchecked errors raised while evaluating one expression.
+ * @param {Set<string>} target - Destination identities.
+ * @param {unknown} expression - Candidate semantic expression.
+ * @param {Map<string, Set<string>>} callEffects - Inferred call effects.
+ * @returns {void}
+ */
+function addExpressionEffects(target, expression, callEffects) {
+  const pending = [expression]
+  const seen = new Set()
+
+  while (pending.length > 0) {
+    const value = pending.pop()
+
+    if (!value || typeof value != "object" || seen.has(value)) continue
+    seen.add(value)
+    if (Reflect.get(value, "kind") == "CallExpression") addAll(target, callEffects.get(Reflect.get(value, "callee")) ?? new Set())
+    for (const [key, child] of Object.entries(value)) {
+      if (["location", "sourceProvenance", "resolution"].includes(key)) continue
+      if (Array.isArray(child)) pending.push(...child)
+      else if (child && typeof child == "object") pending.push(child)
+    }
+  }
+}
+
+/**
+ * Derives unchecked-error propagation over the resolved finite function graph.
+ * This is validator state, never a checked effect in the public function signature.
+ * @param {Map<string, import("./types.js").FunctionDeclaration>} functions - Resolved functions.
+ * @param {Map<string, Set<string>>} [seedEffects] - Dependency effects keyed by local import name.
+ * @param {Set<string>} [localFunctionNames] - Functions whose bodies belong to the current module.
+ * @returns {Map<string, Set<string>>} Escaping error identities by source-visible function name.
+ */
+function inferCallEffects(functions, seedEffects = new Map(), localFunctionNames = new Set(functions.keys())) {
+  const effects = new Map([...functions.keys()].map((name) => [name, new Set(seedEffects.get(name) ?? [])]))
+  let changed = true
+
+  while (changed) {
+    changed = false
+    for (const name of localFunctionNames) {
+      const declaration = functions.get(name)
+
+      if (!declaration) continue
+      const next = syntacticBlockEffects(declaration.body, effects)
+      const current = /** @type {Set<string>} */ (effects.get(name))
+
+      for (const error of next) {
+        if (!current.has(error)) {
+          current.add(error)
+          changed = true
+        }
+      }
+    }
+  }
+
+  return effects
+}
+
+/**
+ * Computes escaping identities from one block for the call-effect fixed point.
+ * @param {unknown} block - Candidate block.
+ * @param {Map<string, Set<string>>} callEffects - Current fixed-point state.
+ * @returns {Set<string>} Escaping identities.
+ */
+function syntacticBlockEffects(block, callEffects) {
+  const result = new Set()
+  const statements = Reflect.get(/** @type {object} */ (block ?? {}), "statements")
+
+  if (!Array.isArray(statements)) return result
+  for (const statement of statements) {
+    if (!statement || typeof statement != "object") continue
+    const kind = Reflect.get(statement, "kind")
+
+    if (kind == "RaiseStatement") {
+      const construction = Reflect.get(statement, "error")
+      const type = construction && typeof construction == "object" ? Reflect.get(construction, "error") : undefined
+      const declarationId = type && typeof type == "object" ? Reflect.get(type, "declarationId") : undefined
+
+      if (typeof declarationId == "string") result.add(declarationId)
+      if (construction && typeof construction == "object") addExpressionEffects(result, Reflect.get(construction, "message"), callEffects)
+      continue
+    }
+    if (kind == "TryStatement") {
+      const bodyEffects = syntacticBlockEffects(Reflect.get(statement, "body"), callEffects)
+      const catchType = Reflect.get(statement, "catchType")
+      const caughtId = catchType && typeof catchType == "object" ? Reflect.get(catchType, "declarationId") : undefined
+
+      if (typeof caughtId == "string" && bodyEffects.delete(caughtId)) {
+        addAll(bodyEffects, syntacticBlockEffects(Reflect.get(statement, "catchBody"), callEffects))
+      }
+      addAll(result, bodyEffects)
+      continue
+    }
+    if (kind == "IfStatement") {
+      addExpressionEffects(result, Reflect.get(statement, "condition"), callEffects)
+      addAll(result, syntacticBlockEffects(Reflect.get(statement, "consequent"), callEffects))
+      addAll(result, syntacticBlockEffects(Reflect.get(statement, "alternate"), callEffects))
+      continue
+    }
+    if (kind == "ForEachStatement") {
+      addExpressionEffects(result, Reflect.get(statement, "list"), callEffects)
+      addAll(result, syntacticBlockEffects(Reflect.get(statement, "body"), callEffects))
+      continue
+    }
+    for (const key of ["expression", "initializer"]) addExpressionEffects(result, Reflect.get(statement, key), callEffects)
+  }
+
+  return result
 }
 
 /**
@@ -661,7 +947,8 @@ function validateTypeReference(type, location, fail, seen = new Set(), records =
 function inferValueExpressionType(expression, scope, functions, records, fail, normalizeOperations, context, expectedType) {
   const type = inferExpressionType(expression, scope, functions, records, fail, normalizeOperations, expectedType)
 
-  if (type == "void") fail("VOID_AS_VALUE", `Void call cannot be used as ${context}.`, expression.location)
+  if (type == "void") return fail("VOID_AS_VALUE", `Void call cannot be used as ${context}.`, expression.location)
+  if (type.kind == "ErrorType") return fail("TYPE_MISMATCH", `Error value cannot be used as ${context}.`, expression.location)
 
   return type
 }
@@ -675,10 +962,23 @@ function inferValueExpressionType(expression, scope, functions, records, fail, n
  * @param {SemanticFail} fail - Diagnostic callback.
  * @param {boolean} normalizeOperations - Whether to replace transient frontend operation intent.
  * @param {import("./types.js").SemanticValueType} [expectedType] - Contextual collection type.
- * @returns {import("./types.js").SemanticValueType | "void"} Expression type.
+ * @returns {import("./types.js").SemanticBindingType | "void"} Expression type.
  */
 function inferExpressionType(expression, scope, functions, records, fail, normalizeOperations, expectedType) {
   if (expression.kind == "IdentifierExpression") return resolveBinding(expression.name, expression.location, scope, fail).type
+
+  if (expression.kind == "ErrorMessageRead") {
+    if (!expression.receiver || expression.receiver.kind != "IdentifierExpression") {
+      return fail("INVALID_MEMBER_RECEIVER", "Error message receiver must be one catch binding.", expression.location)
+    }
+    const receiver = resolveBinding(expression.receiver.name, expression.receiver.location, scope, fail)
+
+    if (receiver.type.kind != "ErrorType") {
+      return fail("INVALID_MEMBER_RECEIVER", "Message member requires a typed error catch binding.", expression.receiver.location)
+    }
+
+    return scalarType("string")
+  }
 
   if (expression.kind == "IntegerLiteral") {
     if (!Number.isSafeInteger(expression.value)) fail("TYPE_MISMATCH", "Non-safe integer literal.", expression.location)
@@ -1138,12 +1438,13 @@ function sameType(left, right) {
 
 /**
  * Formats one validated semantic type for diagnostics.
- * @param {import("./types.js").SemanticFunctionReturnType} type - Semantic type.
+ * @param {import("./types.js").SemanticFunctionReturnType | import("./types.js").ErrorType} type - Semantic type.
  * @returns {string} Stable recursive spelling.
  */
 function typeDescription(type) {
   if (type.kind == "TypeReference") return type.name
   if (type.kind == "RecordType") return `record<${type.declarationId}>`
+  if (type.kind == "ErrorType") return `error<${type.declarationId}>`
   if (type.kind == "ListType") return `list<${typeDescription(type.elementType)}>`
   if (type.kind == "OptionalType") return `optional<${typeDescription(type.valueType)}>`
 
@@ -1256,6 +1557,9 @@ function outerMutableBindingsAssignedBy(block, outerScope, assigned = new Set())
       if (statement.alternate) outerMutableBindingsAssignedBy(statement.alternate, outerScope, assigned)
     } else if (statement.kind == "ForEachStatement") {
       outerMutableBindingsAssignedBy(statement.body, outerScope, assigned)
+    } else if (statement.kind == "TryStatement") {
+      outerMutableBindingsAssignedBy(statement.body, outerScope, assigned)
+      outerMutableBindingsAssignedBy(statement.catchBody, outerScope, assigned)
     }
   }
 

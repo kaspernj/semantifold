@@ -482,7 +482,8 @@ export function semanticEntries(module) {
       if ("imports" in node) {
         node.imports.forEach((child, index) => visit(child, `/imports/${index}`, location))
       }
-      (node.records ?? []).forEach((child, index) => visit(child, `/records/${index}`, location))
+      ;(node.records ?? []).forEach((child, index) => visit(child, `/records/${index}`, location))
+      ;(node.errors ?? []).forEach((child, index) => visit(child, `/errors/${index}`, location))
       node.functions.forEach((child, index) => visit(child, `/functions/${index}`, location))
       if ("exports" in node) {
         node.exports.forEach((child, index) => visit(child, `/exports/${index}`, location))
@@ -501,6 +502,8 @@ export function semanticEntries(module) {
     } else if (node.kind == "Parameter") {
       visit(node.type, `${path}/type`, location)
     } else if (node.kind == "ValueBinding") {
+      visit(node.type, `${path}/type`, location)
+    } else if (node.kind == "CatchBinding") {
       visit(node.type, `${path}/type`, location)
     } else if (node.kind == "ListType") {
       visit(node.elementType, `${path}/elementType`, location)
@@ -527,6 +530,13 @@ export function semanticEntries(module) {
       visit(node.list, `${path}/list`, location)
       visit(node.valueBinding, `${path}/valueBinding`, location)
       visit(node.body, `${path}/body`, location)
+    } else if (node.kind == "RaiseStatement") {
+      visit(node.error, `${path}/error`, location)
+    } else if (node.kind == "TryStatement") {
+      visit(node.body, `${path}/body`, location)
+      visit(node.catchType, `${path}/catchType`, location)
+      visit(node.catchBinding, `${path}/catchBinding`, location)
+      visit(node.catchBody, `${path}/catchBody`, location)
     } else if (node.kind == "EntryPoint") {
       visit(node.body, `${path}/body`, location)
     } else if (node.kind == "UnaryExpression") {
@@ -540,6 +550,11 @@ export function semanticEntries(module) {
       visit(node.record, `${path}/record`, location)
       node.arguments.forEach((child, index) => visit(child, `${path}/arguments/${index}`, location))
     } else if (node.kind == "MemberRead") {
+      visit(node.receiver, `${path}/receiver`, location)
+    } else if (node.kind == "ErrorConstruction") {
+      visit(node.error, `${path}/error`, location)
+      visit(node.message, `${path}/message`, location)
+    } else if (node.kind == "ErrorMessageRead") {
       visit(node.receiver, `${path}/receiver`, location)
     } else if (node.kind == "ListLiteral") {
       node.elements.forEach((child, index) => visit(child, `${path}/elements/${index}`, location))
@@ -578,6 +593,8 @@ function resolveSymbols(module, records) {
   /** @type {Map<string, string>} */
   const recordSymbols = new Map()
   /** @type {Map<string, string>} */
+  const errorSymbols = new Map()
+  /** @type {Map<string, string>} */
   const fieldSymbols = new Map()
 
   for (const [index, declaration] of (module.records ?? []).entries()) {
@@ -591,6 +608,12 @@ function resolveSymbols(module, records) {
 
       if (field.id) fieldSymbols.set(field.id, fieldSymbol)
     }
+  }
+
+  for (const [index, declaration] of (module.errors ?? []).entries()) {
+    const symbol = declare(declaration, declaration.name, "error", `/errors/${index}`)
+
+    if (declaration.id) errorSymbols.set(declaration.id, symbol)
   }
 
   for (const [index, declaration] of (module.records ?? []).entries()) {
@@ -621,7 +644,7 @@ function resolveSymbols(module, records) {
 
   /**
    * Declares one canonical symbol.
-   * @param {import("./types.js").RecordDeclaration | import("./types.js").RecordField | import("./types.js").FunctionDeclaration | import("./types.js").Parameter | import("./types.js").LocalDeclaration | import("./types.js").ValueBinding} node - Declaration.
+   * @param {import("./types.js").RecordDeclaration | import("./types.js").ErrorDeclaration | import("./types.js").RecordField | import("./types.js").FunctionDeclaration | import("./types.js").Parameter | import("./types.js").LocalDeclaration | import("./types.js").ValueBinding | import("./types.js").CatchBinding} node - Declaration.
    * @param {string} name - Symbol name.
    * @param {import("./types.js").SemanticSymbolKind} kind - Symbol kind.
    * @param {string} path - Declaration occurrence path.
@@ -643,8 +666,8 @@ function resolveSymbols(module, records) {
       location,
       name,
       references: [],
-      ...(["record", "field", "function"].includes(kind)
-        ? {semanticDeclarationId: /** @type {import("./types.js").RecordDeclaration | import("./types.js").RecordField | import("./types.js").FunctionDeclaration} */ (node).id}
+      ...(["record", "error", "field", "function"].includes(kind)
+        ? {semanticDeclarationId: /** @type {import("./types.js").RecordDeclaration | import("./types.js").ErrorDeclaration | import("./types.js").RecordField | import("./types.js").FunctionDeclaration} */ (node).id}
         : {})
     })
 
@@ -692,6 +715,23 @@ function resolveSymbols(module, records) {
           `${statementPath}/valueBinding`
         ))
         visitBlock(statement.body, bodyScope, `${statementPath}/body`)
+      } else if (statement.kind == "RaiseStatement") {
+        visitType(statement.error.error, `${statementPath}/error/error`)
+        reference(statement.error, errorSymbols.get(statement.error.error.declarationId), "construct", `${statementPath}/error`)
+        visitExpression(statement.error.message, scope, `${statementPath}/error/message`)
+      } else if (statement.kind == "TryStatement") {
+        visitBlock(statement.body, scope, `${statementPath}/body`)
+        visitType(statement.catchType, `${statementPath}/catchType`)
+        visitType(statement.catchBinding.type, `${statementPath}/catchBinding/type`)
+        const catchScope = new Map(scope)
+
+        catchScope.set(statement.catchBinding.name, declare(
+          statement.catchBinding,
+          statement.catchBinding.name,
+          "catch",
+          `${statementPath}/catchBinding`
+        ))
+        visitBlock(statement.catchBody, catchScope, `${statementPath}/catchBody`)
       }
     }
   }
@@ -715,6 +755,8 @@ function resolveSymbols(module, records) {
       for (const [index, argument] of expression.arguments.entries()) visitExpression(argument, scope, `${path}/arguments/${index}`)
     } else if (expression.kind == "MemberRead") {
       reference(expression, fieldSymbols.get(expression.field), "member", path)
+      visitExpression(expression.receiver, scope, `${path}/receiver`)
+    } else if (expression.kind == "ErrorMessageRead") {
       visitExpression(expression.receiver, scope, `${path}/receiver`)
     } else if (expression.kind == "UnaryExpression") {
       visitExpression(expression.operand, scope, `${path}/operand`)
@@ -745,12 +787,13 @@ function resolveSymbols(module, records) {
 
   /**
    * Resolves nominal references nested in a semantic type.
-   * @param {import("./types.js").SemanticFunctionReturnType} type - Semantic type.
+   * @param {import("./types.js").SemanticFunctionReturnType | import("./types.js").ErrorType} type - Semantic type.
    * @param {string} path - Type occurrence path.
    * @returns {void}
    */
   function visitType(type, path) {
     if (type.kind == "RecordType") reference(type, recordSymbols.get(type.declarationId), "type", path)
+    else if (type.kind == "ErrorType") reference(type, errorSymbols.get(type.declarationId), "type", path)
     else if (type.kind == "ListType") visitType(type.elementType, `${path}/elementType`)
     else if (type.kind == "MapType") {
       visitType(type.keyType, `${path}/keyType`)
@@ -760,7 +803,7 @@ function resolveSymbols(module, records) {
 
   /**
    * Attaches one resolved symbol reference.
-   * @param {import("./types.js").IdentifierExpression | import("./types.js").CallExpression | import("./types.js").RecordType | import("./types.js").RecordConstruction | import("./types.js").MemberRead} node - Reference node.
+   * @param {import("./types.js").IdentifierExpression | import("./types.js").CallExpression | import("./types.js").RecordType | import("./types.js").RecordConstruction | import("./types.js").MemberRead | import("./types.js").ErrorType | import("./types.js").ErrorConstruction} node - Reference node.
    * @param {string | undefined} symbolId - Resolved symbol.
    * @param {"type" | "construct" | "member" | "read" | "write" | "call"} role - Reference role.
    * @param {string} path - Reference occurrence path.
@@ -774,7 +817,7 @@ function resolveSymbols(module, records) {
 
     if (!record || !symbol) throw new Error(`Missing provenance while resolving ${node.kind}.`)
 
-    const rangeRole = role == "call" ? "callee" : role == "construct" ? "record" : role == "member" ? "member" : role == "type" ? "type" : "name"
+    const rangeRole = role == "call" ? "callee" : role == "construct" ? (node.kind == "ErrorConstruction" ? "type" : "record") : role == "member" ? "member" : role == "type" ? "type" : "name"
     const location = record.ranges[rangeRole] ?? ("location" in node ? node.location : primaryLocation(record.origin))
 
     record.symbolId = symbolId

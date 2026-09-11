@@ -258,11 +258,13 @@ function emitStatement(writer, statement, indent, path) {
     writer.mapped("return", {mappingKind: "anchor", node: statement, path})
     writer.synthetic(" ", "return spacing", [statement], [path])
     emitExpression(writer, statement.expression, path + "/expression", "go", identity)
-  } else {
+  } else if (statement.kind == "PrintStatement") {
     writer.mapped("fmt.Println", {mappingKind: "anchor", node: statement, path})
     writer.mapped("(", {mappingKind: "anchor", node: statement, path})
     emitExpression(writer, statement.expression, path + "/expression", "go", identity)
     writer.mapped(")", {mappingKind: "anchor", node: statement, path})
+  } else {
+    throw new TypeError("Unsupported Go statement reached emission after preflight.")
   }
   writer.synthetic("\n", "line break", [statement], [path])
 }

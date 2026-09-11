@@ -8,8 +8,8 @@ import {sourceScalarType} from "./scalars.js"
 /**
  * Resolves the value presented to list iteration after canonical optional unwrap.
  * Semantic validation remains responsible for requiring the matching presence proof.
- * @param {import("../semantic/types.js").SemanticFunctionReturnType | undefined} type - Parser-resolved operand type.
- * @returns {import("../semantic/types.js").SemanticFunctionReturnType | undefined} Iterated value type.
+ * @param {import("../semantic/types.js").SemanticFunctionReturnType | import("../semantic/types.js").ErrorType | undefined} type - Parser-resolved operand type.
+ * @returns {import("../semantic/types.js").SemanticFunctionReturnType | import("../semantic/types.js").ErrorType | undefined} Iterated value type.
  */
 export function iterationOperandType(type) {
   return type?.kind == "OptionalType" ? type.valueType : type
