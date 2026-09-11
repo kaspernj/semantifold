@@ -16,6 +16,21 @@ describe("multi-file program diagnostics", () => {
     )
   }
 
+  /**
+   * @param {Parameters<typeof parseProgram>[0]} input - Program request expected to fail.
+   * @returns {SemantifoldDiagnostic} Captured diagnostic.
+   */
+  function captureDiagnostic(input) {
+    try {
+      parseProgram(input)
+      assert.fail("Missing expected Semantifold diagnostic.")
+    } catch (error) {
+      if (!(error instanceof SemantifoldDiagnostic)) throw error
+
+      return error
+    }
+  }
+
   it("distinguishes a known non-cohort source profile from an unknown language", () => {
     for (const [language, code] of [["python", "UNSUPPORTED_ROLE"], ["missing", "UNSUPPORTED_LANGUAGE"]]) {
       assert.throws(
@@ -225,5 +240,131 @@ function other(): int { return 2; }
         sources: [dependency, {filename: "main.js", id: "main", language: "javascript", source}]
       }, "UNSUPPORTED_SYNTAX")
     }
+  })
+
+  it("rejects a TypeScript type-only import used as a runtime value", () => {
+    expectDiagnostic({
+      entryModule: "main",
+      sources: [{
+        filename: "model.ts",
+        id: "model",
+        language: "typescript",
+        source: "export class User { constructor(readonly name: string) {} }\n"
+      }, {
+        filename: "main.ts",
+        id: "main",
+        language: "typescript",
+        source: `import type {User} from "./model.js"
+const user: User = new User("Ada")
+console.log(user.name)
+`
+      }]
+    }, "UNSUPPORTED_SYNTAX")
+  })
+
+  it("rejects TypeScript type-only exports instead of widening them to value exports", () => {
+    expectDiagnostic({
+      entryModule: "main",
+      sources: [{
+        filename: "main.ts",
+        id: "main",
+        language: "typescript",
+        source: `class User { constructor(readonly name: string) {} }
+export type {User}
+console.log(1)
+`
+      }]
+    }, "UNSUPPORTED_SYNTAX")
+  })
+
+  it("rejects duplicate Java native identities deterministically before resolving an ambiguous import", () => {
+    const one = {
+      filename: "one/app/shared/Library.java",
+      id: "one",
+      language: /** @type {const} */ ("java"),
+      source: "package app.shared;\npublic final class Library { public static int value() { return 1; } }\n"
+    }
+    const two = {
+      filename: "two/app/shared/Library.java",
+      id: "two",
+      language: /** @type {const} */ ("java"),
+      source: "package app.shared;\npublic final class Library { public static int value() { return 2; } }\n"
+    }
+    const main = {
+      filename: "app/main/Main.java",
+      id: "main",
+      language: /** @type {const} */ ("java"),
+      source: `package app.main;
+import app.shared.Library;
+public final class Main { public static void main(String[] args) { System.out.println(Library.value()); } }
+`
+    }
+    const diagnostics = [[one, two, main], [two, one, main]].map((sources) => {
+      const error = captureDiagnostic({entryModule: "main", sources})
+
+      return {code: error.code, detail: error.detail, filename: error.location?.filename}
+    })
+
+    assert.deepEqual(diagnostics[0], diagnostics[1])
+    assert.deepEqual(diagnostics[0], {
+      code: "DUPLICATE_MODULE",
+      detail: "Duplicate Java native module identity 'app.shared.Library' in 'one/app/shared/Library.java' and 'two/app/shared/Library.java'.",
+      filename: "two/app/shared/Library.java"
+    })
+  })
+
+  it("rejects Ruby module reopening deterministically before qualified resolution", () => {
+    const one = {
+      filename: "one.rb",
+      id: "one",
+      language: /** @type {const} */ ("ruby"),
+      source: `module Shared
+  module_function
+
+  # @return [Integer]
+  def one
+    return 1
+  end
+end
+`
+    }
+    const two = {
+      filename: "two.rb",
+      id: "two",
+      language: /** @type {const} */ ("ruby"),
+      source: `module Shared
+  module_function
+
+  # @return [Integer]
+  def two
+    return 2
+  end
+end
+`
+    }
+    const main = {
+      filename: "main.rb",
+      id: "main",
+      language: /** @type {const} */ ("ruby"),
+      source: `require_relative "one"
+require_relative "two"
+
+module Main
+  puts Shared.one + Shared.two
+end
+`
+    }
+    const diagnostics = [[one, two, main], [two, one, main]].map((sources) => {
+      const error = captureDiagnostic({entryModule: "main", sources})
+
+      return {code: error.code, detail: error.detail, filename: error.location?.filename}
+    })
+
+    assert.deepEqual(diagnostics[0], diagnostics[1])
+    assert.deepEqual(diagnostics[0], {
+      code: "DUPLICATE_MODULE",
+      detail: "Duplicate Ruby native module identity 'Shared' in 'one.rb' and 'two.rb'.",
+      filename: "two.rb"
+    })
   })
 })

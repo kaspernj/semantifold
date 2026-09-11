@@ -110,6 +110,20 @@ export function generateRuby(module, writer) {
     writer.mapped("end", {mappingKind: "anchor", node: declaration})
   })
 
+  if (writer.program) {
+    const privateRecords = records.filter((record) => !writer.isExported(record.id))
+    const privateFunctions = module.functions.filter((declaration) => !writer.isExported(declaration.id))
+
+    for (const record of privateRecords) {
+      writer.synthetic("\nprivate_constant :", "Ruby private semantic record", [record])
+      writer.mapped(record.name, {mappingKind: "exact", node: record, role: "name"})
+    }
+    for (const declaration of privateFunctions) {
+      writer.synthetic("\nprivate_class_method :", "Ruby private semantic function", [declaration])
+      writer.mapped(declaration.name, {mappingKind: "exact", node: declaration, role: "name"})
+    }
+  }
+
   if (!writer.program || writer.isProgramEntry()) {
     writer.synthetic("\n\n", "entry-point separator", [module.entryPoint])
     emitBlock(writer, module.entryPoint.body, "", "/entryPoint/body")

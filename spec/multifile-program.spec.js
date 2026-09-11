@@ -80,4 +80,23 @@ export function label(user: User): string {
     expect(userDeclaration).toMatchObject({initializer: {kind: "RecordConstruction", record: {declarationId: "model#record:0"}}})
     expect(print).toMatchObject({expression: {kind: "CallExpression", resolution: {declarationId: "math_tools#function:0"}}})
   })
+
+  it("rekeys only declaration identities while preserving equal literal and filename strings", () => {
+    const program = semantifold.parseProgram({
+      entryModule: "main",
+      sources: [{
+        filename: "function:0",
+        id: "main",
+        language: "typescript",
+        source: `function marker(): string { return "function:0" }
+console.log(marker())
+`
+      }]
+    })
+    const declaration = program.modules[0].functions[0]
+
+    expect(declaration.id).toEqual("main#function:0")
+    expect(declaration.location.filename).toEqual("function:0")
+    expect(declaration.body.statements[0]).toMatchObject({expression: {kind: "StringLiteral", value: "function:0"}})
+  })
 })

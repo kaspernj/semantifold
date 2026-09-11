@@ -1232,7 +1232,7 @@ export function parseRuby({filename, source, program}) {
       return unsupportedSyntax("ruby", "module functions outside one leading module_function profile",
         nodeLocation(moduleFunctionNodes[1] ?? definitions[0], filename, source))
     }
-    body = body.filter((node) => !isModuleFunctionMarker(node))
+    body = body.filter((node) => !isModuleFunctionMarker(node) && !rubyVisibilityMarker(node))
   }
   const recordNodes = body.filter((node) => node instanceof ClassNode)
   const recordDeclarations = recordNodes.map((node, index) => ({
@@ -1341,8 +1341,28 @@ export function inspectRubyModule({filename, source}) {
     }
   })
   const moduleBody = modules[0].body instanceof StatementsNode ? modules[0].body.body : []
+  const visibility = new Map()
+
+  for (const node of moduleBody) {
+    if (!(node instanceof CallNode) || !["private_class_method", "private_constant"].includes(node.name)) continue
+    const marker = rubyVisibilityMarker(node)
+
+    if (!marker) return unsupportedSyntax("ruby", `malformed ${node.name}`, nodeLocation(node, filename, source))
+    if (visibility.has(marker.name)) return unsupportedSyntax("ruby", `duplicate visibility marker for '${marker.name}'`, nodeLocation(node, filename, source))
+    const declaration = moduleBody.find((candidate) => marker.kind == "function"
+      ? candidate instanceof DefNode && candidate.name == marker.name
+      : candidate instanceof ClassNode && candidate.name == marker.name)
+
+    if (!declaration || moduleBody.indexOf(declaration) > moduleBody.indexOf(node)) {
+      return unsupportedSyntax("ruby", `visibility marker without an earlier ${marker.kind}`, nodeLocation(node, filename, source))
+    }
+    visibility.set(marker.name, marker.kind)
+  }
   const exports = moduleBody.flatMap((node) => {
     if (node instanceof DefNode || node instanceof ClassNode) {
+      const kind = node instanceof DefNode ? "function" : "record"
+
+      if (visibility.get(node.name) == kind) return []
       return [{
         exportedName: node.name,
         localName: node.name,
@@ -1373,6 +1393,22 @@ function isRequireRelative(node) {
  */
 function isModuleFunctionMarker(node) {
   return node instanceof CallNode && !node.receiver && !node.block && node.name == "module_function" && !node.arguments_
+}
+
+/**
+ * Reads one exact generated Ruby visibility marker.
+ * @param {import("@ruby/prism").Node} node - Candidate module-body node.
+ * @returns {{kind: import("../semantic/types.js").SemanticDeclarationKind, name: string} | undefined} Marker meaning.
+ */
+function rubyVisibilityMarker(node) {
+  if (!(node instanceof CallNode) || node.receiver || node.block ||
+    !["private_class_method", "private_constant"].includes(node.name) ||
+    node.arguments_?.arguments_.length != 1 || !(node.arguments_.arguments_[0] instanceof SymbolNode)) return undefined
+
+  return {
+    kind: node.name == "private_class_method" ? "function" : "record",
+    name: node.arguments_.arguments_[0].unescaped.value
+  }
 }
 
 /**

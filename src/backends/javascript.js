@@ -148,7 +148,11 @@ function emitAliasedExports(module, writer) {
     const declaration = [...programModule.functions, ...programModule.records ?? []].find(({id}) => id == item.declarationId)
 
     if (!declaration) throw new RangeError(`Unknown exported declaration '${item.declarationId}'.`)
-    writer.synthetic(`${declaration.name} as ${item.exportedName}`, "ESM aliased export", [declaration])
+    const exportPath = `/exports/${programModule.exports.indexOf(item)}`
+
+    writer.mapped(declaration.name, {mappingKind: "exact", name: declaration.name, node: item, path: exportPath, role: "localName"})
+    writer.synthetic(" as ", "ESM aliased export operator", [item], [exportPath])
+    writer.mapped(item.exportedName, {mappingKind: "exact", name: item.exportedName, node: item, path: exportPath, role: "exportedName"})
   })
   writer.synthetic("}", "ESM aliased export close", [module])
 }

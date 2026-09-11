@@ -6,6 +6,8 @@ import {createGeneratedArtifactSet} from "../artifacts.js"
 import {SemantifoldDiagnostic, unsupportedCapability, unsupportedRole} from "../diagnostic.js"
 import {languageRegistry} from "../language-registry.js"
 import {finalizeMapping, toSourceMapV3} from "../mapping.js"
+import {createCoordinateIndex, indexedPointAt, moduleLocation} from "../semantic/location.js"
+import {semanticEntries} from "../semantic/provenance.js"
 import {validateTargetBindingIdentifier, validateTargetIdentifier, validateTargetTypeIdentifier} from "./identifiers.js"
 import {validateBackendModule} from "./shared.js"
 import {programImportName, SourceWriter} from "./writer.js"
@@ -24,8 +26,9 @@ export function generateProgramArtifacts(input) {
   languageRegistry.record(input.language)
   if (!programTargets.has(input.language)) unsupportedRole(input.language, "multi-file text backend")
   const program = validateProgram(input.program, input.language)
-  const paths = planModulePaths(program, input.language)
   const emissionModules = prepareEmissionModules(program, input.language)
+  validateProgramSourceOwnership(program, input.language)
+  const paths = planModulePaths(program, input.language)
   const sources = program.sources.map((source) => {
     if (source.content === null) invalidProgramGeneration(`Program source '${source.filename}' has no retained content.`)
 
@@ -81,6 +84,72 @@ export function generateProgramArtifacts(input) {
   }
 
   return createGeneratedArtifactSet({artifacts, target: input.language})
+}
+
+/**
+ * Validates every mandatory semantic location against its owning module source before writer allocation.
+ * @param {import("../semantic/types.js").SemanticProgram} program - Structurally and semantically validated program.
+ * @param {import("../semantic/types.js").SemanticLanguage} language - Target language.
+ * @returns {void}
+ */
+function validateProgramSourceOwnership(program, language) {
+  const sources = new Map(program.sources.map((source) => [source.filename, {
+    ...source,
+    coordinates: createCoordinateIndex(/** @type {string} */ (source.content))
+  }]))
+
+  for (const module of program.modules) {
+    const source = sources.get(module.sourceFilename)
+
+    if (!source) unsupportedCapability(language, "semantic program module source ownership", undefined)
+    const fallback = moduleLocation(source.filename, /** @type {string} */ (source.content))
+
+    for (const entry of semanticEntries(module)) {
+      const subject = entry.node.kind == "Module" ? "module" : entry.node.kind == "Import" ? "import" :
+        entry.node.kind == "Export" ? "export" : "semantic node"
+
+      if (!("location" in entry.node)) {
+        if (subject != "semantic node") unsupportedCapability(language, `semantic program ${subject} location`, fallback)
+        continue
+      }
+      const location = entry.node.location
+
+      if (sourceOwnsLocation(source, location)) continue
+
+      unsupportedCapability(language, `semantic program ${subject} location source ownership`, fallback)
+    }
+  }
+}
+
+/**
+ * Checks a normalized UTF-16 location against one exact registered source without throwing.
+ * @param {{filename: string, content: string | null, coordinates: ReturnType<typeof createCoordinateIndex>}} source - Owning source.
+ * @param {unknown} candidate - Candidate location.
+ * @returns {boolean} Whether the source owns the location.
+ */
+function sourceOwnsLocation(source, candidate) {
+  if (!isPlainObject(candidate) || candidate.filename != source.filename || !isPlainObject(candidate.start) ||
+    !isPlainObject(candidate.end) || !Number.isInteger(candidate.start.offset) || !Number.isInteger(candidate.end.offset) ||
+    !Number.isInteger(candidate.start.line) || !Number.isInteger(candidate.start.column) ||
+    !Number.isInteger(candidate.end.line) || !Number.isInteger(candidate.end.column)) return false
+  const startOffset = /** @type {number} */ (candidate.start.offset)
+  const endOffset = /** @type {number} */ (candidate.end.offset)
+
+  if (startOffset < 0 || endOffset < startOffset || endOffset > source.coordinates.source.length) return false
+  const expectedStart = indexedPointAt(source.coordinates, startOffset)
+  const expectedEnd = indexedPointAt(source.coordinates, endOffset)
+
+  return samePoint(candidate.start, expectedStart) && samePoint(candidate.end, expectedEnd)
+}
+
+/**
+ * Compares an untrusted point with one canonical indexed point.
+ * @param {Record<string, unknown>} candidate - Candidate point.
+ * @param {import("../semantic/types.js").SourcePoint} expected - Canonical point.
+ * @returns {boolean} Whether every coordinate agrees.
+ */
+function samePoint(candidate, expected) {
+  return candidate.offset == expected.offset && candidate.line == expected.line && candidate.column == expected.column
 }
 
 /**
@@ -198,6 +267,13 @@ function validateProgram(candidate, language) {
   if (entryCount != 1 || !modules.get(program.entryModule)?.entryPoint) {
     unsupportedCapability(language, "program without exactly one selected entry point", modules.get(program.entryModule)?.location)
   }
+  const selectedModule = /** @type {import("../semantic/types.js").SemanticProgramModule} */ (modules.get(program.entryModule))
+  const selectedEntry = selectedModule.entryPoint
+
+  if (!isPlainObject(selectedEntry?.body) || !isDenseArray(selectedEntry.body.statements) || selectedEntry.body.statements.length == 0) {
+    unsupportedCapability(language, "program without a dense non-empty selected entry point block",
+      selectedEntry?.location ?? selectedModule.location)
+  }
   const earlier = new Set()
 
   for (const module of program.modules) {
@@ -250,6 +326,12 @@ function validateProgram(candidate, language) {
       }
       importedTargetNames.add(name)
     }
+    const typeOnlyDeclarationIds = new Set(module.imports.filter(({typeOnly}) => typeOnly).map(({declarationId}) => declarationId))
+    const valueConstruction = findTypeOnlyValueConstruction(module, typeOnlyDeclarationIds)
+
+    if (valueConstruction) {
+      unsupportedCapability(language, "type-only program import used as a value", valueConstruction.location ?? module.location)
+    }
     const exportNames = new Set()
 
     for (const exported of module.exports) {
@@ -274,10 +356,56 @@ function validateProgram(candidate, language) {
       }
       exportNames.add(name)
     }
+    if (language == "php") {
+      const exportedDeclarationIds = new Set(module.exports.map(({declarationId}) => declarationId))
+      const privateDeclaration = [...module.records ?? [], ...module.functions].find(({id}) =>
+        typeof id == "string" && !exportedDeclarationIds.has(id))
+
+      if (privateDeclaration) {
+        unsupportedCapability(language, `non-exported declaration '${privateDeclaration.name}' without target-private module visibility`,
+          privateDeclaration.location)
+      }
+    }
     earlier.add(module.id)
   }
 
   return program
+}
+
+/**
+ * Finds a record construction that crosses a type-only import edge.
+ * @param {import("../semantic/types.js").SemanticProgramModule} module - Importing semantic module.
+ * @param {Set<string>} typeOnlyDeclarationIds - Imported identities unavailable in value positions.
+ * @returns {import("../semantic/types.js").RecordConstruction | undefined} Invalid construction when present.
+ */
+function findTypeOnlyValueConstruction(module, typeOnlyDeclarationIds) {
+  if (typeOnlyDeclarationIds.size == 0) return undefined
+  const seen = new WeakSet()
+
+  /**
+   * Visits one semantic value.
+   * @param {unknown} value - Candidate semantic subtree.
+   * @returns {import("../semantic/types.js").RecordConstruction | undefined} Invalid construction when present.
+   */
+  function visit(value) {
+    if (!value || typeof value != "object" || seen.has(value)) return undefined
+    seen.add(value)
+    const object = /** @type {Record<string, unknown>} */ (value)
+
+    if (object.kind == "RecordConstruction" && isPlainObject(object.record) &&
+      typeof object.record.declarationId == "string" && typeOnlyDeclarationIds.has(object.record.declarationId)) {
+      return /** @type {import("../semantic/types.js").RecordConstruction} */ (value)
+    }
+    for (const child of Object.values(object)) {
+      const found = visit(child)
+
+      if (found) return found
+    }
+
+    return undefined
+  }
+
+  return visit({entryPoint: module.entryPoint, functions: module.functions})
 }
 
 /**

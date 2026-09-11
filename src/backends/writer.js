@@ -172,6 +172,17 @@ export class SourceWriter {
   }
 
   /**
+   * Reports whether one local declaration has any public program export.
+   * @param {string | undefined} declarationId - Declaration identity.
+   * @returns {boolean} Whether the declaration is exported.
+   */
+  isExported(declarationId) {
+    const module = /** @type {Partial<import("../semantic/types.js").SemanticProgramModule>} */ (this.module)
+
+    return typeof declarationId == "string" && Boolean(module.exports?.some((item) => item.declarationId == declarationId))
+  }
+
+  /**
    * Returns whether this is the selected program entry module.
    * @returns {boolean} Whether this writer owns the selected entry.
    */

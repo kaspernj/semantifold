@@ -1,11 +1,14 @@
 // @ts-check
 
+import assert from "node:assert/strict"
 import {describe, expect, it} from "@velocious/testing"
 import {
+  createGeneratedArtifactSet,
   discoverCanonicalToolchain,
   generateProgramArtifactSet,
   parseProgram,
-  runAcceptanceStages
+  runAcceptanceStages,
+  SemantifoldDiagnostic
 } from "../index.js"
 
 function project() {
@@ -33,6 +36,52 @@ export function label(user: User): string { return user.name }
       language: "typescript",
       source: "export class User { constructor(readonly name: string) {} }\n"
     }]
+  })
+}
+
+function privateHelperProject() {
+  return parseProgram({
+    entryModule: "main",
+    sources: [{
+      filename: "library.ts",
+      id: "library",
+      language: "typescript",
+      source: `function hidden(): string { return "secret" }
+export function exposed(): string { return "public" }
+`
+    }, {
+      filename: "main.ts",
+      id: "main",
+      language: "typescript",
+      source: `import {exposed} from "./library.js"
+console.log(exposed())
+`
+    }]
+  })
+}
+
+/**
+ * Adds one generated native visibility probe without changing the generated entry artifact.
+ * @param {import("../src/semantic/types.js").GeneratedArtifactSet} artifacts - Generated project.
+ * @param {string} path - Probe path.
+ * @param {string} content - Native probe source.
+ */
+function withProbe(artifacts, path, content) {
+  return createGeneratedArtifactSet({
+    artifacts: [...artifacts.artifacts, {
+      content,
+      contentKind: /** @type {const} */ ("text"),
+      mediaType: "text/plain",
+      ownership: /** @type {const} */ ("generated"),
+      path,
+      provenance: {
+        kind: /** @type {const} */ ("synthetic"),
+        reason: "Native visibility probe for a non-exported semantic declaration.",
+        relatedOrigins: []
+      },
+      role: /** @type {const} */ ("support")
+    }],
+    target: artifacts.target
   })
 }
 
@@ -90,5 +139,57 @@ describe("multi-file generated project execution", () => {
 
       expect({output: result.stages.at(-1)?.stdout, target}).toEqual({output: "Ada\n", target})
     }
+  })
+
+  it("makes non-exported Ruby helpers inaccessible through the native module", async () => {
+    const ruby = await discoverCanonicalToolchain("ruby")
+    const artifacts = withProbe(
+      generateProgramArtifactSet({language: "ruby", program: privateHelperProject()}),
+      "probe.rb",
+      "require_relative \"library\"\nprint Library.hidden\n"
+    )
+
+    await assert.rejects(
+      () => runAcceptanceStages({
+        artifacts,
+        stages: [{arguments: ["probe.rb"], stage: "execute", tool: ruby}],
+        target: "ruby"
+      }),
+      (error) => error instanceof SemantifoldDiagnostic && error.code == "ACCEPTANCE_NONZERO_EXIT"
+    )
+  })
+
+  it("makes non-exported Java helpers inaccessible through the generated public class", async () => {
+    const javac = await discoverCanonicalToolchain("javac")
+    const artifacts = withProbe(
+      generateProgramArtifactSet({language: "java", program: privateHelperProject()}),
+      "Probe.java",
+      `import semantifold.generated.library.Library;
+public final class Probe {
+  public static void main(String[] args) { System.out.print(Library.hidden()); }
+}
+`
+    )
+
+    await assert.rejects(
+      () => runAcceptanceStages({
+        artifacts,
+        stages: [{
+          arguments: ["semantifold/generated/library/Library.java", "Probe.java"],
+          stage: "compile",
+          tool: javac
+        }],
+        target: "java"
+      }),
+      (error) => error instanceof SemantifoldDiagnostic && error.code == "ACCEPTANCE_NONZERO_EXIT"
+    )
+  })
+
+  it("rejects PHP modules whose non-exported declarations cannot be made module-private", () => {
+    assert.throws(
+      () => generateProgramArtifactSet({language: "php", program: privateHelperProject()}),
+      (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
+        error.language == "php" && error.detail.includes("non-exported declaration")
+    )
   })
 })

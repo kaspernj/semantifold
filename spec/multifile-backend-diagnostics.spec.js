@@ -259,6 +259,95 @@ console.log(value())
     )
   })
 
+  it("preflights mandatory module/header locations and their owning source before writer allocation", () => {
+    const program = parseProgram({
+      entryModule: "main",
+      sources: [{
+        filename: "library.ts",
+        id: "library",
+        language: "typescript",
+        source: "export function value(): number { return 1 }\n"
+      }, {
+        filename: "main.ts",
+        id: "main",
+        language: "typescript",
+        source: "import {value} from \"./library.js\"\nconsole.log(value())\n"
+      }]
+    })
+    const malformedModule = structuredClone(program)
+    const malformedImport = structuredClone(program)
+    const missingExport = structuredClone(program)
+    const foreignExport = structuredClone(program)
+
+    malformedModule.modules[0].location = /** @type {never} */ (null)
+    malformedImport.modules[1].imports[0].location = /** @type {never} */ (null)
+    delete /** @type {Partial<import("../src/semantic/types.js").SemanticExport>} */ (missingExport.modules[0].exports[0]).location
+    foreignExport.modules[0].exports[0].location.filename = "main.ts"
+    for (const [candidate, detail, filename] of [
+      [malformedModule, "module location", "library.ts"],
+      [malformedImport, "import location", "main.ts"],
+      [missingExport, "export location", "library.ts"],
+      [foreignExport, "export location source ownership", "library.ts"]
+    ]) {
+      assert.throws(
+        () => generateProgramArtifactSet({
+          language: "typescript",
+          program: /** @type {import("../src/semantic/types.js").SemanticProgram} */ (candidate)
+        }),
+        (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
+          error.language == "typescript" && error.detail.includes(String(detail)) && error.location?.filename == filename
+      )
+    }
+  })
+
+  it("rejects an empty selected entry body even when that module also declares a function", () => {
+    const program = parseProgram({
+      entryModule: "main",
+      sources: [{
+        filename: "main.ts",
+        id: "main",
+        language: "typescript",
+        source: "function helper(): number { return 1 }\nconsole.log(helper())\n"
+      }]
+    })
+
+    program.modules[0].entryPoint.body.statements = []
+    assert.throws(
+      () => generateProgramArtifactSet({language: "typescript", program}),
+      (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
+        error.language == "typescript" && error.detail.includes("non-empty selected entry point") &&
+        error.location?.filename == "main.ts"
+    )
+  })
+
+  it("rejects caller-authored value construction through a type-only program import", () => {
+    const program = parseProgram({
+      entryModule: "main",
+      sources: [{
+        filename: "model.ts",
+        id: "model",
+        language: "typescript",
+        source: "export class User { constructor(readonly name: string) {} }\n"
+      }, {
+        filename: "main.ts",
+        id: "main",
+        language: "typescript",
+        source: `import {User} from "./model.js"
+const user: User = new User("Ada")
+console.log(user.name)
+`
+      }]
+    })
+
+    program.modules[1].imports[0].typeOnly = true
+    assert.throws(
+      () => generateProgramArtifactSet({language: "typescript", program}),
+      (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
+        error.language == "typescript" && error.detail.includes("type-only program import used as a value") &&
+        error.location?.filename == "main.ts"
+    )
+  })
+
   it("rejects caller-authored import aliases that collide with local target declarations", () => {
     const program = parseProgram({
       entryModule: "main",

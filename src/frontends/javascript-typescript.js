@@ -13,7 +13,7 @@ import {documentedValueType, iterationBindingType, iterationOperandType, listTyp
 /** @typedef {NonNullable<import("@babel/parser").ParseResult<import("@babel/types").File>["tokens"]>[number]} BabelToken */
 /** @typedef {{byStart: Map<number, BabelToken>, tokens: BabelToken[]}} BabelTokenIndex */
 /** @typedef {{name: string, nameLocation: import("../semantic/types.js").SourceLocation, parameters: import("../semantic/types.js").Parameter[], returnType: import("../semantic/types.js").SemanticFunctionReturnType, location: import("../semantic/types.js").SourceLocation}} JavaScriptFunctionSignature */
-/** @typedef {{bindings: Map<string, import("../semantic/types.js").SemanticValueType>, functions: Map<string, JavaScriptFunctionSignature>, recordNames: Map<string, import("../semantic/types.js").RecordDeclaration>, records: Map<string, import("../semantic/types.js").RecordDeclaration>, returnType?: import("../semantic/types.js").SemanticFunctionReturnType}} JavaScriptConversionContext */
+/** @typedef {{bindings: Map<string, import("../semantic/types.js").SemanticValueType>, functions: Map<string, JavaScriptFunctionSignature>, recordNames: Map<string, import("../semantic/types.js").RecordDeclaration>, records: Map<string, import("../semantic/types.js").RecordDeclaration>, returnType?: import("../semantic/types.js").SemanticFunctionReturnType, valueRecordNames: Map<string, import("../semantic/types.js").RecordDeclaration>}} JavaScriptConversionContext */
 
 /** @type {WeakMap<object, BabelTokenIndex>} */
 const nodeTokens = new WeakMap()
@@ -148,7 +148,7 @@ function commentTagLocation(comment, tag, field, filename, source) {
  * @param {boolean} [preserveOptional] - Whether an optional identifier remains wrapped.
  * @returns {import("../semantic/types.js").Expression} Semantic expression.
  */
-function convertExpression(node, language, filename, source, context = {bindings: new Map(), functions: new Map(), recordNames: new Map(), records: new Map()}, expectedType, preserveOptional = false) {
+function convertExpression(node, language, filename, source, context = {bindings: new Map(), functions: new Map(), recordNames: new Map(), records: new Map(), valueRecordNames: new Map()}, expectedType, preserveOptional = false) {
   const location = nodeLocation(node, filename, source)
 
   if (node.type == "Identifier" && node.name == "undefined") {
@@ -276,9 +276,9 @@ function convertExpression(node, language, filename, source, context = {bindings
     return withParserRanges({entries, kind: /** @type {const} */ ("MapLiteral"), location}, {literal: location})
   }
 
-  if (node.type == "NewExpression" && node.callee.type == "Identifier" && context.recordNames.has(node.callee.name)) {
+  if (node.type == "NewExpression" && node.callee.type == "Identifier" && context.valueRecordNames.has(node.callee.name)) {
     if (node.typeArguments || node.typeParameters) return unsupportedSyntax(language, "generic record construction", location)
-    const declaration = /** @type {import("../semantic/types.js").RecordDeclaration} */ (context.recordNames.get(node.callee.name))
+    const declaration = /** @type {import("../semantic/types.js").RecordDeclaration} */ (context.valueRecordNames.get(node.callee.name))
     const arguments_ = node.arguments.map((argument, index) => {
       if (argument.type == "SpreadElement" || argument.type == "ArgumentPlaceholder") {
         return unsupportedSyntax(language, argument.type, nodeLocation(argument, filename, source))
@@ -466,7 +466,7 @@ function knownExpressionType(node, context) {
     return context.functions.get(node.callee.name)?.returnType
   }
   if (node.type == "NewExpression" && node.callee.type == "Identifier") {
-    const declaration = context.recordNames.get(node.callee.name)
+    const declaration = context.valueRecordNames.get(node.callee.name)
 
     if (declaration?.id) return {declarationId: declaration.id, kind: "RecordType"}
   }
@@ -1046,6 +1046,7 @@ function convertFunctionSignature(node, language, filename, source, recordNames)
  * @param {JavaScriptFunctionSignature} signature - Converted signature.
  * @param {Map<string, JavaScriptFunctionSignature>} functions - Module signatures.
  * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} recordNames - Record declarations by name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} valueRecordNames - Record declarations available in value positions.
  * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} records - Record declarations by identity.
  * @param {"javascript" | "typescript"} language - Frontend language.
  * @param {string} filename - Source filename.
@@ -1053,13 +1054,14 @@ function convertFunctionSignature(node, language, filename, source, recordNames)
  * @param {boolean} canonicalZeroRequired - Whether generated scalar output may contain signed zero.
  * @returns {import("../semantic/types.js").FunctionDeclaration} Semantic function.
  */
-function convertFunction(node, signature, functions, recordNames, records, language, filename, source, canonicalZeroRequired) {
+function convertFunction(node, signature, functions, recordNames, valueRecordNames, records, language, filename, source, canonicalZeroRequired) {
   const context = {
     bindings: new Map(signature.parameters.map((parameter) => [parameter.name, parameter.type])),
     functions,
     recordNames,
     records,
-    returnType: signature.returnType
+    returnType: signature.returnType,
+    valueRecordNames
   }
   const body = convertBlock(node.body, language, filename, source, canonicalZeroRequired, context)
 
@@ -1353,7 +1355,7 @@ function convertPrint(node, language, filename, source, canonicalZeroRequired, c
  * @param {string} input.filename - Source filename.
  * @param {"javascript" | "typescript"} input.language - Frontend language.
  * @param {string} input.source - Source text.
- * @param {{isEntry: boolean, functions: Map<string, import("../semantic/types.js").FunctionDeclaration>, records: Map<string, import("../semantic/types.js").RecordDeclaration>}} [input.program] - Resolved program imports and entry role.
+ * @param {{isEntry: boolean, functions: Map<string, import("../semantic/types.js").FunctionDeclaration>, records: Map<string, import("../semantic/types.js").RecordDeclaration>, valueRecords?: Map<string, import("../semantic/types.js").RecordDeclaration>}} [input.program] - Resolved program imports and entry role.
  * @returns {import("../semantic/types.js").SemanticModule} Semantic module.
  */
 export function parseJavaScriptTypeScript({filename, language, source, program}) {
@@ -1411,7 +1413,9 @@ export function parseJavaScriptTypeScript({filename, language, source, program})
     name: node.id?.name ?? ""
   }))
   const recordNames = new Map(program?.records ?? [])
+  const valueRecordNames = new Map(program?.valueRecords ?? program?.records ?? [])
   for (const declaration of recordDeclarations) recordNames.set(declaration.name, declaration)
+  for (const declaration of recordDeclarations) valueRecordNames.set(declaration.name, declaration)
   const recordsById = new Map([...recordNames.values()].map((declaration) => [/** @type {string} */ (declaration.id), declaration]))
   const records = recordNodes.map((node, index) => language == "typescript"
     ? convertTypeScriptRecord(node, recordDeclarations[index], recordNames, filename, source)
@@ -1427,7 +1431,8 @@ export function parseJavaScriptTypeScript({filename, language, source, program})
   }]))
   for (const signature of signatures) functionSignatures.set(signature.name, signature)
   const functions = functionNodes.map((node, index) =>
-    convertFunction(node, signatures[index], functionSignatures, recordNames, recordsById, language, filename, source, canonicalZeroRequired))
+    convertFunction(node, signatures[index], functionSignatures, recordNames, valueRecordNames, recordsById,
+      language, filename, source, canonicalZeroRequired))
   const entryNodes = semanticNodes.filter((node) => node.type != "FunctionDeclaration" && node.type != "ClassDeclaration")
   const location = moduleLocation(filename, source)
 
@@ -1447,7 +1452,7 @@ export function parseJavaScriptTypeScript({filename, language, source, program})
     filename,
     source,
     canonicalZeroRequired,
-    {bindings: new Map(), functions: functionSignatures, recordNames, records: recordsById},
+    {bindings: new Map(), functions: functionSignatures, recordNames, records: recordsById, valueRecordNames},
     entryLocation
   )
 
@@ -1538,6 +1543,7 @@ export function inspectJavaScriptTypeScriptModule({filename, language, source}) 
     }
     if (node.type != "ExportNamedDeclaration") continue
     if (node.source) unsupportedSyntax(language, "re-export", nodeLocation(node, filename, source))
+    if (node.exportKind == "type") unsupportedSyntax(language, "type-only export", nodeLocation(node, filename, source))
     if (node.declaration) {
       if (node.declaration.type != "FunctionDeclaration" && node.declaration.type != "ClassDeclaration") {
         unsupportedSyntax(language, "unsupported exported declaration", nodeLocation(node.declaration, filename, source))
@@ -1552,7 +1558,7 @@ export function inspectJavaScriptTypeScriptModule({filename, language, source}) 
         localName: identifier.name,
         localNameLocation: identifierLocation(identifier, filename, source),
         location: identifierLocation(identifier, filename, source),
-        typeOnly: node.exportKind == "type"
+        typeOnly: /** @type {const} */ (false)
       })
       continue
     }
@@ -1560,6 +1566,7 @@ export function inspectJavaScriptTypeScriptModule({filename, language, source}) 
       if (specifier.type != "ExportSpecifier" || specifier.local.type != "Identifier" || specifier.exported.type != "Identifier") {
         unsupportedSyntax(language, specifier.type, nodeLocation(specifier, filename, source))
       }
+      if (specifier.exportKind == "type") unsupportedSyntax(language, "type-only export", nodeLocation(specifier, filename, source))
       exports.push({
         declarationLocation: nodeLocation(node, filename, source),
         exportedName: specifier.exported.name,
@@ -1567,7 +1574,7 @@ export function inspectJavaScriptTypeScriptModule({filename, language, source}) 
         localName: specifier.local.name,
         localNameLocation: identifierLocation(specifier.local, filename, source),
         location: nodeLocation(specifier, filename, source),
-        typeOnly: node.exportKind == "type" || specifier.exportKind == "type"
+        typeOnly: /** @type {const} */ (false)
       })
     }
   }

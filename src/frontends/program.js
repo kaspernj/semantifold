@@ -4,6 +4,7 @@ import {isDenseArray} from "../array.js"
 import {isSafeArtifactPath} from "../artifact-path.js"
 import {SemantifoldDiagnostic, semanticFailure, unsupportedRole} from "../diagnostic.js"
 import {languageRegistry} from "../language-registry.js"
+import {moduleLocation} from "../semantic/location.js"
 import {annotateParsedModule} from "../semantic/provenance.js"
 import {validateParsedModule} from "../semantic/validate.js"
 import {inspectJavaScriptTypeScriptModule} from "./javascript-typescript.js"
@@ -57,6 +58,8 @@ export function parseProgramSource(input) {
   }
 
   const headers = new Map(sources.map((source) => [source.id, inspectSource(source)]))
+
+  validateNativeModuleIdentities(sources, headers)
   /** @type {Map<string, {source: typeof sources[number], requests: (ReturnType<typeof inspectSource>["imports"][number] & {moduleId: string})[]}>} */
   const graph = new Map()
 
@@ -79,6 +82,7 @@ export function parseProgramSource(input) {
     const localNames = new Set()
     const visibleFunctions = new Map()
     const visibleRecordsByName = new Map()
+    const visibleValueRecordsByName = new Map()
     const visibleRecordsById = new Map()
     const consumedBindings = new Set()
     /** @type {import("../semantic/types.js").SemanticImport[]} */
@@ -125,12 +129,14 @@ export function parseProgramSource(input) {
         }
         if (nativeBinding) consumedBindings.add(nativeBinding)
         const declaration = declarationFor(dependency, exported)
+        const typeOnly = nativeBinding?.typeOnly ?? request.typeOnly
 
         if (exported.symbolKind == "function") visibleFunctions.set(localName, /** @type {import("../semantic/types.js").FunctionDeclaration} */ (declaration))
         else {
           const record = /** @type {import("../semantic/types.js").RecordDeclaration} */ (declaration)
 
           visibleRecordsByName.set(localName, record)
+          if (!typeOnly) visibleValueRecordsByName.set(localName, record)
           visibleRecordsById.set(/** @type {string} */ (record.id), record)
         }
         /** @type {Record<string, import("../semantic/types.js").SourceLocation>} */
@@ -153,7 +159,7 @@ export function parseProgramSource(input) {
           moduleId: request.moduleId,
           sourceProvenance: sourceAssociation(importLocation, ranges, sourceId),
           symbolKind: exported.symbolKind,
-          typeOnly: nativeBinding?.typeOnly ?? request.typeOnly
+          typeOnly
         })
       }
     }
@@ -168,7 +174,12 @@ export function parseProgramSource(input) {
     const raw = frontend({
       filename: source.filename,
       language: source.language,
-      program: {functions: visibleFunctions, isEntry: source.id == input.entryModule, records: visibleRecordsByName},
+      program: {
+        functions: visibleFunctions,
+        isEntry: source.id == input.entryModule,
+        records: visibleRecordsByName,
+        valueRecords: visibleValueRecordsByName
+      },
       source: source.source
     })
 
@@ -234,6 +245,35 @@ export function parseProgramSource(input) {
     kind: "Program",
     modules: orderedIds.map((id) => /** @type {import("../semantic/types.js").SemanticProgramModule} */ (parsed.get(id))),
     sources: registeredSources
+  }
+}
+
+/**
+ * Rejects source-profile identities whose lookup or reopening would depend on caller order.
+ * @param {ProgramSource[]} sources - Complete validated source set.
+ * @param {Map<string, ProgramHeader>} headers - Parser-owned module headers.
+ * @returns {void}
+ */
+function validateNativeModuleIdentities(sources, headers) {
+  if (!sources.every(({language}) => language == "java") && !sources.every(({language}) => language == "ruby")) return
+  const ordered = [...sources].sort((left, right) => left.filename.localeCompare(right.filename, "en-US") ||
+    left.id.localeCompare(right.id, "en-US"))
+  const owners = new Map()
+
+  for (const source of ordered) {
+    const nativeName = requiredMapValue(headers, source.id).nativeName
+
+    if (!nativeName) continue
+    const earlier = owners.get(nativeName)
+
+    if (earlier) {
+      const label = source.language == "java" ? "Java" : "Ruby"
+
+      semanticFailure(source.language, "DUPLICATE_MODULE",
+        `Duplicate ${label} native module identity '${nativeName}' in '${earlier.filename}' and '${source.filename}'.`,
+        moduleLocation(source.filename, source.source))
+    }
+    owners.set(nativeName, source)
   }
 }
 
@@ -397,7 +437,7 @@ function declarationFor(module, exported) {
 }
 
 /**
- * Prefixes module-owned declaration identities and every resolved reference to them.
+ * Prefixes module-owned declaration identities and explicit resolved references to them.
  * @param {import("../semantic/types.js").SemanticModule} module - Validated module.
  * @param {string} moduleId - Stable module identity.
  * @returns {void}
@@ -411,9 +451,15 @@ function rekeyDeclarations(module, moduleId) {
   }
   for (const declaration of module.functions) replacements.set(declaration.id, `${moduleId}#${declaration.id}`)
 
+  for (const declaration of module.records ?? []) {
+    declaration.id = replacements.get(declaration.id)
+    for (const field of declaration.fields) field.id = /** @type {string} */ (replacements.get(field.id))
+  }
+  for (const declaration of module.functions) declaration.id = replacements.get(declaration.id)
+
   const seen = new WeakSet()
   /**
-   * Rewrites declaration identities throughout one semantic subtree.
+   * Rewrites only typed identity-bearing fields throughout one semantic subtree.
    * @param {unknown} value - Semantic subtree.
    */
   function visit(value) {
@@ -421,12 +467,14 @@ function rekeyDeclarations(module, moduleId) {
     seen.add(value)
     const object = /** @type {Record<string, unknown>} */ (value)
 
-    for (const key of Object.keys(object)) {
-      const child = object[key]
-
-      if (typeof child == "string" && replacements.has(child)) object[key] = replacements.get(child)
-      else if (typeof child == "object") visit(child)
+    if ((object.kind == "RecordType" || object.kind == "ResolvedFunctionSignature") &&
+      typeof object.declarationId == "string" && replacements.has(object.declarationId)) {
+      object.declarationId = replacements.get(object.declarationId)
     }
+    if (object.kind == "MemberRead" && typeof object.field == "string" && replacements.has(object.field)) {
+      object.field = replacements.get(object.field)
+    }
+    for (const child of Object.values(object)) if (typeof child == "object") visit(child)
   }
   visit(module)
 }

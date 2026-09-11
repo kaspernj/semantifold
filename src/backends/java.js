@@ -37,7 +37,8 @@ export function generateJava(module, writer) {
     const recordPath = `/records/${recordIndex}`
 
     if (recordIndex > 0) writer.synthetic("\n\n", "record declaration separator", [record], [recordPath])
-    writer.mapped(programModule ? "public final class" : "final class", {mappingKind: "anchor", node: record, path: recordPath})
+    writer.mapped(programModule && writer.isExported(record.id) ? "public final class" : "final class",
+      {mappingKind: "anchor", node: record, path: recordPath})
     writer.synthetic(" ", "record declaration spacing", [record], [recordPath])
     writer.mapped(record.name, {mappingKind: "exact", node: record, path: recordPath, role: "name"})
     writer.synthetic(" {\n", "Java record class scaffolding", [record], [recordPath])
@@ -100,7 +101,8 @@ export function generateJava(module, writer) {
     if (functionIndex > 0) writer.synthetic("\n\n", "declaration separator", [declaration])
 
     writer.synthetic("  ", "indentation", [declaration])
-    writer.mapped(programModule ? "public static" : "private static", {mappingKind: "anchor", node: declaration})
+    writer.mapped(programModule && writer.isExported(declaration.id) ? "public static" : "private static",
+      {mappingKind: "anchor", node: declaration})
     writer.synthetic(" ", "method spacing", [declaration])
     emitType(writer, declaration.returnType, `/functions/${functionIndex}/returnType`, "java")
     writer.synthetic(" ", "method spacing", [declaration])
