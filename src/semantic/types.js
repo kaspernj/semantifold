@@ -663,7 +663,7 @@
 /**
  * @typedef SemanticModule
  * @property {"Module"} kind - Node discriminator.
- * @property {RecordDeclaration[]} records - Top-level nominal record declarations in source order.
+ * @property {RecordDeclaration[]} [records] - Top-level nominal record declarations in source order; omitted when empty.
  * @property {FunctionDeclaration[]} functions - Top-level functions.
  * @property {EntryPoint} entryPoint - Executable entry point.
  * @property {SourceLocation} location - Source location.

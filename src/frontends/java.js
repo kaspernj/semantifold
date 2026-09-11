@@ -1430,5 +1430,5 @@ export function parseJava({filename, source}) {
     convertFunction(method, signatures[index], functionSignatures, recordNames, recordsById, filename, source))
   const entryPoint = convertEntryPoint(mainMethod, filename, source, functionSignatures, recordNames, recordsById)
 
-  return {entryPoint, functions, kind: "Module", location, records}
+  return {entryPoint, functions, kind: "Module", location, ...(records.length > 0 ? {records} : {})}
 }

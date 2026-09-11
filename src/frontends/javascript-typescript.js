@@ -1408,7 +1408,7 @@ export function parseJavaScriptTypeScript({filename, language, source}) {
     functions,
     kind: "Module",
     location,
-    records
+    ...(records.length > 0 ? {records} : {})
   }
 }
 

@@ -1165,7 +1165,7 @@ export function parsePhp({filename, source}) {
     functions,
     kind: "Module",
     location,
-    records
+    ...(records.length > 0 ? {records} : {})
   }
 }
 

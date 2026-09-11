@@ -137,7 +137,7 @@ function convertExpression(node, filename, source, context, expectedType, preser
     node.callOperatorLoc.startOffset,
     node.callOperatorLoc.startOffset + node.callOperatorLoc.length
   ) == "&.") {
-    return unsupportedSyntax("ruby", "safe navigation", prismLocation(node.callOperatorLoc, filename, source))
+    return unsupportedSyntax("ruby", node.constructor.name, location)
   }
 
   if (node instanceof ParenthesesNode && node.body instanceof StatementsNode && node.body.body.length == 1) {
@@ -1224,6 +1224,6 @@ export function parseRuby({filename, source}) {
     functions,
     kind: "Module",
     location,
-    records
+    ...(records.length > 0 ? {records} : {})
   }
 }
