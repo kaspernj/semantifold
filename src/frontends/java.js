@@ -7,7 +7,7 @@ import {withAdaptedOperation} from "../semantic/operators.js"
 import {withParserRanges} from "../semantic/provenance.js"
 import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
 import {requireSourceReturnType, sourceScalarType} from "./scalars.js"
-import {iterationBindingType, iterationOperandType, listType, mapType, optionalType} from "./types.js"
+import {iterationBindingType, iterationOperandType, listType, mapType, optionalType, recordType} from "./types.js"
 
 /** @type {Readonly<Record<string, string>>} */
 const simpleStringEscapes = Object.freeze({
@@ -39,6 +39,8 @@ const javaBinaryOperations = new Map([
  * @typedef JavaConversionContext
  * @property {Map<string, import("../semantic/types.js").SemanticValueType>} bindings - Explicitly typed visible bindings.
  * @property {Map<string, JavaFunctionSignature>} functions - Explicit module function signatures.
+ * @property {Map<string, import("../semantic/types.js").RecordDeclaration>} recordNames - Records by source name.
+ * @property {Map<string, import("../semantic/types.js").RecordDeclaration>} records - Records by identity.
  * @property {import("../semantic/types.js").SemanticFunctionReturnType | undefined} returnType - Enclosing return type.
  */
 
@@ -200,6 +202,26 @@ function convertExpression(node, filename, source, context, expectedType) {
   }
 
   if (node.name == "null") return unsupportedSyntax("java", "null reference", location)
+
+  if (node.name == "ObjectCreationExpression") {
+    const children = structuralChildren(node)
+    const typeNode = children.find((child) => ["TypeName", "ScopedTypeName"].includes(child.name))
+    const argumentList = node.getChild("ArgumentList")
+    const declaration = typeNode ? context.recordNames.get(nodeText(typeNode, source)) : undefined
+
+    if (!typeNode || !argumentList || !declaration || node.getChild("ClassBody")) {
+      return unsupportedSyntax("java", "construction of a non-record or anonymous class", location)
+    }
+    const argumentNodes = structuralChildren(argumentList)
+
+    return withParserRanges({
+      arguments: argumentNodes.map((argument, index) =>
+        convertExpression(argument, filename, source, context, declaration.fields[index]?.type)),
+      kind: /** @type {const} */ ("RecordConstruction"),
+      location,
+      record: recordType(/** @type {string} */ (declaration.id), nodeLocation(typeNode, filename, source))
+    }, {record: nodeLocation(typeNode, filename, source)})
+  }
 
   if (node.name == "UnaryExpression") {
     const children = structuralChildren(node)
@@ -365,11 +387,33 @@ function convertExpression(node, filename, source, context, expectedType) {
       }, {operator: nodeLocation(methodName, filename, source)})
     }
     if (receiver && method == "size" && argumentNodes.length == 0) {
+      const receiverType = knownExpressionType(receiver, context, source)
+
+      if (receiverType?.kind == "RecordType") {
+        return withParserRanges({
+          field: method,
+          kind: /** @type {const} */ ("MemberRead"),
+          location,
+          receiver: convertExpression(receiver, filename, source, context)
+        }, {member: nodeLocation(methodName, filename, source)})
+      }
       return withParserRanges({
         collection: convertExpression(receiver, filename, source, context),
         kind: /** @type {const} */ ("CollectionSizeExpression"),
         location
       }, {operator: nodeLocation(methodName, filename, source)})
+    }
+
+    if (receiver && argumentNodes.length == 0) {
+      if (["getClass", "hashCode", "toString", "clone", "notify", "notifyAll", "wait"].includes(method)) {
+        return unsupportedSyntax("java", "reflective or Object member access", nodeLocation(methodName, filename, source))
+      }
+      return withParserRanges({
+        field: method,
+        kind: /** @type {const} */ ("MemberRead"),
+        location,
+        receiver: convertExpression(receiver, filename, source, context)
+      }, {member: nodeLocation(methodName, filename, source)})
     }
 
     const unsupportedReceiver = receiver
@@ -456,6 +500,7 @@ function isSupportedExpressionNode(node) {
     "UnaryExpression",
     "BinaryExpression",
     "MethodInvocation",
+    "ObjectCreationExpression",
     "null",
     "ParenthesizedExpression"
   ].includes(node.name)
@@ -637,7 +682,7 @@ function convertLocalStatement(statement, filename, source, context) {
     }
 
     const name = nodeText(definition, source)
-    const type = convertType(typeNode, `Local '${name}'`, location, filename, source)
+    const type = convertType(typeNode, `Local '${name}'`, location, filename, source, context.recordNames)
     const initializer = convertExpression(initializerNodes[0], filename, source, context, type)
 
     context.bindings.set(name, type)
@@ -774,7 +819,7 @@ function convertForEach(node, filename, source, context) {
     return unsupportedSyntax("java", "enhanced for modifiers", nodeLocation(modifiers, filename, source))
   }
   const bindingLocation = nodeLocation(bindingNode, filename, source)
-  const declaredType = convertJavaTypeArgument(typeNode, `Iteration binding '${nodeText(bindingNode, source)}'`, bindingLocation, filename, source)
+  const declaredType = convertJavaTypeArgument(typeNode, `Iteration binding '${nodeText(bindingNode, source)}'`, bindingLocation, filename, source, context.recordNames)
   const collectionType = iterationOperandType(knownExpressionType(collectionNode, context, source))
 
   if (!collectionType || collectionType.kind != "ListType" && collectionType.kind != "MapType") {
@@ -829,6 +874,18 @@ function knownExpressionType(node, context, source) {
       if (arguments_.length == 1 && receiverType?.kind == "ListType") return receiverType.elementType
       if (arguments_.length == 1 && receiverType?.kind == "MapType") return receiverType.valueType
     }
+    if (methodName && receiver && argumentList && structuralChildren(argumentList).length == 0) {
+      const receiverType = knownExpressionType(receiver, context, source)
+      const declaration = receiverType?.kind == "RecordType" ? context.records.get(receiverType.declarationId) : undefined
+
+      return declaration?.fields.find((field) => field.name == nodeText(methodName, source))?.type
+    }
+  }
+  if (node.name == "ObjectCreationExpression") {
+    const typeNode = structuralChildren(node).find((child) => ["TypeName", "ScopedTypeName"].includes(child.name))
+    const declaration = typeNode ? context.recordNames.get(nodeText(typeNode, source)) : undefined
+
+    if (declaration?.id) return {declarationId: declaration.id, kind: "RecordType"}
   }
 
   return undefined
@@ -859,9 +916,10 @@ function convertBlock(node, filename, source, context) {
  * @param {import("../semantic/types.js").SourceLocation} location - Source location.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} [recordNames] - Record declarations by source name.
  * @returns {import("../semantic/types.js").SemanticValueType} Semantic type.
  */
-function convertType(sourceType, subject, location, filename, source) {
+function convertType(sourceType, subject, location, filename, source, recordNames = new Map()) {
   if (!sourceType) return missingType("java", subject, location)
   if (sourceType.name == "void") return unsupportedSyntax("java", "void value type", nodeLocation(sourceType, filename, source))
   if (sourceType.name == "GenericType") {
@@ -877,20 +935,20 @@ function convertType(sourceType, subject, location, filename, source) {
 
     if (name == "java.util.List" && arguments_.length == 1) {
       return listType(
-        convertJavaTypeArgument(arguments_[0], subject, location, filename, source),
+        convertJavaTypeArgument(arguments_[0], subject, location, filename, source, recordNames),
         nodeLocation(sourceType, filename, source),
         nodeLocation(arguments_[0], filename, source)
       )
     }
     if (name == "java.util.Map" && arguments_.length == 2) {
-      const keyType = convertJavaTypeArgument(arguments_[0], subject, location, filename, source)
+      const keyType = convertJavaTypeArgument(arguments_[0], subject, location, filename, source, recordNames)
 
       if (keyType.kind != "TypeReference") {
         return unsupportedSyntax("java", "map key type other than string", nodeLocation(arguments_[0], filename, source))
       }
       return mapType(
         keyType,
-        convertJavaTypeArgument(arguments_[1], subject, location, filename, source),
+        convertJavaTypeArgument(arguments_[1], subject, location, filename, source, recordNames),
         nodeLocation(sourceType, filename, source),
         nodeLocation(arguments_[0], filename, source),
         nodeLocation(arguments_[1], filename, source)
@@ -898,7 +956,7 @@ function convertType(sourceType, subject, location, filename, source) {
     }
     if ((name == "java.util.Optional" || name == "Optional") && arguments_.length == 1) {
       return optionalType(
-        convertJavaTypeArgument(arguments_[0], subject, location, filename, source),
+        convertJavaTypeArgument(arguments_[0], subject, location, filename, source, recordNames),
         nodeLocation(sourceType, filename, source),
         nodeLocation(arguments_[0], filename, source)
       )
@@ -909,6 +967,10 @@ function convertType(sourceType, subject, location, filename, source) {
   if (!["PrimitiveType", "TypeName", "ScopedTypeName"].includes(sourceType.name)) {
     return unsupportedSyntax("java", "unsupported scalar type", location)
   }
+
+  const declaration = recordNames.get(nodeText(sourceType, source))
+
+  if (declaration?.id) return recordType(declaration.id, nodeLocation(sourceType, filename, source))
 
   const type = sourceScalarType("java", nodeText(sourceType, source), nodeLocation(sourceType, filename, source))
 
@@ -924,10 +986,14 @@ function convertType(sourceType, subject, location, filename, source) {
  * @param {import("../semantic/types.js").SourceLocation} location - Owning location.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} [recordNames] - Record declarations by source name.
  * @returns {import("../semantic/types.js").SemanticValueType} Semantic type.
  */
-function convertJavaTypeArgument(node, subject, location, filename, source) {
-  if (node.name == "GenericType") return convertType(node, subject, location, filename, source)
+function convertJavaTypeArgument(node, subject, location, filename, source, recordNames = new Map()) {
+  if (node.name == "GenericType") return convertType(node, subject, location, filename, source, recordNames)
+  const declaration = recordNames.get(nodeText(node, source))
+
+  if (declaration?.id) return recordType(declaration.id, nodeLocation(node, filename, source))
   const spelling = nodeText(node, source)
   const scalar = spelling == "Integer" ? "integer" : spelling == "Boolean" ? "boolean" : spelling == "String" ? "string" : undefined
 
@@ -944,14 +1010,15 @@ function convertJavaTypeArgument(node, subject, location, filename, source) {
  * @param {import("../semantic/types.js").SourceLocation} location - Function location.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} [recordNames] - Record declarations by source name.
  * @returns {import("../semantic/types.js").SemanticFunctionReturnType} Semantic return type.
  */
-function convertReturnType(sourceType, subject, location, filename, source) {
+function convertReturnType(sourceType, subject, location, filename, source, recordNames = new Map()) {
   if (sourceType?.name == "void") {
     return requireSourceReturnType("java", "void", subject, location, nodeLocation(sourceType, filename, source))
   }
 
-  return convertType(sourceType, subject, location, filename, source)
+  return convertType(sourceType, subject, location, filename, source, recordNames)
 }
 
 /**
@@ -968,9 +1035,10 @@ function declarationType(node) {
  * @param {import("@lezer/common").SyntaxNode} node - Method declaration.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} recordNames - Record declarations by source name.
  * @returns {JavaFunctionSignature} Semantic function signature.
  */
-function convertFunctionSignature(node, filename, source) {
+function convertFunctionSignature(node, filename, source, recordNames) {
   const location = nodeLocation(node, filename, source)
   const modifiers = node.getChild("Modifiers")
   const modifierNames = modifiers ? structuralChildren(modifiers).map((modifier) => modifier.name) : []
@@ -1006,7 +1074,7 @@ function convertFunctionSignature(node, filename, source) {
       kind: /** @type {const} */ ("Parameter"),
       location: parameterLocation,
       name: parameterName,
-      type: convertType(declarationType(parameter), `Parameter '${parameterName}'`, parameterLocation, filename, source)
+      type: convertType(declarationType(parameter), `Parameter '${parameterName}'`, parameterLocation, filename, source, recordNames)
     }
 
     return withParserRanges(semanticParameter, {name: nodeLocation(parameterNameNode, filename, source)})
@@ -1016,7 +1084,7 @@ function convertFunctionSignature(node, filename, source) {
     name,
     nameLocation: nodeLocation(definition, filename, source),
     parameters,
-    returnType: convertReturnType(declarationType(node), `Function '${name}' return`, location, filename, source)
+    returnType: convertReturnType(declarationType(node), `Function '${name}' return`, location, filename, source, recordNames)
   }
 }
 
@@ -1025,15 +1093,19 @@ function convertFunctionSignature(node, filename, source) {
  * @param {import("@lezer/common").SyntaxNode} node - Method declaration.
  * @param {JavaFunctionSignature} signature - Preconverted function signature.
  * @param {Map<string, JavaFunctionSignature>} functions - Module function signatures.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} recordNames - Record declarations by source name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} records - Record declarations by identity.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
  * @returns {import("../semantic/types.js").FunctionDeclaration} Semantic function.
  */
-function convertFunction(node, signature, functions, filename, source) {
+function convertFunction(node, signature, functions, recordNames, records, filename, source) {
   const block = requiredChild(node, "Block", filename, source)
   const context = {
     bindings: new Map(signature.parameters.map((parameter) => [parameter.name, parameter.type])),
     functions,
+    recordNames,
+    records,
     returnType: signature.returnType
   }
 
@@ -1045,6 +1117,122 @@ function convertFunction(node, signature, functions, filename, source) {
     parameters: signature.parameters,
     returnType: signature.returnType
   }, {name: signature.nameLocation})
+}
+
+/**
+ * Converts one conventional final Java class with exact private-final storage,
+ * constructor initialization, and canonical field-name accessors.
+ * @param {import("@lezer/common").SyntaxNode} node - Class declaration.
+ * @param {import("../semantic/types.js").RecordDeclaration} declaration - Predeclared nominal identity.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} recordNames - Records by source name.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @returns {import("../semantic/types.js").RecordDeclaration} Semantic record.
+ */
+function convertJavaRecord(node, declaration, recordNames, filename, source) {
+  const location = nodeLocation(node, filename, source)
+  const modifiers = node.getChild("Modifiers")
+  const modifierNames = modifiers ? structuralChildren(modifiers).map((modifier) => modifier.name) : []
+
+  if (modifierNames.join(" ") != "final" || node.getChild("Superclass") || node.getChild("SuperInterfaces") ||
+    node.getChild("TypeParameters")) return unsupportedSyntax("java", "noncanonical record class modifiers", location)
+  const classBody = requiredChild(node, "ClassBody", filename, source)
+  const members = structuralChildren(classBody)
+  const fields = members.filter((member) => member.name == "FieldDeclaration")
+  const constructors = members.filter((member) => member.name == "ConstructorDeclaration")
+  const accessors = members.filter((member) => member.name == "MethodDeclaration")
+  const unsupported = members.find((member) => !["FieldDeclaration", "ConstructorDeclaration", "MethodDeclaration"].includes(member.name))
+
+  if (unsupported || constructors.length != 1 || accessors.length != fields.length ||
+    members.slice(0, fields.length).some((member) => member.name != "FieldDeclaration") || members[fields.length] != constructors[0] ||
+    members.slice(fields.length + 1).some((member) => member.name != "MethodDeclaration")) {
+    return unsupportedSyntax("java", "record class member order or shape", nodeLocation(unsupported ?? node, filename, source))
+  }
+  declaration.fields = fields.map((fieldNode) => {
+    const fieldLocation = nodeLocation(fieldNode, filename, source)
+    const fieldModifiers = fieldNode.getChild("Modifiers")
+    const names = fieldModifiers ? structuralChildren(fieldModifiers).map((modifier) => modifier.name) : []
+    const variable = requiredChild(fieldNode, "VariableDeclarator", filename, source)
+    const definition = requiredChild(variable, "Definition", filename, source)
+    const variableChildren = structuralChildren(variable)
+
+    if (names.join(" ") != "private final" || variableChildren.length != 1 || fieldNode.getChild("Dimension")) {
+      return unsupportedSyntax("java", "record field outside private final storage profile", fieldLocation)
+    }
+    const field = {
+      kind: /** @type {const} */ ("RecordField"),
+      location: fieldLocation,
+      name: nodeText(definition, source),
+      type: convertType(declarationType(fieldNode), `Record field '${nodeText(definition, source)}'`, fieldLocation, filename, source, recordNames)
+    }
+
+    return withParserRanges(field, {name: nodeLocation(definition, filename, source)})
+  })
+  const constructor = constructors[0]
+  const constructorName = requiredChild(constructor, "Definition", filename, source)
+  const parametersNode = requiredChild(constructor, "FormalParameters", filename, source)
+  const parameters = structuralChildren(parametersNode)
+  const body = requiredChild(constructor, "ConstructorBody", filename, source)
+  const assignments = structuralChildren(body)
+
+  if (nodeText(constructorName, source) != declaration.name || constructor.getChild("Modifiers") || constructor.getChild("Throws") ||
+    constructor.getChild("TypeParameters") || parameters.length != declaration.fields.length || assignments.length != declaration.fields.length) {
+    return unsupportedSyntax("java", "noncanonical record constructor", nodeLocation(constructor, filename, source))
+  }
+  for (let index = 0; index < declaration.fields.length; index += 1) {
+    const field = declaration.fields[index]
+    const parameter = parameters[index]
+    const parameterName = parameter?.getChild("Definition")
+    const assignment = assignments[index]
+    const assignmentExpression = assignment?.getChild("AssignmentExpression")
+    const assignmentChildren = assignmentExpression ? structuralChildren(assignmentExpression) : []
+    const fieldAccess = assignmentChildren[0]
+    const operator = assignmentChildren[1]
+    const value = assignmentChildren[2]
+    const parameterType = parameter ? convertType(declarationType(parameter), `Record constructor parameter '${field.name}'`,
+      nodeLocation(parameter, filename, source), filename, source, recordNames) : undefined
+
+    if (parameter?.name != "FormalParameter" || !parameterName || nodeText(parameterName, source) != field.name ||
+      parameter.getChild("Modifiers") || parameter.getChild("Dimension") || JSON.stringify(parameterType) != JSON.stringify(field.type) ||
+      assignment?.name != "ExpressionStatement" || assignmentChildren.length != 3 || fieldAccess?.name != "FieldAccess" ||
+      nodeText(fieldAccess, source) != `this.${field.name}` || operator?.name != "AssignOp" || nodeText(operator, source) != "=" ||
+      value?.name != "Identifier" || nodeText(value, source) != field.name) {
+      return unsupportedSyntax("java", "record field not initialized exactly once", nodeLocation(assignment ?? constructor, filename, source))
+    }
+  }
+  for (let index = 0; index < declaration.fields.length; index += 1) {
+    const field = declaration.fields[index]
+    const accessor = accessors[index]
+    const name = requiredChild(accessor, "Definition", filename, source)
+    const parameters = requiredChild(accessor, "FormalParameters", filename, source)
+    const block = requiredChild(accessor, "Block", filename, source)
+    const statements = structuralChildren(block)
+    const returned = statements[0]?.getChild("FieldAccess")
+    const accessorType = convertType(declarationType(accessor), `Record accessor '${field.name}'`,
+      nodeLocation(accessor, filename, source), filename, source, recordNames)
+
+    if (accessor.getChild("Modifiers") || accessor.getChild("Throws") || accessor.getChild("TypeParameters") ||
+      nodeText(name, source) != field.name || structuralChildren(parameters).length != 0 || statements.length != 1 ||
+      statements[0].name != "ReturnStatement" || !returned || nodeText(returned, source) != `this.${field.name}` ||
+      JSON.stringify(accessorType) != JSON.stringify(field.type)) {
+      return unsupportedSyntax("java", "noncanonical record accessor", nodeLocation(accessor, filename, source))
+    }
+  }
+
+  return withParserRanges(declaration, {name: nodeLocation(requiredChild(node, "Definition", filename, source), filename, source)})
+}
+
+/**
+ * Detects only the pinned grammar's parser-backed recovery shape for Java record syntax.
+ * @param {import("@lezer/common").SyntaxNode} root - Program root.
+ * @param {string} source - Complete source.
+ * @returns {import("@lezer/common").SyntaxNode | undefined} The parser-owned `record` type token.
+ */
+function javaRecordRecoveryToken(root, source) {
+  const first = structuralChildren(root)[0]
+  const type = first?.name == "LocalVariableDeclaration" ? first.getChild("TypeName") : null
+
+  return type && nodeText(type, source) == "record" ? type : undefined
 }
 
 /**
@@ -1102,9 +1290,11 @@ function convertIf(node, filename, source, context) {
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
  * @param {Map<string, JavaFunctionSignature>} functions - Module function signatures.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} recordNames - Record declarations by source name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} records - Record declarations by identity.
  * @returns {import("../semantic/types.js").EntryPoint} Semantic entry point.
  */
-function convertEntryPoint(node, filename, source, functions) {
+function convertEntryPoint(node, filename, source, functions, recordNames, records) {
   const location = nodeLocation(node, filename, source)
   const modifiers = node.getChild("Modifiers")
   const parameters = node.getChild("FormalParameters")
@@ -1126,6 +1316,8 @@ function convertEntryPoint(node, filename, source, functions) {
   const body = convertBlock(block, filename, source, {
     bindings: new Map(),
     functions,
+    recordNames,
+    records,
     returnType: undefined
   })
 
@@ -1178,6 +1370,9 @@ export function parseJava({filename, source}) {
   const error = descendants(tree.topNode, "⚠")[0]
 
   if (error) {
+    const recordToken = javaRecordRecoveryToken(tree.topNode, source)
+
+    if (recordToken) return unsupportedSyntax("java", "Java record declaration under the pinned parser", nodeLocation(recordToken, filename, source))
     throw new SemantifoldDiagnostic({
       code: "PARSE_ERROR",
       language: "java",
@@ -1187,11 +1382,13 @@ export function parseJava({filename, source}) {
   }
 
   const programMembers = structuralChildren(tree.topNode)
-  const classDeclaration = programMembers.find((member) => member.name == "ClassDeclaration")
-  const unexpectedProgramMember = programMembers.find((member) => member != classDeclaration)
+  const classDeclarations = programMembers.filter((member) => member.name == "ClassDeclaration")
+  const unexpectedProgramMember = programMembers.find((member) => member.name != "ClassDeclaration")
+  const mainClasses = classDeclarations.filter((declaration) => nodeText(requiredChild(declaration, "Definition", filename, source), source) == "Main")
+  const classDeclaration = mainClasses[0]
 
-  if (!classDeclaration || unexpectedProgramMember || programMembers.length != 1) {
-    return unsupportedSyntax("java", "compilation unit other than one Main class",
+  if (!classDeclaration || mainClasses.length != 1 || unexpectedProgramMember || classDeclarations.at(-1) != classDeclaration) {
+    return unsupportedSyntax("java", "compilation unit other than record classes followed by one Main class",
       nodeLocation(unexpectedProgramMember ?? tree.topNode, filename, source))
   }
   const className = requiredChild(classDeclaration, "Definition", filename, source)
@@ -1215,11 +1412,23 @@ export function parseJava({filename, source}) {
   if (functionMethods.length == 0) return unsupportedSyntax("java", "class without a semantic function", location)
   if (!mainMethod || mainMethods.length != 1) return unsupportedSyntax("java", "class without one unambiguous main", location)
 
-  const signatures = functionMethods.map((method) => convertFunctionSignature(method, filename, source))
+  const recordNodes = classDeclarations.filter((declaration) => declaration != classDeclaration)
+  const recordDeclarations = recordNodes.map((recordNode, index) => ({
+    fields: [],
+    id: `record:${index}`,
+    kind: /** @type {const} */ ("RecordDeclaration"),
+    location: nodeLocation(recordNode, filename, source),
+    name: nodeText(requiredChild(recordNode, "Definition", filename, source), source)
+  }))
+  const recordNames = new Map(recordDeclarations.map((declaration) => [declaration.name, declaration]))
+  const recordsById = new Map(recordDeclarations.map((declaration) => [/** @type {string} */ (declaration.id), declaration]))
+  const records = recordNodes.map((recordNode, index) =>
+    convertJavaRecord(recordNode, recordDeclarations[index], recordNames, filename, source))
+  const signatures = functionMethods.map((method) => convertFunctionSignature(method, filename, source, recordNames))
   const functionSignatures = new Map(signatures.map((signature) => [signature.name, signature]))
   const functions = functionMethods.map((method, index) =>
-    convertFunction(method, signatures[index], functionSignatures, filename, source))
-  const entryPoint = convertEntryPoint(mainMethod, filename, source, functionSignatures)
+    convertFunction(method, signatures[index], functionSignatures, recordNames, recordsById, filename, source))
+  const entryPoint = convertEntryPoint(mainMethod, filename, source, functionSignatures, recordNames, recordsById)
 
-  return {entryPoint, functions, kind: "Module", location}
+  return {entryPoint, functions, kind: "Module", location, ...(records.length > 0 ? {records} : {})}
 }

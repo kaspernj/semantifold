@@ -9,6 +9,61 @@ import {emitExpression, emitType} from "./shared.js"
  * @returns {void}
  */
 export function generateJava(module, writer) {
+  const records = module.records ?? []
+
+  records.forEach((record, recordIndex) => {
+    const recordPath = `/records/${recordIndex}`
+
+    if (recordIndex > 0) writer.synthetic("\n\n", "record declaration separator", [record], [recordPath])
+    writer.mapped("final class", {mappingKind: "anchor", node: record, path: recordPath})
+    writer.synthetic(" ", "record declaration spacing", [record], [recordPath])
+    writer.mapped(record.name, {mappingKind: "exact", node: record, path: recordPath, role: "name"})
+    writer.synthetic(" {\n", "Java record class scaffolding", [record], [recordPath])
+    record.fields.forEach((field, fieldIndex) => {
+      const fieldPath = `${recordPath}/fields/${fieldIndex}`
+
+      writer.synthetic("  private final ", "Java record storage scaffolding", [field], [fieldPath])
+      emitType(writer, field.type, `${fieldPath}/type`, "java")
+      writer.synthetic(" ", "Java record field spacing", [field], [fieldPath])
+      writer.mapped(field.name, {mappingKind: "exact", node: field, path: fieldPath, role: "name"})
+      writer.synthetic(";\n", "Java record storage scaffolding", [field], [fieldPath])
+    })
+    writer.synthetic("\n  ", "Java record constructor spacing", [record], [recordPath])
+    writer.mapped(record.name, {mappingKind: "exact", node: record, path: recordPath, role: "name"})
+    writer.synthetic("(", "Java record constructor scaffolding", [record], [recordPath])
+    record.fields.forEach((field, fieldIndex) => {
+      const fieldPath = `${recordPath}/fields/${fieldIndex}`
+
+      if (fieldIndex) writer.synthetic(", ", "record field separator", [record], [recordPath])
+      emitType(writer, field.type, `${fieldPath}/type`, "java")
+      writer.synthetic(" ", "Java record field spacing", [field], [fieldPath])
+      writer.mapped(field.name, {mappingKind: "exact", node: field, path: fieldPath, role: "name"})
+    })
+    writer.synthetic(") {\n", "Java record constructor scaffolding", [record], [recordPath])
+    record.fields.forEach((field, fieldIndex) => {
+      const fieldPath = `${recordPath}/fields/${fieldIndex}`
+
+      writer.synthetic("    this.", "Java record initialization scaffolding", [field], [fieldPath])
+      writer.mapped(field.name, {mappingKind: "exact", node: field, path: fieldPath, role: "name"})
+      writer.synthetic(" = ", "Java record initialization scaffolding", [field], [fieldPath])
+      writer.mapped(field.name, {mappingKind: "exact", node: field, path: fieldPath, role: "name"})
+      writer.synthetic(";\n", "Java record initialization scaffolding", [field], [fieldPath])
+    })
+    writer.synthetic("  }\n", "Java record constructor scaffolding", [record], [recordPath])
+    record.fields.forEach((field, fieldIndex) => {
+      const fieldPath = `${recordPath}/fields/${fieldIndex}`
+
+      writer.synthetic("\n  ", "Java record accessor spacing", [field], [fieldPath])
+      emitType(writer, field.type, `${fieldPath}/type`, "java")
+      writer.synthetic(" ", "Java record accessor spacing", [field], [fieldPath])
+      writer.mapped(field.name, {mappingKind: "exact", node: field, path: fieldPath, role: "name"})
+      writer.synthetic("() {\n    return this.", "Java record accessor scaffolding", [field], [fieldPath])
+      writer.mapped(field.name, {mappingKind: "exact", node: field, path: fieldPath, role: "name"})
+      writer.synthetic(";\n  }\n", "Java record accessor scaffolding", [field], [fieldPath])
+    })
+    writer.synthetic("}", "Java record class scaffolding", [record], [recordPath])
+  })
+  if (records.length > 0) writer.synthetic("\n\n", "record/Main separator", [module])
   writer.synthetic("public final class Main {\n", "Java class scaffolding", [module])
 
   module.functions.forEach((declaration, functionIndex) => {

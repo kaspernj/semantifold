@@ -479,8 +479,13 @@ export function semanticEntries(module) {
     entries.push({node, ownerLocation: location, path})
 
     if (node.kind == "Module") {
+      (node.records ?? []).forEach((child, index) => visit(child, `/records/${index}`, location))
       node.functions.forEach((child, index) => visit(child, `/functions/${index}`, location))
       visit(node.entryPoint, "/entryPoint", location)
+    } else if (node.kind == "RecordDeclaration") {
+      node.fields.forEach((child, index) => visit(child, `${path}/fields/${index}`, location))
+    } else if (node.kind == "RecordField") {
+      visit(node.type, `${path}/type`, location)
     } else if (node.kind == "FunctionDeclaration") {
       node.parameters.forEach((child, index) => visit(child, `${path}/parameters/${index}`, location))
       visit(node.returnType, `${path}/returnType`, location)
@@ -525,6 +530,11 @@ export function semanticEntries(module) {
       visit(node.right, `${path}/right`, location)
     } else if (node.kind == "CallExpression") {
       node.arguments.forEach((child, index) => visit(child, `${path}/arguments/${index}`, location))
+    } else if (node.kind == "RecordConstruction") {
+      visit(node.record, `${path}/record`, location)
+      node.arguments.forEach((child, index) => visit(child, `${path}/arguments/${index}`, location))
+    } else if (node.kind == "MemberRead") {
+      visit(node.receiver, `${path}/receiver`, location)
     } else if (node.kind == "ListLiteral") {
       node.elements.forEach((child, index) => visit(child, `${path}/elements/${index}`, location))
     } else if (node.kind == "MapLiteral") {
@@ -559,6 +569,29 @@ function resolveSymbols(module, records) {
   const symbols = []
   /** @type {Map<string, string>} */
   const functions = new Map()
+  /** @type {Map<string, string>} */
+  const recordSymbols = new Map()
+  /** @type {Map<string, string>} */
+  const fieldSymbols = new Map()
+
+  for (const [index, declaration] of (module.records ?? []).entries()) {
+    const declarationPath = `/records/${index}`
+    const symbol = declare(declaration, declaration.name, "record", declarationPath)
+
+    if (declaration.id) recordSymbols.set(declaration.id, symbol)
+    for (const [fieldIndex, field] of declaration.fields.entries()) {
+      const fieldPath = `${declarationPath}/fields/${fieldIndex}`
+      const fieldSymbol = declare(field, field.name, "field", fieldPath)
+
+      if (field.id) fieldSymbols.set(field.id, fieldSymbol)
+    }
+  }
+
+  for (const [index, declaration] of (module.records ?? []).entries()) {
+    for (const [fieldIndex, field] of declaration.fields.entries()) {
+      visitType(field.type, `/records/${index}/fields/${fieldIndex}/type`)
+    }
+  }
 
   for (const [index, declaration] of module.functions.entries()) {
     functions.set(declaration.name, declare(declaration, declaration.name, "function", `/functions/${index}`))
@@ -570,7 +603,9 @@ function resolveSymbols(module, records) {
 
     for (const [parameterIndex, parameter] of declaration.parameters.entries()) {
       scope.set(parameter.name, declare(parameter, parameter.name, "parameter", `${declarationPath}/parameters/${parameterIndex}`))
+      visitType(parameter.type, `${declarationPath}/parameters/${parameterIndex}/type`)
     }
+    visitType(declaration.returnType, `${declarationPath}/returnType`)
     visitBlock(declaration.body, scope, `${declarationPath}/body`)
   }
 
@@ -580,7 +615,7 @@ function resolveSymbols(module, records) {
 
   /**
    * Declares one canonical symbol.
-   * @param {import("./types.js").FunctionDeclaration | import("./types.js").Parameter | import("./types.js").LocalDeclaration | import("./types.js").ValueBinding} node - Declaration.
+   * @param {import("./types.js").RecordDeclaration | import("./types.js").RecordField | import("./types.js").FunctionDeclaration | import("./types.js").Parameter | import("./types.js").LocalDeclaration | import("./types.js").ValueBinding} node - Declaration.
    * @param {string} name - Symbol name.
    * @param {import("./types.js").SemanticSymbolKind} kind - Symbol kind.
    * @param {string} path - Declaration occurrence path.
@@ -602,7 +637,9 @@ function resolveSymbols(module, records) {
       location,
       name,
       references: [],
-      ...(kind == "function" ? {semanticDeclarationId: /** @type {import("./types.js").FunctionDeclaration} */ (node).id} : {})
+      ...(["record", "field", "function"].includes(kind)
+        ? {semanticDeclarationId: /** @type {import("./types.js").RecordDeclaration | import("./types.js").RecordField | import("./types.js").FunctionDeclaration} */ (node).id}
+        : {})
     })
 
     return id
@@ -622,6 +659,7 @@ function resolveSymbols(module, records) {
       const statementPath = `${path}/statements/${index}`
 
       if (statement.kind == "LocalDeclaration") {
+        visitType(statement.type, `${statementPath}/type`)
         visitExpression(statement.initializer, scope, `${statementPath}/initializer`)
         scope.set(statement.name, declare(statement, statement.name, "local", statementPath))
       } else if (statement.kind == "AssignmentStatement") {
@@ -638,6 +676,8 @@ function resolveSymbols(module, records) {
       } else if (statement.kind == "ForEachStatement") {
         visitExpression(statement.list, scope, `${statementPath}/list`)
         const bodyScope = new Map(scope)
+
+        visitType(statement.valueBinding.type, `${statementPath}/valueBinding/type`)
 
         bodyScope.set(statement.valueBinding.name, declare(
           statement.valueBinding,
@@ -664,6 +704,12 @@ function resolveSymbols(module, records) {
 
       reference(expression, declaration ? functions.get(declaration.name) : undefined, "call", path)
       for (const [index, argument] of expression.arguments.entries()) visitExpression(argument, scope, `${path}/arguments/${index}`)
+    } else if (expression.kind == "RecordConstruction") {
+      reference(expression, recordSymbols.get(expression.record.declarationId), "construct", path)
+      for (const [index, argument] of expression.arguments.entries()) visitExpression(argument, scope, `${path}/arguments/${index}`)
+    } else if (expression.kind == "MemberRead") {
+      reference(expression, fieldSymbols.get(expression.field), "member", path)
+      visitExpression(expression.receiver, scope, `${path}/receiver`)
     } else if (expression.kind == "UnaryExpression") {
       visitExpression(expression.operand, scope, `${path}/operand`)
     } else if (expression.kind == "BinaryExpression") {
@@ -692,10 +738,25 @@ function resolveSymbols(module, records) {
   }
 
   /**
+   * Resolves nominal references nested in a semantic type.
+   * @param {import("./types.js").SemanticFunctionReturnType} type - Semantic type.
+   * @param {string} path - Type occurrence path.
+   * @returns {void}
+   */
+  function visitType(type, path) {
+    if (type.kind == "RecordType") reference(type, recordSymbols.get(type.declarationId), "type", path)
+    else if (type.kind == "ListType") visitType(type.elementType, `${path}/elementType`)
+    else if (type.kind == "MapType") {
+      visitType(type.keyType, `${path}/keyType`)
+      visitType(type.valueType, `${path}/valueType`)
+    } else if (type.kind == "OptionalType") visitType(type.valueType, `${path}/valueType`)
+  }
+
+  /**
    * Attaches one resolved symbol reference.
-   * @param {import("./types.js").IdentifierExpression | import("./types.js").CallExpression} node - Reference node.
+   * @param {import("./types.js").IdentifierExpression | import("./types.js").CallExpression | import("./types.js").RecordType | import("./types.js").RecordConstruction | import("./types.js").MemberRead} node - Reference node.
    * @param {string | undefined} symbolId - Resolved symbol.
-   * @param {"read" | "write" | "call"} role - Reference role.
+   * @param {"type" | "construct" | "member" | "read" | "write" | "call"} role - Reference role.
    * @param {string} path - Reference occurrence path.
    * @returns {void}
    */
@@ -707,7 +768,8 @@ function resolveSymbols(module, records) {
 
     if (!record || !symbol) throw new Error(`Missing provenance while resolving ${node.kind}.`)
 
-    const location = record.ranges[role == "call" ? "callee" : "name"] ?? node.location
+    const rangeRole = role == "call" ? "callee" : role == "construct" ? "record" : role == "member" ? "member" : role == "type" ? "type" : "name"
+    const location = record.ranges[rangeRole] ?? ("location" in node ? node.location : primaryLocation(record.origin))
 
     record.symbolId = symbolId
     symbol.references.push({location, nodeId: record.id, role})

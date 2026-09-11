@@ -8,12 +8,15 @@ import {
   BlockParametersNode,
   BreakNode,
   CallNode,
+  ClassNode,
+  ConstantReadNode,
   DefNode,
   ElseNode,
   FalseNode,
   HashNode,
   IfNode,
   IntegerNode,
+  InstanceVariableWriteNode,
   InterpolatedStringNode,
   LocalVariableReadNode,
   LocalVariableWriteNode,
@@ -28,6 +31,7 @@ import {
   RetryNode,
   StatementsNode,
   StringNode,
+  SymbolNode,
   TrueNode,
   UnlessNode,
   loadPrism
@@ -38,10 +42,10 @@ import {withAdaptedOperation} from "../semantic/operators.js"
 import {withParserRanges} from "../semantic/provenance.js"
 import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
 import {requireSourceReturnType} from "./scalars.js"
-import {documentedValueType, iterationBindingType, iterationOperandType} from "./types.js"
+import {documentedValueType, iterationBindingType, iterationOperandType, recordType} from "./types.js"
 const parsePrism = await loadPrism()
 /** @typedef {{name: string, nameLocation: import("../semantic/types.js").SourceLocation, parameters: import("../semantic/types.js").Parameter[], returnType: import("../semantic/types.js").SemanticFunctionReturnType, location: import("../semantic/types.js").SourceLocation}} RubyFunctionSignature */
-/** @typedef {{bindings: Map<string, import("../semantic/types.js").SemanticValueType>, functions: Map<string, RubyFunctionSignature>, loopDepth?: number, returnType?: import("../semantic/types.js").SemanticFunctionReturnType}} RubyConversionContext */
+/** @typedef {{bindings: Map<string, import("../semantic/types.js").SemanticValueType>, functions: Map<string, RubyFunctionSignature>, records: Map<string, import("../semantic/types.js").RecordDeclaration>, recordNames: Map<string, import("../semantic/types.js").RecordDeclaration>, loopDepth?: number, returnType?: import("../semantic/types.js").SemanticFunctionReturnType}} RubyConversionContext */
 const rubyBinaryOperations = new Map([
   ["+", "Add"],
   ["-", "Subtract"],
@@ -126,6 +130,14 @@ function convertExpression(node, filename, source, context, expectedType, preser
 
   if (node instanceof CallNode && node.block) {
     return unsupportedSyntax("ruby", "call block", nodeLocation(node.block, filename, source))
+  }
+
+  if (node instanceof CallNode && node.callOperatorLoc && slicePrismSource(
+    source,
+    node.callOperatorLoc.startOffset,
+    node.callOperatorLoc.startOffset + node.callOperatorLoc.length
+  ) == "&.") {
+    return unsupportedSyntax("ruby", node.constructor.name, location)
   }
 
   if (node instanceof ParenthesesNode && node.body instanceof StatementsNode && node.body.body.length == 1) {
@@ -234,6 +246,20 @@ function convertExpression(node, filename, source, context, expectedType, preser
     })
   }
 
+  if (node instanceof CallNode && node.receiver instanceof ConstantReadNode && node.name == "new" &&
+    node.callOperatorLoc && !node.block) {
+    const declaration = context.recordNames.get(node.receiver.name)
+
+    if (!declaration) return unsupportedSyntax("ruby", "construction of a non-record class", nodeLocation(node.receiver, filename, source))
+    return withParserRanges({
+      arguments: (node.arguments_?.arguments_ ?? []).map((argument, index) =>
+        convertExpression(argument, filename, source, context, declaration.fields[index]?.type)),
+      kind: /** @type {const} */ ("RecordConstruction"),
+      location,
+      record: recordType(/** @type {string} */ (declaration.id), nodeLocation(node.receiver, filename, source))
+    }, {record: nodeLocation(node.receiver, filename, source)})
+  }
+
   if (node instanceof CallNode && node.receiver && node.name == "!") {
     const operatorLocation = prismLocation(node.messageLoc ?? node.location, filename, source)
 
@@ -331,11 +357,32 @@ function convertExpression(node, filename, source, context, expectedType, preser
     }, {operator: prismLocation(node.messageLoc ?? node.location, filename, source)})
   }
   if (node instanceof CallNode && node.receiver && node.name == "size" && !node.arguments_ && node.callOperatorLoc && !node.block) {
+    const receiverType = knownValueExpressionType(node.receiver, context)
+
+    if (receiverType?.kind == "RecordType") {
+      return withParserRanges({
+        field: node.name,
+        kind: /** @type {const} */ ("MemberRead"),
+        location,
+        receiver: convertExpression(node.receiver, filename, source, context)
+      }, {member: prismLocation(node.messageLoc ?? node.location, filename, source)})
+    }
     return withParserRanges({
       collection: convertExpression(node.receiver, filename, source, context),
       kind: /** @type {const} */ ("CollectionSizeExpression"),
       location
     }, {operator: prismLocation(node.messageLoc ?? node.location, filename, source)})
+  }
+  if (node instanceof CallNode && node.receiver && node.callOperatorLoc && !node.arguments_ && !node.block) {
+    if (["send", "public_send", "__send__", "instance_variable_get", "method"].includes(node.name)) {
+      return unsupportedSyntax("ruby", "dynamic or reflective member access", prismLocation(node.messageLoc ?? node.location, filename, source))
+    }
+    return withParserRanges({
+      field: node.name,
+      kind: /** @type {const} */ ("MemberRead"),
+      location,
+      receiver: convertExpression(node.receiver, filename, source, context)
+    }, {member: prismLocation(node.messageLoc ?? node.location, filename, source)})
   }
 
   if (node instanceof CallNode && !node.receiver) {
@@ -376,17 +423,44 @@ function knownExpressionType(node, context) {
   if (node instanceof LocalVariableReadNode) return context.bindings.get(node.name)
   if (node instanceof CallNode && !node.receiver) return context.functions.get(node.name)?.returnType
   if (node instanceof CallNode && node.receiver && node.name == "[]") {
-    const collectionType = knownExpressionType(node.receiver, context)
+    const collectionType = knownValueExpressionType(node.receiver, context)
 
     if (collectionType?.kind == "ListType") return collectionType.elementType
   }
   if (node instanceof CallNode && node.receiver && node.name == "fetch") {
-    const collectionType = knownExpressionType(node.receiver, context)
+    const collectionType = knownValueExpressionType(node.receiver, context)
 
     if (collectionType?.kind == "MapType") return collectionType.valueType
   }
+  if (node instanceof CallNode && node.receiver instanceof ConstantReadNode && node.name == "new") {
+    const declaration = context.recordNames.get(node.receiver.name)
+
+    if (declaration?.id) return {declarationId: declaration.id, kind: "RecordType"}
+  }
+  if (node instanceof CallNode && node.receiver && node.callOperatorLoc && !node.arguments_) {
+    const receiver = knownValueExpressionType(node.receiver, context)
+    const declaration = receiver?.kind == "RecordType" ? context.records.get(receiver.declarationId) : undefined
+
+    return declaration?.fields.find((field) => field.name == node.name)?.type
+  }
 
   return undefined
+}
+
+/**
+ * Resolves the value type produced by the frontend's implicit optional-binding unwrap.
+ * Semantic validation separately proves that the unwrap occurs only on a present path.
+ * @param {import("@ruby/prism").Node} node - Parser-owned expression.
+ * @param {RubyConversionContext} context - Typed lexical context.
+ * @returns {import("../semantic/types.js").SemanticFunctionReturnType | undefined} Converted value type.
+ */
+function knownValueExpressionType(node, context) {
+  if (node instanceof ParenthesesNode && node.body instanceof StatementsNode && node.body.body.length == 1) {
+    return knownValueExpressionType(node.body.body[0], context)
+  }
+  const type = knownExpressionType(node, context)
+
+  return node instanceof LocalVariableReadNode && type?.kind == "OptionalType" ? type.valueType : type
 }
 
 /**
@@ -552,9 +626,10 @@ function associatedComments(comments, node, source) {
  * @param {LocalVariableWriteNode} node - Local write.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} recordNames - Record declarations by source name.
  * @returns {{immutable: boolean, type: import("../semantic/types.js").SemanticValueType} | undefined} Metadata when present.
  */
-function localMetadata(comments, node, filename, source) {
+function localMetadata(comments, node, filename, source, recordNames) {
   const associated = associatedComments(comments, node, source)
   const metadata = associated.map((comment) => commentTokens(comment, filename, source))
   const typeMetadata = metadata.filter(([token]) => token?.text == "@type")
@@ -577,7 +652,7 @@ function localMetadata(comments, node, filename, source) {
 
   return {
     immutable: immutableMetadata.length == 1,
-    type: convertType(declaredType.sourceType, `Local '${node.name}'`, location, source, declaredType.location)
+    type: convertType(declaredType.sourceType, `Local '${node.name}'`, location, source, declaredType.location, recordNames)
   }
 }
 
@@ -595,7 +670,7 @@ function convertLocalStatement(node, comments, context, filename, source) {
 
   if (!(node instanceof LocalVariableWriteNode)) return unsupportedSyntax("ruby", node.constructor.name, location)
 
-  const metadata = localMetadata(comments, node, filename, source)
+  const metadata = localMetadata(comments, node, filename, source, context.recordNames)
 
   if (metadata) {
     const semantic = withParserRanges({
@@ -808,10 +883,11 @@ function isImmediateCommentGap(gap) {
  * @param {import("../semantic/types.js").SourceLocation} location - Source location.
  * @param {string} source - Complete parser input.
  * @param {import("../semantic/types.js").SourceLocation} [typeLocation] - Exact type comment token location.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} [recordNames] - Record declarations by source name.
  * @returns {import("../semantic/types.js").SemanticValueType} Semantic type.
  */
-function convertType(sourceType, subject, location, source, typeLocation = location) {
-  return documentedValueType({language: "ruby", location: typeLocation, ownerLocation: location, source, sourceType, subject})
+function convertType(sourceType, subject, location, source, typeLocation = location, recordNames = new Map()) {
+  return documentedValueType({language: "ruby", location: typeLocation, ownerLocation: location, records: recordNames, source, sourceType, subject})
 }
 
 /**
@@ -820,9 +896,10 @@ function convertType(sourceType, subject, location, source, typeLocation = locat
  * @param {import("@ruby/prism/src/deserialize.js").Comment[]} comments - Prism comments.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} recordNames - Record declarations by source name.
  * @returns {RubyFunctionSignature} Semantic signature.
  */
-function convertFunctionSignature(node, comments, filename, source) {
+function convertFunctionSignature(node, comments, filename, source, recordNames) {
   const location = nodeLocation(node, filename, source)
   const parameterList = node.parameters
 
@@ -857,7 +934,7 @@ function convertFunctionSignature(node, comments, filename, source) {
       kind: /** @type {const} */ ("Parameter"),
       location: parameterLocation,
       name: parameter.name,
-      type: convertType(declaredType?.sourceType, `Parameter '${parameter.name}'`, parameterLocation, source, declaredType?.location)
+      type: convertType(declaredType?.sourceType, `Parameter '${parameter.name}'`, parameterLocation, source, declaredType?.location, recordNames)
     }, {name: parameterLocation})
   })
   return {
@@ -867,7 +944,7 @@ function convertFunctionSignature(node, comments, filename, source) {
     parameters,
     returnType: declaredTypes.returnType?.sourceType == "[void]"
       ? requireSourceReturnType("ruby", "[void]", `Function '${node.name}' return`, location, declaredTypes.returnType.location)
-      : convertType(declaredTypes.returnType?.sourceType, `Function '${node.name}' return`, location, source, declaredTypes.returnType?.location)
+      : convertType(declaredTypes.returnType?.sourceType, `Function '${node.name}' return`, location, source, declaredTypes.returnType?.location, recordNames)
   }
 }
 
@@ -876,15 +953,19 @@ function convertFunctionSignature(node, comments, filename, source) {
  * @param {DefNode} node - Prism definition.
  * @param {RubyFunctionSignature} signature - Converted signature.
  * @param {Map<string, RubyFunctionSignature>} functions - Module signatures.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} recordNames - Record declarations by source name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} records - Record declarations by identity.
  * @param {import("@ruby/prism/src/deserialize.js").Comment[]} comments - Prism comments.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
  * @returns {import("../semantic/types.js").FunctionDeclaration} Semantic function.
  */
-function convertFunction(node, signature, functions, comments, filename, source) {
+function convertFunction(node, signature, functions, recordNames, records, comments, filename, source) {
   const context = {
     bindings: new Map(signature.parameters.map((parameter) => [parameter.name, parameter.type])),
     functions,
+    recordNames,
+    records,
     returnType: signature.returnType
   }
   const body = convertBlock(
@@ -904,6 +985,94 @@ function convertFunction(node, signature, functions, comments, filename, source)
     parameters: signature.parameters,
     returnType: signature.returnType
   }, {name: signature.nameLocation})
+}
+
+/**
+ * Converts one exact typed-reader/initializer/freeze Ruby record profile.
+ * @param {ClassNode} node - Prism class declaration.
+ * @param {import("../semantic/types.js").RecordDeclaration} declaration - Predeclared nominal identity.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} recordNames - Record declarations by name.
+ * @param {import("@ruby/prism/src/deserialize.js").Comment[]} comments - Parser-owned comments.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @returns {import("../semantic/types.js").RecordDeclaration} Semantic record.
+ */
+function convertRubyRecord(node, declaration, recordNames, comments, filename, source) {
+  const location = nodeLocation(node, filename, source)
+
+  if (!(node.constantPath instanceof ConstantReadNode) || node.superclass || node.inheritanceOperatorLoc) {
+    return unsupportedSyntax("ruby", "record inheritance or qualified name", location)
+  }
+  const members = node.body instanceof StatementsNode ? node.body.body : []
+  const initializerIndex = members.findIndex((member) => member instanceof DefNode && member.name == "initialize")
+
+  if (initializerIndex < 0 || initializerIndex != members.length - 1 || members.slice(0, initializerIndex).some((member) =>
+    !(member instanceof CallNode) || member.receiver || member.name != "attr_reader" || member.block ||
+    member.arguments_?.arguments_.length != 1 || !(member.arguments_.arguments_[0] instanceof SymbolNode))) {
+    return unsupportedSyntax("ruby", "record class body outside typed readers and one initializer", nodeLocation(members.find((member, index) =>
+      index >= initializerIndex + 1 || !(member instanceof CallNode) || member.name != "attr_reader") ?? node, filename, source))
+  }
+  const readerNodes = /** @type {CallNode[]} */ (members.slice(0, initializerIndex))
+  declaration.fields = readerNodes.map((reader) => {
+    const symbol = /** @type {SymbolNode} */ (reader.arguments_?.arguments_[0])
+    const metadata = associatedComments(comments, reader, source).map((comment) => commentTokens(comment, filename, source))
+    const typeMetadata = metadata.filter(([token]) => token?.text == "@type")
+    const fieldLocation = nodeLocation(reader, filename, source)
+
+    if (typeMetadata.length != 1 || typeMetadata[0].length < 2 || metadata.some(([token]) => token?.text?.startsWith("@type") && token.text != "@type")) {
+      return unsupportedSyntax("ruby", "missing or malformed record reader type", fieldLocation)
+    }
+    const declaredType = joinedCommentToken(typeMetadata[0], 1, source)
+    const field = {
+      kind: /** @type {const} */ ("RecordField"),
+      location: fieldLocation,
+      name: symbol.unescaped.value,
+      type: convertType(declaredType.sourceType, `Record field '${symbol.unescaped.value}'`, fieldLocation, source, declaredType.location, recordNames)
+    }
+
+    return withParserRanges(field, {name: symbol.valueLoc ? prismLocation(symbol.valueLoc, filename, source) : fieldLocation})
+  })
+  const initializer = /** @type {DefNode} */ (members[initializerIndex])
+  const parameterList = initializer.parameters
+  const parameters = parameterList?.requireds ?? []
+  const invalidParameter = parameterList && [parameterList.optionals[0], parameterList.rest, parameterList.posts[0],
+    parameterList.keywords[0], parameterList.keywordRest, parameterList.block].find(Boolean)
+  const initializerStatements = initializer.body instanceof StatementsNode ? initializer.body.body : []
+
+  if (initializer.receiver || invalidParameter || parameters.length != declaration.fields.length ||
+    parameters.some((parameter, index) => !(parameter instanceof RequiredParameterNode) || parameter.name != declaration.fields[index].name) ||
+    initializerStatements.length != declaration.fields.length + 1) {
+    return unsupportedSyntax("ruby", "noncanonical record initializer", nodeLocation(initializer, filename, source))
+  }
+  const annotations = typeComments(comments, initializer, filename, source)
+
+  if (annotations.returnType || annotations.parameters.size != declaration.fields.length) {
+    return unsupportedSyntax("ruby", "incomplete record initializer annotations", nodeLocation(initializer, filename, source))
+  }
+  for (let index = 0; index < declaration.fields.length; index += 1) {
+    const field = declaration.fields[index]
+    const parameter = /** @type {RequiredParameterNode} */ (parameters[index])
+    const assignment = initializerStatements[index]
+    const annotated = annotations.parameters.get(parameter.name)
+
+    if (!(assignment instanceof InstanceVariableWriteNode) || assignment.name != `@${field.name}` ||
+      !(assignment.value instanceof LocalVariableReadNode) || assignment.value.name != field.name || !annotated) {
+      return unsupportedSyntax("ruby", "record field not initialized exactly once", nodeLocation(assignment ?? initializer, filename, source))
+    }
+    const parameterType = convertType(annotated.sourceType, `Record initializer parameter '${parameter.name}'`,
+      nodeLocation(parameter, filename, source), source, annotated.location, recordNames)
+
+    if (JSON.stringify(parameterType) != JSON.stringify(field.type)) {
+      return unsupportedSyntax("ruby", "record reader/initializer type mismatch", annotated.location)
+    }
+  }
+  const freeze = initializerStatements.at(-1)
+
+  if (!(freeze instanceof CallNode) || freeze.receiver || freeze.name != "freeze" || freeze.arguments_ || freeze.block) {
+    return unsupportedSyntax("ruby", "record initializer without final freeze", nodeLocation(freeze ?? initializer, filename, source))
+  }
+
+  return withParserRanges(declaration, {name: nodeLocation(node.constantPath, filename, source)})
 }
 
 /**
@@ -1008,12 +1177,24 @@ export function parseRuby({filename, source}) {
   if (!(result.value instanceof ProgramNode)) throw new Error("Prism returned a non-program root.")
 
   const body = result.value.statements.body
+  const recordNodes = body.filter((node) => node instanceof ClassNode)
+  const recordDeclarations = recordNodes.map((node, index) => ({
+    fields: [],
+    id: `record:${index}`,
+    kind: /** @type {const} */ ("RecordDeclaration"),
+    location: nodeLocation(node, filename, source),
+    name: node.name
+  }))
+  const recordNames = new Map(recordDeclarations.map((declaration) => [declaration.name, declaration]))
+  const recordsById = new Map(recordDeclarations.map((declaration) => [/** @type {string} */ (declaration.id), declaration]))
+  const records = recordNodes.map((node, index) =>
+    convertRubyRecord(node, recordDeclarations[index], recordNames, result.comments, filename, source))
   const functionNodes = body.filter((node) => node instanceof DefNode)
-  const signatures = functionNodes.map((node) => convertFunctionSignature(node, result.comments, filename, source))
+  const signatures = functionNodes.map((node) => convertFunctionSignature(node, result.comments, filename, source, recordNames))
   const functionSignatures = new Map(signatures.map((signature) => [signature.name, signature]))
   const functions = functionNodes.map((node, index) =>
-    convertFunction(node, signatures[index], functionSignatures, result.comments, filename, source))
-  const entryNodes = body.filter((node) => !(node instanceof DefNode))
+    convertFunction(node, signatures[index], functionSignatures, recordNames, recordsById, result.comments, filename, source))
+  const entryNodes = body.filter((node) => !(node instanceof DefNode) && !(node instanceof ClassNode))
   const location = moduleLocation(filename, source)
 
   if (functions.length == 0) return unsupportedSyntax("ruby", "module without a function", location)
@@ -1027,7 +1208,7 @@ export function parseRuby({filename, source}) {
       (entryNodes.at(-1)?.location.startOffset ?? 0) + (entryNodes.at(-1)?.location.length ?? 0)
     )
   ) : location
-  const entryContext = {bindings: new Map(), functions: functionSignatures}
+  const entryContext = {bindings: new Map(), functions: functionSignatures, recordNames, records: recordsById}
   const entryBlock = {
     kind: /** @type {const} */ ("Block"),
     location: entryLocation,
@@ -1042,6 +1223,7 @@ export function parseRuby({filename, source}) {
     },
     functions,
     kind: "Module",
-    location
+    location,
+    ...(records.length > 0 ? {records} : {})
   }
 }

@@ -763,10 +763,13 @@ export function validateMapping(value) {
 
   for (const symbol of mapping.symbols) {
     if (!symbol || typeof symbol != "object" || typeof symbol.id != "string" || symbol.id.length == 0 || symbolIds.has(symbol.id) ||
-      typeof symbol.name != "string" || symbol.name.length == 0 || !["function", "parameter", "local", "iteration"].includes(symbol.kind) ||
+      typeof symbol.name != "string" || symbol.name.length == 0 || !["record", "field", "function", "parameter", "local", "iteration"].includes(symbol.kind) ||
       !nodeIds.has(symbol.declarationNodeId) || !Array.isArray(symbol.references) ||
-      symbol.semanticDeclarationId !== undefined && (symbol.kind != "function" ||
-        typeof symbol.semanticDeclarationId != "string" || !/^function:[0-9]+$/u.test(symbol.semanticDeclarationId))) {
+      symbol.semanticDeclarationId !== undefined && (typeof symbol.semanticDeclarationId != "string" || !(
+        symbol.kind == "function" && /^function:[0-9]+$/u.test(symbol.semanticDeclarationId) ||
+        symbol.kind == "record" && /^record:[0-9]+$/u.test(symbol.semanticDeclarationId) ||
+        symbol.kind == "field" && /^record:[0-9]+:field:[0-9]+$/u.test(symbol.semanticDeclarationId)
+      ))) {
       throw new TypeError("Malformed or duplicate semantic symbol identity.")
     }
     symbolIds.add(symbol.id)
@@ -787,7 +790,7 @@ export function validateMapping(value) {
     validateLocationForSources(symbol.location, sourcesByFilename, sourceCoordinates)
     for (const reference of symbol.references) {
       if (!reference || typeof reference != "object" || !nodeIds.has(reference.nodeId) ||
-        !["declaration", "read", "write", "call"].includes(reference.role)) {
+        !["declaration", "type", "construct", "member", "read", "write", "call"].includes(reference.role)) {
         throw new TypeError("Malformed semantic symbol reference.")
       }
       validateLocationForSources(reference.location, sourcesByFilename, sourceCoordinates)

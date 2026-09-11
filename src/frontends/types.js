@@ -44,6 +44,8 @@ export function iterationBindingType(type, location) {
     )
   }
 
+  if (type.kind == "RecordType") return recordType(type.declarationId, location)
+
   return optionalType(iterationBindingType(type.valueType, location), location, location)
 }
 
@@ -92,6 +94,19 @@ export function optionalType(valueType, location, valueLocation) {
 }
 
 /**
+ * Builds one nominal semantic record type with a parser-owned name range.
+ * @param {string} declarationId - Stable declaration identity.
+ * @param {import("../semantic/types.js").SourceLocation} location - Record type-name range.
+ * @returns {import("../semantic/types.js").RecordType} Record type.
+ */
+export function recordType(declarationId, location) {
+  const type = {declarationId, kind: /** @type {const} */ ("RecordType")}
+
+  setParserRanges(type, {type: location})
+  return type
+}
+
+/**
  * Converts one parser/comment-parser-owned bounded type expression. This parser
  * recognizes only Task 006's concrete scalar/list/map grammar; it never scans
  * source outside the already-associated type token.
@@ -99,12 +114,13 @@ export function optionalType(valueType, location, valueLocation) {
  * @param {"javascript" | "php" | "ruby"} input.language - Comment profile.
  * @param {import("../semantic/types.js").SourceLocation} input.location - Exact type token range.
  * @param {import("../semantic/types.js").SourceLocation} input.ownerLocation - Owning declaration range.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} [input.records] - Available nominal records by source name.
  * @param {string} input.source - Complete parser input for exact subranges.
  * @param {string | undefined} input.sourceType - Exact comment-parser/Prism-owned type token.
  * @param {string} input.subject - Diagnostic subject.
  * @returns {import("../semantic/types.js").SemanticValueType} Semantic value type.
  */
-export function documentedValueType({language, location, ownerLocation, source, sourceType, subject}) {
+export function documentedValueType({language, location, ownerLocation, records = new Map(), source, sourceType, subject}) {
   if (!sourceType) return missingType(language, subject, ownerLocation)
 
   if (language == "php" && sourceType.startsWith("?")) {
@@ -117,7 +133,7 @@ export function documentedValueType({language, location, ownerLocation, source, 
     )
 
     return optionalType(
-      documentedValueType({language, location: valueLocation, ownerLocation, source, sourceType: valueText, subject}),
+      documentedValueType({language, location: valueLocation, ownerLocation, records, source, sourceType: valueText, subject}),
       location,
       valueLocation
     )
@@ -135,7 +151,7 @@ export function documentedValueType({language, location, ownerLocation, source, 
     )
 
     return optionalType(
-      documentedValueType({language, location: valueLocation, ownerLocation, source, sourceType: valueText, subject}),
+      documentedValueType({language, location: valueLocation, ownerLocation, records, source, sourceType: valueText, subject}),
       location,
       valueLocation
     )
@@ -148,14 +164,22 @@ export function documentedValueType({language, location, ownerLocation, source, 
   const scalar = sourceScalarType(language, sourceType, location)
 
   if (scalar) return scalar
+  const unwrappedName = language == "ruby" && sourceType.startsWith("[") && sourceType.endsWith("]")
+    ? sourceType.slice(1, -1)
+    : sourceType
+  const directRecord = records.get(unwrappedName)
+
+  if (directRecord?.id) return recordType(directRecord.id, location)
   const collectionPrefixes = language == "ruby" ? ["[Array", "[Hash", "[Integer?", "[bool?", "[String?"] :
     language == "php" ? ["list", "array"] : ["ReadonlyArray", "ReadonlyMap"]
+  const optionalRecord = language == "ruby" && sourceType.startsWith("[") && sourceType.endsWith("?]") &&
+    records.has(sourceType.slice(1, -2))
 
-  if (!collectionPrefixes.some((prefix) => sourceType.startsWith(prefix))) {
+  if (!optionalRecord && !collectionPrefixes.some((prefix) => sourceType.startsWith(prefix))) {
     return missingType(language, subject, ownerLocation)
   }
 
-  const parser = new DocumentedTypeParser(language, sourceType, location, source)
+  const parser = new DocumentedTypeParser(language, sourceType, location, source, records)
   const type = parser.parse()
 
   if (!parser.atEnd()) return unsupportedSyntax(language, "unsupported collection type", parser.remainingLocation())
@@ -170,12 +194,14 @@ class DocumentedTypeParser {
    * @param {string} text - Parser-owned type text.
    * @param {import("../semantic/types.js").SourceLocation} location - Whole token location.
    * @param {string} source - Complete source.
+   * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} records - Available nominal records.
    */
-  constructor(language, text, location, source) {
+  constructor(language, text, location, source, records) {
     this.language = language
     this.text = text
     this.location = location
     this.source = source
+    this.records = records
     this.offset = 0
   }
 
@@ -238,6 +264,20 @@ class DocumentedTypeParser {
       }
 
       return scalar
+    }
+    const record = this.records.get(name)
+
+    if (record?.id && this.text[this.offset] != "<" && this.text[this.offset] != "[") {
+      const type = recordType(record.id, this.range(start, nameEnd))
+
+      if (this.language == "ruby" && this.consume("?")) {
+        return optionalType(type, this.range(start, this.offset), this.typeRange(type, start, nameEnd))
+      }
+      if (this.language == "javascript" && this.consume("|null")) {
+        return optionalType(type, this.range(start, this.offset), this.typeRange(type, start, nameEnd))
+      }
+
+      return type
     }
 
     const listName = this.language == "ruby" ? "Array" : this.language == "php" ? "list" : "ReadonlyArray"

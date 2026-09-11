@@ -143,6 +143,58 @@ const phpInvalidParameterBindings = new Set([
 ])
 const phpInvalidAssignedBindings = new Set(["GLOBALS", "this"])
 
+/** @type {Readonly<Partial<Record<import("../semantic/types.js").BackendLanguage, Set<string>>>>} */
+const reservedTypeNames = Object.freeze({
+  java: new Set(["Boolean", "Integer", "Main", "Math", "Object", "String", "System"]),
+  javascript: new Set(["Array", "Boolean", "Map", "Math", "Number", "Object", "Reflect", "String"]),
+  php: new Set([
+    "addressinfo", "allowdynamicproperties", "appenditerator", "argumentcounterror", "arithmeticerror", "arrayaccess",
+    "arrayiterator", "arrayobject", "assertionerror", "attribute", "backedenum", "badfunctioncallexception",
+    "badmethodcallexception", "cachingiterator",
+    "callbackfilteriterator", "closedgeneratorexception", "closure", "compileerror", "countable", "dateerror", "dateexception",
+    "dateinterval", "dateinvalidoperationexception", "dateinvalidtimezoneexception", "datemalformedintervalstringexception",
+    "datemalformedperiodstringexception", "datemalformedstringexception", "dateobjecterror", "dateperiod", "daterangeerror",
+    "datetime", "datetimeimmutable", "datetimeinterface", "datetimezone", "deflatecontext", "delayedtargetvalidation",
+    "deprecated", "directory", "directoryiterator", "divisionbyzeroerror", "domainexception", "emptyiterator", "error",
+    "errorexception", "exception", "ffi", "fiber", "fibererror", "filesystemiterator", "filteriterator", "finfo", "generator",
+    "globiterator", "hashcontext", "infiniteiterator", "inflatecontext", "internaliterator", "invalidargumentexception",
+    "iterator", "iteratoraggregate", "iteratoriterator", "jsonexception", "jsonserializable", "lengthexception",
+    "libxmlerror", "limititerator", "logicexception", "multipleiterator", "nodiscard", "norewinditerator",
+    "opensslasymmetrickey", "opensslcertificate", "opensslcertificatesigningrequest",
+    "outofboundsexception", "outofrangeexception", "outeriterator", "overflowexception", "override", "parentiterator",
+    "parseerror", "pdo", "pdoexception", "pdorow", "pdostatement", "phar", "phardata", "pharexception", "pharfileinfo",
+    "php_user_filter", "phptoken", "propertyhooktype", "rangeexception", "recursivearrayiterator", "recursivecachingiterator",
+    "recursivecallbackfilteriterator",
+    "recursivedirectoryiterator", "recursivefilteriterator", "recursiveiterator", "recursiveiteratoriterator",
+    "recursiveregexiterator", "recursivetreeiterator", "reflection", "reflectionattribute", "reflectionclass",
+    "reflectionclassconstant", "reflectionconstant", "reflectionenum", "reflectionenumbackedcase", "reflectionenumunitcase",
+    "reflectionexception", "reflectionextension", "reflectionfiber", "reflectionfunction", "reflectionfunctionabstract",
+    "reflectiongenerator", "reflectionintersectiontype", "reflectionmethod", "reflectionnamedtype", "reflectionobject",
+    "reflectionparameter", "reflectionproperty", "reflectionreference", "reflectiontype", "reflectionuniontype",
+    "reflectionzendextension", "reflector", "regexiterator", "requestparsebodyexception", "returntypewillchange",
+    "roundingmode", "runtimeexception", "seekableiterator", "sensitiveparameter", "sensitiveparametervalue", "serializable",
+    "sessionhandler", "sessionhandlerinterface", "sessionidinterface", "sessionupdatetimestamphandlerinterface", "shmop",
+    "socket", "sodiumexception", "spldoublylinkedlist", "splfileinfo",
+    "splfileobject", "splfixedarray", "splheap", "splmaxheap", "splminheap", "splobjectstorage", "splobserver",
+    "splpriorityqueue", "splqueue", "splstack", "splsubject", "spltempfileobject", "stdclass", "streambucket", "stringable",
+    "sysvmessagequeue", "sysvsemaphore", "sysvsharedmemory", "throwable", "traversable", "typeerror", "underflowexception",
+    "unexpectedvalueexception", "unhandledmatcherror", "unitenum", "valueerror", "weakmap", "weakreference"
+  ]),
+  ruby: new Set([
+    "ArgumentError", "Array", "BasicObject", "Binding", "Class", "ClosedQueueError", "Comparable", "Complex", "Data", "Dir",
+    "Encoding", "EncodingError", "Enumerable", "Enumerator", "EOFError", "Errno", "Exception", "FalseClass", "Fiber",
+    "FiberError", "File", "FileTest", "Float", "FrozenError", "GC", "Hash", "IO", "IOError", "IndexError", "Integer",
+    "Interrupt", "Kernel", "KeyError", "LoadError", "LocalJumpError", "Marshal", "MatchData", "Math", "Method", "Module",
+    "Mutex", "NameError", "NilClass", "NoMemoryError", "NoMethodError", "NotImplementedError", "Numeric", "Object",
+    "ObjectSpace", "Proc", "Process", "Queue", "Ractor", "Random", "Range", "Rational", "Regexp", "RegexpError", "RubyVM",
+    "RuntimeError", "ScriptError", "SecurityError", "Signal", "SignalException", "SizedQueue", "StandardError", "StopIteration",
+    "String", "Struct", "Symbol", "SyntaxError", "SystemCallError", "SystemExit", "SystemStackError", "Thread", "ThreadError",
+    "ThreadGroup", "Time", "TracePoint", "TrueClass", "TypeError", "UnboundMethod", "UncaughtThrowError", "Warning",
+    "ZeroDivisionError"
+  ]),
+  typescript: new Set(["Array", "Boolean", "Map", "Math", "Number", "Object", "ReadonlyArray", "ReadonlyMap", "Reflect", "String"])
+})
+
 /**
  * Validates an identifier against the target backend's deliberately narrow lexical contract.
  * @param {import("../semantic/types.js").BackendLanguage} language - Target language.
@@ -197,6 +249,24 @@ export function validateTargetBindingIdentifier(language, name, role, location) 
 
   if (invalidTypeScriptBinding || invalidPhpVariable || invalidRubyBinding) {
     unsupportedCapability(language, `${role} identifier '${name}'`, location)
+  }
+}
+
+/**
+ * Validates a nominal record/type declaration name for the original-five targets.
+ * @param {import("../semantic/types.js").BackendLanguage} language - Backend language.
+ * @param {unknown} name - Candidate type name.
+ * @param {import("../semantic/types.js").SourceLocation | undefined} location - Declaration location.
+ * @returns {void}
+ */
+export function validateTargetTypeIdentifier(language, name, location) {
+  if (typeof name != "string" || !/^[A-Z][A-Za-z0-9_]*$/u.test(name)) {
+    unsupportedCapability(language, `record type identifier '${String(name)}'`, location)
+  }
+  const reservedName = language == "php" ? name.toLowerCase() : name
+
+  if (reservedWords[language].has(reservedName) || reservedTypeNames[language]?.has(reservedName)) {
+    unsupportedCapability(language, `record type identifier '${name}'`, location)
   }
 }
 

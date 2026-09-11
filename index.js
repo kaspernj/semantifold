@@ -3,7 +3,7 @@
 import {parseSource} from "./src/frontends/index.js"
 import {generateArtifactSource, generateSource} from "./src/backends/index.js"
 import {createGeneratedArtifactSet as constructArtifactSet} from "./src/artifacts.js"
-import {SemantifoldDiagnostic} from "./src/diagnostic.js"
+import {SemantifoldDiagnostic, unsupportedCapability} from "./src/diagnostic.js"
 import {languageRegistry} from "./src/language-registry.js"
 import {kotlinArtifactMetadata} from "./src/backends/kotlin.js"
 
@@ -106,11 +106,15 @@ export function generateArtifactSet(input) {
       message: "Artifact backend role must be 'text', 'binary', or 'application'."
     })
   }
+  const target = languageRegistry.record(language)
+
+  if (Array.isArray(module?.records) && module.records.length > 0 && !target.features.closedRecords) {
+    unsupportedCapability(/** @type {import("./src/semantic/types.js").BackendLanguage} */ (language),
+      "Task 009 closed records", module.records[0].location ?? module.location)
+  }
 
   if (role == "text") {
-    const record = languageRegistry.record(language)
-
-    if (record.artifactMultiplicity == "multiple") {
+    if (target.artifactMultiplicity == "multiple") {
       const backend = languageRegistry.resolve(language, "textBackend", module?.location)
 
       return constructArtifactSet(backend({filename, language, mapDirective, module, sourceMapFilename, sources}))
@@ -128,7 +132,7 @@ export function generateArtifactSet(input) {
     const artifacts = [{
       content: artifact.code,
       contentKind: "text",
-      mediaType: /** @type {string} */ (record.mediaType),
+      mediaType: /** @type {string} */ (target.mediaType),
       ownership: "generated",
       path: artifact.filename,
       provenance: {

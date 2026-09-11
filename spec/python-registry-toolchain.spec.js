@@ -12,7 +12,7 @@ describe("Python registry and toolchain", () => {
     expect(python).toEqual({
       acceptance: {stages: ["parse", "generate", "compile", "execute"], toolchains: ["python"]},
       artifactMultiplicity: "single",
-      features: {generalFunctionsAndCalls: false, immutableCollections: false, optionalValues: false, orderedListIteration: false},
+      features: {closedRecords: false, generalFunctionsAndCalls: false, immutableCollections: false, optionalValues: false, orderedListIteration: false},
       id: "python",
       mapping: {binaryRanges: false, richText: true, sourceMapV3: true},
       roles: {applicationBackend: false, binaryBackend: false, frontend: true, interoperability: false, textBackend: true},

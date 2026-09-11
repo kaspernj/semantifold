@@ -103,6 +103,7 @@ export function createLanguageRegistry(candidateRecords) {
     }
     if (typeof candidate.roundTrip != "boolean") invalidRegistry(`Registry record '${id}' requires a Boolean round-trip declaration.`, id)
     const featuresCandidate = candidate.features ?? {
+      closedRecords: false,
       generalFunctionsAndCalls: false,
       immutableCollections: false,
       optionalValues: false,
@@ -110,7 +111,8 @@ export function createLanguageRegistry(candidateRecords) {
     }
 
     if (!isPlainObject(featuresCandidate) ||
-      Object.keys(featuresCandidate).sort().join(",") != "generalFunctionsAndCalls,immutableCollections,optionalValues,orderedListIteration" ||
+      Object.keys(featuresCandidate).sort().join(",") != "closedRecords,generalFunctionsAndCalls,immutableCollections,optionalValues,orderedListIteration" ||
+      typeof featuresCandidate.closedRecords != "boolean" ||
       typeof featuresCandidate.generalFunctionsAndCalls != "boolean" ||
       typeof featuresCandidate.immutableCollections != "boolean" ||
       typeof featuresCandidate.optionalValues != "boolean" ||
@@ -118,6 +120,7 @@ export function createLanguageRegistry(candidateRecords) {
       invalidRegistry(`Registry record '${id}' has an invalid feature declaration.`, id)
     }
     const features = deepFreeze(/** @type {import("./semantic/types.js").LanguageFeatureCapabilities} */ ({
+      closedRecords: featuresCandidate.closedRecords,
       generalFunctionsAndCalls: featuresCandidate.generalFunctionsAndCalls,
       immutableCollections: featuresCandidate.immutableCollections,
       optionalValues: featuresCandidate.optionalValues,
@@ -323,7 +326,7 @@ const goFrontend = ({filename, source}) => parseGo({filename, source})
 
 const records = [
   language({
-    acceptance: {stages: ["parse", "generate", "execute"], toolchains: ["php"]},
+    acceptance: {stages: ["parse", "generate", "execute"], toolchains: ["php82"]},
     defaultFilename: "program.php",
     frontend: phpFrontend,
     id: "php",
@@ -422,7 +425,7 @@ const records = [
     artifactMultiplicity: "multiple",
     binaryBackend: generateBrowserWasm,
     defaultFilename: "program.wasm",
-    features: {generalFunctionsAndCalls: false, immutableCollections: false, optionalValues: false, orderedListIteration: false},
+    features: {closedRecords: false, generalFunctionsAndCalls: false, immutableCollections: false, optionalValues: false, orderedListIteration: false},
     id: "wasm",
     mapping: {binaryRanges: true, richText: true, sourceMapV3: true},
     mediaType: "application/wasm",
@@ -446,6 +449,7 @@ function language(values) {
   return {
     artifactMultiplicity: "single",
     features: {
+      closedRecords: ["php", "ruby", "javascript", "typescript", "java"].includes(String(values.id)),
       generalFunctionsAndCalls: ["php", "ruby", "javascript", "typescript", "java"].includes(String(values.id)),
       immutableCollections: ["php", "ruby", "javascript", "typescript", "java"].includes(String(values.id)),
       optionalValues: ["php", "ruby", "javascript", "typescript", "java"].includes(String(values.id)),

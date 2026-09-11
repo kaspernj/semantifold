@@ -35,6 +35,7 @@ export function emitScalarType(language, type) {
  * @returns {string} Exact target spelling.
  */
 export function emitSemanticType(language, type, javaBoxed = false) {
+  if (type.kind == "RecordType") throw new TypeError("Nominal record type emission requires declaration context.")
   if (type.kind == "TypeReference") {
     if (language == "java" && javaBoxed) {
       return type.name == "integer" ? "Integer" : type.name == "boolean" ? "Boolean" : type.name == "string" ? "String" : "void"

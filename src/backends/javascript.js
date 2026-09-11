@@ -10,6 +10,43 @@ import {emitExpression, emitType, requiresCanonicalZeroRendering} from "./shared
  */
 export function generateJavaScript(module, writer) {
   const canonicalizeZero = requiresCanonicalZeroRendering(module)
+  const records = module.records ?? []
+
+  records.forEach((record, recordIndex) => {
+    const recordPath = `/records/${recordIndex}`
+
+    if (recordIndex > 0) writer.synthetic("\n\n", "record declaration separator", [record], [recordPath])
+    writer.mapped("class", {mappingKind: "anchor", node: record, path: recordPath})
+    writer.synthetic(" ", "record declaration spacing", [record], [recordPath])
+    writer.mapped(record.name, {mappingKind: "exact", node: record, path: recordPath, role: "name"})
+    writer.synthetic(" {\n  /**\n", "JavaScript record constructor scaffolding", [record], [recordPath])
+    record.fields.forEach((field, fieldIndex) => {
+      const fieldPath = `${recordPath}/fields/${fieldIndex}`
+
+      writer.synthetic("   * @param {", "JavaScript record field type scaffolding", [field], [fieldPath])
+      emitType(writer, field.type, `${fieldPath}/type`, "javascript")
+      writer.synthetic("} ", "JavaScript record field type scaffolding", [field], [fieldPath])
+      writer.mapped(field.name, {mappingKind: "exact", node: field, path: fieldPath, role: "name"})
+      writer.synthetic("\n", "line break", [field], [fieldPath])
+    })
+    writer.synthetic("   */\n  constructor(", "JavaScript record constructor scaffolding", [record], [recordPath])
+    record.fields.forEach((field, fieldIndex) => {
+      if (fieldIndex) writer.synthetic(", ", "record field separator", [record], [recordPath])
+      writer.mapped(field.name, {mappingKind: "exact", node: field, path: `${recordPath}/fields/${fieldIndex}`, role: "name"})
+    })
+    writer.synthetic(") {\n", "JavaScript record constructor scaffolding", [record], [recordPath])
+    record.fields.forEach((field, fieldIndex) => {
+      const fieldPath = `${recordPath}/fields/${fieldIndex}`
+
+      writer.synthetic("    /** @readonly */\n    this.", "JavaScript readonly field scaffolding", [field], [fieldPath])
+      writer.mapped(field.name, {mappingKind: "exact", node: field, path: fieldPath, role: "name"})
+      writer.synthetic(" = ", "JavaScript record assignment scaffolding", [field], [fieldPath])
+      writer.mapped(field.name, {mappingKind: "exact", node: field, path: fieldPath, role: "name"})
+      writer.synthetic("\n", "line break", [field], [fieldPath])
+    })
+    writer.synthetic("    Object.freeze(this)\n  }\n}", "JavaScript record immutability scaffolding", [record], [recordPath])
+  })
+  if (records.length > 0) writer.synthetic("\n\n", "record/function separator", [module])
 
   module.functions.forEach((declaration, functionIndex) => {
     if (functionIndex > 0) writer.synthetic("\n\n", "declaration separator", [declaration])

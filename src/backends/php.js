@@ -10,6 +10,45 @@ import {emitExpression, emitType} from "./shared.js"
  */
 export function generatePhp(module, writer) {
   writer.synthetic("<?php\ndeclare(strict_types=1);\n\n", "PHP program scaffolding", [module])
+  const records = module.records ?? []
+
+  records.forEach((record, recordIndex) => {
+    const recordPath = `/records/${recordIndex}`
+
+    if (recordIndex > 0) writer.synthetic("\n\n", "record declaration separator", [record], [recordPath])
+    writer.mapped("final readonly class", {mappingKind: "anchor", node: record, path: recordPath})
+    writer.synthetic(" ", "record declaration spacing", [record], [recordPath])
+    writer.mapped(record.name, {mappingKind: "exact", node: record, path: recordPath, role: "name"})
+    writer.synthetic(" {\n", "record class scaffolding", [record], [recordPath])
+    const documented = record.fields.filter((field) => phpTypeNeedsDocumentation(field.type))
+
+    if (documented.length > 0) {
+      writer.synthetic("    /**\n", "PHP record type scaffolding", [record], [recordPath])
+      for (const field of documented) {
+        const fieldIndex = record.fields.indexOf(field)
+        const fieldPath = `${recordPath}/fields/${fieldIndex}`
+
+        writer.synthetic("     * @param ", "PHP record type scaffolding", [field], [fieldPath])
+        emitType(writer, field.type, `${fieldPath}/type`, "php")
+        writer.synthetic(" ", "PHP record type scaffolding", [field], [fieldPath])
+        writer.mapped(`$${field.name}`, {mappingKind: "exact", node: field, path: fieldPath, role: "name"})
+        writer.synthetic("\n", "PHP record type scaffolding", [field], [fieldPath])
+      }
+      writer.synthetic("     */\n", "PHP record type scaffolding", [record], [recordPath])
+    }
+    writer.synthetic("    public function __construct(\n", "PHP record constructor scaffolding", [record], [recordPath])
+    record.fields.forEach((field, fieldIndex) => {
+      const fieldPath = `${recordPath}/fields/${fieldIndex}`
+
+      writer.synthetic("        public ", "PHP promoted field scaffolding", [field], [fieldPath])
+      emitNativePhpType(writer, field.type, `${fieldPath}/type`)
+      writer.synthetic(" ", "PHP promoted field spacing", [field], [fieldPath])
+      writer.mapped(`$${field.name}`, {mappingKind: "exact", node: field, path: fieldPath, role: "name"})
+      writer.synthetic(fieldIndex + 1 == record.fields.length ? "\n" : ",\n", "PHP promoted field separator", [field], [fieldPath])
+    })
+    writer.synthetic("    ) {}\n}", "PHP record constructor scaffolding", [record], [recordPath])
+  })
+  if (records.length > 0) writer.synthetic("\n\n", "record/function separator", [module])
 
   module.functions.forEach((declaration, functionIndex) => {
     if (functionIndex > 0) writer.synthetic("\n\n", "declaration separator", [declaration])
@@ -83,13 +122,13 @@ function phpTypeNeedsDocumentation(type) {
  * @returns {void}
  */
 function emitNativePhpType(writer, type, path) {
-  if (type.kind == "TypeReference") {
+  if (type.kind == "TypeReference" || type.kind == "RecordType") {
     emitType(writer, type, path, "php")
     return
   }
   if (type.kind == "OptionalType") {
     writer.mapped("?", {mappingKind: "exact", node: type, path, role: "type"})
-    if (type.valueType.kind == "TypeReference") emitType(writer, type.valueType, `${path}/valueType`, "php")
+    if (type.valueType.kind == "TypeReference" || type.valueType.kind == "RecordType") emitType(writer, type.valueType, `${path}/valueType`, "php")
     else writer.mapped("array", {mappingKind: "anchor", node: type, path})
     return
   }
