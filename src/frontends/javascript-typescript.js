@@ -1193,8 +1193,29 @@ function parseBabelSource({filename, language, source}) {
       tokens: true
     })
   } catch (error) {
-    return parseFailure(language, error)
+    return parseFailure(language, error, babelParserFailureLocation(error, filename, source))
   }
+}
+
+/**
+ * Normalizes Babel's zero-based UTF-16 failure offset when available.
+ * @param {unknown} error - Native Babel parser error.
+ * @param {string} filename - Requested source filename.
+ * @param {string} source - Complete source.
+ * @returns {import("../semantic/types.js").SourceLocation} Failure range.
+ */
+function babelParserFailureLocation(error, filename, source) {
+  if (!error || typeof error != "object") return moduleLocation(filename, source)
+  const direct = Reflect.get(error, "pos")
+  const parserLocation = Reflect.get(error, "loc")
+  const located = parserLocation && typeof parserLocation == "object" ? Reflect.get(parserLocation, "index") : undefined
+  const offset = Number.isSafeInteger(direct) ? direct : located
+
+  if (typeof offset != "number" || !Number.isSafeInteger(offset) || offset < 0 || offset > source.length) {
+    return moduleLocation(filename, source)
+  }
+
+  return locationFromOffsets(filename, source, offset, Math.min(offset + 1, source.length))
 }
 
 /**
