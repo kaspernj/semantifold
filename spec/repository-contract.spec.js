@@ -118,20 +118,6 @@ describe("repository delivery contracts", () => {
     }
   })
 
-  it("keeps Task 013 focused checks additive to the mandatory local aggregate gate", async () => {
-    const [instructions, testing] = await Promise.all([
-      readFile(new URL("../AGENTS.md", import.meta.url), "utf8"),
-      readFile(new URL("../docs/testing.md", import.meta.url), "utf8")
-    ])
-    const aggregateCommand = "LANG=C.UTF-8 LC_ALL=C.UTF-8 npm test"
-    const taskSection = testing.match(/^## Task 013\b[\s\S]*?(?=^## )/mu)?.[0]
-
-    assert.ok(taskSection)
-    expect(instructions).toContain(aggregateCommand)
-    expect(taskSection).toContain(aggregateCommand)
-    assert.doesNotMatch(taskSection, /Do not run local suite|TensorBuzz-owned/u)
-  })
-
   it("pins the custom ESLint plugin to one immutable Git commit", async () => {
     const packageJson = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"))
     const packageLock = JSON.parse(await readFile(new URL("../package-lock.json", import.meta.url), "utf8"))

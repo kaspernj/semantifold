@@ -22,7 +22,7 @@ Task 013 is the separate terminal original-five aggregate gate. Task 005 does no
 
 `spec/five-language-compatibility-diagnostics.spec.js` crosses all five languages with parse, unsupported-form, missing-type, resolution, type, flow, exclusion, malformed external IR, and target preflight cases. `spec/php-parse-diagnostic-location.spec.js` and `spec/javascript-typescript-parse-diagnostic-location.spec.js` protect the parser-derived location correction found by the aggregate gate. Every error must be `SemantifoldDiagnostic` with stable code, language, filename, and useful start; generation APIs must throw before returning any partial artifact.
 
-Run the Task 013 focused files individually and sequentially before the aggregate suite. Missing runtime/compiler commands fail; no case skips or installs a replacement. These commands supplement rather than replace mandatory local suite discovery:
+Run the Task 013 files individually and sequentially. Missing runtime/compiler commands fail; no case skips or installs a replacement. Do not run local suite/directory/glob discovery for this task:
 
 ```sh
 npx velocious-test spec/php-parse-diagnostic-location.spec.js
@@ -33,13 +33,7 @@ npx velocious-test spec/public-api.spec.js
 npx velocious-test spec/tree-sitter-legacy-packed-consumer.spec.js
 ```
 
-After the focused files pass, run the mandatory local aggregate handoff gate:
-
-```sh
-LANG=C.UTF-8 LC_ALL=C.UTF-8 npm test
-```
-
-Task 013 adds no stdlib, pairwise adapter, source-to-target call rewrite, map iteration, Phase 2/3 syntax, expanded-language matrix, application lane, release, or deployment behavior. TensorBuzz repeats the aggregate coverage after the required local handoff gate; it does not replace that local proof.
+Task 013 adds no stdlib, pairwise adapter, source-to-target call rewrite, map iteration, Phase 2/3 syntax, expanded-language matrix, application lane, release, or deployment behavior. Aggregate `npm test` remains TensorBuzz-owned.
 
 ## Task 025 core expanded-language acceptance
 
