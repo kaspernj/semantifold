@@ -453,7 +453,8 @@ function validateReferenceClassTargets(classes, records, errors, functions, lang
         unsupportedCapability(language, `reserved reference lifecycle method '${method.name}'`, exactMethodLocation)
       }
       const reservedHook = language == "php" ? /^__/u.test(method.name) :
-        language == "ruby" ? rubyReferenceMethodHooks.has(method.name) :
+        language == "ruby" ? rubyReferenceMethodHooks.has(method.name) ||
+          typeof method.name == "string" && method.name.endsWith("=") :
           language == "java" ? javaReferenceMethodHooks.has(method.name) :
             language == "javascript" || language == "typescript" ? javascriptReferenceMethodHooks.has(method.name) : false
 

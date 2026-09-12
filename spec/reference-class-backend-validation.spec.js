@@ -57,6 +57,7 @@ describe("reference class backend validation", () => {
       ["php", "__invoke"],
       ["ruby", "method_missing"],
       ["ruby", "size"],
+      ["ruby", "value="],
       ["java", "equals"]
     ]
 

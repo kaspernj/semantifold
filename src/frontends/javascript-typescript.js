@@ -1627,24 +1627,16 @@ function convertJavaScriptError(node, declaration, language, filename, source) {
 }
 
 /**
- * Converts the bounded native private-field reference-class profile.
+ * Predeclares the bounded native private-field reference-class profile and all callable signatures.
  * @param {import("@babel/types").ClassDeclaration} node - Parser class.
  * @param {import("../semantic/types.js").ClassDeclaration} declaration - Predeclared class identity.
  * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} nominalNames - Nominal types by name.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} valueNames - Nominal constructors by name.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} records - Records by identity.
- * @param {Map<string, import("../semantic/types.js").ClassDeclaration>} classes - Classes by identity.
- * @param {Map<string, JavaScriptFunctionSignature>} functions - Top-level signatures.
- * @param {Map<string, import("../semantic/types.js").ErrorDeclaration>} errorNames - Errors by name.
- * @param {Map<string, import("../semantic/types.js").ErrorDeclaration>} errors - Errors by identity.
  * @param {"javascript" | "typescript"} language - Source language.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
- * @param {boolean} canonicalZeroRequired - Whether scalar output canonicalizes zero.
  * @returns {import("../semantic/types.js").ClassDeclaration} Semantic class.
  */
-function convertReferenceClass(node, declaration, nominalNames, valueNames, records, classes, functions, errorNames,
-  errors, language, filename, source, canonicalZeroRequired) {
+function predeclareReferenceClass(node, declaration, nominalNames, language, filename, source) {
   const location = nodeLocation(node, filename, source)
 
   if (!node.id || node.superClass || node.decorators?.length || node.typeParameters || node.superTypeParameters ||
@@ -1714,6 +1706,33 @@ function convertReferenceClass(node, declaration, nominalNames, valueNames, reco
       parameters: signature.parameters, returnType: /** @type {import("../semantic/types.js").SemanticFunctionReturnType} */ (signature.returnType)},
     {name: signature.nameLocation})
   })
+
+  return withParserRanges(declaration, {name: identifierLocation(node.id, filename, source)})
+}
+
+/**
+ * Converts one reference class body after every class signature is complete.
+ * @param {import("@babel/types").ClassDeclaration} node - Parser class.
+ * @param {import("../semantic/types.js").ClassDeclaration} declaration - Complete predeclared class signature.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} nominalNames - Nominal types by name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} valueNames - Nominal constructors by name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} records - Records by identity.
+ * @param {Map<string, import("../semantic/types.js").ClassDeclaration>} classes - Classes by identity.
+ * @param {Map<string, JavaScriptFunctionSignature>} functions - Top-level signatures.
+ * @param {Map<string, import("../semantic/types.js").ErrorDeclaration>} errorNames - Errors by name.
+ * @param {Map<string, import("../semantic/types.js").ErrorDeclaration>} errors - Errors by identity.
+ * @param {"javascript" | "typescript"} language - Source language.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @param {boolean} canonicalZeroRequired - Whether scalar output canonicalizes zero.
+ * @returns {import("../semantic/types.js").ClassDeclaration} Completed semantic class.
+ */
+function convertReferenceClassBodies(node, declaration, nominalNames, valueNames, records, classes, functions, errorNames,
+  errors, language, filename, source, canonicalZeroRequired) {
+  const constructorNode = /** @type {import("@babel/types").ClassMethod} */ (
+    node.body.body.find((member) => member.type == "ClassMethod" && member.kind == "constructor"))
+  const methodNodes = /** @type {import("@babel/types").ClassMethod[]} */ (
+    node.body.body.filter((member) => member.type == "ClassMethod" && member.kind == "method"))
   const baseContext = {bindings: new Map(), classes, currentClass: declaration, errorNames, errors, functions,
     recordNames: nominalNames, records, valueRecordNames: valueNames}
   const constructorContext = {...baseContext,
@@ -1730,7 +1749,7 @@ function convertReferenceClass(node, declaration, nominalNames, valueNames, reco
     method.body = convertBlock(methodNodes[index].body, language, filename, source, canonicalZeroRequired, context)
   }
 
-  return withParserRanges(declaration, {name: identifierLocation(node.id, filename, source)})
+  return declaration
 }
 
 /**
@@ -2192,6 +2211,9 @@ export function parseJavaScriptTypeScript({filename, language, source, program})
   for (const declaration of classDeclarations) valueRecordNames.set(declaration.name, declaration)
   const valueRecordsById = new Map(recordDeclarations.map((declaration) => [/** @type {string} */ (declaration.id), declaration]))
   const classesById = new Map(classDeclarations.map((declaration) => [/** @type {string} */ (declaration.id), declaration]))
+  const classes = referenceClassNodes.map((node, index) => predeclareReferenceClass(
+    node, classDeclarations[index], recordNames, language, filename, source
+  ))
   const functionNodes = semanticNodes.filter((node) => node.type == "FunctionDeclaration")
   const signatures = functionNodes.map((node, index) =>
     convertFunctionSignature(node, language, filename, source, recordNames, `function:${index}`))
@@ -2207,9 +2229,11 @@ export function parseJavaScriptTypeScript({filename, language, source, program})
   const records = recordNodes.map((node, index) => language == "typescript"
     ? convertTypeScriptRecord(node, recordDeclarations[index], recordNames, filename, source)
     : convertJavaScriptRecord(node, recordDeclarations[index], recordNames, filename, source))
-  const classes = referenceClassNodes.map((node, index) => convertReferenceClass(node, classDeclarations[index],
-    recordNames, valueRecordNames, valueRecordsById, classesById, functionSignatures, errorNames, errorsById,
-    language, filename, source, canonicalZeroRequired))
+  for (let index = 0; index < referenceClassNodes.length; index += 1) {
+    convertReferenceClassBodies(referenceClassNodes[index], classes[index], recordNames, valueRecordNames,
+      valueRecordsById, classesById, functionSignatures, errorNames, errorsById, language, filename, source,
+      canonicalZeroRequired)
+  }
   const functions = functionNodes.map((node, index) =>
     convertFunction(node, signatures[index], functionSignatures, recordNames, valueRecordNames, valueRecordsById, classesById,
       errorNames, errorsById, language, filename, source, canonicalZeroRequired))

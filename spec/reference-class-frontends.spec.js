@@ -36,6 +36,65 @@ describe("reference class frontends", () => {
     for (const meaning of meanings.slice(1)) expect(meaning).toEqual(meanings[0])
   })
 
+  it("resolves forward constructor and method signatures before converting class bodies", () => {
+    const sources = [
+      ["typescript", "forward.ts", `class Factory {
+  private seed: number
+  constructor(seed: number) { this.seed = seed }
+  make(value: number): number { return new Box(value).get() }
+}
+class Box {
+  private value: number
+  constructor(value: number) { this.value = value }
+  get(): number { return this.value }
+}
+function keep(value: number): number { return value }
+console.log(new Factory(0).make(4))
+`],
+      ["javascript", "forward.js", `class Factory {
+  /** @type {number} */
+  #seed
+  /** @param {number} seed */
+  constructor(seed) { this.#seed = seed }
+  /**
+   * @param {number} value
+   * @returns {number}
+   */
+  make(value) { return new Box(value).get() }
+}
+class Box {
+  /** @type {number} */
+  #value
+  /** @param {number} value */
+  constructor(value) { this.#value = value }
+  /** @returns {number} */
+  get() { return this.#value }
+}
+/**
+ * @param {number} value
+ * @returns {number}
+ */
+function keep(value) { return value }
+console.log(new Factory(0).make(4))
+`]
+    ]
+
+    for (const [language, filename, source] of sources) {
+      const module = parse({filename, language, source})
+      const returned = module.classes[0].methods[0].body.statements[0].expression
+
+      expect(returned).toMatchObject({
+        kind: "MethodCallExpression",
+        receiver: {
+          kind: "ReferenceConstruction",
+          reference: {declarationId: "class:1", kind: "ReferenceType"},
+          resolution: {declarationId: "class:1:constructor", kind: "ResolvedConstructorSignature"}
+        },
+        resolution: {declarationId: "class:1:method:0", kind: "ResolvedMethodSignature"}
+      })
+    }
+  })
+
   it("rejects inheritance, static methods, host construction, dynamic dispatch, reflection, and reopening", async () => {
     const typescript = await readFile(new URL("fixtures/reference-classes/program.ts", import.meta.url), "utf8")
     const javascript = await readFile(new URL("fixtures/reference-classes/program.js", import.meta.url), "utf8")
