@@ -256,6 +256,10 @@ function collectKnownSubstitutions(formal, actual, substitutions) {
     substitutions.set(formal.parameterId, actual)
     return true
   }
+  if (formal.kind == "OptionalType") {
+    return collectKnownSubstitutions(formal.valueType,
+      actual.kind == "OptionalType" ? actual.valueType : actual, substitutions)
+  }
   if (formal.kind != actual.kind) return false
   if (formal.kind == "TypeReference") return sameValueType(formal, actual)
   if (formal.kind == "RecordType" && actual.kind == "RecordType") {
@@ -267,9 +271,6 @@ function collectKnownSubstitutions(formal, actual, substitutions) {
   }
   if (formal.kind == "ListType" && actual.kind == "ListType") {
     return collectKnownSubstitutions(formal.elementType, actual.elementType, substitutions)
-  }
-  if (formal.kind == "OptionalType" && actual.kind == "OptionalType") {
-    return collectKnownSubstitutions(formal.valueType, actual.valueType, substitutions)
   }
   if (formal.kind == "MapType" && actual.kind == "MapType") {
     return collectKnownSubstitutions(formal.keyType, actual.keyType, substitutions) &&

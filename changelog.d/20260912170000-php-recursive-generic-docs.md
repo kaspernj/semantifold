@@ -1,1 +1,1 @@
-Preserve PHP generic function ownership while reparsing documented optional type variables nested inside applied records and recursive list/map positions, using parser-known sibling call arguments only to close erased constructor applications.
+Preserve PHP generic function ownership while reparsing documented optional type variables nested inside applied records and recursive list/map positions, using parser-known sibling call arguments—including present values supplied for optional formals—only to close erased constructor applications.
