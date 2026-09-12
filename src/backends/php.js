@@ -12,6 +12,7 @@ export function generatePhp(module, writer) {
   if (writer.program) emitProgramHeader(module, writer)
   else writer.synthetic("<?php\ndeclare(strict_types=1);\n\n", "PHP program scaffolding", [module])
   const records = module.records ?? []
+  const classes = module.classes ?? []
   const errors = module.errors ?? []
 
   errors.forEach((error, index) => {
@@ -68,6 +69,12 @@ export function generatePhp(module, writer) {
     writer.synthetic("    ) {}\n}", "PHP record constructor scaffolding", [record], [recordPath])
   })
   if (records.length > 0) writer.synthetic("\n\n", "record/function separator", [module])
+
+  classes.forEach((declaration, classIndex) => {
+    if (classIndex > 0) writer.synthetic("\n\n", "reference class separator", [declaration], [`/classes/${classIndex}`])
+    emitReferenceClass(writer, declaration, classIndex)
+  })
+  if (classes.length > 0) writer.synthetic("\n\n", "reference class/function separator", [module])
 
   module.functions.forEach((declaration, functionIndex) => {
     if (functionIndex > 0) writer.synthetic("\n\n", "declaration separator", [declaration])
@@ -132,6 +139,74 @@ export function generatePhp(module, writer) {
     writer.synthetic("\n\n", "entry-point separator", [module.entryPoint])
     emitBlock(writer, module.entryPoint.body, "", "/entryPoint/body")
   }
+}
+
+/**
+ * Emits one native PHP reference class.
+ * @param {import("./writer.js").SourceWriter} writer - Source-aware writer.
+ * @param {import("../semantic/types.js").ClassDeclaration} declaration - Reference class.
+ * @param {number} classIndex - Module class index.
+ * @returns {void}
+ */
+function emitReferenceClass(writer, declaration, classIndex) {
+  const path = `/classes/${classIndex}`
+
+  writer.mapped("final class", {mappingKind: "anchor", node: declaration, path})
+  writer.synthetic(" ", "reference class spacing", [declaration], [path])
+  writer.mapped(declaration.name, {mappingKind: "exact", node: declaration, path, role: "name"})
+  writer.synthetic(" {\n", "reference class open", [declaration], [path])
+  declaration.fields.forEach((field, index) => {
+    const fieldPath = `${path}/fields/${index}`
+
+    writer.synthetic("    private ", "private field scaffolding", [field], [fieldPath])
+    emitNativePhpType(writer, field.type, `${fieldPath}/type`)
+    writer.synthetic(" $", "private field spacing", [field], [fieldPath])
+    writer.mapped(field.name, {mappingKind: "exact", node: field, path: fieldPath, role: "name"})
+    writer.synthetic(";\n", "line break", [field], [fieldPath])
+  })
+  const constructor = declaration.constructor
+  const constructorPath = `${path}/constructor`
+
+  writer.synthetic("\n    public function ", "constructor scaffolding", [constructor], [constructorPath])
+  writer.mapped("__construct", {mappingKind: "exact", node: constructor, path: constructorPath, role: "constructor"})
+  emitPhpParameters(writer, constructor.parameters, `${constructorPath}/parameters`)
+  writer.synthetic(" {\n", "constructor open", [constructor], [constructorPath])
+  emitBlock(writer, constructor.body, "        ", `${constructorPath}/body`)
+  writer.synthetic("    }", "constructor close", [constructor], [constructorPath])
+  declaration.methods.forEach((method, index) => {
+    const methodPath = `${path}/methods/${index}`
+
+    writer.synthetic("\n\n    public function ", "method scaffolding", [method], [methodPath])
+    writer.mapped(method.name, {mappingKind: "exact", node: method, path: methodPath, role: "name"})
+    emitPhpParameters(writer, method.parameters, `${methodPath}/parameters`)
+    writer.synthetic(": ", "method return separator", [method], [methodPath])
+    emitNativePhpType(writer, method.returnType, `${methodPath}/returnType`)
+    writer.synthetic(" {\n", "method open", [method], [methodPath])
+    emitBlock(writer, method.body, "        ", `${methodPath}/body`)
+    writer.synthetic("    }", "method close", [method], [methodPath])
+  })
+  writer.synthetic("\n", "line break", [declaration], [path])
+  writer.mapped("}", {mappingKind: "anchor", node: declaration, path})
+}
+
+/**
+ * Emits one PHP parameter list.
+ * @param {import("./writer.js").SourceWriter} writer - Source-aware writer.
+ * @param {import("../semantic/types.js").Parameter[]} parameters - Ordered parameters.
+ * @param {string} path - Parameter collection path.
+ * @returns {void}
+ */
+function emitPhpParameters(writer, parameters, path) {
+  writer.synthetic("(", "parameter list open", parameters)
+  parameters.forEach((parameter, index) => {
+    const parameterPath = `${path}/${index}`
+
+    if (index) writer.synthetic(", ", "parameter separator", parameters)
+    emitNativePhpType(writer, parameter.type, `${parameterPath}/type`)
+    writer.synthetic(" $", "parameter spacing", [parameter], [parameterPath])
+    writer.mapped(parameter.name, {mappingKind: "exact", node: parameter, path: parameterPath, role: "name"})
+  })
+  writer.synthetic(")", "parameter list close", parameters)
 }
 
 /**
@@ -269,6 +344,10 @@ function emitNativePhpType(writer, type, path) {
     })
     return
   }
+  if (type.kind == "ReferenceType") {
+    emitType(writer, type, path, "php")
+    return
+  }
   if (type.kind == "TypeReference") {
     emitType(writer, type, path, "php")
     return
@@ -317,6 +396,17 @@ function emitBlock(writer, block, indent, path) {
 function emitStatement(writer, statement, indent, path) {
   if (statement.kind == "LocalDeclaration" || statement.kind == "AssignmentStatement") return emitLocal(writer, statement, indent, path)
   writer.synthetic(indent, "indentation", [statement], [path])
+  if (statement.kind == "PrivateFieldWriteStatement") {
+    emitExpression(writer, statement.receiver, `${path}/receiver`, "php", phpIdentifier)
+    const field = writer.privateFieldForId(statement.field)
+
+    writer.mapped(`->${field.name}`, {mappingKind: "exact", name: field.name, node: statement, path, role: "member"})
+    writer.synthetic(" = ", "private field assignment", [statement], [path])
+    emitExpression(writer, statement.expression, `${path}/expression`, "php", phpIdentifier)
+    writer.mapped(";", {mappingKind: "anchor", node: statement, path})
+    writer.synthetic("\n", "line break", [statement], [path])
+    return
+  }
   if (statement.kind == "BreakStatement" || statement.kind == "ContinueStatement") {
     writer.mapped(statement.kind == "BreakStatement" ? "break" : "continue", {mappingKind: "exact", node: statement, path})
     writer.mapped(";", {mappingKind: "anchor", node: statement, path})

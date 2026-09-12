@@ -198,6 +198,12 @@ export function parseProgramSource(input) {
       source: source.source
     })
 
+    if ((raw.classes?.length ?? 0) > 0) {
+      semanticFailure(source.language, "UNSUPPORTED_SYNTAX",
+        "Task 033 reference classes are not supported by the Task 010 semantic program profile.",
+        raw.classes?.[0]?.location ?? raw.location)
+    }
+
     if (source.id == input.entryModule && raw.entryPoint.body.statements.length == 0) {
       semanticFailure(source.language, "INVALID_ENTRY_MODULE", `Selected entry module '${source.id}' has no executable statements.`, raw.entryPoint.location)
     }

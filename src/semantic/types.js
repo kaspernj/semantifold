@@ -8,8 +8,8 @@
 /** @typedef {SemanticTypeName | "void"} FunctionReturnTypeName */
 /** @typedef {"IntegerNegate" | "BooleanNot"} SemanticUnaryOperation */
 /** @typedef {"IntegerAdd" | "IntegerSubtract" | "IntegerMultiply" | "BooleanAnd" | "BooleanOr" | "IntegerEqual" | "IntegerNotEqual" | "BooleanEqual" | "BooleanNotEqual" | "StringEqual" | "StringNotEqual" | "IntegerLessThan" | "IntegerLessThanOrEqual" | "IntegerGreaterThan" | "IntegerGreaterThanOrEqual" | "StringConcat"} SemanticBinaryOperation */
-/** @typedef {"record" | "error" | "field" | "function" | "typeParameter" | "parameter" | "local" | "iteration" | "catch"} SemanticSymbolKind */
-/** @typedef {"record" | "error" | "function"} SemanticDeclarationKind */
+/** @typedef {"record" | "class" | "error" | "field" | "constructor" | "method" | "function" | "typeParameter" | "parameter" | "local" | "iteration" | "catch"} SemanticSymbolKind */
+/** @typedef {"record" | "class" | "error" | "function"} SemanticDeclarationKind */
 /** @typedef {"declaration" | "type" | "construct" | "member" | "read" | "write" | "call"} SemanticSymbolRole */
 /** @typedef {"parse" | "generate" | "restore" | "compile" | "link" | "validate" | "instantiate" | "execute"} AcceptanceStage */
 /** @typedef {"entry" | "source" | "manifest" | "support" | "mapping" | "resource" | "loader"} GeneratedArtifactRole */
@@ -47,6 +47,7 @@
  * @property {boolean} closedRecords - Task 009 nominal closed immutable records, construction, and member reads.
  * @property {boolean} typedErrors - Task 011 nominal unchecked errors, raises, and exact typed catches.
  * @property {boolean} typeParametersAndGenerics - Task 012 invariant unbounded type parameters and closed generic applications.
+ * @property {boolean} referenceClasses - Task 033 nominal reference classes, private instance state, exact constructors, and receiver methods.
  */
 
 /**
@@ -361,7 +362,14 @@
  * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned type-name range.
  */
 
-/** @typedef {TypeReference | TypeVariableReference | ListType | MapType | OrderedMapType | OptionalType | RecordType} SemanticValueType */
+/**
+ * @typedef ReferenceType
+ * @property {"ReferenceType"} kind - Nominal reference-class type discriminator.
+ * @property {string} declarationId - Stable module-local class declaration identity.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned type-name range.
+ */
+
+/** @typedef {TypeReference | TypeVariableReference | ListType | MapType | OrderedMapType | OptionalType | RecordType | ReferenceType} SemanticValueType */
 /** @typedef {SemanticValueType | ErrorType} SemanticBindingType */
 
 /**
@@ -373,7 +381,7 @@
 
 /** @typedef {SemanticValueType | FunctionReturnTypeReference} SemanticFunctionReturnType */
 
-/** @typedef {SemanticTypeName | {kind: "TypeVariableReference", parameterId: string} | {kind: "ListType", elementType: SemanticTypeIdentity} | {kind: "MapType", keyType: SemanticTypeIdentity, valueType: SemanticTypeIdentity} | {kind: "OrderedMapType", keyType: SemanticTypeIdentity, valueType: SemanticTypeIdentity, order: "insertion"} | {kind: "OptionalType", valueType: SemanticTypeIdentity} | {kind: "RecordType", declarationId: string, arguments?: SemanticTypeIdentity[]}} SemanticTypeIdentity */
+/** @typedef {SemanticTypeName | {kind: "TypeVariableReference", parameterId: string} | {kind: "ListType", elementType: SemanticTypeIdentity} | {kind: "MapType", keyType: SemanticTypeIdentity, valueType: SemanticTypeIdentity} | {kind: "OrderedMapType", keyType: SemanticTypeIdentity, valueType: SemanticTypeIdentity, order: "insertion"} | {kind: "OptionalType", valueType: SemanticTypeIdentity} | {kind: "RecordType", declarationId: string, arguments?: SemanticTypeIdentity[]} | {kind: "ReferenceType", declarationId: string}} SemanticTypeIdentity */
 /** @typedef {SemanticTypeIdentity | "void"} FunctionReturnTypeIdentity */
 
 /**
@@ -551,6 +559,59 @@
  */
 
 /**
+ * @typedef ResolvedConstructorSignature
+ * @property {"ResolvedConstructorSignature"} kind - Resolution discriminator.
+ * @property {string} declarationId - Exact constructor declaration identity.
+ * @property {SemanticTypeIdentity[]} parameterTypes - Exact constructor parameter types.
+ */
+
+/**
+ * @typedef ResolvedMethodSignature
+ * @property {"ResolvedMethodSignature"} kind - Resolution discriminator.
+ * @property {string} declarationId - Exact resolved method identity.
+ * @property {SemanticTypeIdentity[]} parameterTypes - Exact method parameter types.
+ * @property {FunctionReturnTypeIdentity} returnType - Exact method return type.
+ */
+
+/**
+ * @typedef ReceiverExpression
+ * @property {"ReceiverExpression"} kind - The declaring class instance receiver.
+ * @property {string} classId - Stable declaring class identity.
+ * @property {SourceLocation} location - Source receiver location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned receiver range.
+ */
+
+/**
+ * @typedef ReferenceConstruction
+ * @property {"ReferenceConstruction"} kind - Fresh nominal reference construction.
+ * @property {ReferenceType} reference - Exact class type.
+ * @property {Expression[]} arguments - Source-ordered constructor arguments.
+ * @property {ResolvedConstructorSignature} [resolution] - Exact constructor binding, required after validation.
+ * @property {SourceLocation} location - Complete construction location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned class-name range.
+ */
+
+/**
+ * @typedef MethodCallExpression
+ * @property {"MethodCallExpression"} kind - Resolved receiver-method invocation.
+ * @property {Expression} receiver - Receiver evaluated once before arguments.
+ * @property {string} method - Stable method identity after validation.
+ * @property {Expression[]} arguments - Source-ordered arguments.
+ * @property {ResolvedMethodSignature} [resolution] - Exact method binding, required after validation.
+ * @property {SourceLocation} location - Complete call location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned method-name range.
+ */
+
+/**
+ * @typedef PrivateFieldRead
+ * @property {"PrivateFieldRead"} kind - Declaring-receiver-only private field read.
+ * @property {ReceiverExpression} receiver - Exact declaring receiver.
+ * @property {string} field - Stable private field identity.
+ * @property {SourceLocation} location - Complete read location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned field-name range.
+ */
+
+/**
  * @typedef RecordConstruction
  * @property {"RecordConstruction"} kind - Nominal record construction.
  * @property {RecordType} record - Resolved record declaration identity.
@@ -576,7 +637,7 @@
  * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned message-member range.
  */
 
-/** @typedef {IdentifierExpression | IntegerLiteral | BooleanLiteral | StringLiteral | OptionalNone | OptionalSome | OptionalIsPresent | OptionalUnwrap | ListLiteral | MapLiteral | OrderedMapLiteral | ListIndexExpression | MapLookupExpression | CollectionSizeExpression | UnaryExpression | BinaryExpression | CallExpression | RecordConstruction | MemberRead | ErrorMessageRead} Expression */
+/** @typedef {IdentifierExpression | ReceiverExpression | IntegerLiteral | BooleanLiteral | StringLiteral | OptionalNone | OptionalSome | OptionalIsPresent | OptionalUnwrap | ListLiteral | MapLiteral | OrderedMapLiteral | ListIndexExpression | MapLookupExpression | CollectionSizeExpression | UnaryExpression | BinaryExpression | CallExpression | MethodCallExpression | ReferenceConstruction | RecordConstruction | MemberRead | PrivateFieldRead | ErrorMessageRead} Expression */
 
 /**
  * @typedef LocalDeclaration
@@ -599,6 +660,16 @@
  */
 
 /**
+ * @typedef PrivateFieldWriteStatement
+ * @property {"PrivateFieldWriteStatement"} kind - Declaring-receiver-only private field mutation.
+ * @property {ReceiverExpression} receiver - Exact declaring receiver.
+ * @property {string} field - Stable private field identity.
+ * @property {Expression} expression - New field value.
+ * @property {SourceLocation} location - Assignment source location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned field-name range.
+ */
+
+/**
  * @typedef ReturnStatement
  * @property {"ReturnStatement"} kind - Node discriminator.
  * @property {Expression} [expression] - Returned expression; absent exactly for a bare void return.
@@ -609,7 +680,7 @@
 /**
  * @typedef ExpressionStatement
  * @property {"ExpressionStatement"} kind - Node discriminator.
- * @property {CallExpression} expression - A direct call whose resolved return type is void.
+ * @property {CallExpression | MethodCallExpression} expression - A direct or receiver call whose resolved return type is void.
  * @property {SourceLocation} location - Source location.
  * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
  */
@@ -722,7 +793,7 @@
  */
 
 /** @typedef {LocalDeclaration | AssignmentStatement} LocalStatement */
-/** @typedef {LocalStatement | ExpressionStatement | IfStatement | ForEachStatement | ForEachMapStatement | WhileStatement | BreakStatement | ContinueStatement | ReturnStatement | PrintStatement | RaiseStatement | TryStatement} Statement */
+/** @typedef {LocalStatement | PrivateFieldWriteStatement | ExpressionStatement | IfStatement | ForEachStatement | ForEachMapStatement | WhileStatement | BreakStatement | ContinueStatement | ReturnStatement | PrintStatement | RaiseStatement | TryStatement} Statement */
 
 /**
  * @typedef Block
@@ -767,6 +838,50 @@
  */
 
 /**
+ * @typedef PrivateField
+ * @property {"PrivateField"} kind - Declaring-class-private mutable instance field.
+ * @property {string} [id] - Stable class-scoped field identity, required after validation.
+ * @property {string} name - Source-visible field name inside the declaring class only.
+ * @property {SemanticValueType} type - Exact field type.
+ * @property {SourceLocation} location - Field declaration location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned name/type ranges.
+ */
+
+/**
+ * @typedef ConstructorDeclaration
+ * @property {"ConstructorDeclaration"} kind - Exact complete private-state initializer.
+ * @property {string} [id] - Stable class-scoped constructor identity, required after validation.
+ * @property {Parameter[]} parameters - Exact positional constructor signature.
+ * @property {Block} body - Field-order initialization body.
+ * @property {SourceLocation} location - Complete constructor location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned constructor range.
+ */
+
+/**
+ * @typedef MethodDeclaration
+ * @property {"MethodDeclaration"} kind - Receiver-bound class method.
+ * @property {string} [id] - Stable class-scoped method identity, required after validation.
+ * @property {string} name - Source-visible method name.
+ * @property {Parameter[]} parameters - Exact positional method signature.
+ * @property {SemanticFunctionReturnType} returnType - Exact return type.
+ * @property {Block} body - Method body.
+ * @property {SourceLocation} location - Complete method location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned method-name range.
+ */
+
+/**
+ * @typedef ClassDeclaration
+ * @property {"ClassDeclaration"} kind - Nominal reference class with private mutable state.
+ * @property {string} [id] - Stable module-local class identity, required after validation.
+ * @property {string} name - Source-visible class name.
+ * @property {PrivateField[]} fields - Ordered private instance state.
+ * @property {ConstructorDeclaration} constructor - Sole exact constructor.
+ * @property {MethodDeclaration[]} methods - Ordered receiver methods.
+ * @property {SourceLocation} location - Complete class location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned class-name range.
+ */
+
+/**
  * @typedef ErrorDeclaration
  * @property {"ErrorDeclaration"} kind - Nominal unchecked error with one immutable string message.
  * @property {string} [id] - Stable module-local declaration identity, required after frontend validation.
@@ -795,6 +910,7 @@
  * @typedef SemanticModule
  * @property {"Module"} kind - Node discriminator.
  * @property {RecordDeclaration[]} [records] - Top-level nominal record declarations in source order; omitted when empty.
+ * @property {ClassDeclaration[]} [classes] - Top-level nominal reference classes in source order; omitted when empty.
  * @property {ErrorDeclaration[]} [errors] - Top-level nominal unchecked error declarations in source order; omitted when empty.
  * @property {FunctionDeclaration[]} functions - Top-level functions.
  * @property {EntryPoint} entryPoint - Executable entry point.
@@ -850,7 +966,7 @@
  * @property {RegisteredSource[]} sources - Caller-order complete source registry.
  */
 
-/** @typedef {SemanticModule | SemanticProgramModule | SemanticImport | SemanticExport | RecordDeclaration | ErrorDeclaration | RecordField | FunctionDeclaration | TypeParameter | Parameter | ValueBinding | CatchBinding | Block | Statement | EntryPoint | Expression | ErrorConstruction | ErrorType | MapEntry | SemanticValueType | FunctionReturnTypeReference} SemanticNode */
+/** @typedef {SemanticModule | SemanticProgramModule | SemanticImport | SemanticExport | RecordDeclaration | ClassDeclaration | ErrorDeclaration | RecordField | PrivateField | ConstructorDeclaration | MethodDeclaration | FunctionDeclaration | TypeParameter | Parameter | ValueBinding | CatchBinding | Block | Statement | EntryPoint | Expression | ErrorConstruction | ErrorType | MapEntry | SemanticValueType | FunctionReturnTypeReference} SemanticNode */
 /** @typedef {SemanticNode} SemanticNodeWithoutLocations */
 
 export {}

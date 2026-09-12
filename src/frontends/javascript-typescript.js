@@ -8,15 +8,19 @@ import {withAdaptedOperation} from "../semantic/operators.js"
 import {withParserRanges} from "../semantic/provenance.js"
 import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
 import {requireSourceReturnType, requireSourceScalarType} from "./scalars.js"
-import {documentedValueType, instantiatedRecordFieldType, iterationBindingType, iterationOperandType, knownCallReturnType, listType, mapType, optionalType, orderedMapTypeFromMap, preservesGenericOptionalEvidence, recordType, typeVariable} from "./types.js"
+import {documentedValueType, instantiatedRecordFieldType, iterationBindingType, iterationOperandType, knownCallReturnType, listType, mapType, optionalType, orderedMapTypeFromMap, preservesGenericOptionalEvidence, recordType, referenceType, typeVariable} from "./types.js"
 
 /** @typedef {NonNullable<import("@babel/parser").ParseResult<import("@babel/types").File>["tokens"]>[number]} BabelToken */
 /** @typedef {{byStart: Map<number, BabelToken>, tokens: BabelToken[]}} BabelTokenIndex */
 /** @typedef {{name: string, nameLocation: import("../semantic/types.js").SourceLocation, parameters: import("../semantic/types.js").Parameter[], returnType: import("../semantic/types.js").SemanticFunctionReturnType, typeParameters?: import("../semantic/types.js").TypeParameter[], location: import("../semantic/types.js").SourceLocation}} JavaScriptFunctionSignature */
-/** @typedef {{bindings: Map<string, import("../semantic/types.js").SemanticBindingType>, errors: Map<string, import("../semantic/types.js").ErrorDeclaration>, errorNames: Map<string, import("../semantic/types.js").ErrorDeclaration>, functions: Map<string, JavaScriptFunctionSignature>, lexicalValueNames?: Set<string>, orderedMapDeclarations?: Set<object>, recordNames: Map<string, import("../semantic/types.js").RecordDeclaration>, records: Map<string, import("../semantic/types.js").RecordDeclaration>, returnType?: import("../semantic/types.js").SemanticFunctionReturnType, typeParameters?: Map<string, import("../semantic/types.js").TypeParameter>, valueRecordNames: Map<string, import("../semantic/types.js").RecordDeclaration>}} JavaScriptConversionContext */
+/** @typedef {{bindings: Map<string, import("../semantic/types.js").SemanticBindingType>, classes: Map<string, import("../semantic/types.js").ClassDeclaration>, currentClass?: import("../semantic/types.js").ClassDeclaration, errors: Map<string, import("../semantic/types.js").ErrorDeclaration>, errorNames: Map<string, import("../semantic/types.js").ErrorDeclaration>, functions: Map<string, JavaScriptFunctionSignature>, lexicalValueNames?: Set<string>, orderedMapDeclarations?: Set<object>, recordNames: Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>, records: Map<string, import("../semantic/types.js").RecordDeclaration>, returnType?: import("../semantic/types.js").SemanticFunctionReturnType, typeParameters?: Map<string, import("../semantic/types.js").TypeParameter>, valueRecordNames: Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>}} JavaScriptConversionContext */
 
 /** @type {WeakMap<object, BabelTokenIndex>} */
 const nodeTokens = new WeakMap()
+const referenceMethodHooks = new Set([
+  "__defineGetter__", "__defineSetter__", "__lookupGetter__", "__lookupSetter__", "__proto__", "constructor",
+  "hasOwnProperty", "isPrototypeOf", "propertyIsEnumerable", "toLocaleString", "toString", "valueOf"
+])
 const babelBinaryOperations = new Map([
   ["+", "Add"],
   ["-", "Subtract"],
@@ -158,7 +162,7 @@ function nativeMapAvailable(context) {
  * @param {boolean} [preserveOptional] - Whether an optional identifier remains wrapped.
  * @returns {import("../semantic/types.js").Expression} Semantic expression.
  */
-function convertExpression(node, language, filename, source, context = {bindings: new Map(), errors: new Map(), errorNames: new Map(), functions: new Map(), recordNames: new Map(), records: new Map(), valueRecordNames: new Map()}, expectedType, preserveOptional = false) {
+function convertExpression(node, language, filename, source, context = {bindings: new Map(), classes: new Map(), errors: new Map(), errorNames: new Map(), functions: new Map(), recordNames: new Map(), records: new Map(), valueRecordNames: new Map()}, expectedType, preserveOptional = false) {
   const location = nodeLocation(node, filename, source)
 
   if (node.type == "Identifier" && node.name == "undefined") {
@@ -201,6 +205,13 @@ function convertExpression(node, language, filename, source, context = {bindings
     }
 
     return identifier
+  }
+
+  if (node.type == "ThisExpression") {
+    if (!context.currentClass) return unsupportedSyntax(language, "receiver outside a reference class", location)
+
+    return withParserRanges({classId: /** @type {string} */ (context.currentClass.id), kind: /** @type {const} */ ("ReceiverExpression"), location},
+      {receiver: location})
   }
 
   if (node.type == "NumericLiteral") {
@@ -303,7 +314,21 @@ function convertExpression(node, language, filename, source, context = {bindings
   }
 
   if (node.type == "NewExpression" && node.callee.type == "Identifier" && context.valueRecordNames.has(node.callee.name)) {
-    const declaration = /** @type {import("../semantic/types.js").RecordDeclaration} */ (context.valueRecordNames.get(node.callee.name))
+    const declaration = /** @type {import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration} */ (context.valueRecordNames.get(node.callee.name))
+    if (declaration.kind == "ClassDeclaration") {
+      if (node.typeArguments || node.typeParameters) return unsupportedSyntax(language, "generic reference construction", location)
+      const arguments_ = node.arguments.map((argument, index) => {
+        if (argument.type == "SpreadElement" || argument.type == "ArgumentPlaceholder") {
+          return unsupportedSyntax(language, argument.type, nodeLocation(argument, filename, source))
+        }
+
+        return convertExpression(argument, language, filename, source, context, declaration.constructor.parameters[index]?.type)
+      })
+      const classLocation = identifierLocation(node.callee, filename, source)
+
+      return withParserRanges({arguments: arguments_, kind: /** @type {const} */ ("ReferenceConstruction"), location,
+        reference: referenceType(/** @type {string} */ (declaration.id), classLocation)}, {class: classLocation})
+    }
     const sourceArguments = node.typeArguments?.params ?? node.typeParameters?.params
     const typeArguments = sourceArguments?.map((/** @type {import("@babel/types").TSType} */ argument) => convertTypeScriptValueTypeNode(
       argument,
@@ -327,6 +352,23 @@ function convertExpression(node, language, filename, source, context = {bindings
   }
 
   if (node.type == "MemberExpression" && !node.optional && node.object.type != "Super") {
+    if (!node.computed && node.object.type == "ThisExpression" && context.currentClass) {
+      /** @type {import("@babel/types").Identifier | undefined} */
+      let property
+
+      if (language == "javascript" && node.property.type == "PrivateName") property = node.property.id
+      if (language == "typescript" && node.property.type == "Identifier") property = node.property
+      if (!property) return unsupportedSyntax(language, "noncanonical private instance field access", location)
+      const field = context.currentClass.fields.find((candidate) => candidate.name == property.name)
+
+      if (!field) return unsupportedSyntax(language, `unknown private field '${property.name}'`, identifierLocation(property, filename, source))
+      return withParserRanges({field: /** @type {string} */ (field.id), kind: /** @type {const} */ ("PrivateFieldRead"), location,
+        receiver: /** @type {import("../semantic/types.js").ReceiverExpression} */ (
+          convertExpression(node.object, language, filename, source, context))}, {member: identifierLocation(property, filename, source)})
+    }
+    if (knownValueExpressionType(node.object, context, language, filename, source)?.kind == "ReferenceType") {
+      return unsupportedSyntax(language, "private reference-class field access", location)
+    }
     if (!node.computed && node.object.type == "Identifier" && node.property.type == "Identifier" &&
       node.property.name == "message" && context.bindings.get(node.object.name)?.kind == "ErrorType") {
       const receiverLocation = identifierLocation(node.object, filename, source)
@@ -475,6 +517,30 @@ function convertExpression(node, language, filename, source, context = {bindings
 
   if (node.type == "CallExpression" && !node.optional && !node.typeArguments && !node.typeParameters &&
     node.callee.type == "MemberExpression" && !node.callee.computed && !node.callee.optional &&
+    node.callee.object.type != "Super" && node.callee.property.type == "Identifier") {
+    const receiverType = knownValueExpressionType(node.callee.object, context, language, filename, source)
+
+    if (receiverType?.kind == "ReferenceType") {
+      const declaration = context.classes.get(receiverType.declarationId)
+      const methodName = node.callee.property.name
+      const method = declaration?.methods.find((candidate) => candidate.name == methodName)
+      const arguments_ = node.arguments.map((argument, index) => {
+        if (argument.type == "SpreadElement" || argument.type == "ArgumentPlaceholder") {
+          return unsupportedSyntax(language, argument.type, nodeLocation(argument, filename, source))
+        }
+
+        return convertExpression(argument, language, filename, source, context, method?.parameters[index]?.type)
+      })
+
+      return withParserRanges({arguments: arguments_, kind: /** @type {const} */ ("MethodCallExpression"), location,
+        method: method?.name ?? node.callee.property.name,
+        receiver: convertExpression(node.callee.object, language, filename, source, context)},
+      {member: identifierLocation(node.callee.property, filename, source)})
+    }
+  }
+
+  if (node.type == "CallExpression" && !node.optional && !node.typeArguments && !node.typeParameters &&
+    node.callee.type == "MemberExpression" && !node.callee.computed && !node.callee.optional &&
     node.callee.object.type != "Super" && node.callee.property.type == "Identifier" &&
     node.callee.property.name == "get") {
     if (node.arguments.length != 1) return unsupportedSyntax(language, "Map.get argument count", location)
@@ -521,6 +587,7 @@ function knownExpressionType(node, context, language, filename, source) {
     const declaration = context.valueRecordNames.get(node.callee.name)
 
     if (declaration?.id) {
+      if (declaration.kind == "ClassDeclaration") return {declarationId: declaration.id, kind: "ReferenceType"}
       const sourceArguments = node.typeArguments?.params ?? node.typeParameters?.params
       const typeArguments = sourceArguments?.map((/** @type {import("@babel/types").TSType} */ argument) =>
         convertTypeScriptValueTypeNode(
@@ -535,6 +602,33 @@ function knownExpressionType(node, context, language, filename, source) {
 
       return {declarationId: declaration.id, kind: "RecordType", ...(typeArguments ? {arguments: typeArguments} : {})}
     }
+  }
+  if (node.type == "ThisExpression" && context.currentClass?.id) {
+    return {declarationId: context.currentClass.id, kind: "ReferenceType"}
+  }
+  if (node.type == "CallExpression" && node.callee.type == "MemberExpression" && !node.callee.computed &&
+    node.callee.object.type != "Super" && node.callee.property.type == "Identifier") {
+    const receiver = knownValueExpressionType(node.callee.object, context, language, filename, source)
+
+    if (receiver?.kind == "ReferenceType") {
+      const methodName = node.callee.property.name
+
+      return context.classes.get(receiver.declarationId)?.methods.find((method) => method.name == methodName)?.returnType
+    }
+  }
+  if (node.type == "MemberExpression" && !node.computed && node.object.type == "ThisExpression" && context.currentClass) {
+    if (language == "javascript" && node.property.type == "PrivateName") {
+      const name = node.property.id.name
+
+      return context.currentClass.fields.find((field) => field.name == name)?.type
+    }
+    if (language == "typescript" && node.property.type == "Identifier") {
+      const name = node.property.name
+
+      return context.currentClass.fields.find((field) => field.name == name)?.type
+    }
+
+    return undefined
   }
   if (node.type == "MemberExpression" && !node.computed && node.object.type != "Super" && node.property.type == "Identifier") {
     const receiver = knownValueExpressionType(node.object, context, language, filename, source)
@@ -630,7 +724,7 @@ function convertReturn(node, language, filename, source, context) {
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
  * @param {JavaScriptConversionContext} context - Typed lexical conversion context.
- * @returns {import("../semantic/types.js").LocalStatement} Semantic local statement.
+ * @returns {import("../semantic/types.js").LocalStatement | import("../semantic/types.js").PrivateFieldWriteStatement} Semantic local or private-field statement.
  */
 function convertLocalStatement(node, language, filename, source, context) {
   const location = nodeLocation(node, filename, source)
@@ -678,6 +772,27 @@ function convertLocalStatement(node, language, filename, source, context) {
     const targetLocation = nodeLocation(assignment.left, filename, source)
 
     if (assignment.operator != "=") return unsupportedSyntax(language, `assignment ${assignment.operator}`, location)
+    if (assignment.left.type == "MemberExpression" && !assignment.left.computed &&
+      assignment.left.object.type == "ThisExpression" && context.currentClass) {
+      /** @type {import("@babel/types").Identifier | undefined} */
+      let property
+
+      if (language == "javascript" && assignment.left.property.type == "PrivateName") property = assignment.left.property.id
+      if (language == "typescript" && assignment.left.property.type == "Identifier") property = assignment.left.property
+      if (!property) return unsupportedSyntax(language, "noncanonical private instance field assignment", location)
+      const field = context.currentClass.fields.find((candidate) => candidate.name == property.name)
+
+      if (!field) return unsupportedSyntax(language, `unknown private field '${property.name}'`, identifierLocation(property, filename, source))
+      return withParserRanges({
+        expression: convertExpression(assignment.right, language, filename, source, context, field.type),
+        field: /** @type {string} */ (field.id),
+        kind: /** @type {const} */ ("PrivateFieldWriteStatement"),
+        location,
+        receiver: /** @type {import("../semantic/types.js").ReceiverExpression} */ (
+          convertExpression(assignment.left.object, language, filename, source, context))
+      }, {member: identifierLocation(property, filename, source), operator: tokenLocation(assignment, "=",
+        assignment.left.end ?? assignment.start ?? 0, assignment.right.start ?? assignment.end ?? source.length, filename, source)})
+    }
     if (assignment.left.type != "Identifier") return unsupportedSyntax(language, assignment.left.type, targetLocation)
 
     const target = withParserRanges({kind: /** @type {const} */ ("IdentifierExpression"), location: targetLocation, name: assignment.left.name}, {
@@ -707,7 +822,7 @@ function convertLocalStatement(node, language, filename, source, context) {
  * @param {string} name - Local name.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} recordNames - Record declarations by source name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} recordNames - Nominal declarations by source name.
  * @param {Map<string, import("../semantic/types.js").TypeParameter>} [typeParameters] - Declaration-scoped parameters.
  * @returns {import("../semantic/types.js").SemanticValueType} Semantic type.
  */
@@ -771,9 +886,12 @@ function convertStatement(node, language, filename, source, canonicalZeroRequire
     return convertLocalStatement(node, language, filename, source, context)
   }
   if (node.type == "ExpressionStatement") {
-    if (node.expression.type == "CallExpression" && node.expression.callee.type == "Identifier") {
+    if (node.expression.type == "CallExpression" && (node.expression.callee.type == "Identifier" ||
+      node.expression.callee.type == "MemberExpression" && !node.expression.callee.computed &&
+      node.expression.callee.object.type != "Super" &&
+      knownValueExpressionType(node.expression.callee.object, context, language, filename, source)?.kind == "ReferenceType")) {
       return {
-        expression: /** @type {import("../semantic/types.js").CallExpression} */ (
+        expression: /** @type {import("../semantic/types.js").CallExpression | import("../semantic/types.js").MethodCallExpression} */ (
           convertExpression(node.expression, language, filename, source, context)
         ),
         kind: "ExpressionStatement",
@@ -1129,7 +1247,7 @@ function classJsdocTypeParameters(node, ownerId, filename, source) {
  * @param {import("../semantic/types.js").SourceLocation} location - Source location.
  * @param {string} source - Complete parser input.
  * @param {import("../semantic/types.js").SourceLocation} [typeLocation] - Exact type token location.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} [recordNames] - Record declarations by source name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} [recordNames] - Nominal declarations by source name.
  * @param {Map<string, import("../semantic/types.js").TypeParameter>} [typeParameters] - Declaration-scoped parameters.
  * @returns {import("../semantic/types.js").SemanticValueType} Semantic type.
  */
@@ -1147,7 +1265,7 @@ function convertType(sourceType, language, subject, location, source, typeLocati
  * @param {import("../semantic/types.js").SourceLocation} location - Function location.
  * @param {string} source - Complete parser input.
  * @param {import("../semantic/types.js").SourceLocation} [typeLocation] - Exact annotation location.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} [recordNames] - Record declarations by source name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} [recordNames] - Nominal declarations by source name.
  * @param {Map<string, import("../semantic/types.js").TypeParameter>} [typeParameters] - Declaration-scoped parameters.
  * @returns {import("../semantic/types.js").SemanticFunctionReturnType} Semantic return type.
  */
@@ -1164,7 +1282,7 @@ function convertReturnType(sourceType, language, subject, location, source, type
  * @param {import("../semantic/types.js").SourceLocation} ownerLocation - Owning declaration location.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} [recordNames] - Record declarations by source name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} [recordNames] - Nominal declarations by source name.
  * @param {Map<string, import("../semantic/types.js").TypeParameter>} [typeParameters] - Declaration-scoped parameters.
  * @returns {import("../semantic/types.js").SemanticValueType} Semantic type.
  */
@@ -1184,7 +1302,7 @@ function convertTypeScriptType(annotation, subject, ownerLocation, filename, sou
  * @param {import("../semantic/types.js").SourceLocation} ownerLocation - Owning declaration.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} [recordNames] - Record declarations by source name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} [recordNames] - Nominal declarations by source name.
  * @param {Map<string, import("../semantic/types.js").TypeParameter>} [typeParameters] - Declaration-scoped parameters.
  * @returns {import("../semantic/types.js").SemanticValueType} Semantic value type.
  */
@@ -1203,7 +1321,12 @@ function convertTypeScriptValueTypeNode(typeNode, subject, ownerLocation, filena
   }
   if (typeNode.type == "TSTypeReference" && typeNode.typeName.type == "Identifier" &&
     recordNames.has(typeNode.typeName.name)) {
-    const declaration = /** @type {import("../semantic/types.js").RecordDeclaration} */ (recordNames.get(typeNode.typeName.name))
+    const declaration = /** @type {import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration} */ (recordNames.get(typeNode.typeName.name))
+
+    if (declaration.kind == "ClassDeclaration") {
+      if (typeNode.typeParameters) return unsupportedSyntax("typescript", "generic reference class type", nodeLocation(typeNode, filename, source))
+      return referenceType(/** @type {string} */ (declaration.id), nodeLocation(typeNode.typeName, filename, source))
+    }
     const arguments_ = typeNode.typeParameters?.params.map((parameter) =>
       convertTypeScriptValueTypeNode(parameter, subject, ownerLocation, filename, source, recordNames, typeParameters))
 
@@ -1273,7 +1396,7 @@ function convertTypeScriptValueTypeNode(typeNode, subject, ownerLocation, filena
  * @param {import("../semantic/types.js").SourceLocation} ownerLocation - Function location.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} [recordNames] - Record declarations by source name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} [recordNames] - Nominal declarations by source name.
  * @param {Map<string, import("../semantic/types.js").TypeParameter>} [typeParameters] - Declaration-scoped parameters.
  * @returns {import("../semantic/types.js").SemanticFunctionReturnType} Semantic return type.
  */
@@ -1320,7 +1443,7 @@ function typeScriptTypeParameters(declaration, ownerId, filename, source) {
  * @param {"javascript" | "typescript"} language - Frontend language.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} recordNames - Record declarations by source name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} recordNames - Nominal declarations by source name.
  * @param {string} ownerId - Stable function identity.
  * @returns {JavaScriptFunctionSignature} Semantic function signature.
  */
@@ -1377,9 +1500,10 @@ function convertFunctionSignature(node, language, filename, source, recordNames,
  * @param {import("@babel/types").FunctionDeclaration} node - Babel function.
  * @param {JavaScriptFunctionSignature} signature - Converted signature.
  * @param {Map<string, JavaScriptFunctionSignature>} functions - Module signatures.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} recordNames - Record declarations by name.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} valueRecordNames - Record declarations available in value positions.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} recordNames - Nominal declarations by name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} valueRecordNames - Nominal declarations available in value positions.
  * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} records - Record declarations by identity.
+ * @param {Map<string, import("../semantic/types.js").ClassDeclaration>} classes - Reference classes by identity.
  * @param {Map<string, import("../semantic/types.js").ErrorDeclaration>} errorNames - Error declarations by source name.
  * @param {Map<string, import("../semantic/types.js").ErrorDeclaration>} errors - Error declarations by identity.
  * @param {"javascript" | "typescript"} language - Frontend language.
@@ -1388,9 +1512,10 @@ function convertFunctionSignature(node, language, filename, source, recordNames,
  * @param {boolean} canonicalZeroRequired - Whether generated scalar output may contain signed zero.
  * @returns {import("../semantic/types.js").FunctionDeclaration} Semantic function.
  */
-function convertFunction(node, signature, functions, recordNames, valueRecordNames, records, errorNames, errors, language, filename, source, canonicalZeroRequired) {
+function convertFunction(node, signature, functions, recordNames, valueRecordNames, records, classes, errorNames, errors, language, filename, source, canonicalZeroRequired) {
   const context = {
     bindings: new Map(signature.parameters.map((parameter) => [parameter.name, parameter.type])),
+    classes,
     errorNames,
     errors,
     functions,
@@ -1502,10 +1627,192 @@ function convertJavaScriptError(node, declaration, language, filename, source) {
 }
 
 /**
+ * Predeclares the bounded native private-field reference-class profile and all callable signatures.
+ * @param {import("@babel/types").ClassDeclaration} node - Parser class.
+ * @param {import("../semantic/types.js").ClassDeclaration} declaration - Predeclared class identity.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} nominalNames - Nominal types by name.
+ * @param {"javascript" | "typescript"} language - Source language.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @returns {import("../semantic/types.js").ClassDeclaration} Semantic class.
+ */
+function predeclareReferenceClass(node, declaration, nominalNames, language, filename, source) {
+  const location = nodeLocation(node, filename, source)
+
+  if (!node.id || node.superClass || node.decorators?.length || node.typeParameters || node.superTypeParameters ||
+    Reflect.get(node, "abstract") || Reflect.get(node, "declare") || Reflect.get(node, "implements")?.length) {
+    return unsupportedSyntax(language, "reference class inheritance, generics, decoration, or modifier", location)
+  }
+  const constructorNodes = /** @type {import("@babel/types").ClassMethod[]} */ (
+    node.body.body.filter((member) => member.type == "ClassMethod" && member.kind == "constructor"))
+  const fieldNodes = node.body.body.filter((member) => member.type == "ClassProperty" || member.type == "ClassPrivateProperty")
+  const methodNodes = /** @type {import("@babel/types").ClassMethod[]} */ (
+    node.body.body.filter((member) => member.type == "ClassMethod" && member.kind == "method"))
+
+  if (constructorNodes.length != 1 || fieldNodes.length == 0 ||
+    fieldNodes.length + methodNodes.length + constructorNodes.length != node.body.body.length) {
+    return unsupportedSyntax(language, "reference class requires private fields, one constructor, and ordinary methods", location)
+  }
+  declaration.fields = fieldNodes.map((member, index) => {
+    const fieldLocation = nodeLocation(member, filename, source)
+    let name
+    let nameLocation
+    let type
+
+    if (language == "typescript") {
+      if (member.type != "ClassProperty" || member.key.type != "Identifier" || member.computed || member.static ||
+        member.accessibility != "private" || member.readonly || member.value || member.optional || member.decorators?.length ||
+        Reflect.get(member, "abstract") || Reflect.get(member, "declare")) {
+        return unsupportedSyntax(language, "noncanonical private instance field", fieldLocation)
+      }
+      name = member.key.name
+      nameLocation = identifierLocation(member.key, filename, source)
+      type = convertTypeScriptType(member.typeAnnotation, `Private field '${name}'`, fieldLocation, filename, source, nominalNames)
+    } else {
+      if (member.type != "ClassPrivateProperty" || member.key.type != "PrivateName" || member.static || member.value ||
+        member.decorators?.length) {
+        return unsupportedSyntax(language, "noncanonical private instance field", fieldLocation)
+      }
+      name = member.key.id.name
+      nameLocation = identifierLocation(member.key.id, filename, source)
+      const comment = member.leadingComments?.at(-1)
+      const gap = comment ? source.slice(comment.end ?? 0, member.start ?? 0) : ""
+      const block = comment?.type == "CommentBlock" && comment.value.startsWith("*") && /^\s*$/u.test(gap)
+        ? parseComment(`/*${comment.value}*/`)[0] : undefined
+      const tags = block?.tags.filter((tag) => tag.tag == "type") ?? []
+
+      if (!comment || tags.length != 1 || tags[0].name || tags[0].description) {
+        return missingType(language, `Private field '${name}'`, fieldLocation)
+      }
+      type = convertType(tags[0].type, language, `Private field '${name}'`, fieldLocation, source,
+        commentTagLocation(/** @type {import("@babel/types").CommentBlock} */ (comment), tags[0], "type", filename, source), nominalNames)
+    }
+
+    return withParserRanges({id: `${declaration.id}:field:${index}`, kind: /** @type {const} */ ("PrivateField"),
+      location: fieldLocation, name, type}, {name: nameLocation})
+  })
+
+  const constructorNode = /** @type {import("@babel/types").ClassMethod} */ (constructorNodes[0])
+  const constructorSignature = convertClassCallableSignature(constructorNode, declaration, nominalNames, language,
+    filename, source, true)
+  declaration.constructor = withParserRanges({body: /** @type {import("../semantic/types.js").Block} */ ({}),
+    id: `${declaration.id}:constructor`, kind: /** @type {const} */ ("ConstructorDeclaration"), location: constructorSignature.location,
+    parameters: constructorSignature.parameters}, {constructor: constructorSignature.nameLocation})
+  declaration.methods = methodNodes.map((methodNode, index) => {
+    const signature = convertClassCallableSignature(methodNode, declaration, nominalNames, language, filename, source, false)
+
+    return withParserRanges({body: /** @type {import("../semantic/types.js").Block} */ ({}), id: `${declaration.id}:method:${index}`,
+      kind: /** @type {const} */ ("MethodDeclaration"), location: signature.location, name: signature.name,
+      parameters: signature.parameters, returnType: /** @type {import("../semantic/types.js").SemanticFunctionReturnType} */ (signature.returnType)},
+    {name: signature.nameLocation})
+  })
+
+  return withParserRanges(declaration, {name: identifierLocation(node.id, filename, source)})
+}
+
+/**
+ * Converts one reference class body after every class signature is complete.
+ * @param {import("@babel/types").ClassDeclaration} node - Parser class.
+ * @param {import("../semantic/types.js").ClassDeclaration} declaration - Complete predeclared class signature.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} nominalNames - Nominal types by name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} valueNames - Nominal constructors by name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} records - Records by identity.
+ * @param {Map<string, import("../semantic/types.js").ClassDeclaration>} classes - Classes by identity.
+ * @param {Map<string, JavaScriptFunctionSignature>} functions - Top-level signatures.
+ * @param {Map<string, import("../semantic/types.js").ErrorDeclaration>} errorNames - Errors by name.
+ * @param {Map<string, import("../semantic/types.js").ErrorDeclaration>} errors - Errors by identity.
+ * @param {"javascript" | "typescript"} language - Source language.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @param {boolean} canonicalZeroRequired - Whether scalar output canonicalizes zero.
+ * @returns {import("../semantic/types.js").ClassDeclaration} Completed semantic class.
+ */
+function convertReferenceClassBodies(node, declaration, nominalNames, valueNames, records, classes, functions, errorNames,
+  errors, language, filename, source, canonicalZeroRequired) {
+  const constructorNode = /** @type {import("@babel/types").ClassMethod} */ (
+    node.body.body.find((member) => member.type == "ClassMethod" && member.kind == "constructor"))
+  const methodNodes = /** @type {import("@babel/types").ClassMethod[]} */ (
+    node.body.body.filter((member) => member.type == "ClassMethod" && member.kind == "method"))
+  const baseContext = {bindings: new Map(), classes, currentClass: declaration, errorNames, errors, functions,
+    recordNames: nominalNames, records, valueRecordNames: valueNames}
+  const constructorContext = {...baseContext,
+    bindings: new Map(declaration.constructor.parameters.map((parameter) => [parameter.name, parameter.type])),
+    returnType: {kind: /** @type {const} */ ("TypeReference"), name: /** @type {const} */ ("void")}}
+
+  declaration.constructor.body = convertBlock(constructorNode.body, language, filename, source, canonicalZeroRequired,
+    constructorContext)
+  for (let index = 0; index < methodNodes.length; index += 1) {
+    const method = declaration.methods[index]
+    const context = {...baseContext, bindings: new Map(method.parameters.map((parameter) => [parameter.name, parameter.type])),
+      returnType: method.returnType}
+
+    method.body = convertBlock(methodNodes[index].body, language, filename, source, canonicalZeroRequired, context)
+  }
+
+  return declaration
+}
+
+/**
+ * Reads one constructor or method signature without admitting overloads or modifiers.
+ * @param {import("@babel/types").ClassMethod} node - Parser method.
+ * @param {import("../semantic/types.js").ClassDeclaration} declaration - Declaring class.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} nominalNames - Nominal types.
+ * @param {"javascript" | "typescript"} language - Source language.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @param {boolean} constructor - Whether this is the constructor.
+ * @returns {{location: import("../semantic/types.js").SourceLocation, name: string, nameLocation: import("../semantic/types.js").SourceLocation, parameters: import("../semantic/types.js").Parameter[], returnType?: import("../semantic/types.js").SemanticFunctionReturnType}} Signature.
+ */
+function convertClassCallableSignature(node, declaration, nominalNames, language, filename, source, constructor) {
+  const location = nodeLocation(node, filename, source)
+
+  if (node.computed || node.static || node.async || node.generator || node.decorators?.length || node.typeParameters ||
+    node.key.type != "Identifier" || constructor != (node.kind == "constructor") ||
+    language == "typescript" && node.accessibility != null) {
+    return unsupportedSyntax(language, "noncanonical reference class callable", location)
+  }
+  const documented = language == "javascript"
+    ? jsdocTypes(/** @type {import("@babel/types").FunctionDeclaration} */ (/** @type {unknown} */ (node)), filename, source)
+    : undefined
+  if (constructor && (node.returnType || documented?.returnType)) {
+    return unsupportedSyntax(language, "constructor return annotation", location)
+  }
+  const parameters = node.params.map((parameter) => {
+    const parameterLocation = nodeLocation(parameter, filename, source)
+
+    if (parameter.type != "Identifier" || parameter.optional || parameter.decorators?.length) {
+      return unsupportedSyntax(language, "noncanonical method parameter", parameterLocation)
+    }
+    const documentedType = documented?.parameters.get(parameter.name)
+    const type = language == "typescript"
+      ? convertTypeScriptType(parameter.typeAnnotation, `Parameter '${parameter.name}'`, parameterLocation, filename, source, nominalNames)
+      : convertType(documentedType?.sourceType, language, `Parameter '${parameter.name}'`, parameterLocation, source,
+        documentedType?.location, nominalNames)
+
+    return withParserRanges({kind: /** @type {const} */ ("Parameter"), location: parameterLocation, name: parameter.name, type},
+      {name: identifierLocation(parameter, filename, source)})
+  })
+  if (documented && documented.parameters.size != parameters.length) {
+    return unsupportedSyntax(language, "method JSDoc parameter mismatch", location)
+  }
+  const name = constructor ? "constructor" : node.key.name
+  const nameLocation = identifierLocation(node.key, filename, source)
+
+  if (!constructor && referenceMethodHooks.has(name)) {
+    return unsupportedSyntax(language, `reserved reference method '${name}'`, nameLocation)
+  }
+
+  return {location, name, nameLocation, parameters, ...(constructor ? {} : {returnType: language == "typescript"
+    ? convertTypeScriptReturnType(node.returnType, `Method '${name}' return`, location, filename, source, nominalNames)
+    : convertReturnType(documented?.returnType?.sourceType, language, `Method '${name}' return`, location, source,
+      documented?.returnType?.location, nominalNames)})}
+}
+
+/**
  * Converts one exact TypeScript readonly constructor-parameter record profile.
  * @param {import("@babel/types").ClassDeclaration} node - Class declaration.
  * @param {import("../semantic/types.js").RecordDeclaration} declaration - Predeclared nominal identity.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} recordNames - All record declarations by name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} recordNames - All nominal declarations by name.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
  * @returns {import("../semantic/types.js").RecordDeclaration} Semantic record declaration.
@@ -1560,7 +1867,7 @@ function convertTypeScriptRecord(node, declaration, recordNames, filename, sourc
  * Converts one exact JSDoc constructor/readonly-assignment/freeze record profile.
  * @param {import("@babel/types").ClassDeclaration} node - Class declaration.
  * @param {import("../semantic/types.js").RecordDeclaration} declaration - Predeclared nominal identity.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} recordNames - Record declarations by name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} recordNames - Nominal declarations by name.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
  * @returns {import("../semantic/types.js").RecordDeclaration} Semantic record declaration.
@@ -1861,7 +2168,9 @@ export function parseJavaScriptTypeScript({filename, language, source, program})
   }
   const classNodes = semanticNodes.filter((node) => node.type == "ClassDeclaration")
   const errorNodes = classNodes.filter((node) => node.superClass?.type == "Identifier" && node.superClass.name == "Error")
-  const recordNodes = classNodes.filter((node) => !errorNodes.includes(node))
+  const referenceClassNodes = classNodes.filter((node) => !errorNodes.includes(node) &&
+    node.body.body.some((member) => member.type == "ClassProperty" || member.type == "ClassPrivateProperty"))
+  const recordNodes = classNodes.filter((node) => !errorNodes.includes(node) && !referenceClassNodes.includes(node))
   const errorDeclarations = errorNodes.map((node, index) => ({
     id: `error:${index}`,
     kind: /** @type {const} */ ("ErrorDeclaration"),
@@ -1883,18 +2192,28 @@ export function parseJavaScriptTypeScript({filename, language, source, program})
       ...(typeParameters ? {typeParameters} : {})
     }
   })
-  const recordNames = new Map(program?.records ?? [])
-  const valueRecordNames = new Map(program?.valueRecords ?? program?.records ?? [])
+  const classDeclarations = referenceClassNodes.map((node, index) => ({
+    constructor: /** @type {import("../semantic/types.js").ConstructorDeclaration} */ ({}),
+    fields: [], id: `class:${index}`, kind: /** @type {const} */ ("ClassDeclaration"),
+    location: nodeLocation(node, filename, source), methods: [], name: node.id?.name ?? ""
+  }))
+  const recordNames = /** @type {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} */ (
+    new Map(program?.records ?? []))
+  const valueRecordNames = /** @type {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} */ (
+    new Map(program?.valueRecords ?? program?.records ?? []))
   const errorNames = new Map(program?.errors ?? [])
   for (const declaration of errorDeclarations) errorNames.set(declaration.name, declaration)
   const errorsById = new Map([...errorNames.values()].map((declaration) => [/** @type {string} */ (declaration.id), declaration]))
   const errors = errorNodes.map((node, index) => convertJavaScriptError(node, errorDeclarations[index], language, filename, source))
   for (const declaration of recordDeclarations) recordNames.set(declaration.name, declaration)
   for (const declaration of recordDeclarations) valueRecordNames.set(declaration.name, declaration)
-  const recordsById = new Map([...recordNames.values()].map((declaration) => [/** @type {string} */ (declaration.id), declaration]))
-  const records = recordNodes.map((node, index) => language == "typescript"
-    ? convertTypeScriptRecord(node, recordDeclarations[index], recordNames, filename, source)
-    : convertJavaScriptRecord(node, recordDeclarations[index], recordNames, filename, source))
+  for (const declaration of classDeclarations) recordNames.set(declaration.name, declaration)
+  for (const declaration of classDeclarations) valueRecordNames.set(declaration.name, declaration)
+  const valueRecordsById = new Map(recordDeclarations.map((declaration) => [/** @type {string} */ (declaration.id), declaration]))
+  const classesById = new Map(classDeclarations.map((declaration) => [/** @type {string} */ (declaration.id), declaration]))
+  const classes = referenceClassNodes.map((node, index) => predeclareReferenceClass(
+    node, classDeclarations[index], recordNames, language, filename, source
+  ))
   const functionNodes = semanticNodes.filter((node) => node.type == "FunctionDeclaration")
   const signatures = functionNodes.map((node, index) =>
     convertFunctionSignature(node, language, filename, source, recordNames, `function:${index}`))
@@ -1907,8 +2226,16 @@ export function parseJavaScriptTypeScript({filename, language, source, program})
     ...(declaration.typeParameters ? {typeParameters: declaration.typeParameters} : {})
   }]))
   for (const signature of signatures) functionSignatures.set(signature.name, signature)
+  const records = recordNodes.map((node, index) => language == "typescript"
+    ? convertTypeScriptRecord(node, recordDeclarations[index], recordNames, filename, source)
+    : convertJavaScriptRecord(node, recordDeclarations[index], recordNames, filename, source))
+  for (let index = 0; index < referenceClassNodes.length; index += 1) {
+    convertReferenceClassBodies(referenceClassNodes[index], classes[index], recordNames, valueRecordNames,
+      valueRecordsById, classesById, functionSignatures, errorNames, errorsById, language, filename, source,
+      canonicalZeroRequired)
+  }
   const functions = functionNodes.map((node, index) =>
-    convertFunction(node, signatures[index], functionSignatures, recordNames, valueRecordNames, recordsById,
+    convertFunction(node, signatures[index], functionSignatures, recordNames, valueRecordNames, valueRecordsById, classesById,
       errorNames, errorsById, language, filename, source, canonicalZeroRequired))
   const entryNodes = semanticNodes.filter((node) => node.type != "FunctionDeclaration" && node.type != "ClassDeclaration")
   const location = moduleLocation(filename, source)
@@ -1929,8 +2256,8 @@ export function parseJavaScriptTypeScript({filename, language, source, program})
     filename,
     source,
     canonicalZeroRequired,
-    {bindings: new Map(), errorNames, errors: errorsById, functions: functionSignatures,
-      orderedMapDeclarations: orderedMapDeclarationsFor(entryNodes), recordNames, records: recordsById, valueRecordNames},
+    {bindings: new Map(), classes: classesById, errorNames, errors: errorsById, functions: functionSignatures,
+      orderedMapDeclarations: orderedMapDeclarationsFor(entryNodes), recordNames, records: valueRecordsById, valueRecordNames},
     entryLocation
   )
 
@@ -1944,6 +2271,7 @@ export function parseJavaScriptTypeScript({filename, language, source, program})
     kind: "Module",
     location,
     ...(errors.length > 0 ? {errors} : {}),
+    ...(classes.length > 0 ? {classes} : {}),
     ...(records.length > 0 ? {records} : {})
   }
 }

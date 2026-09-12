@@ -1,6 +1,6 @@
 # 032 — Condition-controlled loops and break/continue
 
-- Status: `implemented and validated locally; coordinator review / CI / merge pending`
+- Status: `delivered through PR #42`
 - Phase/priority: Phase S / P1
 - Dependencies: [004-statement-sequencing-and-conditionals.md](004-statement-sequencing-and-conditionals.md), [005-general-function-signatures-and-calls.md](005-general-function-signatures-and-calls.md)
 
@@ -69,4 +69,6 @@ The candidate adds parser-neutral `WhileStatement {id, condition, body, location
 
 The adopted source/backend cohort is exactly PHP, Ruby, JavaScript/JSDoc, TypeScript, and Java. Their ordinary block-bodied pre-condition forms normalize to the same IR and emit direct native `while` syntax. Alternative/post-condition loops, Ruby `until` and modifiers, PHP alternative syntax and levels, non-block bodies, labels, valued controls, iterator/basic loops, truthiness, and optional-as-condition behavior remain rejected. Every other registered target advertises `conditionControlledLoops: false` and fails transactionally before output.
 
-Focused frontend, semantic, backend-validation, backend/round-trip/provenance, registry, and real-toolchain runtime specs cover zero, one, and many iterations; condition effects; nested nearest-loop `break`/`continue`; return and fallthrough; malformed blocks and identities; cross-function targets; deterministic artifacts; and unsupported roles. All six focused files pass individually. The aggregate suite passes 952 tests, and lint, typecheck, build, high-severity audit, complete dependency listings, dry-run pack, temporary 559-file tarball inspection, and whitespace checks are green. Documentation and both changelog forms describe the same boundary. Coordinator-owned review, exact-head TensorBuzz CI, merge, and any later release remain pending.
+Focused frontend, semantic, backend-validation, backend/round-trip/provenance, registry, and real-toolchain runtime specs cover zero, one, and many iterations; condition effects; nested nearest-loop `break`/`continue`; return and fallthrough; malformed blocks and identities; cross-function targets; deterministic artifacts; and unsupported roles. All six focused files pass individually. The aggregate suite passes 952 tests, and lint, typecheck, build, high-severity audit, complete dependency listings, dry-run pack, temporary 559-file tarball inspection, and whitespace checks are green. Documentation and both changelog forms describe the same boundary.
+
+Task 032 was delivered through PR #42 at exact head `8ad60e381f14ab5dab85d6d1996e58de7e3f84bc` and merge commit `e6889212a57d4d0820b9c5cd3ad21b0ef8cc2c9e`. Exact-head TensorBuzz group `ce46b291-81f3-4d2c-8ce3-66741d7fb5c3` completed successfully, the automatic Codex review completed with no findings, and the exact PR subscriptions were retired. Post-merge focused acceptance passed 14/14.

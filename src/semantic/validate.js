@@ -9,7 +9,10 @@ import {parserRangeFor} from "./provenance.js"
 const task005Languages = new Set(["php", "ruby", "javascript", "typescript", "java"])
 
 /** @typedef {Map<string, import("./types.js").RecordDeclaration>} RecordRegistry */
+/** @typedef {Map<string, import("./types.js").ClassDeclaration>} ClassRegistry */
 /** @typedef {Map<string, import("./types.js").ErrorDeclaration>} ErrorRegistry */
+/** @type {WeakMap<RecordRegistry, ClassRegistry>} */
+const referenceClassesByRecordRegistry = new WeakMap()
 
 /**
  * @typedef Binding
@@ -26,6 +29,7 @@ const task005Languages = new Set(["php", "ruby", "javascript", "typescript", "ja
  * @property {Scope | undefined} parent - Enclosing lexical scope.
  * @property {Set<string>} typeParameters - Type parameters visible throughout the enclosing declaration.
  * @property {Set<string>} usedNames - All names used by the enclosing function or entry point.
+ * @property {import("./types.js").ClassDeclaration | undefined} currentClass - Declaring class for receiver-private access.
  */
 
 /**
@@ -73,6 +77,10 @@ export function validateBackendTypes(module, language, visible = {}) {
  * @returns {void}
  */
 function validateModuleShape(module, language, fail) {
+  for (const declaration of module.classes ?? []) {
+    validateBlockShape(declaration.constructor?.body, "constructor body", fail)
+    for (const method of declaration.methods ?? []) validateBlockShape(method.body, "method body", fail)
+  }
   for (const functionDeclaration of module.functions) {
     if (!task005Languages.has(language) && functionDeclaration.parameters.length != 2) {
       fail("function parameter count other than two", functionDeclaration.location)
@@ -97,7 +105,7 @@ function validateBlockShape(block, detail, fail) {
   }
 
   for (const statement of block.statements) {
-    if (!["AssignmentStatement", "BreakStatement", "ContinueStatement", "ExpressionStatement", "ForEachMapStatement", "ForEachStatement", "IfStatement", "LocalDeclaration", "PrintStatement", "RaiseStatement", "ReturnStatement", "TryStatement", "WhileStatement"].includes(statement.kind)) {
+    if (!["AssignmentStatement", "BreakStatement", "ContinueStatement", "ExpressionStatement", "ForEachMapStatement", "ForEachStatement", "IfStatement", "LocalDeclaration", "PrivateFieldWriteStatement", "PrintStatement", "RaiseStatement", "ReturnStatement", "TryStatement", "WhileStatement"].includes(statement.kind)) {
       fail(`${detail} statement ${statement.kind}`, statement.location)
     }
     if (statement.kind == "IfStatement") {
@@ -123,7 +131,8 @@ function validateBlockShape(block, detail, fail) {
  * @returns {void}
  */
 function validateModuleTypes(module, fail, normalizeOperations, visible = {}) {
-  const records = validateRecordDeclarations(module.records ?? [], fail, normalizeOperations, visible.records)
+  const classes = registerClassDeclarations(module.classes ?? [], fail, normalizeOperations)
+  const records = validateRecordDeclarations(module.records ?? [], fail, normalizeOperations, visible.records, classes)
   const errors = validateErrorDeclarations(module.errors ?? [], fail, normalizeOperations, visible.errors)
   /** @type {Map<string, import("./types.js").FunctionDeclaration>} */
   const functions = new Map(visible.functions ?? [])
@@ -148,12 +157,13 @@ function validateModuleTypes(module, fail, normalizeOperations, visible = {}) {
   const reservedValueNames = new Set([
     ...functions.keys(),
     ...[...records.values()].map((declaration) => declaration.name),
+    ...[...classes.values()].map((declaration) => declaration.name),
     ...[...errors.values()].map((declaration) => declaration.name)
   ])
 
   const nominalNames = new Set()
 
-  for (const declaration of [...module.records ?? [], ...module.errors ?? []]) {
+  for (const declaration of [...module.records ?? [], ...module.classes ?? [], ...module.errors ?? []]) {
     if (nominalNames.has(declaration.name)) {
       fail("DUPLICATE_BINDING", `Duplicate nominal declaration '${declaration.name}'.`, roleLocation(declaration, "name"))
     }
@@ -161,6 +171,11 @@ function validateModuleTypes(module, fail, normalizeOperations, visible = {}) {
   }
   const localFunctionNames = new Set(module.functions.map(({name}) => name))
   const callEffects = inferCallEffects(functions, visible.callEffects, localFunctionNames)
+
+  for (const declaration of module.classes ?? []) {
+    validateClassDeclaration(declaration, functions, records, errors, callEffects, reservedValueNames, fail,
+      normalizeOperations, loopOwners)
+  }
 
   for (const functionDeclaration of module.functions) {
     validateFunction(functionDeclaration, functions, records, errors, callEffects, reservedValueNames, fail, normalizeOperations, loopOwners)
@@ -183,7 +198,9 @@ function prepareLoopIdentities(module, normalizeOperations, fail) {
   const owners = new Map()
   let nextLoop = 0
 
-  for (const owner of [...module.functions, module.entryPoint]) visit(owner.body, owner, [])
+  const classOwners = (module.classes ?? []).flatMap((declaration) => [declaration.constructor, ...declaration.methods])
+
+  for (const owner of [...classOwners, ...module.functions, module.entryPoint]) visit(owner.body, owner, [])
 
   return owners
 
@@ -236,6 +253,157 @@ export function moduleUncheckedErrorEffects(module, visible = {}) {
   const effects = inferCallEffects(functions, visible.callEffects, localFunctionNames)
 
   return new Map(module.functions.map((declaration) => [declaration.name, new Set(effects.get(declaration.name) ?? [])]))
+}
+
+/**
+ * Assigns and validates the closed nominal identities owned by reference classes.
+ * @param {unknown} declarations - Candidate declarations.
+ * @param {SemanticFail} fail - Diagnostic callback.
+ * @param {boolean} normalizeOperations - Whether parser-authored identities are assigned.
+ * @returns {ClassRegistry} Classes by stable identity.
+ */
+function registerClassDeclarations(declarations, fail, normalizeOperations) {
+  if (!Array.isArray(declarations)) {
+    return fail("TYPE_MISMATCH", "Reference class declarations must be an ordered array.", /** @type {never} */ (undefined))
+  }
+  /** @type {ClassRegistry} */
+  const classes = new Map()
+  const names = new Set()
+
+  for (let classIndex = 0; classIndex < declarations.length; classIndex += 1) {
+    const declaration = declarations[classIndex]
+
+    if (!declaration || declaration.kind != "ClassDeclaration" || !Array.isArray(declaration.fields) ||
+      !Array.isArray(declaration.methods) || !declaration.constructor || declaration.constructor.kind != "ConstructorDeclaration") {
+      return fail("DUPLICATE_CLASS", "Malformed or invalid reference class declaration.", declaration?.location)
+    }
+    if (declaration.fields.length == 0) {
+      fail("INCOMPLETE_INITIALIZATION", "Reference classes must declare private instance state.", declaration.location)
+    }
+    if (normalizeOperations) declaration.id = `class:${classIndex}`
+    if (typeof declaration.id != "string" || !/^(?:[a-z][a-z0-9._-]*#)?class:[0-9]+$/u.test(declaration.id) ||
+      classes.has(declaration.id) || typeof declaration.name != "string" || declaration.name.length == 0 || names.has(declaration.name)) {
+      fail("DUPLICATE_CLASS", `Duplicate or invalid reference class '${String(declaration.name)}'.`, roleLocation(declaration, "name"))
+    }
+    names.add(declaration.name)
+    classes.set(declaration.id, declaration)
+
+    const fieldNames = new Set()
+
+    for (let fieldIndex = 0; fieldIndex < declaration.fields.length; fieldIndex += 1) {
+      const field = declaration.fields[fieldIndex]
+      const expectedId = `${declaration.id}:field:${fieldIndex}`
+
+      if (!field || field.kind != "PrivateField") {
+        fail("DUPLICATE_PRIVATE_FIELD", "Malformed or invalid private field.", field?.location ?? declaration.location)
+      }
+      if (normalizeOperations) field.id = expectedId
+      if (field.id != expectedId || typeof field.name != "string" || field.name.length == 0 || fieldNames.has(field.name)) {
+        fail("DUPLICATE_PRIVATE_FIELD", `Duplicate or invalid private field '${String(field.name)}'.`, roleLocation(field, "name"))
+      }
+      fieldNames.add(field.name)
+    }
+
+    const constructorId = `${declaration.id}:constructor`
+
+    if (normalizeOperations) declaration.constructor.id = constructorId
+    if (declaration.constructor.id != constructorId || !Array.isArray(declaration.constructor.parameters) ||
+      !declaration.constructor.body || declaration.constructor.body.kind != "Block") {
+      fail("DUPLICATE_CONSTRUCTOR", "Malformed or invalid constructor declaration.", declaration.constructor.location)
+    }
+
+    const methodNames = new Set()
+
+    for (let methodIndex = 0; methodIndex < declaration.methods.length; methodIndex += 1) {
+      const method = declaration.methods[methodIndex]
+      const expectedId = `${declaration.id}:method:${methodIndex}`
+
+      if (!method || method.kind != "MethodDeclaration") {
+        fail("DUPLICATE_METHOD", "Malformed or invalid method declaration.", method?.location ?? declaration.location)
+      }
+      if (normalizeOperations) method.id = expectedId
+      if (method.id != expectedId || typeof method.name != "string" || method.name.length == 0 || methodNames.has(method.name) ||
+        !Array.isArray(method.parameters) || !method.body || method.body.kind != "Block") {
+        fail("DUPLICATE_METHOD", `Duplicate or invalid method '${String(method.name)}'.`, roleLocation(method, "name"))
+      }
+      methodNames.add(method.name)
+    }
+  }
+
+  return classes
+}
+
+/**
+ * Validates exact construction, private state, and method bodies for one class.
+ * @param {import("./types.js").ClassDeclaration} declaration - Class declaration.
+ * @param {Map<string, import("./types.js").FunctionDeclaration>} functions - Function signatures.
+ * @param {RecordRegistry} records - Record and reference-class registries.
+ * @param {ErrorRegistry} errors - Error declarations.
+ * @param {Map<string, Set<string>>} callEffects - Function call effects.
+ * @param {Set<string>} reservedValueNames - Module-reserved names.
+ * @param {SemanticFail} fail - Diagnostic callback.
+ * @param {boolean} normalizeOperations - Whether parser-authored resolutions are assigned.
+ * @param {Map<string, object>} loopOwners - Loop ownership registry.
+ * @returns {void}
+ */
+function validateClassDeclaration(declaration, functions, records, errors, callEffects, reservedValueNames, fail,
+  normalizeOperations, loopOwners) {
+  for (const field of declaration.fields) {
+    validateValueTypeReference(field.type, field.location, fail, undefined, records)
+  }
+
+  const constructor = declaration.constructor
+
+  if (syntacticBlockEffects(constructor.body, callEffects).size > 0) {
+    fail("UNSUPPORTED_STATEMENT", "Reference constructors cannot expose unchecked-error effects in Task 033.", constructor.location)
+  }
+
+  if (constructor.parameters.length != declaration.fields.length || constructor.body.statements.length != declaration.fields.length) {
+    fail("INCOMPLETE_INITIALIZATION", `Constructor for '${declaration.name}' must initialize every private field exactly once in declaration order.`,
+      constructor.location)
+  }
+  const constructorScope = createScope(undefined, constructor.body.statements, reservedValueNames, new Set(), declaration)
+
+  for (let index = 0; index < constructor.parameters.length; index += 1) {
+    const parameter = constructor.parameters[index]
+    const field = declaration.fields[index]
+    const type = validateValueTypeReference(parameter.type, parameter.location, fail, undefined, records)
+
+    if (!sameType(type, field.type)) {
+      fail("TYPE_MISMATCH", `Constructor parameter '${parameter.name}' must exactly match private field '${field.name}'.`, parameter.location)
+    }
+    declareBinding(parameter.name, {knownValue: undefined, mutable: false, type}, roleLocation(parameter, "name"), constructorScope, fail)
+    const statement = constructor.body.statements[index]
+
+    if (!statement || statement.kind != "PrivateFieldWriteStatement" || statement.field != field.id ||
+      statement.receiver?.kind != "ReceiverExpression" || statement.receiver.classId != declaration.id ||
+      statement.expression?.kind != "IdentifierExpression" || statement.expression.name != parameter.name) {
+      fail("INCOMPLETE_INITIALIZATION", `Constructor for '${declaration.name}' must initialize '${field.name}' from its corresponding parameter.`,
+        statement?.location ?? constructor.location)
+    }
+  }
+  validateBlock(constructor.body, constructorScope, {kind: "TypeReference", name: "void"}, functions, records,
+    errors, callEffects, fail, normalizeOperations, {owner: constructor, owners: loopOwners})
+
+  for (const method of declaration.methods) {
+    if (syntacticBlockEffects(method.body, callEffects).size > 0) {
+      fail("UNSUPPORTED_STATEMENT", `Reference method '${method.name}' cannot expose unchecked-error effects in Task 033.`, method.location)
+    }
+    const scope = createScope(undefined, method.body.statements, reservedValueNames, new Set(), declaration)
+
+    for (const parameter of method.parameters) {
+      const type = validateValueTypeReference(parameter.type, parameter.location, fail, undefined, records)
+
+      declareBinding(parameter.name, {knownValue: undefined, mutable: false, type}, roleLocation(parameter, "name"), scope, fail)
+    }
+    const returnType = validateReturnTypeReference(method.returnType, method.location, fail, records)
+    const flow = validateBlock(method.body, scope, returnType, functions, records, errors, callEffects, fail,
+      normalizeOperations, {owner: method, owners: loopOwners})
+
+    if (!isVoidType(returnType) && flow.normal) {
+      fail("MISSING_RETURN", `Method '${method.name}' does not return on every reachable path.`, method.location)
+    }
+  }
 }
 
 /**
@@ -323,12 +491,15 @@ function declarationTypeParameterIds(declaration) {
  * @param {SemanticFail} fail - Diagnostic callback.
  * @param {boolean} normalizeOperations - Whether parser-authored identities are assigned.
  * @param {Map<string, import("./types.js").RecordDeclaration>} [visibleRecords] - Imported record declarations by identity.
+ * @param {ClassRegistry} [classes] - Module reference classes by identity.
  * @returns {RecordRegistry} Validated declarations by identity.
  */
-function validateRecordDeclarations(declarations, fail, normalizeOperations, visibleRecords = new Map()) {
+function validateRecordDeclarations(declarations, fail, normalizeOperations, visibleRecords = new Map(), classes = new Map()) {
   if (!Array.isArray(declarations)) return fail("TYPE_MISMATCH", "Record declarations must be an ordered array.", /** @type {never} */ (undefined))
   /** @type {RecordRegistry} */
   const records = new Map(visibleRecords)
+
+  referenceClassesByRecordRegistry.set(records, classes)
   const names = new Set()
 
   for (let recordIndex = 0; recordIndex < declarations.length; recordIndex += 1) {
@@ -499,6 +670,27 @@ function validateBlock(block, scope, returnType, functions, records, errors, cal
       addExpressionEffects(raises, statement.expression, callEffects)
       continue
     }
+    if (statement.kind == "PrivateFieldWriteStatement") {
+      const declaration = scope.currentClass
+
+      if (!declaration || !statement.receiver || statement.receiver.kind != "ReceiverExpression" ||
+        statement.receiver.classId != declaration.id) {
+        fail("ILLEGAL_PRIVATE_ACCESS", "Private field receiver must be the declaring class receiver.", statement.location)
+      }
+      const field = declaration.fields.find((candidate) => candidate.id == statement.field)
+
+      if (!field) fail("ILLEGAL_PRIVATE_ACCESS", "Private field identity is not owned by the declaring class.", statement.location)
+      const expressionType = inferValueExpressionType(
+        statement.expression, scope, functions, records, fail, normalizeOperations, "a private field assignment", field.type
+      )
+
+      if (!sameType(expressionType, field.type)) {
+        fail("TYPE_MISMATCH", `Private field assignment type ${typeDescription(expressionType)}; expected ${typeDescription(field.type)}.`,
+          statement.expression.location)
+      }
+      addExpressionEffects(raises, statement.expression, callEffects)
+      continue
+    }
     if (statement.kind == "PrintStatement") {
       const printedType = inferValueExpressionType(statement.expression, scope, functions, records, fail, normalizeOperations, "a print value")
 
@@ -509,8 +701,8 @@ function validateBlock(block, scope, returnType, functions, records, errors, cal
       continue
     }
     if (statement.kind == "ExpressionStatement") {
-      if (!statement.expression || statement.expression.kind != "CallExpression") {
-        fail("TYPE_MISMATCH", "Expression statement must contain a direct call.", statement.location)
+      if (!statement.expression || !["CallExpression", "MethodCallExpression"].includes(statement.expression.kind)) {
+        fail("TYPE_MISMATCH", "Expression statement must contain a direct or receiver call.", statement.location)
       }
       const expressionType = inferExpressionType(statement.expression, scope, functions, records, fail, normalizeOperations)
 
@@ -966,14 +1158,17 @@ function syntacticBlockEffects(block, callEffects) {
  * @param {{kind: string, name?: string}[]} statements - Scope statements.
  * @param {Set<string>} [reservedNames] - Names unavailable to root bindings.
  * @param {Set<string>} [typeParameters] - Declaration-scoped type parameters.
+ * @param {import("./types.js").ClassDeclaration} [currentClass] - Declaring class for receiver-private access.
  * @returns {Scope} Scope.
  */
-function createScope(parent, statements, reservedNames = new Set(), typeParameters = parent?.typeParameters ?? new Set()) {
+function createScope(parent, statements, reservedNames = new Set(), typeParameters = parent?.typeParameters ?? new Set(),
+  currentClass = parent?.currentClass) {
   const pending = new Set(statements.filter((statement) => statement.kind == "LocalDeclaration")
     .map((statement) => /** @type {{name: string}} */ (statement).name))
 
   return {
     bindings: new Map(),
+    currentClass,
     parent,
     pending,
     presenceProofs: new Set(parent?.presenceProofs ?? []),
@@ -1145,6 +1340,16 @@ function validateTypeReference(type, location, fail, seen = new Set(), records =
 
     return candidate
   }
+  if (candidate.kind == "ReferenceType") {
+    const classes = referenceClassesFor(records)
+
+    if (Object.keys(candidate).filter((key) => key != "sourceProvenance").sort().join(",") != "declarationId,kind" ||
+      typeof candidate.declarationId != "string" || !classes.has(candidate.declarationId)) {
+      fail("UNKNOWN_CLASS", `Unknown reference class declaration '${String(candidate.declarationId)}'.`, typeLocation(candidate, location))
+    }
+
+    return candidate
+  }
   if (candidate.kind == "ListType") {
     if (seen.has(candidate)) return fail("TYPE_MISMATCH", "Recursive collection types cannot contain cycles.", typeLocation(candidate, location))
     seen.add(candidate)
@@ -1203,6 +1408,15 @@ function validateTypeReference(type, location, fail, seen = new Set(), records =
 }
 
 /**
+ * Retrieves the reference-class registry attached to the record validation context.
+ * @param {RecordRegistry} records - Record validation registry.
+ * @returns {ClassRegistry} Reference classes.
+ */
+function referenceClassesFor(records) {
+  return referenceClassesByRecordRegistry.get(records) ?? new Map()
+}
+
+/**
  * Infers a value expression and rejects the non-value result of a void call.
  * @param {import("./types.js").Expression} expression - Semantic expression.
  * @param {Scope} scope - Visible lexical scope.
@@ -1240,6 +1454,28 @@ function inferValueExpressionType(expression, scope, functions, records, fail, n
 function inferExpressionType(expression, scope, functions, records, fail, normalizeOperations, expectedType,
   inferCollectionElements = false) {
   if (expression.kind == "IdentifierExpression") return resolveBinding(expression.name, expression.location, scope, fail).type
+
+  if (expression.kind == "ReceiverExpression") {
+    if (!scope.currentClass || expression.classId != scope.currentClass.id) {
+      return fail("ILLEGAL_PRIVATE_ACCESS", "Receiver expression is valid only inside its declaring class.", expression.location)
+    }
+
+    return {declarationId: /** @type {string} */ (scope.currentClass.id), kind: "ReferenceType"}
+  }
+
+  if (expression.kind == "PrivateFieldRead") {
+    const declaration = scope.currentClass
+
+    if (!declaration || !expression.receiver || expression.receiver.kind != "ReceiverExpression" ||
+      expression.receiver.classId != declaration.id) {
+      return fail("ILLEGAL_PRIVATE_ACCESS", "Private field receiver must be the declaring class receiver.", expression.location)
+    }
+    const field = declaration.fields.find((candidate) => candidate.id == expression.field)
+
+    if (!field) return fail("ILLEGAL_PRIVATE_ACCESS", "Private field identity is not owned by the declaring class.", expression.location)
+
+    return field.type
+  }
 
   if (expression.kind == "ErrorMessageRead") {
     if (!expression.receiver || expression.receiver.kind != "IdentifierExpression") {
@@ -1504,6 +1740,93 @@ function inferExpressionType(expression, scope, functions, records, fail, normal
     }
 
     return scalarType("integer")
+  }
+  if (expression.kind == "ReferenceConstruction") {
+    const referenceType = validateValueTypeReference(expression.reference, expression.location, fail, undefined, records,
+      scope.typeParameters)
+
+    if (referenceType.kind != "ReferenceType") {
+      return fail("TYPE_MISMATCH", "Reference construction requires a nominal reference class type.", expression.location)
+    }
+    const declaration = referenceClassesFor(records).get(referenceType.declarationId)
+
+    if (!declaration) return fail("UNKNOWN_CLASS", `Unknown reference class '${referenceType.declarationId}'.`, expression.location)
+    if (!isDenseArray(expression.arguments)) {
+      return fail("TYPE_MISMATCH", "Constructor arguments must be a dense ordered array.", expression.location)
+    }
+    if (expression.arguments.length != declaration.constructor.parameters.length) {
+      return fail("CONSTRUCTOR_ARITY_MISMATCH",
+        `Constructor for '${declaration.name}' has ${expression.arguments.length} arguments; expected ${declaration.constructor.parameters.length}.`,
+        expression.location)
+    }
+    const parameterTypes = declaration.constructor.parameters.map((parameter) =>
+      validateValueTypeReference(parameter.type, parameter.location, fail, undefined, records))
+
+    for (let index = 0; index < expression.arguments.length; index += 1) {
+      const actual = inferValueExpressionType(expression.arguments[index], scope, functions, records, fail,
+        normalizeOperations, "a constructor argument", parameterTypes[index])
+
+      if (!sameType(actual, parameterTypes[index])) {
+        fail("TYPE_MISMATCH", `Constructor argument type ${typeDescription(actual)}; expected ${typeDescription(parameterTypes[index])}.`,
+          expression.arguments[index].location)
+      }
+    }
+    const resolution = {
+      declarationId: /** @type {string} */ (declaration.constructor.id),
+      kind: /** @type {const} */ ("ResolvedConstructorSignature"),
+      parameterTypes: parameterTypes.map((type) => /** @type {import("./types.js").SemanticTypeIdentity} */ (typeIdentity(type)))
+    }
+
+    if (normalizeOperations) expression.resolution = resolution
+    else validateReferenceResolution(expression.resolution, resolution, expression.location, fail, "constructor")
+
+    return referenceType
+  }
+  if (expression.kind == "MethodCallExpression") {
+    const receiverType = inferValueExpressionType(expression.receiver, scope, functions, records, fail,
+      normalizeOperations, "a method receiver")
+
+    if (receiverType.kind != "ReferenceType") {
+      return fail("INVALID_METHOD_RECEIVER", "Method call receiver must have a reference class type.", expression.receiver.location)
+    }
+    const declaration = referenceClassesFor(records).get(receiverType.declarationId)
+
+    if (!declaration) return fail("UNKNOWN_CLASS", `Unknown reference class '${receiverType.declarationId}'.`, expression.receiver.location)
+    const method = declaration.methods.find((candidate) => candidate.id == expression.method) ??
+      (normalizeOperations ? declaration.methods.find((candidate) => candidate.name == expression.method) : undefined)
+
+    if (!method) return fail("UNKNOWN_METHOD", `Class '${declaration.name}' has no method '${expression.method}'.`,
+      roleLocation(expression, "member"))
+    if (normalizeOperations) expression.method = /** @type {string} */ (method.id)
+    if (!isDenseArray(expression.arguments)) return fail("TYPE_MISMATCH", "Method arguments must be a dense ordered array.", expression.location)
+    if (expression.arguments.length != method.parameters.length) {
+      return fail("METHOD_ARITY_MISMATCH",
+        `Method '${method.name}' has ${expression.arguments.length} arguments; expected ${method.parameters.length}.`, expression.location)
+    }
+    const parameterTypes = method.parameters.map((parameter) =>
+      validateValueTypeReference(parameter.type, parameter.location, fail, undefined, records))
+
+    for (let index = 0; index < expression.arguments.length; index += 1) {
+      const actual = inferValueExpressionType(expression.arguments[index], scope, functions, records, fail,
+        normalizeOperations, "a method argument", parameterTypes[index])
+
+      if (!sameType(actual, parameterTypes[index])) {
+        fail("TYPE_MISMATCH", `Method argument type ${typeDescription(actual)}; expected ${typeDescription(parameterTypes[index])}.`,
+          expression.arguments[index].location)
+      }
+    }
+    const returnType = validateReturnTypeReference(method.returnType, method.location, fail, records)
+    const resolution = {
+      declarationId: /** @type {string} */ (method.id),
+      kind: /** @type {const} */ ("ResolvedMethodSignature"),
+      parameterTypes: parameterTypes.map((type) => /** @type {import("./types.js").SemanticTypeIdentity} */ (typeIdentity(type))),
+      returnType: typeIdentity(returnType)
+    }
+
+    if (normalizeOperations) expression.resolution = resolution
+    else validateReferenceResolution(expression.resolution, resolution, expression.location, fail, "method")
+
+    return isVoidType(returnType) ? "void" : returnType
   }
   if (expression.kind == "RecordConstruction") {
     const recordType = validateValueTypeReference(expression.record, expression.location, fail, undefined, records, scope.typeParameters)
@@ -1799,6 +2122,12 @@ function inferTypeArguments(formal, actual, substitutions, location, fail) {
     }
     return
   }
+  if (formal.kind == "ReferenceType" && actual.kind == "ReferenceType") {
+    if (formal.declarationId != actual.declarationId) {
+      fail("TYPE_MISMATCH", `Call argument type ${typeDescription(actual)}; expected ${typeDescription(formal)}.`, location)
+    }
+    return
+  }
   if (formal.kind == "RecordType" && actual.kind == "RecordType") {
     if (formal.declarationId != actual.declarationId || (formal.arguments?.length ?? 0) != (actual.arguments?.length ?? 0)) {
       fail("TYPE_MISMATCH", `Call argument type ${typeDescription(actual)}; expected ${typeDescription(formal)}.`, location)
@@ -1926,6 +2255,34 @@ function validateResolution(actual, expected, location, fail) {
 }
 
 /**
+ * Validates exact caller-owned constructor or method resolution metadata.
+ * @param {unknown} actual - Candidate resolution.
+ * @param {import("./types.js").ResolvedConstructorSignature | import("./types.js").ResolvedMethodSignature} expected - Exact resolution.
+ * @param {import("./types.js").SourceLocation} location - Expression location.
+ * @param {SemanticFail} fail - Diagnostic callback.
+ * @param {"constructor" | "method"} role - Resolution role.
+ * @returns {void}
+ */
+function validateReferenceResolution(actual, expected, location, fail, role) {
+  const expectedKeys = role == "constructor" ? "declarationId,kind,parameterTypes" :
+    "declarationId,kind,parameterTypes,returnType"
+
+  if (!actual || typeof actual != "object" || Array.isArray(actual) || Object.keys(actual).sort().join(",") != expectedKeys) {
+    fail("TYPE_MISMATCH", `Reference ${role} call is missing an exact resolved ${role} signature.`, location)
+  }
+  const candidate = /** @type {Record<string, unknown>} */ (actual)
+
+  if (candidate.kind != expected.kind || candidate.declarationId != expected.declarationId ||
+    !isDenseArray(candidate.parameterTypes) || candidate.parameterTypes.length != expected.parameterTypes.length ||
+    candidate.parameterTypes.some((type, index) => !validTypeIdentity(type, false) ||
+      !sameTypeIdentity(type, expected.parameterTypes[index])) ||
+    role == "method" && (!validTypeIdentity(candidate.returnType, true) ||
+      !sameTypeIdentity(candidate.returnType, /** @type {import("./types.js").ResolvedMethodSignature} */ (expected).returnType))) {
+    fail("TYPE_MISMATCH", `Resolved ${role} signature does not match its declaration.`, location)
+  }
+}
+
+/**
  * Converts a semantic type to its detached call-resolution identity.
  * @param {import("./types.js").SemanticFunctionReturnType} type - Validated semantic type.
  * @returns {import("./types.js").FunctionReturnTypeIdentity} Detached identity.
@@ -1939,6 +2296,7 @@ function typeIdentity(type) {
     ...(type.arguments ? {arguments: type.arguments.map((argument) =>
       /** @type {import("./types.js").SemanticTypeIdentity} */ (typeIdentity(argument)))} : {})
   }
+  if (type.kind == "ReferenceType") return {declarationId: type.declarationId, kind: "ReferenceType"}
   if (type.kind == "ListType") return {elementType: /** @type {import("./types.js").SemanticTypeIdentity} */ (typeIdentity(type.elementType)), kind: "ListType"}
   if (type.kind == "OptionalType") return {kind: "OptionalType", valueType: /** @type {import("./types.js").SemanticTypeIdentity} */ (typeIdentity(type.valueType))}
   if (type.kind == "OrderedMapType") return {
@@ -1990,6 +2348,9 @@ function validTypeIdentity(type, allowVoid, seen = new Set()) {
     valid = typeof candidate.declarationId == "string" && /^(?:[a-z][a-z0-9._-]*#)?record:[0-9]+$/u.test(candidate.declarationId) &&
       (candidateArguments === undefined || isDenseArray(candidateArguments) &&
         candidateArguments.every((argument) => validTypeIdentity(argument, false, seen)))
+  } else if (candidate.kind == "ReferenceType" && Object.keys(candidate).sort().join(",") == "declarationId,kind") {
+    valid = typeof candidate.declarationId == "string" &&
+      /^(?:[a-z][a-z0-9._-]*#)?class:[0-9]+$/u.test(candidate.declarationId)
   }
   seen.delete(type)
 
@@ -2034,6 +2395,7 @@ function sameTypeIdentity(left, right) {
     return leftType.declarationId == rightType.declarationId && leftArguments.length == rightArguments.length &&
       leftArguments.every((argument, index) => sameTypeIdentity(argument, rightArguments[index]))
   }
+  if (leftType.kind == "ReferenceType") return leftType.declarationId == rightType.declarationId
   if (leftType.kind == "MapType" || leftType.kind == "OrderedMapType") {
     return sameTypeIdentity(leftType.keyType, rightType.keyType) && sameTypeIdentity(leftType.valueType, rightType.valueType)
   }
@@ -2061,6 +2423,7 @@ function typeDescription(type) {
   if (type.kind == "TypeVariableReference") return `type-variable<${type.parameterId}>`
   if (type.kind == "RecordType") return `record<${type.declarationId}${type.arguments?.length
     ? `, ${type.arguments.map(typeDescription).join(", ")}` : ""}>`
+  if (type.kind == "ReferenceType") return `reference<${type.declarationId}>`
   if (type.kind == "ErrorType") return `error<${type.declarationId}>`
   if (type.kind == "ListType") return `list<${typeDescription(type.elementType)}>`
   if (type.kind == "OptionalType") return `optional<${typeDescription(type.valueType)}>`

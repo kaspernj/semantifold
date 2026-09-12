@@ -10,6 +10,7 @@ import {emitExpression, emitType} from "./shared.js"
  */
 export function generateRuby(module, writer) {
   const records = module.records ?? []
+  const classes = module.classes ?? []
   const errors = module.errors ?? []
 
   if (writer.program) {
@@ -88,6 +89,12 @@ export function generateRuby(module, writer) {
   })
   if (records.length > 0) writer.synthetic("\n\n", "record/function separator", [module])
 
+  classes.forEach((declaration, classIndex) => {
+    if (classIndex > 0) writer.synthetic("\n\n", "reference class separator", [declaration], [`/classes/${classIndex}`])
+    emitReferenceClass(writer, declaration, classIndex)
+  })
+  if (classes.length > 0) writer.synthetic("\n\n", "reference class/function separator", [module])
+
   module.functions.forEach((declaration, functionIndex) => {
     if (functionIndex > 0) writer.synthetic("\n\n", "declaration separator", [declaration])
 
@@ -146,6 +153,96 @@ export function generateRuby(module, writer) {
 }
 
 /**
+ * Emits one native Ruby reference class.
+ * @param {import("./writer.js").SourceWriter} writer - Source-aware writer.
+ * @param {import("../semantic/types.js").ClassDeclaration} declaration - Reference class.
+ * @param {number} classIndex - Module class index.
+ * @returns {void}
+ */
+function emitReferenceClass(writer, declaration, classIndex) {
+  const path = `/classes/${classIndex}`
+
+  writer.mapped("class", {mappingKind: "anchor", node: declaration, path})
+  writer.synthetic(" ", "reference class spacing", [declaration], [path])
+  writer.mapped(declaration.name, {mappingKind: "exact", node: declaration, path, role: "name"})
+  writer.synthetic("\n", "line break", [declaration], [path])
+  declaration.fields.forEach((field, index) => {
+    const fieldPath = `${path}/fields/${index}`
+
+    writer.synthetic("  # @semantifold-private ", "private field metadata", [field], [fieldPath])
+    writer.mapped(field.name, {mappingKind: "exact", node: field, path: fieldPath, role: "name"})
+    writer.synthetic(" [", "private field type metadata", [field], [fieldPath])
+    emitType(writer, field.type, `${fieldPath}/type`, "ruby")
+    writer.synthetic("]\n", "line break", [field], [fieldPath])
+  })
+  const constructor = declaration.constructor
+  const constructorPath = `${path}/constructor`
+
+  writer.synthetic("\n", "constructor spacing", [constructor], [constructorPath])
+  emitRubyCallableComments(writer, constructor.parameters, undefined, `${constructorPath}/parameters`, undefined)
+  writer.synthetic("  ", "constructor indentation", [constructor], [constructorPath])
+  writer.mapped("def initialize", {mappingKind: "exact", node: constructor, path: constructorPath, role: "constructor"})
+  emitRubyParameters(writer, constructor.parameters, `${constructorPath}/parameters`)
+  writer.synthetic("\n", "line break", [constructor], [constructorPath])
+  emitBlock(writer, constructor.body, "    ", `${constructorPath}/body`)
+  writer.synthetic("  end", "constructor close", [constructor], [constructorPath])
+  declaration.methods.forEach((method, index) => {
+    const methodPath = `${path}/methods/${index}`
+
+    writer.synthetic("\n\n", "method spacing", [method], [methodPath])
+    emitRubyCallableComments(writer, method.parameters, method.returnType, `${methodPath}/parameters`, `${methodPath}/returnType`)
+    writer.synthetic("  def ", "method indentation", [method], [methodPath])
+    writer.mapped(method.name, {mappingKind: "exact", node: method, path: methodPath, role: "name"})
+    emitRubyParameters(writer, method.parameters, `${methodPath}/parameters`)
+    writer.synthetic("\n", "line break", [method], [methodPath])
+    emitBlock(writer, method.body, "    ", `${methodPath}/body`)
+    writer.synthetic("  end", "method close", [method], [methodPath])
+  })
+  writer.synthetic("\n", "line break", [declaration], [path])
+  writer.mapped("end", {mappingKind: "anchor", node: declaration, path})
+}
+
+/**
+ * Emits exact Ruby callable type comments.
+ * @param {import("./writer.js").SourceWriter} writer - Source-aware writer.
+ * @param {import("../semantic/types.js").Parameter[]} parameters - Ordered parameters.
+ * @param {import("../semantic/types.js").SemanticFunctionReturnType | undefined} returnType - Optional return type.
+ * @param {string} parameterPath - Parameter collection path.
+ * @param {string | undefined} returnPath - Return type path.
+ * @returns {void}
+ */
+function emitRubyCallableComments(writer, parameters, returnType, parameterPath, returnPath) {
+  for (const [index, parameter] of parameters.entries()) {
+    writer.synthetic("  # @param ", "parameter type metadata", [parameter], [`${parameterPath}/${index}`])
+    writer.mapped(parameter.name, {mappingKind: "exact", node: parameter, path: `${parameterPath}/${index}`, role: "name"})
+    writer.synthetic(" [", "parameter type metadata", [parameter], [`${parameterPath}/${index}`])
+    emitType(writer, parameter.type, `${parameterPath}/${index}/type`, "ruby")
+    writer.synthetic("]\n", "line break", [parameter])
+  }
+  if (returnType && returnPath) {
+    writer.synthetic("  # @return [", "return type metadata", [])
+    emitType(writer, returnType, returnPath, "ruby")
+    writer.synthetic("]\n", "line break", [])
+  }
+}
+
+/**
+ * Emits one Ruby parameter list.
+ * @param {import("./writer.js").SourceWriter} writer - Source-aware writer.
+ * @param {import("../semantic/types.js").Parameter[]} parameters - Ordered parameters.
+ * @param {string} path - Parameter collection path.
+ * @returns {void}
+ */
+function emitRubyParameters(writer, parameters, path) {
+  writer.synthetic("(", "parameter list open", parameters)
+  parameters.forEach((parameter, index) => {
+    if (index) writer.synthetic(", ", "parameter separator", parameters)
+    writer.mapped(parameter.name, {mappingKind: "exact", node: parameter, path: `${path}/${index}`, role: "name"})
+  })
+  writer.synthetic(")", "parameter list close", parameters)
+}
+
+/**
  * Emits exact RDoc declaration parameters.
  * @param {import("./writer.js").SourceWriter} writer - Source-aware writer.
  * @param {import("../semantic/types.js").TypeParameter[]} parameters - Ordered type parameters.
@@ -182,6 +279,15 @@ function emitBlock(writer, block, indent, path) {
 function emitStatement(writer, statement, indent, path) {
   if (statement.kind == "LocalDeclaration" || statement.kind == "AssignmentStatement") return emitLocal(writer, statement, indent, path)
   writer.synthetic(indent, "indentation", [statement], [path])
+  if (statement.kind == "PrivateFieldWriteStatement") {
+    const field = writer.privateFieldForId(statement.field)
+
+    writer.mapped(`@${field.name}`, {mappingKind: "exact", name: field.name, node: statement, path, role: "member"})
+    writer.synthetic(" = ", "private field assignment", [statement], [path])
+    emitExpression(writer, statement.expression, `${path}/expression`, "ruby", identity)
+    writer.synthetic("\n", "line break", [statement], [path])
+    return
+  }
   if (statement.kind == "BreakStatement" || statement.kind == "ContinueStatement") {
     writer.mapped(statement.kind == "BreakStatement" ? "break" : "next", {mappingKind: "exact", node: statement, path})
     writer.synthetic("\n", "line break", [statement], [path])

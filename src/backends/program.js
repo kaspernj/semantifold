@@ -256,6 +256,10 @@ function validateProgram(candidate, language) {
       !isDenseArray(module.imports) || !isDenseArray(module.exports)) {
       unsupportedCapability(language, "malformed or duplicate semantic program module", module?.location)
     }
+    if (Reflect.get(module, "classes") !== undefined) {
+      unsupportedCapability(language, "Task 033 reference classes are not supported by semantic program generation",
+        Reflect.get(module, "classes")?.[0]?.location ?? module.location)
+    }
     if (typeof module.sourceFilename != "string" || !sourceFilenames.has(module.sourceFilename)) {
       unsupportedCapability(language, "semantic program module source identity", module.location)
     }

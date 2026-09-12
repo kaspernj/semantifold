@@ -62,15 +62,20 @@ export class SourceWriter {
     this.programPaths = programPaths
     this.index = index
     const programRecords = program?.modules.flatMap((programModule) => programModule.records ?? []) ?? module.records ?? []
+    const programClasses = program ? [] : module.classes ?? []
     const programErrors = program?.modules.flatMap((programModule) => programModule.errors ?? []) ?? module.errors ?? []
     const programFunctions = program?.modules.flatMap((programModule) => programModule.functions) ?? module.functions
 
     this.records = new Map(programRecords.map((record) => [record.id, record]))
+    this.classes = new Map(programClasses.map((declaration) => [declaration.id, declaration]))
     this.errors = new Map(programErrors.map((error) => [error.id, error]))
     this.fields = new Map(programRecords.flatMap((record) => record.fields.map((field) => [field.id, field])))
     this.fieldRecords = new Map(programRecords.flatMap((record) => record.fields.map((field) => [field.id, record])))
+    this.privateFields = new Map(programClasses.flatMap((declaration) => declaration.fields.map((field) => [field.id, field])))
+    this.methods = new Map(programClasses.flatMap((declaration) => declaration.methods.map((method) => [method.id, method])))
     this.typeParameters = new Map([...programRecords, ...programFunctions].flatMap((declaration) =>
       (declaration.typeParameters ?? []).map((parameter) => [parameter.id, parameter])))
+    this.referenceClassEmissionDepth = 0
     /** @type {Map<string, import("../semantic/types.js").SemanticProgramModule>} */
     this.declarationModules = new Map(program?.modules.flatMap((programModule) => [
       ...(programModule.records ?? []).map((declaration) => /** @type {const} */ ([/** @type {string} */ (declaration.id), programModule])),
@@ -139,6 +144,54 @@ export class SourceWriter {
   }
 
   /**
+   * Resolves one validated reference class.
+   * @param {string} declarationId - Stable class identity.
+   * @returns {import("../semantic/types.js").ClassDeclaration} Class declaration.
+   */
+  classForId(declarationId) {
+    const declaration = this.classes.get(declarationId)
+
+    if (!declaration) throw new RangeError(`Unknown validated reference class identity '${declarationId}'.`)
+
+    return declaration
+  }
+
+  /**
+   * Returns the target spelling of one reference class.
+   * @param {string} declarationId - Stable class identity.
+   * @returns {string} Target spelling.
+   */
+  classNameForId(declarationId) {
+    return this.classForId(declarationId).name
+  }
+
+  /**
+   * Resolves one validated private field.
+   * @param {string} fieldId - Stable private-field identity.
+   * @returns {import("../semantic/types.js").PrivateField} Field declaration.
+   */
+  privateFieldForId(fieldId) {
+    const field = this.privateFields.get(fieldId)
+
+    if (!field) throw new RangeError(`Unknown validated private field identity '${fieldId}'.`)
+
+    return field
+  }
+
+  /**
+   * Resolves one validated receiver method.
+   * @param {string} methodId - Stable method identity.
+   * @returns {import("../semantic/types.js").MethodDeclaration} Method declaration.
+   */
+  methodForId(methodId) {
+    const method = this.methods.get(methodId)
+
+    if (!method) throw new RangeError(`Unknown validated method identity '${methodId}'.`)
+
+    return method
+  }
+
+  /**
    * Resolves one validated declaration-scoped type parameter.
    * @param {string} parameterId - Stable type-parameter identity.
    * @returns {import("../semantic/types.js").TypeParameter} Type parameter.
@@ -194,11 +247,23 @@ export class SourceWriter {
     const owner = declarationId ? this.declarationModules.get(declarationId) : undefined
     const imported = declarationId ? this.#programModule()?.imports.find((item) => item.declarationId == declarationId) : undefined
 
+    if (this.language == "java" && !this.program && this.referenceClassEmissionDepth > 0) return `Main.${expression.callee}`
     if (!declarationId || !this.program || !owner || owner.id == Reflect.get(this.module, "id")) return expression.callee
     if (this.language == "ruby" || this.language == "java") return `${moduleClassName(owner.id)}.${declarationName(owner, declarationId)}`
     if (imported) return this.importNameFor(imported)
 
     return declarationName(owner, declarationId)
+  }
+
+  /** Marks emission as occurring inside one top-level reference class. */
+  beginReferenceClassEmission() {
+    this.referenceClassEmissionDepth += 1
+  }
+
+  /** Ends one balanced top-level reference-class emission scope. */
+  endReferenceClassEmission() {
+    if (this.referenceClassEmissionDepth == 0) throw new RangeError("Reference-class emission scope is not active.")
+    this.referenceClassEmissionDepth -= 1
   }
 
   /**

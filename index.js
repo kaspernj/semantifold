@@ -144,6 +144,11 @@ export function generateArtifactSet(input) {
       "Task 009 closed records", module.records[0].location ?? module.location)
   }
 
+  if (Array.isArray(module?.classes) && module.classes.length > 0 && !target.features.referenceClasses) {
+    unsupportedCapability(/** @type {import("./src/semantic/types.js").BackendLanguage} */ (language),
+      "Task 033 reference classes", module.classes[0].location ?? module.location)
+  }
+
   if (role == "text") {
     if (target.artifactMultiplicity == "multiple") {
       const backend = languageRegistry.resolve(language, "textBackend", module?.location)
