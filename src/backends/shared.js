@@ -985,6 +985,13 @@ function validateStatement(statement, language, ownerLocation, loopDepth = 0, ac
       unsupportedCapability(language, "local declaration with invalid mutability", location)
     }
     validateTargetBindingIdentifier(language, declaration.name, "local", location)
+    if (declaration.type?.kind == "OrderedMapType" && declaration.initializer?.kind != "OrderedMapLiteral") {
+      unsupportedCapability(language, "ordered-map local requires a direct literal initializer",
+        diagnosticLocation(declaration.initializer?.location, location))
+    }
+    if (declaration.initializer?.kind == "OrderedMapLiteral" && declaration.mutable !== false) {
+      unsupportedCapability(language, "ordered-map local must be immutable", location)
+    }
     validateExpression(declaration.initializer, language, location, false, new Set(), externalDeclarationIds,
       language == "java" && declaration.initializer?.kind == "OrderedMapLiteral")
     return

@@ -3,7 +3,7 @@
 import assert from "node:assert/strict"
 import {readFileSync} from "node:fs"
 import {describe, expect, it} from "@velocious/testing"
-import {generate, parse, SemantifoldDiagnostic} from "../index.js"
+import {generate, generateArtifact, generateArtifactSet, parse, SemantifoldDiagnostic} from "../index.js"
 
 const source = readFileSync(new URL("fixtures/ordered-map-iteration/program.ts", import.meta.url), "utf8")
 
@@ -73,5 +73,42 @@ console.log(key)
 `}),
       (error) => error instanceof SemantifoldDiagnostic && error.code == "UNRESOLVED_BINDING"
     )
+  })
+
+  it("rejects ordered-map aliases and mutable literal declarations through every generation API", () => {
+    const mutations = [
+      {
+        apply(module) {
+          const declaration = module.entryPoint.body.statements[0]
+          const alias = structuredClone(declaration)
+
+          alias.initializer = {kind: "IdentifierExpression", location: declaration.initializer.location, name: declaration.name}
+          alias.name = "aliasValues"
+          module.entryPoint.body.statements.splice(1, 0, alias)
+        },
+        detail: "ordered-map local requires a direct literal initializer"
+      },
+      {
+        apply(module) {
+          module.entryPoint.body.statements[0].mutable = true
+        },
+        detail: "ordered-map local must be immutable"
+      }
+    ]
+
+    for (const {apply, detail} of mutations) {
+      for (const language of ["ruby", "javascript", "typescript", "php", "java"]) {
+        for (const api of [generate, generateArtifact, generateArtifactSet]) {
+          const module = moduleWithMapLoop()
+
+          apply(module)
+          assert.throws(
+            () => api({language, module}),
+            (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
+              error.language == language && error.detail.includes(detail)
+          )
+        }
+      }
+    }
   })
 })
