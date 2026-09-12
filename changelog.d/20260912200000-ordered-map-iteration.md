@@ -1,0 +1,1 @@
+Added distinct insertion-ordered immutable maps and key/value pair iteration for PHP, Ruby, JavaScript/JSDoc, TypeScript, and Java. Ordinary maps remain unordered and non-iterable; unsafe keys, duplicates, mutation, aliases, and unsupported targets fail loudly, while Java uses a non-escaping `LinkedHashMap` backing sealed as an unmodifiable `SequencedMap`.

@@ -2,6 +2,9 @@
 
 import {emitExpression, emitType} from "./shared.js"
 
+/** @type {WeakMap<import("./writer.js").SourceWriter, Set<string>>} */
+const generatedNames = new WeakMap()
+
 /**
  * Emits an independently executable Java `Main` program through the source-aware writer.
  * @param {import("../semantic/types.js").SemanticModule} module - Semantic module.
@@ -9,6 +12,7 @@ import {emitExpression, emitType} from "./shared.js"
  * @returns {void}
  */
 export function generateJava(module, writer) {
+  generatedNames.set(writer, collectNames(module))
   const records = module.records ?? []
   const errors = module.errors ?? []
   const programModule = writer.program?.modules.find(({id}) => id == Reflect.get(module, "id"))
@@ -228,6 +232,27 @@ function emitStatement(writer, statement, indent, path) {
     writer.synthetic("\n", "line break", [statement], [path])
     return
   }
+  if (statement.kind == "ForEachMapStatement") {
+    const entryName = freshGeneratedName(writer, "__semantifold_entry")
+
+    writer.mapped("for", {mappingKind: "anchor", node: statement, path})
+    writer.synthetic(" (java.util.Map.Entry<", "ordered-map loop scaffolding", [statement], [path])
+    emitType(writer, statement.keyBinding.type, `${path}/keyBinding/type`, "java", true)
+    writer.synthetic(",", "ordered-map entry type separator", [statement], [path])
+    emitType(writer, statement.valueBinding.type, `${path}/valueBinding/type`, "java", true)
+    writer.synthetic(`> ${entryName} : `, "ordered-map loop scaffolding", [statement], [path])
+    emitExpression(writer, statement.map, `${path}/map`, "java", identity)
+    writer.synthetic(".sequencedEntrySet()) ", "ordered-map loop scaffolding", [statement], [path])
+    writer.mapped("{", {mappingKind: "anchor", node: statement.body, path: `${path}/body`})
+    writer.synthetic("\n", "line break", [statement], [path])
+    emitJavaMapPairBinding(writer, statement.keyBinding, `${indent}  `, `${path}/keyBinding`, entryName, "getKey")
+    emitJavaMapPairBinding(writer, statement.valueBinding, `${indent}  `, `${path}/valueBinding`, entryName, "getValue")
+    emitBlock(writer, statement.body, `${indent}  `, `${path}/body`)
+    writer.synthetic(indent, "indentation", [statement], [path])
+    writer.mapped("}", {mappingKind: "anchor", node: statement.body, path: `${path}/body`})
+    writer.synthetic("\n", "line break", [statement], [path])
+    return
+  }
   if (statement.kind == "RaiseStatement") {
     const type = statement.error.error
     const error = writer.errorForId(type.declarationId)
@@ -323,6 +348,38 @@ function emitStatement(writer, statement, indent, path) {
  * @returns {void}
  */
 function emitLocal(writer, statement, indent, statementPath) {
+  if (statement.kind == "LocalDeclaration" && statement.initializer.kind == "OrderedMapLiteral" &&
+    statement.type.kind == "OrderedMapType") {
+    const backingName = freshGeneratedName(writer, `__semantifold_${statement.name}_backing`)
+
+    writer.synthetic(`${indent}final java.util.LinkedHashMap<`, "ordered-map backing declaration", [statement], [statementPath])
+    emitType(writer, statement.type.keyType, `${statementPath}/type/keyType`, "java", true)
+    writer.synthetic(",", "ordered-map backing type separator", [statement], [statementPath])
+    emitType(writer, statement.type.valueType, `${statementPath}/type/valueType`, "java", true)
+    writer.synthetic(`> ${backingName} = new java.util.LinkedHashMap<>();\n`, "ordered-map backing construction", [statement], [statementPath])
+    statement.initializer.entries.forEach((entry, index) => {
+      const entryPath = `${statementPath}/initializer/entries/${index}`
+
+      writer.synthetic(`${indent}${backingName}.`, "ordered-map insertion receiver", [entry], [entryPath])
+      writer.mapped("put", {mappingKind: "anchor", node: entry, path: entryPath, role: "operator"})
+      writer.synthetic("(", "ordered-map insertion open", [entry], [entryPath])
+      emitExpression(writer, entry.key, `${entryPath}/key`, "java", identity)
+      writer.synthetic(", ", "ordered-map insertion separator", [entry], [entryPath])
+      emitExpression(writer, entry.value, `${entryPath}/value`, "java", identity)
+      writer.synthetic(");\n", "ordered-map insertion close", [entry], [entryPath])
+    })
+    writer.synthetic(indent, "indentation", [statement], [statementPath])
+    writer.mapped("final", {mappingKind: "anchor", node: statement, path: statementPath})
+    writer.synthetic(" ", "modifier spacing", [statement], [statementPath])
+    emitType(writer, statement.type, `${statementPath}/type`, "java")
+    writer.synthetic(" ", "declaration spacing", [statement], [statementPath])
+    writer.mapped(statement.name, {mappingKind: "exact", node: statement, path: statementPath, role: "name"})
+    writer.synthetic(" ", "assignment spacing", [statement], [statementPath])
+    writer.mapped("=", {mappingKind: "exact", node: statement, path: statementPath, role: "operator"})
+    writer.synthetic(` java.util.Collections.unmodifiableSequencedMap(${backingName});\n`,
+      "ordered-map immutable boundary", [statement.initializer], [`${statementPath}/initializer`])
+    return
+  }
   writer.synthetic(indent, "indentation", [statement], [statementPath])
 
   if (statement.kind == "AssignmentStatement") {
@@ -349,6 +406,62 @@ function emitLocal(writer, statement, indent, statementPath) {
   emitExpression(writer, statement.initializer, `${statementPath}/initializer`, "java", identity)
   writer.mapped(";", {mappingKind: "anchor", node: statement, path: statementPath})
   writer.synthetic("\n", "line break", [statement], [statementPath])
+}
+
+/**
+ * Emits one immutable semantic map-loop binding from the hidden native entry.
+ * @param {import("./writer.js").SourceWriter} writer - Source-aware writer.
+ * @param {import("../semantic/types.js").ValueBinding} binding - Semantic binding.
+ * @param {string} indent - Leading indentation.
+ * @param {string} path - Exact binding path.
+ * @param {string} entryName - Collision-safe hidden entry name.
+ * @param {"getKey" | "getValue"} accessor - Native accessor.
+ * @returns {void}
+ */
+function emitJavaMapPairBinding(writer, binding, indent, path, entryName, accessor) {
+  writer.synthetic(`${indent}final `, "ordered-map binding declaration", [binding], [path])
+  emitType(writer, binding.type, `${path}/type`, "java")
+  writer.synthetic(" ", "ordered-map binding spacing", [binding], [path])
+  writer.mapped(binding.name, {mappingKind: "exact", node: binding, path, role: "name"})
+  writer.synthetic(` = ${entryName}.${accessor}();\n`, "ordered-map entry access", [binding], [path])
+}
+
+/**
+ * Allocates a Java identifier that cannot capture any semantic source name in this module.
+ * @param {import("./writer.js").SourceWriter} writer - Source-aware writer.
+ * @param {string} preferred - Stable readable prefix.
+ * @returns {string} Fresh identifier.
+ */
+function freshGeneratedName(writer, preferred) {
+  const names = generatedNames.get(writer) ?? new Set()
+  let name = preferred
+  let suffix = 2
+
+  while (names.has(name)) {
+    name = `${preferred}_${suffix}`
+    suffix += 1
+  }
+  names.add(name)
+  generatedNames.set(writer, names)
+  return name
+}
+
+/**
+ * Collects every semantic name so generated Java temporaries remain hygienic.
+ * @param {unknown} value - Semantic subtree.
+ * @param {Set<object>} [seen] - Cycle protection.
+ * @param {Set<string>} [names] - Accumulated names.
+ * @returns {Set<string>} All explicit names.
+ */
+function collectNames(value, seen = new Set(), names = new Set()) {
+  if (!value || typeof value != "object" || seen.has(value)) return names
+  seen.add(value)
+  if (!Array.isArray(value) && typeof Reflect.get(value, "name") == "string") {
+    names.add(/** @type {string} */ (Reflect.get(value, "name")))
+  }
+  for (const child of Array.isArray(value) ? value : Object.values(value)) collectNames(child, seen, names)
+
+  return names
 }
 
 /**

@@ -8,12 +8,12 @@ import {withAdaptedOperation} from "../semantic/operators.js"
 import {withParserRanges} from "../semantic/provenance.js"
 import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
 import {requireSourceReturnType, requireSourceScalarType} from "./scalars.js"
-import {documentedValueType, instantiatedRecordFieldType, iterationBindingType, iterationOperandType, knownCallReturnType, listType, mapType, optionalType, preservesGenericOptionalEvidence, recordType, typeVariable} from "./types.js"
+import {documentedValueType, instantiatedRecordFieldType, iterationBindingType, iterationOperandType, knownCallReturnType, listType, mapType, optionalType, orderedMapTypeFromMap, preservesGenericOptionalEvidence, recordType, typeVariable} from "./types.js"
 
 /** @typedef {NonNullable<import("@babel/parser").ParseResult<import("@babel/types").File>["tokens"]>[number]} BabelToken */
 /** @typedef {{byStart: Map<number, BabelToken>, tokens: BabelToken[]}} BabelTokenIndex */
 /** @typedef {{name: string, nameLocation: import("../semantic/types.js").SourceLocation, parameters: import("../semantic/types.js").Parameter[], returnType: import("../semantic/types.js").SemanticFunctionReturnType, typeParameters?: import("../semantic/types.js").TypeParameter[], location: import("../semantic/types.js").SourceLocation}} JavaScriptFunctionSignature */
-/** @typedef {{bindings: Map<string, import("../semantic/types.js").SemanticBindingType>, errors: Map<string, import("../semantic/types.js").ErrorDeclaration>, errorNames: Map<string, import("../semantic/types.js").ErrorDeclaration>, functions: Map<string, JavaScriptFunctionSignature>, recordNames: Map<string, import("../semantic/types.js").RecordDeclaration>, records: Map<string, import("../semantic/types.js").RecordDeclaration>, returnType?: import("../semantic/types.js").SemanticFunctionReturnType, typeParameters?: Map<string, import("../semantic/types.js").TypeParameter>, valueRecordNames: Map<string, import("../semantic/types.js").RecordDeclaration>}} JavaScriptConversionContext */
+/** @typedef {{bindings: Map<string, import("../semantic/types.js").SemanticBindingType>, errors: Map<string, import("../semantic/types.js").ErrorDeclaration>, errorNames: Map<string, import("../semantic/types.js").ErrorDeclaration>, functions: Map<string, JavaScriptFunctionSignature>, lexicalValueNames?: Set<string>, orderedMapDeclarations?: Set<object>, recordNames: Map<string, import("../semantic/types.js").RecordDeclaration>, records: Map<string, import("../semantic/types.js").RecordDeclaration>, returnType?: import("../semantic/types.js").SemanticFunctionReturnType, typeParameters?: Map<string, import("../semantic/types.js").TypeParameter>, valueRecordNames: Map<string, import("../semantic/types.js").RecordDeclaration>}} JavaScriptConversionContext */
 
 /** @type {WeakMap<object, BabelTokenIndex>} */
 const nodeTokens = new WeakMap()
@@ -138,6 +138,16 @@ function commentTagLocation(comment, tag, field, filename, source) {
 }
 
 /**
+ * Reports whether `Map` resolves to the native intrinsic in the current lexical scope.
+ * @param {JavaScriptConversionContext} context - Typed lexical conversion context.
+ * @returns {boolean} Whether native Map construction is unshadowed.
+ */
+function nativeMapAvailable(context) {
+  return !context.bindings.has("Map") && !context.lexicalValueNames?.has("Map") &&
+    !context.functions.has("Map") && !context.valueRecordNames.has("Map") && !context.errorNames.has("Map")
+}
+
+/**
  * Converts a supported Babel expression.
  * @param {import("@babel/types").Expression} node - Babel expression.
  * @param {"javascript" | "typescript"} language - Frontend language.
@@ -226,20 +236,30 @@ function convertExpression(node, language, filename, source, context = {bindings
   }
 
   if (node.type == "NewExpression" && node.callee.type == "Identifier" && node.callee.name == "Map") {
+    if (!nativeMapAvailable(context)) {
+      return unsupportedSyntax(language, "shadowed Map constructor", identifierLocation(node.callee, filename, source))
+    }
     if (expectedType?.kind == "RecordType") return unsupportedSyntax(language, "Map used as a structural record substitute", location)
     if (node.typeArguments || node.typeParameters || node.arguments.length > 1) {
       return unsupportedSyntax(language, "generic or invalid Map construction", location)
     }
     const initializer = node.arguments[0]
 
-    if (!initializer) return withParserRanges({entries: [], kind: /** @type {const} */ ("MapLiteral"), location}, {literal: location})
+    if (!initializer) return withParserRanges({
+      entries: [],
+      kind: expectedType?.kind == "OrderedMapType"
+        ? /** @type {const} */ ("OrderedMapLiteral")
+        : /** @type {const} */ ("MapLiteral"),
+      location
+    }, {literal: location})
     if (initializer.type == "SpreadElement" || initializer.type == "ArgumentPlaceholder") {
       return unsupportedSyntax(language, initializer.type, nodeLocation(initializer, filename, source))
     }
     if (initializer.type != "ArrayExpression") {
       return unsupportedSyntax(language, "Map initializer other than an entry array", nodeLocation(initializer, filename, source))
     }
-    const valueType = expectedType?.kind == "MapType" ? expectedType.valueType : undefined
+    const valueType = expectedType?.kind == "MapType" || expectedType?.kind == "OrderedMapType"
+      ? expectedType.valueType : undefined
     const entries = initializer.elements.map((element, index) => {
       if (!element) return unsupportedSyntax(language, "sparse map initializer", arrayHoleLocation(initializer, index, filename, source))
       if (element.type == "SpreadElement") return unsupportedSyntax(language, "map spread", nodeLocation(element, filename, source))
@@ -273,7 +293,13 @@ function convertExpression(node, language, filename, source, context = {bindings
       })
     })
 
-    return withParserRanges({entries, kind: /** @type {const} */ ("MapLiteral"), location}, {literal: location})
+    return withParserRanges({
+      entries,
+      kind: expectedType?.kind == "OrderedMapType"
+        ? /** @type {const} */ ("OrderedMapLiteral")
+        : /** @type {const} */ ("MapLiteral"),
+      location
+    }, {literal: location})
   }
 
   if (node.type == "NewExpression" && node.callee.type == "Identifier" && context.valueRecordNames.has(node.callee.name)) {
@@ -530,7 +556,7 @@ function knownExpressionType(node, context, language, filename, source) {
     node.callee.property.type == "Identifier" && node.callee.property.name == "get") {
     const collectionType = knownValueExpressionType(node.callee.object, context, language, filename, source)
 
-    if (collectionType?.kind == "MapType") return collectionType.valueType
+    if (collectionType?.kind == "MapType" || collectionType?.kind == "OrderedMapType") return collectionType.valueType
   }
 
   return undefined
@@ -620,10 +646,16 @@ function convertLocalStatement(node, language, filename, source, context) {
     if (declarator.id.type != "Identifier") return unsupportedSyntax(language, declarator.id.type, declaratorLocation)
     if (!declarator.init) return unsupportedSyntax(language, "uninitialized declaration", declaratorLocation)
 
-    const type = language == "typescript"
+    let type = language == "typescript"
       ? convertTypeScriptType(declarator.id.typeAnnotation, `Local '${declarator.id.name}'`, declaratorLocation, filename, source,
         context.recordNames, context.typeParameters)
       : localJavaScriptType(node, declarator.id.name, filename, source, context.recordNames, context.typeParameters)
+
+    if (node.kind == "const" && type.kind == "MapType" && context.orderedMapDeclarations?.has(declarator) &&
+      declarator.init.type == "NewExpression" && declarator.init.callee.type == "Identifier" &&
+      declarator.init.callee.name == "Map" && nativeMapAvailable(context)) {
+      type = orderedMapTypeFromMap(type, declaratorLocation)
+    }
 
     const semantic = withParserRanges({
       initializer: convertExpression(declarator.init, language, filename, source, context, type),
@@ -858,7 +890,7 @@ function convertTypedTry(node, language, filename, source, canonicalZeroRequired
  * @param {string} source - Complete source.
  * @param {boolean} canonicalZeroRequired - Whether scalar output canonicalizes zero.
  * @param {JavaScriptConversionContext} context - Typed lexical conversion context.
- * @returns {import("../semantic/types.js").ForEachStatement} Semantic loop.
+ * @returns {import("../semantic/types.js").ForEachStatement | import("../semantic/types.js").ForEachMapStatement} Semantic loop.
  */
 function convertForEach(node, language, filename, source, canonicalZeroRequired, context) {
   const location = nodeLocation(node, filename, source)
@@ -878,16 +910,64 @@ function convertForEach(node, language, filename, source, canonicalZeroRequired,
   if (node.left.declarations.length != 1) return unsupportedSyntax(language, "multiple iteration bindings", nodeLocation(node.left, filename, source))
   const declarator = node.left.declarations[0]
 
+  if (declarator.id.type == "ArrayPattern") {
+    const [key, value] = declarator.id.elements
+
+    if (declarator.id.elements.length != 2 || !key || !value || key.type != "Identifier" || value.type != "Identifier" ||
+      declarator.id.typeAnnotation || key.typeAnnotation || value.typeAnnotation || key.optional || value.optional) {
+      return unsupportedSyntax(language, "map iteration binding shape", nodeLocation(declarator.id, filename, source))
+    }
+    if (declarator.init) return unsupportedSyntax(language, "initialized iteration binding", nodeLocation(declarator, filename, source))
+    if (node.body.type != "BlockStatement") return unsupportedSyntax(language, "for-of without block body", nodeLocation(node.body, filename, source))
+    const collectionType = iterationOperandType(knownExpressionType(node.right, context, language, filename, source))
+
+    if (collectionType?.kind == "MapType") {
+      return unsupportedSyntax(language, "unordered map iteration", nodeLocation(node.right, filename, source))
+    }
+    if (!collectionType || collectionType.kind != "OrderedMapType") {
+      return missingType(language, "Ordered map iteration collection", nodeLocation(node.right, filename, source))
+    }
+    const keyLocation = identifierLocation(key, filename, source)
+    const valueLocation = identifierLocation(value, filename, source)
+    const keyType = iterationBindingType(collectionType.keyType, keyLocation)
+    const valueType = iterationBindingType(collectionType.valueType, valueLocation)
+    const keyBinding = withParserRanges({
+      kind: /** @type {const} */ ("ValueBinding"), location: keyLocation, mutable: /** @type {const} */ (false),
+      name: key.name, type: keyType
+    }, {name: keyLocation})
+    const valueBinding = withParserRanges({
+      kind: /** @type {const} */ ("ValueBinding"), location: valueLocation, mutable: /** @type {const} */ (false),
+      name: value.name, type: valueType
+    }, {name: valueLocation})
+    const bodyContext = {...context, bindings: new Map(context.bindings)}
+
+    bodyContext.bindings.set(key.name, keyType)
+    bodyContext.bindings.set(value.name, valueType)
+    return withParserRanges({
+      body: convertBlock(node.body, language, filename, source, canonicalZeroRequired, bodyContext),
+      keyBinding,
+      kind: /** @type {const} */ ("ForEachMapStatement"),
+      location,
+      map: convertExpression(node.right, language, filename, source, context),
+      valueBinding
+    }, {
+      operator: tokenLocation(node, "of", node.left.end ?? node.start ?? 0, node.right.start ?? node.end ?? source.length,
+        filename, source)
+    })
+  }
   if (declarator.id.type != "Identifier") return unsupportedSyntax(language, declarator.id.type, nodeLocation(declarator.id, filename, source))
   if (declarator.init) return unsupportedSyntax(language, "initialized iteration binding", nodeLocation(declarator, filename, source))
   if (node.body.type != "BlockStatement") return unsupportedSyntax(language, "for-of without block body", nodeLocation(node.body, filename, source))
   const collectionType = iterationOperandType(knownExpressionType(node.right, context, language, filename, source))
 
-  if (!collectionType || collectionType.kind != "ListType" && collectionType.kind != "MapType") {
+  if (collectionType?.kind == "MapType" || collectionType?.kind == "OrderedMapType") {
+    return unsupportedSyntax(language, "map iteration without key/value pair binding", nodeLocation(node.right, filename, source))
+  }
+  if (!collectionType || collectionType.kind != "ListType") {
     return missingType(language, "Iteration collection", nodeLocation(node.right, filename, source))
   }
   const bindingLocation = identifierLocation(declarator.id, filename, source)
-  const inferredType = collectionType.kind == "ListType" ? collectionType.elementType : collectionType.valueType
+  const inferredType = collectionType.elementType
   const bindingType = language == "typescript" && declarator.id.typeAnnotation
     ? convertTypeScriptType(declarator.id.typeAnnotation, `Iteration binding '${declarator.id.name}'`, bindingLocation, filename, source,
       context.recordNames, context.typeParameters)
@@ -928,6 +1008,15 @@ function convertBlock(input, language, filename, source, canonicalZeroRequired, 
   const statements = Array.isArray(input) ? input : input.body
   const directives = Array.isArray(input) ? [] : input.directives
   const blockLocation = location ?? nodeLocation(/** @type {import("@babel/types").BlockStatement} */ (input), filename, source)
+  const lexicalValueNames = new Set(context.lexicalValueNames)
+
+  for (const statement of statements) {
+    if (statement.type != "VariableDeclaration") continue
+    for (const declarator of statement.declarations) {
+      if (declarator.id.type == "Identifier") lexicalValueNames.add(declarator.id.name)
+    }
+  }
+  const blockContext = {...context, lexicalValueNames}
 
   if (directives.length > 0) {
     return unsupportedSyntax(language, "directive", nodeLocation(directives[0], filename, source))
@@ -936,7 +1025,7 @@ function convertBlock(input, language, filename, source, canonicalZeroRequired, 
   return {
     kind: "Block",
     location: blockLocation,
-    statements: statements.map((statement) => convertStatement(statement, language, filename, source, canonicalZeroRequired, context))
+    statements: statements.map((statement) => convertStatement(statement, language, filename, source, canonicalZeroRequired, blockContext))
   }
 }
 
@@ -1304,6 +1393,7 @@ function convertFunction(node, signature, functions, recordNames, valueRecordNam
     errorNames,
     errors,
     functions,
+    orderedMapDeclarations: orderedMapDeclarationsFor(node.body),
     recordNames,
     records,
     returnType: signature.returnType,
@@ -1321,6 +1411,69 @@ function convertFunction(node, signature, functions, recordNames, valueRecordNam
     returnType: signature.returnType,
     ...(signature.typeParameters ? {typeParameters: signature.typeParameters} : {})
   }, {name: signature.nameLocation})
+}
+
+/**
+ * Resolves parser-owned pair loops to exact declarations inside one lexical owner.
+ * Ambiguous same-name declarations produce no evidence and fail during loop conversion.
+ * @param {unknown} value - Function body or entry-point subtree.
+ * @returns {Set<object>} Exact pair-iterated parser declarations.
+ */
+function orderedMapDeclarationsFor(value) {
+  /** @type {{declaration: object, name: string, offset: number}[]} */
+  const declarations = []
+  /** @type {{name: string, offset: number}[]} */
+  const receivers = []
+  const seen = new WeakSet()
+  /**
+   * Visits one parser candidate.
+   * @param {unknown} candidate - Parser candidate.
+   */
+  const visit = (candidate) => {
+    if (!candidate || typeof candidate != "object" || seen.has(candidate)) return
+    seen.add(candidate)
+    const type = Reflect.get(candidate, "type")
+
+    if (type == "FunctionDeclaration" || type == "ClassDeclaration") return
+    if (type == "VariableDeclarator") {
+      const identifier = Reflect.get(candidate, "id")
+
+      if (Reflect.get(identifier, "type") == "Identifier") declarations.push({
+        declaration: candidate,
+        name: Reflect.get(identifier, "name"),
+        offset: Reflect.get(candidate, "start")
+      })
+    } else if (type == "ForOfStatement") {
+      const left = Reflect.get(candidate, "left")
+      const right = Reflect.get(candidate, "right")
+      const loopDeclarations = left && typeof left == "object" ? Reflect.get(left, "declarations") : undefined
+      const pattern = Array.isArray(loopDeclarations) && loopDeclarations.length == 1 ? Reflect.get(loopDeclarations[0], "id") : undefined
+      const elements = pattern && typeof pattern == "object" ? Reflect.get(pattern, "elements") : undefined
+
+      if (Reflect.get(left, "kind") == "const" && Reflect.get(pattern, "type") == "ArrayPattern" &&
+        Array.isArray(elements) && elements.length == 2 && elements.every((element) => Reflect.get(element, "type") == "Identifier") &&
+        Reflect.get(right, "type") == "Identifier") receivers.push({
+        name: Reflect.get(right, "name"),
+        offset: Reflect.get(candidate, "start")
+      })
+    }
+    for (const [key, child] of Object.entries(candidate)) {
+      if (["extra", "innerComments", "leadingComments", "loc", "trailingComments"].includes(key)) continue
+      if (Array.isArray(child)) {
+        for (const item of child) visit(item)
+      } else visit(child)
+    }
+  }
+
+  visit(value)
+  const selected = new Set()
+  for (const receiver of receivers) {
+    const matches = declarations.filter(({name, offset}) => name == receiver.name && offset < receiver.offset)
+
+    if (matches.length == 1) selected.add(matches[0].declaration)
+  }
+
+  return selected
 }
 
 /**
@@ -1749,7 +1902,8 @@ export function parseJavaScriptTypeScript({filename, language, source, program})
     filename,
     source,
     canonicalZeroRequired,
-    {bindings: new Map(), errorNames, errors: errorsById, functions: functionSignatures, recordNames, records: recordsById, valueRecordNames},
+    {bindings: new Map(), errorNames, errors: errorsById, functions: functionSignatures,
+      orderedMapDeclarations: orderedMapDeclarationsFor(entryNodes), recordNames, records: recordsById, valueRecordNames},
     entryLocation
   )
 

@@ -34,6 +34,7 @@ const task008Languages = new Set(["php", "ruby", "javascript", "typescript", "ja
 const task009Languages = new Set(["php", "ruby", "javascript", "typescript", "java"])
 const task011Languages = new Set(["php", "ruby", "javascript", "typescript", "java"])
 const task012Languages = new Set(["php", "ruby", "javascript", "typescript", "java"])
+const task014Languages = new Set(["php", "ruby", "javascript", "typescript", "java"])
 const javaObjectInstanceMethodSignatures = new Set([
   "clone()", "equals(Object)", "finalize()", "getClass()", "hashCode()", "notify()", "notifyAll()", "toString()",
   "wait()", "wait(long)", "wait(long,int)"
@@ -71,6 +72,7 @@ export function validateBackendModule(module, language, options = {}) {
     unsupportedCapability(language, "Task 009 closed records", records[0]?.location ?? module.location)
   }
   if (!task011Languages.has(language)) rejectTypedErrors(module, language)
+  if (!task014Languages.has(language)) rejectOrderedMapCapability(module, language)
   validateRecordTargets(records, module.functions, language, module.location)
   if (!task008Languages.has(language)) rejectIterationStatements(module, language)
   if (!task007Languages.has(language)) rejectOptionalTypes(module, language)
@@ -132,6 +134,41 @@ export function validateBackendModule(module, language, options = {}) {
 }
 
 /**
+ * Rejects Task 014 IR transactionally before a non-cohort target allocates output.
+ * @param {import("../semantic/types.js").SemanticModule} module - Candidate module.
+ * @param {import("../semantic/types.js").BackendLanguage} language - Target identity.
+ * @returns {void}
+ */
+function rejectOrderedMapCapability(module, language) {
+  const node = findOrderedMapNode(module)
+
+  if (node) unsupportedCapability(language, "Task 014 ordered-map iteration", diagnosticLocation(node.location, module.location))
+}
+
+/**
+ * Finds the first distinct ordered-map type, literal, or loop in parser-neutral IR.
+ * @param {unknown} value - Candidate subtree.
+ * @param {Set<object>} [seen] - Cycle protection.
+ * @returns {Record<string, unknown> | undefined} First Task 014 node.
+ */
+function findOrderedMapNode(value, seen = new Set()) {
+  if (!value || typeof value != "object" || seen.has(value)) return undefined
+  seen.add(value)
+  if (!Array.isArray(value)) {
+    const candidate = /** @type {Record<string, unknown>} */ (value)
+
+    if (["OrderedMapType", "OrderedMapLiteral", "ForEachMapStatement"].includes(String(candidate.kind))) return candidate
+  }
+  for (const child of Array.isArray(value) ? value : Object.values(value)) {
+    const found = findOrderedMapNode(child, seen)
+
+    if (found) return found
+  }
+
+  return undefined
+}
+
+/**
  * Rejects typed errors for a target outside the Task 011 cohort.
  * @param {import("../semantic/types.js").SemanticModule} module - Candidate module.
  * @param {import("../semantic/types.js").BackendLanguage} language - Target language.
@@ -170,7 +207,7 @@ function rejectTypedErrorBlock(/** @type {unknown} */ block,
     if (Reflect.get(statement, "kind") == "IfStatement") {
       rejectTypedErrorBlock(Reflect.get(statement, "consequent"), language, seen)
       rejectTypedErrorBlock(Reflect.get(statement, "alternate"), language, seen)
-    } else if (Reflect.get(statement, "kind") == "ForEachStatement") {
+    } else if (["ForEachStatement", "ForEachMapStatement"].includes(String(Reflect.get(statement, "kind")))) {
       rejectTypedErrorBlock(Reflect.get(statement, "body"), language, seen)
     }
   }
@@ -387,7 +424,7 @@ function rejectBlockIteration(block, language, seen = new Set()) {
     const kind = Reflect.get(statement, "kind")
     const location = diagnosticLocation(Reflect.get(statement, "location"), Reflect.get(block, "location"))
 
-    if (["ForEachStatement", "BreakStatement", "ContinueStatement"].includes(kind)) {
+    if (["ForEachStatement", "ForEachMapStatement", "BreakStatement", "ContinueStatement"].includes(kind)) {
       unsupportedCapability(language, "Task 008 ordered list iteration", location)
     }
     if (kind == "IfStatement") {
@@ -441,7 +478,7 @@ function rejectBlockOptionalTypes(block, language) {
       rejectBlockOptionalTypes(statement.consequent, language)
       if (statement.alternate) rejectBlockOptionalTypes(statement.alternate, language)
     }
-    if (statement.kind == "ForEachStatement") {
+    if (statement.kind == "ForEachStatement" || statement.kind == "ForEachMapStatement") {
       if (containsOptionalType(statement.valueBinding?.type)) {
         unsupportedCapability(language, "Task 007 optional iteration binding type", statement.valueBinding.location ?? statement.location)
       }
@@ -467,7 +504,7 @@ function containsOptionalType(type, seen = new Set()) {
 
   if (kind == "OptionalType") return true
   if (kind == "ListType") return containsOptionalType(Reflect.get(type, "elementType"), seen)
-  if (kind == "MapType") return containsOptionalType(Reflect.get(type, "keyType"), seen) ||
+  if (kind == "MapType" || kind == "OrderedMapType") return containsOptionalType(Reflect.get(type, "keyType"), seen) ||
     containsOptionalType(Reflect.get(type, "valueType"), seen)
 
   return false
@@ -515,7 +552,7 @@ function rejectBlockCollectionTypes(block, language) {
       rejectBlockCollectionTypes(statement.consequent, language)
       if (statement.alternate) rejectBlockCollectionTypes(statement.alternate, language)
     }
-    if (statement.kind == "ForEachStatement") {
+    if (statement.kind == "ForEachStatement" || statement.kind == "ForEachMapStatement") {
       if (isCollectionType(statement.valueBinding?.type)) {
         unsupportedCapability(language, "Task 006 immutable collection iteration binding type", statement.valueBinding.location ?? statement.location)
       }
@@ -535,7 +572,7 @@ function rejectBlockCollectionTypes(block, language) {
  */
 function isCollectionType(type) {
   return Boolean(type && typeof type == "object" && !Array.isArray(type) &&
-    (Reflect.get(type, "kind") == "ListType" || Reflect.get(type, "kind") == "MapType"))
+    (["ListType", "MapType", "OrderedMapType"].includes(String(Reflect.get(type, "kind")))))
 }
 
 /**
@@ -546,7 +583,8 @@ function isCollectionType(type) {
  */
 function validateScaffoldingNames(module, language) {
   validateRecordConstructorNames(module, language)
-  const needsNativeMap = ["javascript", "typescript"].includes(language) && moduleContainsExpressionKind(module, "MapLiteral")
+  const needsNativeMap = ["javascript", "typescript"].includes(language) &&
+    (moduleContainsExpressionKind(module, "MapLiteral") || moduleContainsExpressionKind(module, "OrderedMapLiteral"))
   const needsPhpCount = language == "php" && moduleContainsExpressionKind(module, "CollectionSizeExpression")
   const javascriptOwnedNames = new Set(["console", ...(needsNativeMap ? ["Map"] : [])])
   const ownedEntryNames = language == "go" ? new Set(["fmt", "int64", "bool", "string", "true", "false"]) :
@@ -571,6 +609,13 @@ function validateScaffoldingNames(module, language) {
     if (statement.kind == "ForEachStatement" && ownedEntryNames.has(statement.valueBinding.name)) {
       unsupportedCapability(language, `entry iteration binding '${statement.valueBinding.name}' captures backend scaffolding`,
         statement.valueBinding.location)
+    }
+    if (statement.kind == "ForEachMapStatement") {
+      for (const binding of [statement.keyBinding, statement.valueBinding]) {
+        if (ownedEntryNames.has(binding.name)) {
+          unsupportedCapability(language, `entry iteration binding '${binding.name}' captures backend scaffolding`, binding.location)
+        }
+      }
     }
     if (statement.kind == "TryStatement" && ownedEntryNames.has(statement.catchBinding.name)) {
       unsupportedCapability(language, `entry catch binding '${statement.catchBinding.name}' captures backend scaffolding`,
@@ -606,6 +651,13 @@ function validateScaffoldingNames(module, language) {
       if (statement.kind == "ForEachStatement" && ownedPrintReceiverNames.has(statement.valueBinding.name)) {
         unsupportedCapability(language, `function iteration binding '${statement.valueBinding.name}' captures backend scaffolding`,
           statement.valueBinding.location)
+      }
+      if (statement.kind == "ForEachMapStatement") {
+        for (const binding of [statement.keyBinding, statement.valueBinding]) {
+          if (ownedPrintReceiverNames.has(binding.name)) {
+            unsupportedCapability(language, `function iteration binding '${binding.name}' captures backend scaffolding`, binding.location)
+          }
+        }
       }
       if (statement.kind == "TryStatement" && ownedPrintReceiverNames.has(statement.catchBinding.name)) {
         unsupportedCapability(language, `function catch binding '${statement.catchBinding.name}' captures backend scaffolding`,
@@ -646,6 +698,14 @@ function validateRecordConstructorNames(module, language) {
           `${owner} iteration binding '${statement.valueBinding.name}' captures record constructor`,
           bindingNameLocation(statement.valueBinding)
         )
+      }
+      if (statement.kind == "ForEachMapStatement") {
+        for (const binding of [statement.keyBinding, statement.valueBinding]) {
+          if (recordNames.has(binding.name)) {
+            unsupportedCapability(language, `${owner} iteration binding '${binding.name}' captures record constructor`,
+              bindingNameLocation(binding))
+          }
+        }
       }
       if (statement.kind == "TryStatement" && recordNames.has(statement.catchBinding.name)) {
         unsupportedCapability(
@@ -693,6 +753,7 @@ function validateJavaUtilFactoryNames(module) {
       }
       const expression = statement.kind == "IfStatement" ? statement.condition :
         statement.kind == "ForEachStatement" ? statement.list :
+          statement.kind == "ForEachMapStatement" ? statement.map :
         statement.kind == "LocalDeclaration" ? statement.initializer :
           statement.kind == "AssignmentStatement" ? statement.expression :
             statement.kind == "ReturnStatement" ? statement.expression :
@@ -700,7 +761,8 @@ function validateJavaUtilFactoryNames(module) {
                 statement.kind == "RaiseStatement" ? statement.error.message : undefined
 
       if (capture && expression && (expressionContainsKind(expression, "ListLiteral") ||
-        expressionContainsKind(expression, "MapLiteral") || expressionContainsKind(expression, "OptionalNone") ||
+        expressionContainsKind(expression, "MapLiteral") || expressionContainsKind(expression, "OrderedMapLiteral") ||
+        expressionContainsKind(expression, "OptionalNone") ||
         expressionContainsKind(expression, "OptionalSome"))) {
         unsupportedCapability("java", capture.detail, capture.location)
       }
@@ -712,6 +774,15 @@ function validateJavaUtilFactoryNames(module) {
         const loopCapture = statement.valueBinding.name == "java" ? {
           detail: `${owner} iteration binding 'java' captures java.util factory syntax`,
           location: statement.valueBinding.location
+        } : capture
+
+        validateBlockNames(statement.body, loopCapture, owner)
+      }
+      if (statement.kind == "ForEachMapStatement") {
+        const capturedBinding = [statement.keyBinding, statement.valueBinding].find(({name}) => name == "java")
+        const loopCapture = capturedBinding ? {
+          detail: `${owner} iteration binding 'java' captures java.util factory syntax`,
+          location: capturedBinding.location
         } : capture
 
         validateBlockNames(statement.body, loopCapture, owner)
@@ -751,6 +822,7 @@ function moduleContainsExpressionKind(module, kind) {
     allStatements(block).some((statement) => {
       const expression = statement.kind == "IfStatement" ? statement.condition :
         statement.kind == "ForEachStatement" ? statement.list :
+          statement.kind == "ForEachMapStatement" ? statement.map :
         statement.kind == "LocalDeclaration" ? statement.initializer :
           statement.kind == "AssignmentStatement" ? statement.expression :
             statement.kind == "ReturnStatement" ? statement.expression :
@@ -779,7 +851,7 @@ function expressionContainsKind(expression, kind) {
   }
   if (expression.kind == "MemberRead") return expressionContainsKind(expression.receiver, kind)
   if (expression.kind == "ListLiteral") return expression.elements.some((element) => expressionContainsKind(element, kind))
-  if (expression.kind == "MapLiteral") {
+  if (expression.kind == "MapLiteral" || expression.kind == "OrderedMapLiteral") {
     return expression.entries.some((entry) => expressionContainsKind(entry.key, kind) || expressionContainsKind(entry.value, kind))
   }
   if (expression.kind == "ListIndexExpression") {
@@ -828,6 +900,7 @@ function emittedJavaFunctionSignature(declaration) {
 
     if (!type || typeof type != "object" || Array.isArray(type)) return undefined
     const emitted = type.kind == "ListType" ? "java.util.List" : type.kind == "MapType" ? "java.util.Map" :
+      type.kind == "OrderedMapType" ? "java.util.SequencedMap" :
       type.kind == "TypeReference" ? emitScalarType("java", type) : undefined
 
     if (!emitted) return undefined
@@ -847,7 +920,9 @@ function allStatements(block) {
     if (statement.kind == "IfStatement") {
       return [statement, ...allStatements(statement.consequent), ...(statement.alternate ? allStatements(statement.alternate) : [])]
     }
-    if (statement.kind == "ForEachStatement") return [statement, ...allStatements(statement.body)]
+    if (statement.kind == "ForEachStatement" || statement.kind == "ForEachMapStatement") {
+      return [statement, ...allStatements(statement.body)]
+    }
     if (statement.kind == "TryStatement") return [statement, ...allStatements(statement.body), ...allStatements(statement.catchBody)]
 
     return [statement]
@@ -910,7 +985,15 @@ function validateStatement(statement, language, ownerLocation, loopDepth = 0, ac
       unsupportedCapability(language, "local declaration with invalid mutability", location)
     }
     validateTargetBindingIdentifier(language, declaration.name, "local", location)
-    validateExpression(declaration.initializer, language, location, false, new Set(), externalDeclarationIds)
+    if (declaration.type?.kind == "OrderedMapType" && declaration.initializer?.kind != "OrderedMapLiteral") {
+      unsupportedCapability(language, "ordered-map local requires a direct literal initializer",
+        diagnosticLocation(declaration.initializer?.location, location))
+    }
+    if (declaration.initializer?.kind == "OrderedMapLiteral" && declaration.mutable !== false) {
+      unsupportedCapability(language, "ordered-map local must be immutable", location)
+    }
+    validateExpression(declaration.initializer, language, location, false, new Set(), externalDeclarationIds,
+      language == "java" && declaration.initializer?.kind == "OrderedMapLiteral")
     return
   }
   if (kind == "AssignmentStatement") {
@@ -992,6 +1075,40 @@ function validateStatement(statement, language, ownerLocation, loopDepth = 0, ac
       unsupportedCapability(language, "missing or invalid iteration body", loopLocation)
     }
     requireSemanticLocation(Reflect.get(loop.body, "location"), language, "iteration body location", loopLocation)
+    validateBlock(loop.body, language, loopLocation, loopDepth + 1, activePath, externalDeclarationIds)
+    return
+  }
+  if (kind == "ForEachMapStatement") {
+    if (!task014Languages.has(language)) unsupportedCapability(language, "Task 014 ordered-map iteration", location)
+    const loopLocation = requireSemanticLocation(ownLocation, language, "ForEachMapStatement location", ownerLocation)
+    const loop = /** @type {import("../semantic/types.js").ForEachMapStatement} */ (statement)
+    const fields = Object.keys(loop).filter((key) => key != "sourceProvenance").sort().join(",")
+
+    if (fields != "body,keyBinding,kind,location,map,valueBinding") {
+      unsupportedCapability(language, "malformed ForEachMapStatement", loopLocation)
+    }
+    if (!loop.map || typeof loop.map != "object" || Array.isArray(loop.map)) {
+      unsupportedCapability(language, "missing or invalid ordered-map iteration collection", loopLocation)
+    }
+    requireSemanticLocation(Reflect.get(loop.map, "location"), language, "ordered-map iteration collection location", loopLocation)
+    validateExpression(loop.map, language, loopLocation, false, new Set(), externalDeclarationIds)
+    for (const [role, binding] of [["key", loop.keyBinding], ["value", loop.valueBinding]]) {
+      if (!binding || typeof binding != "object" || Array.isArray(binding)) {
+        unsupportedCapability(language, `missing or invalid map iteration ${role} binding`, loopLocation)
+      }
+      const bindingLocation = requireSemanticLocation(binding.location, language, `map iteration ${role} binding location`, loopLocation)
+      const bindingFields = Object.keys(binding).filter((key) => key != "sourceProvenance").sort().join(",")
+
+      if (binding.kind != "ValueBinding" || bindingFields != "kind,location,mutable,name,type") {
+        unsupportedCapability(language, `malformed map iteration ${role} binding`, bindingLocation)
+      }
+      if (binding.mutable !== false) unsupportedCapability(language, "Map iteration bindings must be immutable", bindingLocation)
+      validateTargetBindingIdentifier(language, binding.name, `map iteration ${role} binding`, bindingLocation)
+    }
+    if (!loop.body || typeof loop.body != "object" || Array.isArray(loop.body)) {
+      unsupportedCapability(language, "missing or invalid map iteration body", loopLocation)
+    }
+    requireSemanticLocation(Reflect.get(loop.body, "location"), language, "map iteration body location", loopLocation)
     validateBlock(loop.body, language, loopLocation, loopDepth + 1, activePath, externalDeclarationIds)
     return
   }
@@ -1149,9 +1266,10 @@ function validateAssignmentTarget(target, language, ownerLocation) {
  * @param {boolean} [allowJavaNegatedMinimumOperand] - Whether Java may use 2147483648 only beneath integer negation.
  * @param {Set<object>} [activePath] - Ancestors on the current recursive validation path.
  * @param {Set<string>} [externalDeclarationIds] - Resolved declarations whose source spelling is target-independent.
+ * @param {boolean} [allowJavaOrderedMapRoot] - Whether this root is a Java local initializer eligible for statement lowering.
  * @returns {void}
  */
-function validateExpression(expression, language, ownerLocation, allowJavaNegatedMinimumOperand = false, activePath = new Set(), externalDeclarationIds = new Set()) {
+function validateExpression(expression, language, ownerLocation, allowJavaNegatedMinimumOperand = false, activePath = new Set(), externalDeclarationIds = new Set(), allowJavaOrderedMapRoot = false) {
   if (!expression || typeof expression != "object" || Array.isArray(expression)) {
     return unsupportedCapability(language, "missing or invalid expression", ownerLocation)
   }
@@ -1216,8 +1334,14 @@ function validateExpression(expression, language, ownerLocation, allowJavaNegate
     validateExpression(operation.operand, language, location, false, expressionPath, externalDeclarationIds)
     return
   }
-  if (["ListLiteral", "MapLiteral", "ListIndexExpression", "MapLookupExpression", "CollectionSizeExpression"].includes(candidate.kind)) {
+  if (["ListLiteral", "MapLiteral", "OrderedMapLiteral", "ListIndexExpression", "MapLookupExpression", "CollectionSizeExpression"].includes(candidate.kind)) {
     if (!task006Languages.has(language)) unsupportedCapability(language, "Task 006 immutable collections", location)
+    if (candidate.kind == "OrderedMapLiteral" && !task014Languages.has(language)) {
+      unsupportedCapability(language, "Task 014 ordered-map iteration", location)
+    }
+    if (candidate.kind == "OrderedMapLiteral" && language == "java" && !allowJavaOrderedMapRoot) {
+      unsupportedCapability(language, "unsafe Java ordered-map expression lowering", location)
+    }
     if (candidate.kind == "ListLiteral") {
       if (!isDenseArray(candidate.elements)) unsupportedCapability(language, "missing or sparse list elements", location)
       for (const element of candidate.elements) {
@@ -1225,9 +1349,9 @@ function validateExpression(expression, language, ownerLocation, allowJavaNegate
       }
       return
     }
-    if (candidate.kind == "MapLiteral") {
+    if (candidate.kind == "MapLiteral" || candidate.kind == "OrderedMapLiteral") {
       if (!isDenseArray(candidate.entries)) unsupportedCapability(language, "missing or sparse map entries", location)
-      if (language == "java" && candidate.entries.length > 10) {
+      if (candidate.kind == "MapLiteral" && language == "java" && candidate.entries.length > 10) {
         unsupportedCapability(language, "java.util.Map.of supports at most ten entries", location)
       }
       for (const entry of candidate.entries) {
@@ -1432,7 +1556,7 @@ export function emitType(writer, type, path, language, javaBoxed = false) {
     ? language == "ruby" ? "Array[" : language == "php" ? "list<" :
       language == "java" ? "java.util.List<" : "ReadonlyArray<"
     : language == "ruby" ? "Hash[" : language == "php" ? "array<" :
-      language == "java" ? "java.util.Map<" : "ReadonlyMap<"
+      language == "java" ? type.kind == "OrderedMapType" ? "java.util.SequencedMap<" : "java.util.Map<" : "ReadonlyMap<"
 
   writer.mapped(prefix, {mappingKind: "exact", node: type, path, role: "type"})
   if (type.kind == "ListType") {
@@ -1518,7 +1642,7 @@ export function emitExpression(writer, expression, path, language, emitIdentifie
     writer.mapped(language == "java" ? ")" : "]", {mappingKind: "anchor", node: expression, path})
     return
   }
-  if (expression.kind == "MapLiteral") {
+  if (expression.kind == "MapLiteral" || expression.kind == "OrderedMapLiteral") {
     const open = language == "java" ? "java.util.Map.of(" : language == "javascript" || language == "typescript" ? "new Map([" :
       language == "php" ? "[" : "{"
     const close = language == "java" ? ")" : language == "javascript" || language == "typescript" ? "])" :
@@ -1775,6 +1899,9 @@ function blockContainsSignProducingOperation(block) {
     if (statement.kind == "ForEachStatement") {
       return expressionContainsSignProducingOperation(statement.list) || blockContainsSignProducingOperation(statement.body)
     }
+    if (statement.kind == "ForEachMapStatement") {
+      return expressionContainsSignProducingOperation(statement.map) || blockContainsSignProducingOperation(statement.body)
+    }
     if (statement.kind == "TryStatement") {
       return blockContainsSignProducingOperation(statement.body) || blockContainsSignProducingOperation(statement.catchBody)
     }
@@ -1812,7 +1939,7 @@ function expressionContainsSignProducingOperation(expression) {
   }
   if (expression.kind == "MemberRead") return expressionContainsSignProducingOperation(expression.receiver)
   if (expression.kind == "ListLiteral") return expression.elements.some((element) => expressionContainsSignProducingOperation(element))
-  if (expression.kind == "MapLiteral") {
+  if (expression.kind == "MapLiteral" || expression.kind == "OrderedMapLiteral") {
     return expression.entries.some((entry) => expressionContainsSignProducingOperation(entry.key) ||
       expressionContainsSignProducingOperation(entry.value))
   }

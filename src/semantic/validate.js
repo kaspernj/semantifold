@@ -90,14 +90,16 @@ function validateBlockShape(block, detail, fail) {
   }
 
   for (const statement of block.statements) {
-    if (!["AssignmentStatement", "BreakStatement", "ContinueStatement", "ExpressionStatement", "ForEachStatement", "IfStatement", "LocalDeclaration", "PrintStatement", "RaiseStatement", "ReturnStatement", "TryStatement"].includes(statement.kind)) {
+    if (!["AssignmentStatement", "BreakStatement", "ContinueStatement", "ExpressionStatement", "ForEachMapStatement", "ForEachStatement", "IfStatement", "LocalDeclaration", "PrintStatement", "RaiseStatement", "ReturnStatement", "TryStatement"].includes(statement.kind)) {
       fail(`${detail} statement ${statement.kind}`, statement.location)
     }
     if (statement.kind == "IfStatement") {
       validateBlockShape(statement.consequent, "if consequent", fail)
       if (statement.alternate) validateBlockShape(statement.alternate, "if alternate", fail)
     }
-    if (statement.kind == "ForEachStatement") validateBlockShape(statement.body, "for-each body", fail)
+    if (statement.kind == "ForEachStatement" || statement.kind == "ForEachMapStatement") {
+      validateBlockShape(statement.body, "for-each body", fail)
+    }
     if (statement.kind == "TryStatement") {
       validateBlockShape(statement.body, "try body", fail)
       validateBlockShape(statement.catchBody, "catch body", fail)
@@ -586,6 +588,57 @@ function validateBlock(block, scope, returnType, functions, records, errors, cal
       }
       continue
     }
+    if (statement.kind == "ForEachMapStatement") {
+      const mapType = inferValueExpressionType(statement.map, scope, functions, records, fail, normalizeOperations,
+        "a map iteration collection")
+
+      if (mapType.kind != "OrderedMapType") {
+        fail("TYPE_MISMATCH", `Map iteration collection type ${typeDescription(mapType)}; expected ordered map.`, statement.map.location)
+      }
+      if (!statement.keyBinding || statement.keyBinding.kind != "ValueBinding" ||
+        !statement.valueBinding || statement.valueBinding.kind != "ValueBinding") {
+        fail("TYPE_MISMATCH", "Map iteration requires exact key and value bindings.", statement.location)
+      }
+      if (statement.keyBinding.mutable !== false || statement.valueBinding.mutable !== false) {
+        fail("TYPE_MISMATCH", "Map iteration bindings must be immutable.",
+          statement.keyBinding.mutable !== false ? statement.keyBinding.location : statement.valueBinding.location)
+      }
+      const keyType = validateValueTypeReference(statement.keyBinding.type, statement.keyBinding.location, fail,
+        undefined, records, scope.typeParameters)
+      const valueType = validateValueTypeReference(statement.valueBinding.type, statement.valueBinding.location, fail,
+        undefined, records, scope.typeParameters)
+
+      if (!sameType(keyType, mapType.keyType)) {
+        fail("TYPE_MISMATCH", `Map iteration key binding type ${typeDescription(keyType)}; expected ${typeDescription(mapType.keyType)}.`,
+          typeLocation(statement.keyBinding.type, statement.keyBinding.location))
+      }
+      if (!sameType(valueType, mapType.valueType)) {
+        fail("TYPE_MISMATCH", `Map iteration value binding type ${typeDescription(valueType)}; expected ${typeDescription(mapType.valueType)}.`,
+          typeLocation(statement.valueBinding.type, statement.valueBinding.location))
+      }
+      const assignedOuterBindings = outerMutableBindingsAssignedBy(statement.body, scope)
+
+      for (const binding of assignedOuterBindings) {
+        binding.knownValue = undefined
+        scope.presenceProofs.delete(binding)
+      }
+      const loopScope = createScope(scope, statement.body.statements)
+
+      declareBinding(statement.keyBinding.name, {knownValue: undefined, mutable: false, type: keyType},
+        roleLocation(statement.keyBinding, "name"), loopScope, fail)
+      declareBinding(statement.valueBinding.name, {knownValue: undefined, mutable: false, type: valueType},
+        roleLocation(statement.valueBinding, "name"), loopScope, fail)
+      const bodyFlow = validateBlock(statement.body, loopScope, returnType, functions, records, errors, callEffects,
+        fail, normalizeOperations, loopDepth + 1)
+
+      addExpressionEffects(raises, statement.map, callEffects)
+      addAll(raises, bodyFlow.raises)
+      for (const binding of assignedOuterBindings) {
+        binding.knownValue = undefined
+        scope.presenceProofs.delete(binding)
+      }
+      continue
+    }
     if (statement.kind == "RaiseStatement") {
       if (!statement.error || statement.error.kind != "ErrorConstruction") {
         fail("NON_ERROR_RAISE", "Raise requires one constructed semantic error.", statement.location)
@@ -788,8 +841,8 @@ function syntacticBlockEffects(block, callEffects) {
       addAll(result, syntacticBlockEffects(Reflect.get(statement, "alternate"), callEffects))
       continue
     }
-    if (kind == "ForEachStatement") {
-      addExpressionEffects(result, Reflect.get(statement, "list"), callEffects)
+    if (kind == "ForEachStatement" || kind == "ForEachMapStatement") {
+      addExpressionEffects(result, Reflect.get(statement, kind == "ForEachStatement" ? "list" : "map"), callEffects)
       addAll(result, syntacticBlockEffects(Reflect.get(statement, "body"), callEffects))
       continue
     }
@@ -995,7 +1048,16 @@ function validateTypeReference(type, location, fail, seen = new Set(), records =
 
     return candidate
   }
-  if (candidate.kind == "MapType") {
+  if (candidate.kind == "MapType" || candidate.kind == "OrderedMapType") {
+    const expectedFields = candidate.kind == "OrderedMapType" ? "keyType,kind,order,valueType" : "keyType,kind,valueType"
+
+    if (Object.keys(candidate).filter((key) => key != "sourceProvenance").sort().join(",") != expectedFields) {
+      return fail("TYPE_MISMATCH", `Malformed ${candidate.kind == "OrderedMapType" ? "ordered map" : "map"} type.`,
+        typeLocation(candidate, location))
+    }
+    if (candidate.kind == "OrderedMapType" && candidate.order != "insertion") {
+      return fail("TYPE_MISMATCH", "Ordered map type requires insertion order.", typeLocation(candidate, location))
+    }
     if (seen.has(candidate)) return fail("TYPE_MISMATCH", "Recursive collection types cannot contain cycles.", typeLocation(candidate, location))
     seen.add(candidate)
     const keyType = validateValueTypeReference(candidate.keyType, typeLocation(candidate, location, "keyType"), fail, seen, records, typeParameters)
@@ -1228,6 +1290,46 @@ function inferExpressionType(expression, scope, functions, records, fail, normal
       valueType: /** @type {import("./types.js").SemanticValueType} */ (inferredValueType)
     }
   }
+  if (expression.kind == "OrderedMapLiteral") {
+    if (expectedType && expectedType.kind != "OrderedMapType") {
+      return fail("TYPE_MISMATCH", `Ordered-map literal context ${typeDescription(expectedType)}; expected ordered map.`, expression.location)
+    }
+    if (!expectedType && !inferCollectionElements) {
+      return fail("MISSING_TYPE", "Ordered-map literal requires an explicit recursive ordered-map type.", expression.location)
+    }
+    if (expectedType?.kind == "OrderedMapType" && !isScalarType(expectedType.keyType, "string")) {
+      return fail("TYPE_MISMATCH", "Ordered-map key type must be string.", typeLocation(expectedType.keyType, expression.location))
+    }
+    const entries = validateMapLiteralEntries(expression, scope, functions, records, fail, normalizeOperations,
+      inferCollectionElements)
+
+    if (!expectedType && entries.length == 0) {
+      return fail("MISSING_TYPE", "Empty ordered-map literal requires an explicit recursive ordered-map type.", expression.location)
+    }
+    /** @type {import("./types.js").SemanticValueType | undefined} */
+    let inferredValueType
+
+    for (const entry of entries) {
+      const actual = inferValueExpressionType(
+        entry.value, scope, functions, records, fail, normalizeOperations, "an ordered-map value",
+        expectedType?.kind == "OrderedMapType" ? expectedType.valueType : inferredValueType, inferCollectionElements
+      )
+      inferredValueType ??= actual
+      const requiredValueType = expectedType?.kind == "OrderedMapType" ? expectedType.valueType : inferredValueType
+
+      if (!sameType(actual, requiredValueType)) {
+        fail("TYPE_MISMATCH", `Ordered-map value type ${typeDescription(actual)}; expected ${typeDescription(requiredValueType)}.`,
+          entry.value.location)
+      }
+    }
+
+    return expectedType?.kind == "OrderedMapType" ? expectedType : {
+      keyType: scalarType("string"),
+      kind: "OrderedMapType",
+      order: "insertion",
+      valueType: /** @type {import("./types.js").SemanticValueType} */ (inferredValueType)
+    }
+  }
   if (expression.kind == "ListIndexExpression") {
     const collectionType = inferValueExpressionType(expression.collection, scope, functions, records, fail, normalizeOperations, "a list receiver")
     const indexType = inferValueExpressionType(expression.index, scope, functions, records, fail, normalizeOperations, "a list index", scalarType("integer"))
@@ -1255,7 +1357,7 @@ function inferExpressionType(expression, scope, functions, records, fail, normal
     const collectionType = inferValueExpressionType(expression.collection, scope, functions, records, fail, normalizeOperations, "a map receiver")
     const keyType = inferValueExpressionType(expression.key, scope, functions, records, fail, normalizeOperations, "a map key", scalarType("string"))
 
-    if (collectionType.kind != "MapType") {
+    if (collectionType.kind != "MapType" && collectionType.kind != "OrderedMapType") {
       return fail("TYPE_MISMATCH", `Map lookup receiver type ${typeDescription(collectionType)}; expected map.`, expression.collection.location)
     }
     if (!isScalarType(keyType, "string")) {
@@ -1264,7 +1366,8 @@ function inferExpressionType(expression, scope, functions, records, fail, normal
     const knownCollection = knownValueForExpression(expression.collection, scope)
     const knownKey = knownValueForExpression(expression.key, scope)
 
-    if (knownCollection?.kind == "MapLiteral" && knownKey?.kind == "StringLiteral" &&
+    if ((knownCollection?.kind == "MapLiteral" || knownCollection?.kind == "OrderedMapLiteral") &&
+      knownKey?.kind == "StringLiteral" &&
       !knownCollection.entries.some((entry) => entry.key.value == knownKey.value)) {
       fail("MISSING_MAP_KEY", `Map key '${knownKey.value}' is absent from the literal initializer.`, expression.location)
     }
@@ -1277,7 +1380,7 @@ function inferExpressionType(expression, scope, functions, records, fail, normal
   if (expression.kind == "CollectionSizeExpression") {
     const collectionType = inferValueExpressionType(expression.collection, scope, functions, records, fail, normalizeOperations, "a collection-size receiver")
 
-    if (collectionType.kind != "ListType" && collectionType.kind != "MapType") {
+    if (collectionType.kind != "ListType" && collectionType.kind != "MapType" && collectionType.kind != "OrderedMapType") {
       return fail("TYPE_MISMATCH", `Collection size receiver type ${typeDescription(collectionType)}; expected list or map.`, expression.collection.location)
     }
     const collectionKind = collectionType.kind == "ListType" ? "list" : "map"
@@ -1464,7 +1567,7 @@ function inferExpressionType(expression, scope, functions, records, fail, normal
 
 /**
  * Validates map layout and fixed string keys independently of contextual value inference.
- * @param {import("./types.js").MapLiteral} expression - Candidate map literal.
+ * @param {import("./types.js").MapLiteral | import("./types.js").OrderedMapLiteral} expression - Candidate map literal.
  * @param {Scope} scope - Visible lexical scope.
  * @param {Map<string, import("./types.js").FunctionDeclaration>} functions - Module function signatures.
  * @param {RecordRegistry} records - Record declarations by identity.
@@ -1493,7 +1596,8 @@ function validateMapLiteralEntries(expression, scope, functions, records, fail, 
       fail("INVALID_MAP_KEY", "Map initializer keys must be nonnumeric strings.", entry.key.location)
     }
     if (keys.has(entry.key.value)) {
-      fail("DUPLICATE_MAP_KEY", `Duplicate map key '${entry.key.value}'.`, entry.key.location)
+      fail("DUPLICATE_MAP_KEY", `Duplicate ${expression.kind == "OrderedMapLiteral" ? "ordered-map" : "map"} key '${entry.key.value}'.`,
+        entry.key.location)
     }
     keys.add(entry.key.value)
   }
@@ -1535,7 +1639,8 @@ function inferGenericArgumentEvidence(formal, expression, substitutions, scope, 
     }
     return
   }
-  if (formal.kind == "MapType" && expression.kind == "MapLiteral") {
+  if ((formal.kind == "MapType" && expression.kind == "MapLiteral") ||
+    (formal.kind == "OrderedMapType" && expression.kind == "OrderedMapLiteral")) {
     const entries = validateMapLiteralEntries(expression, scope, functions, records, fail, normalizeOperations, true)
 
     for (const entry of entries) {
@@ -1604,7 +1709,8 @@ function inferTypeArguments(formal, actual, substitutions, location, fail) {
     inferTypeArguments(formal.valueType, actual.valueType, substitutions, location, fail)
     return
   }
-  if (formal.kind == "MapType" && actual.kind == "MapType") {
+  if ((formal.kind == "MapType" && actual.kind == "MapType") ||
+    (formal.kind == "OrderedMapType" && actual.kind == "OrderedMapType")) {
     inferTypeArguments(formal.keyType, actual.keyType, substitutions, location, fail)
     inferTypeArguments(formal.valueType, actual.valueType, substitutions, location, fail)
   }
@@ -1620,7 +1726,9 @@ function typeContainsVariable(type, parameterId) {
   if (type.kind == "TypeVariableReference") return type.parameterId == parameterId
   if (type.kind == "RecordType") return type.arguments?.some((argument) => typeContainsVariable(argument, parameterId)) ?? false
   if (type.kind == "ListType") return typeContainsVariable(type.elementType, parameterId)
-  if (type.kind == "MapType") return typeContainsVariable(type.keyType, parameterId) || typeContainsVariable(type.valueType, parameterId)
+  if (type.kind == "MapType" || type.kind == "OrderedMapType") {
+    return typeContainsVariable(type.keyType, parameterId) || typeContainsVariable(type.valueType, parameterId)
+  }
   if (type.kind == "OptionalType") return typeContainsVariable(type.valueType, parameterId)
 
   return false
@@ -1725,6 +1833,12 @@ function typeIdentity(type) {
   }
   if (type.kind == "ListType") return {elementType: /** @type {import("./types.js").SemanticTypeIdentity} */ (typeIdentity(type.elementType)), kind: "ListType"}
   if (type.kind == "OptionalType") return {kind: "OptionalType", valueType: /** @type {import("./types.js").SemanticTypeIdentity} */ (typeIdentity(type.valueType))}
+  if (type.kind == "OrderedMapType") return {
+    keyType: /** @type {import("./types.js").SemanticTypeIdentity} */ (typeIdentity(type.keyType)),
+    kind: "OrderedMapType",
+    order: "insertion",
+    valueType: /** @type {import("./types.js").SemanticTypeIdentity} */ (typeIdentity(type.valueType))
+  }
 
   return {
     keyType: /** @type {import("./types.js").SemanticTypeIdentity} */ (typeIdentity(type.keyType)),
@@ -1752,6 +1866,10 @@ function validTypeIdentity(type, allowVoid, seen = new Set()) {
     valid = validTypeIdentity(candidate.elementType, false, seen)
   } else if (candidate.kind == "MapType" && Object.keys(candidate).sort().join(",") == "keyType,kind,valueType") {
     valid = candidate.keyType == "string" && validTypeIdentity(candidate.valueType, false, seen)
+  } else if (candidate.kind == "OrderedMapType" &&
+    Object.keys(candidate).sort().join(",") == "keyType,kind,order,valueType") {
+    valid = candidate.keyType == "string" && candidate.order == "insertion" &&
+      validTypeIdentity(candidate.valueType, false, seen)
   } else if (candidate.kind == "OptionalType" && Object.keys(candidate).sort().join(",") == "kind,valueType") {
     valid = validTypeIdentity(candidate.valueType, false, seen) &&
       !(candidate.valueType && typeof candidate.valueType == "object" && Reflect.get(candidate.valueType, "kind") == "OptionalType")
@@ -1808,7 +1926,7 @@ function sameTypeIdentity(left, right) {
     return leftType.declarationId == rightType.declarationId && leftArguments.length == rightArguments.length &&
       leftArguments.every((argument, index) => sameTypeIdentity(argument, rightArguments[index]))
   }
-  if (leftType.kind == "MapType") {
+  if (leftType.kind == "MapType" || leftType.kind == "OrderedMapType") {
     return sameTypeIdentity(leftType.keyType, rightType.keyType) && sameTypeIdentity(leftType.valueType, rightType.valueType)
   }
 
@@ -1838,6 +1956,7 @@ function typeDescription(type) {
   if (type.kind == "ErrorType") return `error<${type.declarationId}>`
   if (type.kind == "ListType") return `list<${typeDescription(type.elementType)}>`
   if (type.kind == "OptionalType") return `optional<${typeDescription(type.valueType)}>`
+  if (type.kind == "OrderedMapType") return `ordered-map<string, ${typeDescription(type.valueType)}, insertion>`
 
   return `map<string, ${typeDescription(type.valueType)}>`
 }
@@ -1946,7 +2065,7 @@ function outerMutableBindingsAssignedBy(block, outerScope, assigned = new Set())
     } else if (statement.kind == "IfStatement") {
       outerMutableBindingsAssignedBy(statement.consequent, outerScope, assigned)
       if (statement.alternate) outerMutableBindingsAssignedBy(statement.alternate, outerScope, assigned)
-    } else if (statement.kind == "ForEachStatement") {
+    } else if (statement.kind == "ForEachStatement" || statement.kind == "ForEachMapStatement") {
       outerMutableBindingsAssignedBy(statement.body, outerScope, assigned)
     } else if (statement.kind == "TryStatement") {
       outerMutableBindingsAssignedBy(statement.body, outerScope, assigned)
@@ -1964,7 +2083,7 @@ function outerMutableBindingsAssignedBy(block, outerScope, assigned = new Set())
  * @returns {import("./types.js").Expression | undefined} Known value.
  */
 function knownValueForExpression(expression, scope) {
-  if (["IntegerLiteral", "BooleanLiteral", "StringLiteral", "ListLiteral", "MapLiteral"].includes(expression.kind)) return expression
+  if (["IntegerLiteral", "BooleanLiteral", "StringLiteral", "ListLiteral", "MapLiteral", "OrderedMapLiteral"].includes(expression.kind)) return expression
   if (expression.kind == "IdentifierExpression") return findBinding(expression.name, scope)?.knownValue
   if (expression.kind == "ListIndexExpression") return provenListElement(expression.collection, expression.index, scope)
   if (expression.kind == "MapLookupExpression") return provenMapValue(expression.collection, expression.key, scope)
@@ -2000,7 +2119,8 @@ function provenMapValue(collection, key, scope) {
   const knownCollection = knownValueForExpression(collection, scope)
   const knownKey = knownValueForExpression(key, scope)
 
-  if (knownCollection?.kind != "MapLiteral" || knownKey?.kind != "StringLiteral") return undefined
+  if (knownCollection?.kind != "MapLiteral" && knownCollection?.kind != "OrderedMapLiteral" ||
+    knownKey?.kind != "StringLiteral") return undefined
 
   return knownCollection.entries.find((entry) => entry.key.value == knownKey.value)?.value
 }

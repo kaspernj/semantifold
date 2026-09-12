@@ -44,7 +44,7 @@ const values: ReadonlyMap<string, number> = new Map([["a", 1]])
 for (const value of values) { console.log(value) }
 `
 }
-const unsupportedFormCodes = {java: "UNSUPPORTED_SYNTAX", javascript: "UNSUPPORTED_SYNTAX", php: "UNSUPPORTED_SYNTAX", ruby: "UNSUPPORTED_SYNTAX", typescript: "TYPE_MISMATCH"}
+const unsupportedFormCodes = {java: "UNSUPPORTED_SYNTAX", javascript: "UNSUPPORTED_SYNTAX", php: "UNSUPPORTED_SYNTAX", ruby: "UNSUPPORTED_SYNTAX", typescript: "UNSUPPORTED_SYNTAX"}
 const missingTypes = {
   java: `public final class Main {
   private static void visit(java.util.List<Integer> values) {
@@ -169,7 +169,7 @@ console.log(identity(1))
 }
 const phaseBoundaryCases = [
   {
-    code: "TYPE_MISMATCH", filename: "ruby-map-iteration.rb", language: "ruby",
+    code: "UNSUPPORTED_SYNTAX", filename: "ruby-map-iteration.rb", language: "ruby",
     source: `# @return [Integer]
 def zero()
   return 0

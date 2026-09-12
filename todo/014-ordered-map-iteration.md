@@ -1,6 +1,6 @@
 # 014 — Ordered map iteration
 
-- Status: `todo`
+- Status: `implemented and validated locally; coordinator review / CI / merge pending`
 - Phase/priority: Phase 2 / P2 (deferred, conditional)
 - Dependencies: [006-immutable-lists-and-maps.md](006-immutable-lists-and-maps.md), [008-collection-iteration.md](008-collection-iteration.md)
 
@@ -35,9 +35,9 @@ This matrix records the original-five mappings researched for this conditional t
 ## Frontend work
 
 - Prism: recognize an exact typed `Hash` literal as `OrderedMapLiteral` only in this profile and an exact `.each` block with two simple parameters; continue mapping Task 006 hashes to ordinary maps when no ordered capability is declared.
-- Babel for JavaScript and TypeScript: recognize exact native `new Map` construction from dense two-element entry arrays plus `for...of` two-identifier array binding. Prove JSDoc/TypeScript readonly generic types and reject object/custom-iterable lookalikes and all mutations.
+- Babel for JavaScript and TypeScript: recognize exact native `new Map` construction from dense two-element entry arrays plus `for...of` two-identifier array binding. Prove the `Map` constructor identifier resolves to the unshadowed native intrinsic, prove JSDoc/TypeScript readonly generic types, and reject object/custom-iterable lookalikes and all mutations.
 - `php-parser`: recognize an explicitly documented string-key ordered array and key/value `foreach`; validate every entry/key and reject coercible, implicit, unpacked, referenced, or mutated forms.
-- Lezer: recognize one bounded Java construction sequence: fresh insertion-ordered `LinkedHashMap`, ordered `put` statements, immediate `unmodifiableSequencedMap` sealing, and enhanced iteration over `sequencedEntrySet`. Consume every statement in that sequence into the ordered literal or loop node, preserve each location, and reject any intervening use, alias, branch, reassignment, or backing escape. Never recover this meaning from source text.
+- Lezer: recognize one bounded Java construction sequence: fresh insertion-ordered `LinkedHashMap`, ordered `put` statements, immediate `unmodifiableSequencedMap` sealing, and enhanced iteration over `sequencedEntrySet`. A `SequencedMap` annotation without that exact construction remains ordinary-map evidence. Consume every statement in that sequence into the ordered literal or loop node, reserve consumed backing and entry-helper names in their exact lexical scopes, preserve each location, and reject any collision, intervening use, alias, branch, reassignment, or backing escape. Never recover this meaning from source text.
 - Every adapter must reject an ordinary Task 006 map operand with `UNSUPPORTED_SYNTAX` at the iteration expression rather than treating observed parser/runtime enumeration as semantic order.
 
 ## Backend and target validation work
@@ -74,3 +74,7 @@ Adding map iteration to Task 008 or Task 013; assigning order to Task 006 `MapTy
 - All five frontends accept only parser-proven ordered construction/iteration profiles and reject unordered or alias-unsafe forms with stable located diagnostics.
 - All five backends validate and emit a genuinely ordered representation; Java uses a non-escaping insertion-ordered backing behind an unmodifiable sequenced view and never depends on `Map.of`-family iteration order.
 - Focused negative/equivalence specs and real registered-runtime generated execution prove non-lexical insertion order, control flow, and semantic round-trip, with documentation and changelog updated.
+
+## Local implementation record
+
+The candidate adds the distinct `OrderedMapType`, `OrderedMapLiteral`, and `ForEachMapStatement` capability without changing Task 006 `MapType`. All five source adapters require their parser-proven immutable native profiles, and all five text backends preserve insertion order through native ordered carriers. Java recognizes and emits only the bounded non-escaping `LinkedHashMap` construction followed by an unmodifiable `SequencedMap` boundary; collision-safe generated temporaries never become semantic bindings. Every other registered target rejects Task 014 IR transactionally. Focused semantic, frontend, backend, runtime, provenance, registry, public API, and package tests own the candidate; publication remains coordinator-owned.

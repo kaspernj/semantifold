@@ -9,7 +9,7 @@ import {withParserRanges} from "../semantic/provenance.js"
 import {hasOnlyUnicodeScalars, scalarType} from "../semantic/scalars.js"
 import {typeContainsAnyVariable} from "../semantic/generics.js"
 import {requireSourceReturnType, requireSourceScalarType, sourceScalarType} from "./scalars.js"
-import {documentedValueType, instantiatedRecordFieldType, iterationBindingType, iterationOperandType, knownCallParameterTypes, knownCallReturnType, optionalType, preservesGenericOptionalEvidence, recordType, sameValueType} from "./types.js"
+import {documentedValueType, instantiatedRecordFieldType, iterationBindingType, iterationOperandType, knownCallParameterTypes, knownCallReturnType, optionalType, orderedMapTypeFromMap, preservesGenericOptionalEvidence, recordType, sameValueType} from "./types.js"
 const parser = new PhpParser.Engine({
   ast: {withPositions: true},
   parser: {extractDoc: true, suppressErrors: false}
@@ -39,6 +39,7 @@ const phpBinaryOperations = new Map([
  * @property {Map<string, import("../semantic/types.js").ErrorDeclaration>} errorNames - Error declarations by source name.
  * @property {Map<string, import("../semantic/types.js").ErrorDeclaration>} errors - Error declarations by identity.
  * @property {Map<string, PhpFunctionSignature>} functions - Explicit module function signatures.
+ * @property {Set<object>} [orderedMapDeclarations] - Exact local declarations selected by parser-owned pair iteration.
  * @property {Map<string, import("../semantic/types.js").RecordDeclaration>} recordNames - Record declarations by source name.
  * @property {Map<string, import("../semantic/types.js").RecordDeclaration>} records - Record declarations by identity.
  * @property {import("../semantic/types.js").SemanticFunctionReturnType | undefined} returnType - Enclosing return type.
@@ -231,7 +232,9 @@ function convertExpression(node, filename, source, context, expectedType, preser
     const entries = /** @type {import("php-parser").Entry[]} */ (literal.items)
     const hasKeys = entries.some((entry) => entry.key != null)
     const hasImplicit = entries.some((entry) => entry.key == null)
-    const collectionKind = entries.length == 0 ? expectedType?.kind : hasKeys && !hasImplicit ? "MapType" : !hasKeys ? "ListType" : "mixed"
+    const collectionKind = entries.length == 0 ? expectedType?.kind : hasKeys && !hasImplicit
+      ? expectedType?.kind == "OrderedMapType" ? "OrderedMapType" : "MapType"
+      : !hasKeys ? "ListType" : "mixed"
 
     if (collectionKind == "mixed") return unsupportedSyntax("php", "mixed list/map array literal", location)
     if (collectionKind == "ListType") {
@@ -243,8 +246,9 @@ function convertExpression(node, filename, source, context, expectedType, preser
         location
       }, {literal: location})
     }
-    if (collectionKind == "MapType") {
-      const valueType = expectedType?.kind == "MapType" ? expectedType.valueType : undefined
+    if (collectionKind == "MapType" || collectionKind == "OrderedMapType") {
+      const valueType = expectedType?.kind == "MapType" || expectedType?.kind == "OrderedMapType"
+        ? expectedType.valueType : undefined
       const semanticEntries = entries.map((entry) => {
         if (!entry.key || entry.key.kind != "string") {
           return unsupportedSyntax("php", "map key other than a literal string", entry.key ? nodeLocation(entry.key, filename, source) : nodeLocation(entry, filename, source))
@@ -259,7 +263,13 @@ function convertExpression(node, filename, source, context, expectedType, preser
         }, {operator: tokenLocation("=>", entry.key.loc?.end.offset ?? 0, entry.value.loc?.start.offset ?? source.length, filename, source)})
       })
 
-      return withParserRanges({entries: semanticEntries, kind: /** @type {const} */ ("MapLiteral"), location}, {literal: location})
+      return withParserRanges({
+        entries: semanticEntries,
+        kind: collectionKind == "OrderedMapType"
+          ? /** @type {const} */ ("OrderedMapLiteral")
+          : /** @type {const} */ ("MapLiteral"),
+        location
+      }, {literal: location})
     }
 
     return unsupportedSyntax("php", "empty array without a list or map type", location)
@@ -324,7 +334,8 @@ function convertExpression(node, filename, source, context, expectedType, preser
     if (!lookup.offset) return unsupportedSyntax("php", "append or missing array index", location)
     const receiver = lookup.what.kind == "variable" ? /** @type {import("php-parser").Variable} */ (lookup.what) : undefined
     const receiverType = receiver && typeof receiver.name == "string" ? context.bindings.get(receiver.name) : undefined
-    const accessKind = receiverType?.kind == "ListType" ? "list" : receiverType?.kind == "MapType" ? "map" :
+    const accessKind = receiverType?.kind == "ListType" ? "list" :
+      receiverType?.kind == "MapType" || receiverType?.kind == "OrderedMapType" ? "map" :
       lookup.offset.kind == "number" ? "list" : lookup.offset.kind == "string" ? "map" : undefined
 
     if (accessKind == "list" && ["number", "string", "variable"].includes(lookup.offset.kind)) {
@@ -498,7 +509,7 @@ function knownExpressionType(node, context) {
     const collectionType = knownExpressionType(lookup.what, context)
 
     if (collectionType?.kind == "ListType") return collectionType.elementType
-    if (collectionType?.kind == "MapType") return collectionType.valueType
+    if (collectionType?.kind == "MapType" || collectionType?.kind == "OrderedMapType") return collectionType.valueType
   }
   if (node.kind == "new") {
     const construction = /** @type {import("php-parser").New} */ (node)
@@ -684,16 +695,23 @@ function convertLocalStatement(node, filename, source, context) {
   const metadata = localMetadata(node, variable.name, filename, source, context.recordNames, context.typeParameters)
 
   if (metadata) {
-    const initializer = convertExpression(assignment.right, filename, source, context, metadata.type)
+    let declaredType = metadata.type
+    let ordered = false
 
-    context.bindings.set(variable.name, metadata.type)
+    if (declaredType.kind == "MapType" && context.orderedMapDeclarations?.has(assignment) && assignment.right.kind == "array") {
+      declaredType = orderedMapTypeFromMap(declaredType, location)
+      ordered = true
+    }
+    const initializer = convertExpression(assignment.right, filename, source, context, declaredType)
+
+    context.bindings.set(variable.name, declaredType)
     return withParserRanges({
       initializer,
       kind: "LocalDeclaration",
       location,
-      mutable: !metadata.immutable,
+      mutable: ordered ? false : !metadata.immutable,
       name: variable.name,
-      type: metadata.type
+      type: declaredType
     }, {
       name: targetLocation,
       operator: tokenLocation("=", assignment.left.loc?.end.offset ?? 0, assignment.right.loc?.start.offset ?? source.length, filename, source)
@@ -873,13 +891,12 @@ function convertPhpTry(node, filename, source, context) {
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
  * @param {PhpConversionContext} context - Typed conversion context.
- * @returns {import("../semantic/types.js").ForEachStatement} Semantic loop.
+ * @returns {import("../semantic/types.js").ForEachStatement | import("../semantic/types.js").ForEachMapStatement} Semantic loop.
  */
 function convertForEach(node, filename, source, context) {
   const location = nodeLocation(node, filename, source)
 
   if (node.shortForm) return unsupportedSyntax("php", "alternative foreach syntax", location)
-  if (node.key) return unsupportedSyntax("php", "foreach key binding", nodeLocation(node.key, filename, source))
   if (node.value.kind != "variable") return unsupportedSyntax("php", "foreach destructuring", nodeLocation(node.value, filename, source))
   const variable = /** @type {import("php-parser").Variable} */ (node.value)
 
@@ -891,11 +908,54 @@ function convertForEach(node, filename, source, context) {
   const body = /** @type {import("php-parser").Block} */ (node.body)
   const collectionType = iterationOperandType(knownExpressionType(node.source, context))
 
-  if (!collectionType || collectionType.kind != "ListType" && collectionType.kind != "MapType") {
+  if (node.key) {
+    if (node.key.kind != "variable") return unsupportedSyntax("php", "foreach key binding shape", nodeLocation(node.key, filename, source))
+    const keyVariable = /** @type {import("php-parser").Variable} */ (node.key)
+
+    if (Reflect.get(keyVariable, "byref") === true || typeof keyVariable.name != "string" || keyVariable.curly) {
+      return unsupportedSyntax("php", "invalid foreach key binding", nodeLocation(keyVariable, filename, source))
+    }
+    if (collectionType?.kind == "MapType") {
+      return unsupportedSyntax("php", "unordered map iteration", nodeLocation(node.source, filename, source))
+    }
+    if (!collectionType || collectionType.kind != "OrderedMapType") {
+      return missingType("php", "Ordered map iteration collection", nodeLocation(node.source, filename, source))
+    }
+    const keyLocation = nodeLocation(keyVariable, filename, source)
+    const valueLocation = nodeLocation(variable, filename, source)
+    const keyType = iterationBindingType(collectionType.keyType, keyLocation)
+    const valueType = iterationBindingType(collectionType.valueType, valueLocation)
+    const keyBinding = withParserRanges({
+      kind: /** @type {const} */ ("ValueBinding"), location: keyLocation, mutable: /** @type {const} */ (false),
+      name: keyVariable.name, type: keyType
+    }, {name: keyLocation})
+    const valueBinding = withParserRanges({
+      kind: /** @type {const} */ ("ValueBinding"), location: valueLocation, mutable: /** @type {const} */ (false),
+      name: variable.name, type: valueType
+    }, {name: valueLocation})
+    const bodyContext = {...context, bindings: new Map(context.bindings)}
+
+    bodyContext.bindings.set(keyVariable.name, keyType)
+    bodyContext.bindings.set(variable.name, valueType)
+    return withParserRanges({
+      body: convertBlock(body, filename, source, bodyContext),
+      keyBinding,
+      kind: /** @type {const} */ ("ForEachMapStatement"),
+      location,
+      map: convertExpression(node.source, filename, source, context),
+      valueBinding
+    }, {operator: tokenLocation("foreach", node.loc?.start.offset ?? 0, node.source.loc?.start.offset ?? source.length,
+      filename, source)})
+  }
+
+  if (collectionType?.kind == "MapType" || collectionType?.kind == "OrderedMapType") {
+    return unsupportedSyntax("php", "map iteration without key/value pair binding", nodeLocation(node.source, filename, source))
+  }
+  if (!collectionType || collectionType.kind != "ListType") {
     return missingType("php", "Iteration collection", nodeLocation(node.source, filename, source))
   }
   const bindingLocation = nodeLocation(variable, filename, source)
-  const inferredType = collectionType.kind == "ListType" ? collectionType.elementType : collectionType.valueType
+  const inferredType = collectionType.elementType
   const bindingType = iterationBindingType(inferredType, bindingLocation)
   const valueBinding = withParserRanges({
     kind: /** @type {const} */ ("ValueBinding"),
@@ -1209,7 +1269,9 @@ function phpDocumentedNativeTypeMatches(nativeType, nativeNullable, documentedTy
   if (documentedType.kind == "TypeReference") {
     return nativeType !== undefined && sourceScalarType("php", nativeType)?.name == documentedType.name
   }
-  if (documentedType.kind == "ListType" || documentedType.kind == "MapType") return nativeType == "array"
+  if (documentedType.kind == "ListType" || documentedType.kind == "MapType" || documentedType.kind == "OrderedMapType") {
+    return nativeType == "array"
+  }
   if (documentedType.kind == "RecordType") {
     return nativeType !== undefined && records.get(nativeType)?.id == documentedType.declarationId
   }
@@ -1237,6 +1299,7 @@ function convertFunction(node, signature, functions, recordNames, records, error
     errorNames,
     errors,
     functions,
+    orderedMapDeclarations: orderedMapDeclarationsForPhp(node.body),
     recordNames,
     records,
     returnType: signature.returnType,
@@ -1252,6 +1315,66 @@ function convertFunction(node, signature, functions, recordNames, records, error
     returnType: signature.returnType,
     ...(signature.typeParameters ? {typeParameters: signature.typeParameters} : {})
   }, {name: signature.nameLocation})
+}
+
+/**
+ * Resolves parser-owned key/value loops to exact declarations inside one lexical owner.
+ * Ambiguous same-name declarations produce no evidence and fail during loop conversion.
+ * @param {unknown} value - Function body or entry-point subtree.
+ * @returns {Set<object>} Exact pair-iterated parser declarations.
+ */
+function orderedMapDeclarationsForPhp(value) {
+  /** @type {{declaration: object, name: string, offset: number}[]} */
+  const declarations = []
+  /** @type {{name: string, offset: number}[]} */
+  const receivers = []
+  const seen = new WeakSet()
+  /**
+   * Visits one parser candidate.
+   * @param {unknown} candidate - Parser candidate.
+   */
+  const visit = (candidate) => {
+    if (!candidate || typeof candidate != "object" || seen.has(candidate)) return
+    seen.add(candidate)
+    const kind = Reflect.get(candidate, "kind")
+
+    if (kind == "function" || kind == "class") return
+    if (kind == "assign") {
+      const variable = Reflect.get(candidate, "left")
+
+      if (Reflect.get(variable, "kind") == "variable" && typeof Reflect.get(variable, "name") == "string") {
+        declarations.push({
+          declaration: candidate,
+          name: Reflect.get(variable, "name"),
+          offset: Reflect.get(variable, "loc")?.start.offset
+        })
+      }
+    } else if (kind == "foreach") {
+      const receiver = Reflect.get(candidate, "source")
+
+      if (Reflect.get(receiver, "kind") == "variable" && typeof Reflect.get(receiver, "name") == "string" &&
+        Reflect.get(candidate, "key")) receivers.push({
+        name: Reflect.get(receiver, "name"),
+        offset: Reflect.get(candidate, "loc")?.start.offset
+      })
+    }
+    for (const [key, child] of Object.entries(candidate)) {
+      if (["loc", "leadingComments", "trailingComments"].includes(key)) continue
+      if (Array.isArray(child)) {
+        for (const item of child) visit(item)
+      } else visit(child)
+    }
+  }
+
+  visit(value)
+  const selected = new Set()
+  for (const receiver of receivers) {
+    const matches = declarations.filter(({name, offset}) => name == receiver.name && offset < receiver.offset)
+
+    if (matches.length == 1) selected.add(matches[0].declaration)
+  }
+
+  return selected
 }
 
 /**
@@ -1529,7 +1652,8 @@ export function parsePhp({filename, source, program: programContext}) {
   }]))
   for (const signature of signatures) functionSignatures.set(signature.name, signature)
   const functions = functionNodes.map((node, index) =>
-    convertFunction(node, signatures[index], functionSignatures, recordNames, recordsById, errorNames, errorsById, filename, source))
+    convertFunction(node, signatures[index], functionSignatures, recordNames, recordsById, errorNames, errorsById,
+      filename, source))
   const executableNodes = body.filter((node) => !["class", "function", "declare", "noop"].includes(node.kind))
   const location = moduleLocation(filename, source)
 
@@ -1547,6 +1671,7 @@ export function parsePhp({filename, source, program: programContext}) {
     errorNames,
     errors: errorsById,
     functions: functionSignatures,
+    orderedMapDeclarations: orderedMapDeclarationsForPhp(executableNodes),
     recordNames,
     records: recordsById,
     returnType: undefined
