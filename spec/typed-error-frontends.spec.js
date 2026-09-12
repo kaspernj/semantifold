@@ -3,7 +3,7 @@
 import assert from "node:assert/strict"
 import {readFile} from "node:fs/promises"
 import {describe, expect, it} from "@velocious/testing"
-import {parse, SemantifoldDiagnostic} from "../index.js"
+import {parse, parseProgram, SemantifoldDiagnostic} from "../index.js"
 
 const fixtures = [
   ["php", "program.php"],
@@ -73,6 +73,114 @@ function run(): string {
 }
 console.log(run())
 `)
+  })
+
+  it("rejects imported error aliases shadowed by JavaScript-family lexical bindings", () => {
+    const cases = [
+      ["parameter", {
+        javascript: `/**
+ * @param {string} E
+ * @returns {string}
+ */
+function run(E) { throw new E("bad") }
+console.log(run("value"))
+`,
+        typescript: `function run(E: string): string { throw new E("bad") }
+console.log(run("value"))
+`
+      }],
+      ["local", {
+        javascript: `/** @returns {string} */
+function run() {
+  /** @type {string} */ const E = "value"
+  throw new E("bad")
+}
+console.log(run())
+`,
+        typescript: `function run(): string {
+  const E: string = "value"
+  throw new E("bad")
+}
+console.log(run())
+`
+      }],
+      ["iteration", {
+        javascript: `/**
+ * @param {ReadonlyArray<number>} values
+ * @returns {string}
+ */
+function run(values) {
+  for (const E of values) { throw new E("bad") }
+  return "ok"
+}
+/** @type {ReadonlyArray<number>} */ const values = [1]
+console.log(run(values))
+`,
+        typescript: `function run(values: readonly number[]): string {
+  for (const E of values) { throw new E("bad") }
+  return "ok"
+}
+const values: readonly number[] = [1]
+console.log(run(values))
+`
+      }],
+      ["catch", {
+        javascript: `/** @returns {string} */
+function run() {
+  try { throw new E("bad") }
+  catch (E) {
+    if (!(E instanceof E)) { throw E }
+    return E.message
+  }
+}
+console.log(run())
+`,
+        typescript: `function run(): string {
+  try { throw new E("bad") }
+  catch (E) {
+    if (!(E instanceof E)) { throw E }
+    return E.message
+  }
+}
+console.log(run())
+`
+      }]
+    ]
+    const accepted = []
+
+    for (const language of ["javascript", "typescript"]) {
+      const extension = language == "javascript" ? "js" : "ts"
+
+      for (const [binding, sources] of cases) {
+        try {
+          parseProgram({
+            entryModule: "main",
+            sources: [
+              {
+                filename: `errors.${extension}`,
+                id: "errors",
+                language,
+                source: "export class ValidationError extends Error {}\n"
+              },
+              {
+                filename: `main.${extension}`,
+                id: "main",
+                language,
+                source: `import {ValidationError as E} from "./errors.js"\n${sources[language]}`
+              }
+            ]
+          })
+          accepted.push(`${language}:${binding}`)
+        } catch (error) {
+          assert.ok(error instanceof SemantifoldDiagnostic)
+          assert.equal(error.code, "UNSUPPORTED_SYNTAX")
+          assert.equal(error.language, language)
+          assert.equal(error.location?.filename, `main.${extension}`)
+        }
+      }
+    }
+
+    expect(accepted).toEqual([])
   })
 
   it("rejects Ruby default rescue, retry, else, and ensure semantics", () => {

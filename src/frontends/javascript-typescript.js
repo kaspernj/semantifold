@@ -731,7 +731,7 @@ function convertTypedThrow(node, language, filename, source, context) {
   const argument = node.argument
 
   if (!argument || argument.type != "NewExpression" || argument.callee.type != "Identifier" ||
-    !context.errorNames.has(argument.callee.name) || argument.arguments.length != 1 ||
+    context.bindings.has(argument.callee.name) || !context.errorNames.has(argument.callee.name) || argument.arguments.length != 1 ||
     argument.arguments[0].type == "SpreadElement" || argument.arguments[0].type == "ArgumentPlaceholder" ||
     argument.typeArguments || argument.typeParameters) {
     return unsupportedSyntax(language, "throw other than exact declared error construction", location)
@@ -773,7 +773,8 @@ function convertTypedTry(node, language, filename, source, canonicalZeroRequired
   if (!guard || guard.type != "IfStatement" || guard.alternate || guard.test.type != "UnaryExpression" ||
     guard.test.operator != "!" || guard.test.argument.type != "BinaryExpression" || guard.test.argument.operator != "instanceof" ||
     guard.test.argument.left.type != "Identifier" || guard.test.argument.left.name != binding.name ||
-    guard.test.argument.right.type != "Identifier" || !context.errorNames.has(guard.test.argument.right.name) ||
+    guard.test.argument.right.type != "Identifier" || guard.test.argument.right.name == binding.name ||
+    context.bindings.has(guard.test.argument.right.name) || !context.errorNames.has(guard.test.argument.right.name) ||
     guard.consequent.type != "BlockStatement" || guard.consequent.body.length != 1 || guard.consequent.directives.length > 0 ||
     guard.consequent.body[0].type != "ThrowStatement" || guard.consequent.body[0].argument?.type != "Identifier" ||
     guard.consequent.body[0].argument.name != binding.name) {

@@ -68,7 +68,6 @@ export function validateBackendModule(module, language, options = {}) {
   }
   if (!task011Languages.has(language)) rejectTypedErrors(module, language)
   validateRecordTargets(records, module.functions, language, module.location)
-  validateErrorTargets(errors, records, module.functions, language, module.location)
   if (!task008Languages.has(language)) rejectIterationStatements(module, language)
   if (!task007Languages.has(language)) rejectOptionalTypes(module, language)
   if (!task006Languages.has(language)) rejectCollectionTypes(module, language)
@@ -117,6 +116,7 @@ export function validateBackendModule(module, language, options = {}) {
       validateTargetBindingIdentifier(language, parameter.name, "parameter", parameter.location)
     }
   }
+  validateErrorTargets(errors, records, module.functions, language, module.location)
   validateScaffoldingNames(module, language)
   validateBackendTypes(module, language, {
     callEffects: options.visibleCallEffects,
