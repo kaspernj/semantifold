@@ -91,6 +91,21 @@ if (boxed !== null) { console.log(boxed) }
     }
   })
 
+  it("reparses and executes PHP recursive generic documentation with sibling inference evidence", async () => {
+    const module = parse({
+      filename: "program.ts",
+      language: "typescript",
+      source: `class Box<T> { constructor(readonly value: T) {} }
+function keep<T>(values: ReadonlyArray<Box<T | null>>, fallback: T): T { return fallback }
+console.log(keep([new Box<string | null>(null)], "kept"))
+`
+    })
+    const generated = generate({language: "php", module})
+
+    expect(parse({filename: "program.php", language: "php", source: generated}).functions).toHaveLength(1)
+    expect(await execute("php", generated)).toEqual("kept\n")
+  })
+
   it("reparses and executes optional generic records plus instantiated call results in every required toolchain", async () => {
     const source = `class Box<T> { constructor(readonly size: T) {} }
 class MaybeBox<T> { constructor(readonly value: T | null) {} }

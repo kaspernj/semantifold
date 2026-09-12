@@ -324,6 +324,33 @@ puts "ok"
     expect(meanings[1]).toEqual(meanings[0])
   })
 
+  it("keeps PHP function type-parameter ownership inside recursive applied-record argument contexts", () => {
+    const source = `<?php
+declare(strict_types=1);
+/** @template T */
+final class Box {
+    /** @param T $value */
+    public function __construct(private $value) {}
+    /** @return T */
+    public function value() { return $this->value; }
+}
+/** @template T
+ * @param list<Box<?T>> $values
+ * @param array<string,list<Box<?T>>> $byName
+ * @param T $fallback
+ * @return T
+ */
+function keep(array $values, array $byName, $fallback) { return $fallback; }
+echo keep([new Box(null)], ["nested" => [new Box(null)]], "kept"), PHP_EOL;
+`
+    const module = parse({filename: "program.php", language: "php", source})
+    const print = /** @type {import("../src/semantic/types.js").PrintStatement} */ (module.entryPoint.body.statements[0])
+    const call = /** @type {import("../src/semantic/types.js").CallExpression} */ (print.expression)
+
+    expect(call.resolution.typeArguments).toEqual(["string"])
+    rejected("php", "undeclared.php", source.replace("/** @template T\n * @param list", "/**\n * @param list"))
+  })
+
   it("preserves an optional binding as direct generic-call evidence", () => {
     const module = parse({
       filename: "optional-identity.ts",

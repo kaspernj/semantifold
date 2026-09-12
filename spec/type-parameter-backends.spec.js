@@ -210,6 +210,41 @@ console.log("ok")
     }
   })
 
+  it("reparses PHP optional type variables nested inside applied records, lists, and maps", () => {
+    const module = parse({
+      filename: "program.ts",
+      language: "typescript",
+      source: `class Box<T> { constructor(readonly value: T) {} }
+function keep<T>(values: ReadonlyArray<Box<T | null>>, byName: ReadonlyMap<string, ReadonlyArray<Box<T | null>>>, fallback: T): T { return fallback }
+console.log(keep([new Box<string | null>(null)], new Map([["nested", [new Box<string | null>(null)]]]), "kept"))
+`
+    })
+    const generated = generate({language: "php", module})
+
+    expect(generated).toContain("@param list<Box<?T>> $values")
+    expect(generated).toContain("@param array<string,list<Box<?T>>> $byName")
+    expect(semanticMeaning(parse({filename: "program.php", language: "php", source: generated})))
+      .toEqual(semanticMeaning(module))
+  })
+
+  it("reparses PHP recursive generic documentation when a present optional sibling supplies evidence", () => {
+    const module = parse({
+      filename: "program.ts",
+      language: "typescript",
+      source: `class Box<T> { constructor(readonly value: T) {} }
+function keep<T>(values: ReadonlyArray<Box<T | null>>, fallback: T | null): T | null { return fallback }
+const kept: string | null = keep([new Box<string | null>(null)], "kept")
+if (kept !== null) { console.log(kept) }
+`
+    })
+    const generated = generate({language: "php", module})
+
+    expect(generated).toContain("@param list<Box<?T>> $values")
+    expect(generated).toContain("@param ?T $fallback")
+    expect(semanticMeaning(parse({filename: "program.php", language: "php", source: generated})))
+      .toEqual(semanticMeaning(module))
+  })
+
   it("matches PHP documented generic-record fields to exact nullable native scalar carriers", () => {
     const module = parse({
       filename: "program.ts",

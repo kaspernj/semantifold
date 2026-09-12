@@ -182,6 +182,35 @@ export function instantiatedRecordFieldType(declaration, arguments_, index) {
  */
 export function knownCallReturnType(signature, arguments_) {
   if (signature.returnType.kind == "TypeReference" && signature.returnType.name == "void") return signature.returnType
+  const substitutions = knownCallSubstitutions(signature, arguments_)
+
+  return substitutions ? substituteValueType(signature.returnType, substitutions) : undefined
+}
+
+/**
+ * Applies conservative parser-known call evidence to every parameter context.
+ * Unresolved variables remain open for the language frontend to handle only in
+ * a matching lexical type-parameter scope.
+ * @param {{parameters: import("../semantic/types.js").Parameter[]}} signature - Declared signature.
+ * @param {(import("../semantic/types.js").SemanticFunctionReturnType | import("../semantic/types.js").ErrorType | undefined)[]} arguments_ - Parser-known argument types.
+ * @returns {import("../semantic/types.js").SemanticValueType[] | undefined} Substituted parameter contexts.
+ */
+export function knownCallParameterTypes(signature, arguments_) {
+  const substitutions = knownCallSubstitutions(signature, arguments_)
+
+  return substitutions
+    ? signature.parameters.map((parameter) => substituteValueType(parameter.type, substitutions))
+    : undefined
+}
+
+/**
+ * Collects conservative parser-known substitutions once for call context and
+ * result classification. Semantic validation remains authoritative.
+ * @param {{parameters: import("../semantic/types.js").Parameter[]}} signature - Declared signature.
+ * @param {(import("../semantic/types.js").SemanticFunctionReturnType | import("../semantic/types.js").ErrorType | undefined)[]} arguments_ - Parser-known argument types.
+ * @returns {Map<string, import("../semantic/types.js").SemanticValueType> | undefined} Compatible substitutions.
+ */
+function knownCallSubstitutions(signature, arguments_) {
   /** @type {Map<string, import("../semantic/types.js").SemanticValueType>} */
   const substitutions = new Map()
 
@@ -194,7 +223,8 @@ export function knownCallReturnType(signature, arguments_) {
       return undefined
     }
   }
-  return substituteValueType(signature.returnType, substitutions)
+
+  return substitutions
 }
 
 /**
@@ -226,6 +256,10 @@ function collectKnownSubstitutions(formal, actual, substitutions) {
     substitutions.set(formal.parameterId, actual)
     return true
   }
+  if (formal.kind == "OptionalType") {
+    return collectKnownSubstitutions(formal.valueType,
+      actual.kind == "OptionalType" ? actual.valueType : actual, substitutions)
+  }
   if (formal.kind != actual.kind) return false
   if (formal.kind == "TypeReference") return sameValueType(formal, actual)
   if (formal.kind == "RecordType" && actual.kind == "RecordType") {
@@ -237,9 +271,6 @@ function collectKnownSubstitutions(formal, actual, substitutions) {
   }
   if (formal.kind == "ListType" && actual.kind == "ListType") {
     return collectKnownSubstitutions(formal.elementType, actual.elementType, substitutions)
-  }
-  if (formal.kind == "OptionalType" && actual.kind == "OptionalType") {
-    return collectKnownSubstitutions(formal.valueType, actual.valueType, substitutions)
   }
   if (formal.kind == "MapType" && actual.kind == "MapType") {
     return collectKnownSubstitutions(formal.keyType, actual.keyType, substitutions) &&

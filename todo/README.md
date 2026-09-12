@@ -2,9 +2,9 @@
 
 ## Purpose and current baseline
 
-This folder is Semantifold's durable, dependency-ordered implementation backlog and delivered design record. The released baseline is `semantifold@0.3.0` / `v0.3.0` at commit `80e221d`; the current merged `master` baseline includes Task 013 plus its packed-consumer lifecycle correction through PRs 32/33 at `a78e513aa9929d8baaf1761079d5f486575bc8f0`, Task 009 through PRs 34/35 at `f828063f052a0be518cc320f280f4b68e399a88b`, Task 010 through PR #37 at `ba386ee85bdadd3772819215903d44dff4ad0c23`, and Task 011 through PR #38 at `4c5a0a9c70305fcc69077088e90a2971a05ad15d`. Repository and external evidence is recorded in [SOURCES.md](SOURCES.md).
+This folder is Semantifold's durable, dependency-ordered implementation backlog and delivered design record. The released baseline is `semantifold@0.3.0` / `v0.3.0` at commit `80e221d`; the current merged `master` baseline includes Task 013 plus its packed-consumer lifecycle correction through PRs 32/33 at `a78e513aa9929d8baaf1761079d5f486575bc8f0`, Task 009 through PRs 34/35 at `f828063f052a0be518cc320f280f4b68e399a88b`, Task 010 through PR #37 at `ba386ee85bdadd3772819215903d44dff4ad0c23`, Task 011 through PR #38 at `4c5a0a9c70305fcc69077088e90a2971a05ad15d`, and Task 012 through PR #39 at `18e67d0de048259d3570c60e141c16a1d26719e2`. Repository and external evidence is recorded in [SOURCES.md](SOURCES.md).
 
-Tasks 001–011, 013, and 015–025 are delivered. The merged language expansion includes C++ at `8d672f3`, Rust at `eca13c0`, browser Wasm at `754d76d`, Swift at `80019a9`, Kotlin/JVM at `f468eb9`, and the Task 025 aggregate gate in PR 27 at `78ff710081a6385ffc887a14c66f45b918998ff8`. Task 005 delivered general required calls and void functions for PHP, Ruby, JavaScript/JSDoc, TypeScript, and Java in PR 28 at `26982754e15b7e647662d2b094171e5f649b23b1`; Task 006 delivered recursive immutable collections for the same cohort in PR 29 at `7199418bd05d6234ae7a022ee26d93bb1ec935b3`; Task 007 delivered explicit optional presence/absence plus conservative branch-local narrowing in PR 30 at `5f0b500ba4899873d75821e07dd9b9e3e197fbc5`; Task 008 delivered ordered list iteration in PR 31 at `275711332157bbe8d2af6f4189e7849f344bf31f`; Task 013 delivered the terminal Tasks 001–008 original-five acceptance gate through PR 32 with its packed-consumer lifecycle correction in PR 33. Task 009 delivered closed records and member access through PRs 34/35 at `f828063f052a0be518cc320f280f4b68e399a88b`; Task 010 delivered explicit multi-file semantic programs through PR #37 at `ba386ee85bdadd3772819215903d44dff4ad0c23`; Task 011 delivered exact nominal typed unchecked errors through PR #38 at `4c5a0a9c70305fcc69077088e90a2971a05ad15d`. Task 012 is implemented locally with independent review, exact-head TensorBuzz CI, and merge pending. The other eight source languages retain the delivered Tasks 001–004 exact-two/scalar-return profile, and browser Wasm remains target-only. Tasks 014 and 026–037 remain roadmap work.
+Tasks 001–013 and 015–025 are delivered. The merged language expansion includes C++ at `8d672f3`, Rust at `eca13c0`, browser Wasm at `754d76d`, Swift at `80019a9`, Kotlin/JVM at `f468eb9`, and the Task 025 aggregate gate in PR 27 at `78ff710081a6385ffc887a14c66f45b918998ff8`. Task 005 delivered general required calls and void functions for PHP, Ruby, JavaScript/JSDoc, TypeScript, and Java in PR 28 at `26982754e15b7e647662d2b094171e5f649b23b1`; Task 006 delivered recursive immutable collections for the same cohort in PR 29 at `7199418bd05d6234ae7a022ee26d93bb1ec935b3`; Task 007 delivered explicit optional presence/absence plus conservative branch-local narrowing in PR 30 at `5f0b500ba4899873d75821e07dd9b9e3e197fbc5`; Task 008 delivered ordered list iteration in PR 31 at `275711332157bbe8d2af6f4189e7849f344bf31f`; Task 013 delivered the terminal Tasks 001–008 original-five acceptance gate through PR 32 with its packed-consumer lifecycle correction in PR 33. Task 009 delivered closed records and member access through PRs 34/35 at `f828063f052a0be518cc320f280f4b68e399a88b`; Task 010 delivered explicit multi-file semantic programs through PR #37 at `ba386ee85bdadd3772819215903d44dff4ad0c23`; Task 011 delivered exact nominal typed unchecked errors through PR #38 at `4c5a0a9c70305fcc69077088e90a2971a05ad15d`; Task 012 delivered invariant unbounded generics through PR #39 at `18e67d0de048259d3570c60e141c16a1d26719e2`. A PHP recursive-documentation correctness follow-up is implemented locally with coordinator-owned CI and merge pending. The other eight source languages retain the delivered Tasks 001–004 exact-two/scalar-return profile, and browser Wasm remains target-only. Tasks 014 and 026–037 remain roadmap work.
 
 The delivered language-baseline expansion keeps its small Tasks 001–004 IR contract. Tasks 005–008 are bounded original-five semantic layers; none makes every platform, legacy bridge, or later language block semantic progress.
 
@@ -103,7 +103,7 @@ Task 010 owns the shared semantic project model: multiple caller-supplied source
 
 ### Phase 3 — parametric abstraction (P3, conditional)
 
-- [012 — Type parameters and generic declarations](012-type-parameters-and-generics.md) — implemented locally; review/CI/merge pending
+- [012 — Type parameters and generic declarations](012-type-parameters-and-generics.md) — delivered through PR #39 at `18e67d0de048259d3570c60e141c16a1d26719e2`; PHP recursive-doc follow-up local
 
 Generic declarations follow concrete collection and record types. No frontend/backend may erase a semantic type parameter into `mixed`, `object`, a raw type, pointer, or dynamic value.
 
@@ -136,11 +136,11 @@ Legend: **implemented** describes the baseline, **core** gates Task 025, **later
 
 | Language/platform | Source frontend | Target role | Artifact profile | Parser/tool route | Initial scope |
 | --- | --- | --- | --- | --- | --- |
-| Ruby | implemented | implemented text | `.rb` | Prism | Tasks 001–012 (Task 012 local) |
-| JavaScript + JSDoc | implemented | implemented text | `.js` | Babel + comment parser | Tasks 001–012 (Task 012 local) |
-| TypeScript | implemented | implemented text | `.ts` | Babel | Tasks 001–012 (Task 012 local) |
-| PHP | implemented | implemented text | `.php` | `php-parser` | Tasks 001–012 (Task 012 local) |
-| Java | implemented | implemented text | `Main.java` | Lezer Java | Tasks 001–012 (Task 012 local) |
+| Ruby | implemented | implemented text | `.rb` | Prism | Tasks 001–012 |
+| JavaScript + JSDoc | implemented | implemented text | `.js` | Babel + comment parser | Tasks 001–012 |
+| TypeScript | implemented | implemented text | `.ts` | Babel | Tasks 001–012 |
+| PHP | implemented | implemented text | `.php` | `php-parser` | Tasks 001–012; recursive-doc follow-up local |
+| Java | implemented | implemented text | `Main.java` | Lezer Java | Tasks 001–012 |
 | Python | implemented 016 | implemented text 016 | `program.py` | `tree-sitter@0.25.1` + official `tree-sitter-python@0.25.0` | Tasks 001–004 |
 | C# | implemented 017 | implemented managed project 017 | `Program.cs`, `Semantifold.csproj` | `tree-sitter@0.25.1` + official `tree-sitter-c-sharp@0.23.5`; .NET 10 | Tasks 001–004 |
 | Go | implemented 024 | implemented native module 024 | `go.mod`, `main.go` | `tree-sitter@0.25.1` + official `tree-sitter-go@0.25.0`; Go 1.26 | Tasks 001–004 |
@@ -239,7 +239,7 @@ Dependencies in task files are authoritative. Existing IDs remain stable; numeri
 | [009](009-closed-records-and-member-access.md) | delivered | P2 | Closed records/members; delivered through PRs 34/35 at `f828063f052a0be518cc320f280f4b68e399a88b` | 002, 005, 006, 007 |
 | [010](010-multifile-modules-and-names.md) | delivered | P2 | Semantic projects/modules; delivered in PR #37 at `ba386ee85bdadd3772819215903d44dff4ad0c23` | 005, 009 |
 | [011](011-typed-errors-and-handling.md) | delivered | P2 | Typed errors; delivered via PR #38 at `4c5a0a9c70305fcc69077088e90a2971a05ad15d` | 004, 007, 009 |
-| [012](012-type-parameters-and-generics.md) | 3 | P3 | Generics; implemented locally with review/CI/merge pending | 005, 006, 009 |
+| [012](012-type-parameters-and-generics.md) | delivered | P3 | Generics; delivered through PR #39 at `18e67d0de048259d3570c60e141c16a1d26719e2`; PHP recursive-doc follow-up local | 005, 006, 009 |
 | [013](013-five-language-compatibility-acceptance.md) | delivered | P1 legacy | Original-five compatibility; delivered through PRs 32/33 at `a78e513aa9929d8baaf1761079d5f486575bc8f0` | 001–008 |
 | [014](014-ordered-map-iteration.md) | 2 | P2 | Ordered maps | 006, 008 |
 | [021](021-browser-webassembly-target.md) | delivered (P) | — | Browser Wasm binary target | 015 |
