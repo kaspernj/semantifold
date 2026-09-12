@@ -1,6 +1,7 @@
 // @ts-check
 
 import {emitExpression, emitType} from "./shared.js"
+import {emitEffectPrefixes, emitEffectSupport} from "./effects.js"
 
 /** @type {WeakMap<import("./writer.js").SourceWriter, Set<string>>} */
 const generatedNames = new WeakMap()
@@ -40,6 +41,7 @@ export function generateJava(module, writer) {
     writer.synthetic("\n", "Java program header separator", [module])
   }
 
+  emitEffectSupport(writer, module, "java", "top")
   errors.forEach((error, index) => {
     const path = `/errors/${index}`
 
@@ -123,6 +125,7 @@ export function generateJava(module, writer) {
     : "Main"
 
   writer.synthetic(`public final class ${className} {\n`, "Java class scaffolding", [module])
+  emitEffectSupport(writer, module, "java", "members")
 
   module.functions.forEach((declaration, functionIndex) => {
     if (functionIndex > 0) writer.synthetic("\n\n", "declaration separator", [declaration])
@@ -289,6 +292,8 @@ function emitBlock(writer, block, indent, path) {
  * @returns {void}
  */
 function emitStatement(writer, statement, indent, path) {
+  emitEffectPrefixes(writer, statement, indent, path, "java",
+    (expression, expressionPath) => emitExpression(writer, expression, expressionPath, "java", identity))
   if (statement.kind == "LocalDeclaration" || statement.kind == "AssignmentStatement") return emitLocal(writer, statement, indent, path)
   writer.synthetic(indent, "indentation", [statement], [path])
   if (statement.kind == "PrivateFieldWriteStatement") {

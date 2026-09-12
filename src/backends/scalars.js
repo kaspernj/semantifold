@@ -38,7 +38,11 @@ export function emitSemanticType(language, type, javaBoxed = false) {
   if (type.kind == "RecordType" || type.kind == "ReferenceType") {
     throw new TypeError("Nominal type emission requires declaration context.")
   }
+  if (type.kind == "OwnedResourceType" || type.kind == "OwnedReferenceType") {
+    throw new TypeError("Owned type emission requires declaration context.")
+  }
   if (type.kind == "TypeVariableReference") throw new TypeError("Type-variable emission requires declaration context.")
+  if (type.kind == "OptionalType") throw new TypeError("Optional type emission requires target-specific context.")
   if (type.kind == "TypeReference") {
     if (language == "java" && javaBoxed) {
       return type.name == "integer" ? "Integer" : type.name == "boolean" ? "Boolean" : type.name == "string" ? "String" : "void"

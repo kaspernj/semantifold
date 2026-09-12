@@ -55,6 +55,8 @@ export function iterationBindingType(type, location) {
   if (type.kind == "RecordType") return recordType(type.declarationId, location,
     type.arguments?.map((argument) => iterationBindingType(argument, location)))
   if (type.kind == "ReferenceType") return referenceType(type.declarationId, location)
+  if (type.kind == "OwnedResourceType") return ownedResourceType(type.resourceId, location)
+  if (type.kind == "OwnedReferenceType") return ownedReferenceType(type.declarationId, location)
 
   return optionalType(iterationBindingType(type.valueType, location), location, location)
 }
@@ -165,6 +167,46 @@ export function referenceType(declarationId, location) {
 }
 
 /**
+ * Builds one compiler-owned resource type with a parser-owned name range.
+ * @param {string} resourceId - Stable capability resource identity.
+ * @param {import("../semantic/types.js").SourceLocation} location - Resource type-name range.
+ * @returns {import("../semantic/types.js").OwnedResourceType} Owned resource type.
+ */
+export function ownedResourceType(resourceId, location) {
+  const type = {kind: /** @type {const} */ ("OwnedResourceType"), resourceId}
+  setParserRanges(type, {type: location})
+  return type
+}
+
+/**
+ * Builds one linear owned-reference type with a parser-owned name range.
+ * @param {string} declarationId - Stable owned class identity.
+ * @param {import("../semantic/types.js").SourceLocation} location - Class type-name range.
+ * @returns {import("../semantic/types.js").OwnedReferenceType} Owned reference type.
+ */
+export function ownedReferenceType(declarationId, location) {
+  const type = {declarationId, kind: /** @type {const} */ ("OwnedReferenceType")}
+  setParserRanges(type, {type: location})
+  return type
+}
+
+/**
+ * Builds parser-context signatures for compiler-authorized operations without exposing a source declaration.
+ * @param {readonly import("../semantic/types.js").EffectCapabilityDeclaration[]} capabilities - Authorized declarations.
+ * @param {import("../semantic/types.js").SourceLocation} location - Synthetic parser-context anchor.
+ * @returns {Map<string, {location: import("../semantic/types.js").SourceLocation, nameLocation: import("../semantic/types.js").SourceLocation, name: string, parameters: import("../semantic/types.js").Parameter[], returnType: import("../semantic/types.js").SemanticFunctionReturnType, typeParameters?: import("../semantic/types.js").TypeParameter[]}>} Signatures by source spelling.
+ */
+export function capabilityFunctionSignatures(capabilities, location) {
+  return new Map(capabilities.flatMap(({operations}) => operations).map((operation) => [operation.name, {
+    location,
+    name: operation.name,
+    nameLocation: location,
+    parameters: operation.parameters.map((parameter) => ({kind: /** @type {const} */ ("Parameter"), location, ...parameter})),
+    returnType: operation.returnType
+  }]))
+}
+
+/**
  * Builds one declaration-scoped type-variable reference.
  * @param {string} parameterId - Stable type-parameter identity.
  * @param {import("../semantic/types.js").SourceLocation} location - Exact reference range.
@@ -201,6 +243,8 @@ export function sameValueType(left, right) {
       leftArguments.every((argument, index) => sameValueType(argument, rightArguments[index]))
   }
   if (left.kind == "ReferenceType" && right.kind == "ReferenceType") return left.declarationId == right.declarationId
+  if (left.kind == "OwnedResourceType" && right.kind == "OwnedResourceType") return left.resourceId == right.resourceId
+  if (left.kind == "OwnedReferenceType" && right.kind == "OwnedReferenceType") return left.declarationId == right.declarationId
 
   return false
 }
@@ -319,6 +363,8 @@ function collectKnownSubstitutions(formal, actual, substitutions) {
   if (formal.kind != actual.kind) return false
   if (formal.kind == "TypeReference") return sameValueType(formal, actual)
   if (formal.kind == "ReferenceType" && actual.kind == "ReferenceType") return sameValueType(formal, actual)
+  if (formal.kind == "OwnedResourceType" && actual.kind == "OwnedResourceType") return sameValueType(formal, actual)
+  if (formal.kind == "OwnedReferenceType" && actual.kind == "OwnedReferenceType") return sameValueType(formal, actual)
   if (formal.kind == "RecordType" && actual.kind == "RecordType") {
     if (formal.declarationId != actual.declarationId || (formal.arguments?.length ?? 0) != (actual.arguments?.length ?? 0)) return false
 
@@ -346,7 +392,7 @@ function collectKnownSubstitutions(formal, actual, substitutions) {
  * @param {"javascript" | "php" | "ruby"} input.language - Comment profile.
  * @param {import("../semantic/types.js").SourceLocation} input.location - Exact type token range.
  * @param {import("../semantic/types.js").SourceLocation} input.ownerLocation - Owning declaration range.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} [input.records] - Available nominal declarations by source name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").EffectResourceDeclaration>} [input.records] - Available nominal declarations by source name.
  * @param {Map<string, import("../semantic/types.js").TypeParameter>} [input.typeParameters] - Declaration-scoped parameters by name.
  * @param {string} input.source - Complete parser input for exact subranges.
  * @param {string | undefined} input.sourceType - Exact comment-parser/Prism-owned type token.
@@ -405,7 +451,9 @@ export function documentedValueType({language, location, ownerLocation, records 
 
   if (directRecord?.id) return directRecord.kind == "ClassDeclaration"
     ? referenceType(directRecord.id, location)
-    : recordType(directRecord.id, location)
+    : directRecord.kind == "EffectResourceDeclaration"
+      ? ownedResourceType(directRecord.id, location)
+      : recordType(directRecord.id, location)
   const directTypeParameter = typeParameters.get(unwrappedName)
 
   if (directTypeParameter?.id) return typeVariable(directTypeParameter.id, location)
@@ -436,7 +484,7 @@ class DocumentedTypeParser {
    * @param {string} text - Parser-owned type text.
    * @param {import("../semantic/types.js").SourceLocation} location - Whole token location.
    * @param {string} source - Complete source.
-   * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} records - Available nominal declarations.
+   * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").EffectResourceDeclaration>} records - Available nominal declarations.
    * @param {Map<string, import("../semantic/types.js").TypeParameter>} typeParameters - Declaration-scoped parameters.
    */
   constructor(language, text, location, source, records, typeParameters) {
@@ -532,7 +580,9 @@ class DocumentedTypeParser {
     if (record?.id && this.text[this.offset] != "<" && this.text[this.offset] != "[") {
       const type = record.kind == "ClassDeclaration"
         ? referenceType(record.id, this.range(start, nameEnd))
-        : recordType(record.id, this.range(start, nameEnd))
+        : record.kind == "EffectResourceDeclaration"
+          ? ownedResourceType(record.id, this.range(start, nameEnd))
+          : recordType(record.id, this.range(start, nameEnd))
 
       if (this.language == "ruby" && this.consume("?")) {
         return optionalType(type, this.range(start, this.offset), this.typeRange(type, start, nameEnd))

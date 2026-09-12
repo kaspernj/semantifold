@@ -5,6 +5,8 @@ import {recordTypeSubstitutions, substituteValueType, typeContainsAnyVariable} f
 import {hasOnlyUnicodeScalars, isScalarTypeName, scalarType} from "./scalars.js"
 import {adaptedOperationFor} from "./operators.js"
 import {parserRangeFor} from "./provenance.js"
+import {validateEffectGraph} from "./effects.js"
+import {validateResourceLifetimes} from "./lifetime.js"
 
 const task005Languages = new Set(["php", "ruby", "javascript", "typescript", "java"])
 
@@ -13,6 +15,8 @@ const task005Languages = new Set(["php", "ruby", "javascript", "typescript", "ja
 /** @typedef {Map<string, import("./types.js").ErrorDeclaration>} ErrorRegistry */
 /** @type {WeakMap<RecordRegistry, ClassRegistry>} */
 const referenceClassesByRecordRegistry = new WeakMap()
+/** @type {WeakMap<RecordRegistry, Set<string>>} */
+const resourceIdsByRecordRegistry = new WeakMap()
 
 /**
  * @typedef Binding
@@ -52,10 +56,52 @@ const referenceClassesByRecordRegistry = new WeakMap()
  * @returns {import("./types.js").SemanticModule} Validated module.
  */
 export function validateParsedModule(module, language, visible = {}) {
+  normalizeParsedOwnedReferences(module)
   validateModuleShape(module, language, (detail, location) => unsupportedSyntax(language, detail, location))
-  validateModuleTypes(module, (code, detail, location) => semanticFailure(language, code, detail, location), true, visible)
+  /**
+   * Converts one parser failure into a located semantic diagnostic.
+   * @type {SemanticFail}
+   */
+  const fail = (code, detail, location) => semanticFailure(language, code, detail, location)
+
+  validateModuleTypes(module, fail, true, visible)
+  validateResourceLifetimes(module, fail)
 
   return module
+}
+
+/**
+ * Promotes parser-authored class spellings after all private field types are known.
+ * @param {import("./types.js").SemanticModule} module - Parser-authored module.
+ * @returns {void}
+ */
+function normalizeParsedOwnedReferences(module) {
+  const ownedClassIds = new Set()
+
+  for (const declaration of module.classes ?? []) {
+    const fields = declaration.fields.filter(({type}) => type?.kind == "OwnedResourceType")
+    if (fields.length != 1) continue
+    const field = /** @type {import("./types.js").PrivateField & {type: import("./types.js").OwnedResourceType}} */ (fields[0])
+
+    declaration.ownership = {fieldId: /** @type {string} */ (field.id), kind: "ownedResource", resourceId: field.type.resourceId}
+    ownedClassIds.add(/** @type {string} */ (declaration.id))
+  }
+  /** @type {unknown[]} */
+  const pending = [module]
+  /** @type {Set<object>} */
+  const seen = new Set()
+
+  while (pending.length > 0) {
+    const value = pending.pop()
+    if (!value || typeof value != "object" || seen.has(value)) continue
+    seen.add(value)
+    if (!Array.isArray(value) && Reflect.get(value, "kind") == "ReferenceType" &&
+      ownedClassIds.has(Reflect.get(value, "declarationId"))) Reflect.set(value, "kind", "OwnedReferenceType")
+    for (const [key, child] of Object.entries(value)) {
+      if (["location", "sourceProvenance"].includes(key)) continue
+      if (child && typeof child == "object") pending.push(child)
+    }
+  }
 }
 
 /**
@@ -66,7 +112,14 @@ export function validateParsedModule(module, language, visible = {}) {
  * @returns {void}
  */
 export function validateBackendTypes(module, language, visible = {}) {
-  validateModuleTypes(module, (_code, detail, location) => unsupportedCapability(language, detail, location), false, visible)
+  /**
+   * Converts one backend validation failure into an unsupported-capability diagnostic.
+   * @type {SemanticFail}
+   */
+  const fail = (_code, detail, location) => unsupportedCapability(language, detail, location)
+
+  validateModuleTypes(module, fail, false, visible)
+  validateResourceLifetimes(module, fail)
 }
 
 /**
@@ -152,13 +205,28 @@ function validateModuleTypes(module, fail, normalizeOperations, visible = {}) {
     functions.set(functionDeclaration.name, functionDeclaration)
   }
 
+  validateEffectGraph(module, functions, fail, normalizeOperations)
+  const capabilityResources = (module.capabilities ?? []).flatMap(({resources}) => resources)
+  const capabilityFailures = (module.capabilities ?? []).flatMap(({failures}) => failures)
+
+  resourceIdsByRecordRegistry.set(records, new Set(capabilityResources.map(({id}) => id)))
+  const existingErrorNames = new Set([...errors.values()].map(({name}) => name))
+  for (const failure of capabilityFailures) {
+    if (errors.has(failure.id) || existingErrorNames.has(failure.name)) {
+      fail("DUPLICATE_ERROR", `Duplicate capability failure '${failure.name}'.`, module.location)
+    }
+    errors.set(failure.id, /** @type {import("./types.js").ErrorDeclaration} */ (/** @type {unknown} */ (failure)))
+    existingErrorNames.add(failure.name)
+  }
+
   const loopOwners = prepareLoopIdentities(module, normalizeOperations, fail)
 
   const reservedValueNames = new Set([
     ...functions.keys(),
     ...[...records.values()].map((declaration) => declaration.name),
     ...[...classes.values()].map((declaration) => declaration.name),
-    ...[...errors.values()].map((declaration) => declaration.name)
+    ...[...errors.values()].map((declaration) => declaration.name),
+    ...capabilityResources.map(({name}) => name)
   ])
 
   const nominalNames = new Set()
@@ -166,6 +234,12 @@ function validateModuleTypes(module, fail, normalizeOperations, visible = {}) {
   for (const declaration of [...module.records ?? [], ...module.classes ?? [], ...module.errors ?? []]) {
     if (nominalNames.has(declaration.name)) {
       fail("DUPLICATE_BINDING", `Duplicate nominal declaration '${declaration.name}'.`, roleLocation(declaration, "name"))
+    }
+    nominalNames.add(declaration.name)
+  }
+  for (const declaration of [...capabilityResources, ...capabilityFailures]) {
+    if (nominalNames.has(declaration.name)) {
+      fail("DUPLICATE_BINDING", `Duplicate nominal declaration '${declaration.name}'.`, module.location)
     }
     nominalNames.add(declaration.name)
   }
@@ -185,6 +259,7 @@ function validateModuleTypes(module, fail, normalizeOperations, visible = {}) {
 
   validateBlock(module.entryPoint.body, entryScope, undefined, functions, records, errors, callEffects, fail,
     normalizeOperations, {owner: module.entryPoint, owners: loopOwners})
+  if (normalizeOperations) validateEffectGraph(module, functions, fail, true)
 }
 
 /**
@@ -271,7 +346,7 @@ function registerClassDeclarations(declarations, fail, normalizeOperations) {
   const names = new Set()
 
   for (let classIndex = 0; classIndex < declarations.length; classIndex += 1) {
-    const declaration = declarations[classIndex]
+    const declaration = /** @type {import("./types.js").ClassDeclaration} */ (declarations[classIndex])
 
     if (!declaration || declaration.kind != "ClassDeclaration" || !Array.isArray(declaration.fields) ||
       !Array.isArray(declaration.methods) || !declaration.constructor || declaration.constructor.kind != "ConstructorDeclaration") {
@@ -302,6 +377,28 @@ function registerClassDeclarations(declarations, fail, normalizeOperations) {
         fail("DUPLICATE_PRIVATE_FIELD", `Duplicate or invalid private field '${String(field.name)}'.`, roleLocation(field, "name"))
       }
       fieldNames.add(field.name)
+    }
+    const invalidOwnedField = declaration.fields.find(({type}) => containsOwnedType(type) && type.kind != "OwnedResourceType")
+
+    if (invalidOwnedField) {
+      fail("RESOURCE_ALIAS", `Class '${declaration.name}' may contain ownership only in one direct resource field.`, invalidOwnedField.location)
+    }
+    const ownedFields = declaration.fields.filter(({type}) => type?.kind == "OwnedResourceType")
+
+    if (ownedFields.length > 1) {
+      fail("RESOURCE_ALIAS", `Class '${declaration.name}' may own exactly one direct resource field.`, declaration.location)
+    }
+    if (ownedFields.length == 1) {
+      const field = /** @type {import("./types.js").PrivateField & {type: import("./types.js").OwnedResourceType}} */ (ownedFields[0])
+      const expected = {fieldId: /** @type {string} */ (field.id), kind: /** @type {const} */ ("ownedResource"),
+        resourceId: field.type.resourceId}
+
+      if (normalizeOperations) declaration.ownership = expected
+      else if (JSON.stringify(declaration.ownership) != JSON.stringify(expected)) {
+        fail("RESOURCE_TYPE_MISMATCH", `Class '${declaration.name}' has malformed resource ownership metadata.`, declaration.location)
+      }
+    } else if (declaration.ownership?.kind == "ownedResource") {
+      fail("RESOURCE_TYPE_MISMATCH", `Class '${declaration.name}' does not contain its declared resource field.`, declaration.location)
     }
 
     const constructorId = `${declaration.id}:constructor`
@@ -374,10 +471,13 @@ function validateClassDeclaration(declaration, functions, records, errors, callE
     }
     declareBinding(parameter.name, {knownValue: undefined, mutable: false, type}, roleLocation(parameter, "name"), constructorScope, fail)
     const statement = constructor.body.statements[index]
+    const initializer = statement?.kind == "PrivateFieldWriteStatement"
+      ? statement.expression.kind == "OwnedMoveExpression" ? statement.expression.expression : statement.expression
+      : undefined
 
     if (!statement || statement.kind != "PrivateFieldWriteStatement" || statement.field != field.id ||
       statement.receiver?.kind != "ReceiverExpression" || statement.receiver.classId != declaration.id ||
-      statement.expression?.kind != "IdentifierExpression" || statement.expression.name != parameter.name) {
+      initializer?.kind != "IdentifierExpression" || initializer.name != parameter.name) {
       fail("INCOMPLETE_INITIALIZATION", `Constructor for '${declaration.name}' must initialize '${field.name}' from its corresponding parameter.`,
         statement?.location ?? constructor.location)
     }
@@ -386,7 +486,10 @@ function validateClassDeclaration(declaration, functions, records, errors, callE
     errors, callEffects, fail, normalizeOperations, {owner: constructor, owners: loopOwners})
 
   for (const method of declaration.methods) {
-    if (syntacticBlockEffects(method.body, callEffects).size > 0) {
+    const unsupportedMethodEffects = [...syntacticBlockEffects(method.body, callEffects)]
+      .filter((id) => !/^capability:[0-9]+\/failure:[0-9]+$/u.test(id))
+
+    if (declaration.ownership?.kind != "ownedResource" && unsupportedMethodEffects.length > 0) {
       fail("UNSUPPORTED_STATEMENT", `Reference method '${method.name}' cannot expose unchecked-error effects in Task 033.`, method.location)
     }
     const scope = createScope(undefined, method.body.statements, reservedValueNames, new Set(), declaration)
@@ -399,6 +502,8 @@ function validateClassDeclaration(declaration, functions, records, errors, callE
     const returnType = validateReturnTypeReference(method.returnType, method.location, fail, records)
     const flow = validateBlock(method.body, scope, returnType, functions, records, errors, callEffects, fail,
       normalizeOperations, {owner: method, owners: loopOwners})
+
+    if (declaration.ownership?.kind == "ownedResource") ownedMethodResourceFlow(declaration, method, fail)
 
     if (!isVoidType(returnType) && flow.normal) {
       fail("MISSING_RETURN", `Method '${method.name}' does not return on every reachable path.`, method.location)
@@ -534,6 +639,9 @@ function validateRecordDeclarations(declarations, fail, normalizeOperations, vis
       }
       if (fieldNames.has(field.name)) fail("DUPLICATE_FIELD", `Duplicate field '${field.name}'.`, roleLocation(field, "name"))
       fieldNames.add(field.name)
+      if (containsOwnedType(field.type)) {
+        fail("RESOURCE_ALIAS", "Owned resources cannot be stored in immutable records.", field.location)
+      }
       validateValueTypeReference(field.type, field.location, fail, undefined, records, typeParameters)
     }
   }
@@ -633,12 +741,16 @@ function validateBlock(block, scope, returnType, functions, records, errors, cal
 
     if (statement.kind == "LocalDeclaration") {
       const declaredType = validateValueTypeReference(statement.type, statement.location, fail, undefined, records, scope.typeParameters)
+      statement.initializer = normalizeOwnedMove(statement.initializer, declaredType, normalizeOperations, fail)
       const initializerType = inferValueExpressionType(
         statement.initializer, scope, functions, records, fail, normalizeOperations, "an initializer", declaredType
       )
 
       scope.pending.delete(statement.name)
       if (!sameType(initializerType, declaredType)) {
+        if (initializerType.kind == "OptionalType" && declaredType.kind != "OptionalType") {
+          fail("FAILURE_ABSENCE_CONFLATION", "Optional absence cannot be coerced into a value or typed failure.", statement.initializer.location)
+        }
         fail("TYPE_MISMATCH", `Initializer type ${typeDescription(initializerType)}; expected ${typeDescription(declaredType)}.`, statement.initializer.location)
       }
       declareBinding(statement.name, {
@@ -654,6 +766,9 @@ function validateBlock(block, scope, returnType, functions, records, errors, cal
 
       if (binding.type.kind == "ErrorType") {
         fail("IMMUTABLE_ASSIGNMENT", `Cannot assign to immutable catch binding '${statement.target.name}'.`, statement.target.location)
+      }
+      if (binding.type.kind == "OwnedResourceType" || binding.type.kind == "OwnedReferenceType") {
+        fail("RESOURCE_ALIAS", "Owned resources cannot be reassigned or aliased.", statement.location)
       }
       const expressionType = inferValueExpressionType(
         statement.expression, scope, functions, records, fail, normalizeOperations, "an assignment", binding.type
@@ -680,6 +795,7 @@ function validateBlock(block, scope, returnType, functions, records, errors, cal
       const field = declaration.fields.find((candidate) => candidate.id == statement.field)
 
       if (!field) fail("ILLEGAL_PRIVATE_ACCESS", "Private field identity is not owned by the declaring class.", statement.location)
+      statement.expression = normalizeOwnedMove(statement.expression, field.type, normalizeOperations, fail)
       const expressionType = inferValueExpressionType(
         statement.expression, scope, functions, records, fail, normalizeOperations, "a private field assignment", field.type
       )
@@ -694,6 +810,9 @@ function validateBlock(block, scope, returnType, functions, records, errors, cal
     if (statement.kind == "PrintStatement") {
       const printedType = inferValueExpressionType(statement.expression, scope, functions, records, fail, normalizeOperations, "a print value")
 
+      if (printedType.kind == "OwnedResourceType" || printedType.kind == "OwnedReferenceType") {
+        fail("BORROW_ESCAPE", "Owned values cannot escape through printing or serialization.", statement.expression.location)
+      }
       if (printedType.kind != "TypeReference") {
         fail("TYPE_MISMATCH", "Collections and records cannot be printed directly.", statement.expression.location)
       }
@@ -701,7 +820,7 @@ function validateBlock(block, scope, returnType, functions, records, errors, cal
       continue
     }
     if (statement.kind == "ExpressionStatement") {
-      if (!statement.expression || !["CallExpression", "MethodCallExpression"].includes(statement.expression.kind)) {
+      if (!statement.expression || !["CallExpression", "EffectCallExpression", "MethodCallExpression"].includes(statement.expression.kind)) {
         fail("TYPE_MISMATCH", "Expression statement must contain a direct or receiver call.", statement.location)
       }
       const expressionType = inferExpressionType(statement.expression, scope, functions, records, fail, normalizeOperations)
@@ -744,6 +863,7 @@ function validateBlock(block, scope, returnType, functions, records, errors, cal
         if (!statement.expression) {
           fail("MISSING_RETURN_VALUE", `Function return requires a ${typeDescription(returnType)} value.`, statement.location)
         }
+        statement.expression = normalizeOwnedMove(statement.expression, returnType, normalizeOperations, fail)
         const actualType = inferValueExpressionType(
           statement.expression,
           scope,
@@ -1054,6 +1174,16 @@ function addExpressionEffects(target, expression, callEffects) {
     if (!value || typeof value != "object" || seen.has(value)) continue
     seen.add(value)
     if (Reflect.get(value, "kind") == "CallExpression") addAll(target, callEffects.get(Reflect.get(value, "callee")) ?? new Set())
+    if (Reflect.get(value, "kind") == "MethodCallExpression") {
+      const failures = Reflect.get(value, "failureIds")
+      if (Array.isArray(failures)) for (const failure of failures) if (typeof failure == "string") target.add(failure)
+    }
+    if (Reflect.get(value, "kind") == "EffectCallExpression") {
+      const resolution = Reflect.get(value, "resolution")
+      const failures = resolution && typeof resolution == "object" ? Reflect.get(resolution, "failureIds") : undefined
+
+      if (Array.isArray(failures)) for (const failure of failures) if (typeof failure == "string") target.add(failure)
+    }
     for (const [key, child] of Object.entries(value)) {
       if (["location", "sourceProvenance", "resolution"].includes(key)) continue
       if (Array.isArray(child)) pending.push(...child)
@@ -1287,6 +1417,11 @@ function validateTypeReference(type, location, fail, seen = new Set(), records =
 
   const candidate = /** @type {import("./types.js").SemanticFunctionReturnType} */ (type)
 
+  if (["ListType", "MapType", "OptionalType", "OrderedMapType", "RecordType"].includes(candidate.kind) &&
+    containsOwnedType(candidate)) {
+    fail("RESOURCE_ALIAS", "Owned resources and references cannot be nested in value or generic types.", typeLocation(candidate, location))
+  }
+
   if (candidate.kind == "TypeReference") {
     if (!isScalarTypeName(candidate.name) && candidate.name != "void") {
       fail("TYPE_MISMATCH", "Unsupported scalar or void return type.", typeLocation(candidate, location))
@@ -1348,6 +1483,22 @@ function validateTypeReference(type, location, fail, seen = new Set(), records =
       fail("UNKNOWN_CLASS", `Unknown reference class declaration '${String(candidate.declarationId)}'.`, typeLocation(candidate, location))
     }
 
+    return candidate
+  }
+  if (candidate.kind == "OwnedResourceType") {
+    if (Object.keys(candidate).filter((key) => key != "sourceProvenance").sort().join(",") != "kind,resourceId" ||
+      typeof candidate.resourceId != "string" || !resourceIdsByRecordRegistry.get(records)?.has(candidate.resourceId)) {
+      fail("RESOURCE_TYPE_MISMATCH", `Unknown owned resource '${String(candidate.resourceId)}'.`, typeLocation(candidate, location))
+    }
+    return candidate
+  }
+  if (candidate.kind == "OwnedReferenceType") {
+    const classes = referenceClassesFor(records)
+
+    if (Object.keys(candidate).filter((key) => key != "sourceProvenance").sort().join(",") != "declarationId,kind" ||
+      typeof candidate.declarationId != "string" || classes.get(candidate.declarationId)?.ownership?.kind != "ownedResource") {
+      fail("RESOURCE_TYPE_MISMATCH", `Unknown owned reference '${String(candidate.declarationId)}'.`, typeLocation(candidate, location))
+    }
     return candidate
   }
   if (candidate.kind == "ListType") {
@@ -1431,7 +1582,9 @@ function referenceClassesFor(records) {
  */
 function inferValueExpressionType(expression, scope, functions, records, fail, normalizeOperations, context, expectedType,
   inferCollectionElements = false) {
-  const type = inferExpressionType(expression, scope, functions, records, fail, normalizeOperations, expectedType, inferCollectionElements)
+  const allowOwnedBorrow = context == "an effect argument" || context == "a method receiver"
+  const type = inferExpressionType(expression, scope, functions, records, fail, normalizeOperations, expectedType,
+    inferCollectionElements, allowOwnedBorrow)
 
   if (type == "void") return fail("VOID_AS_VALUE", `Void call cannot be used as ${context}.`, expression.location)
   if (type.kind == "ErrorType") return fail("TYPE_MISMATCH", `Error value cannot be used as ${context}.`, expression.location)
@@ -1449,10 +1602,11 @@ function inferValueExpressionType(expression, scope, functions, records, fail, n
  * @param {boolean} normalizeOperations - Whether to replace transient frontend operation intent.
  * @param {import("./types.js").SemanticValueType} [expectedType] - Contextual collection type.
  * @param {boolean} [inferCollectionElements] - Whether a generic-call evidence pass may infer nonempty collection literals.
+ * @param {boolean} [allowOwnedBorrow] - Whether this exact call position admits an immediate borrow.
  * @returns {import("./types.js").SemanticBindingType | "void"} Expression type.
  */
 function inferExpressionType(expression, scope, functions, records, fail, normalizeOperations, expectedType,
-  inferCollectionElements = false) {
+  inferCollectionElements = false, allowOwnedBorrow = false) {
   if (expression.kind == "IdentifierExpression") return resolveBinding(expression.name, expression.location, scope, fail).type
 
   if (expression.kind == "ReceiverExpression") {
@@ -1475,6 +1629,38 @@ function inferExpressionType(expression, scope, functions, records, fail, normal
     if (!field) return fail("ILLEGAL_PRIVATE_ACCESS", "Private field identity is not owned by the declaring class.", expression.location)
 
     return field.type
+  }
+
+  if (expression.kind == "OwnedBorrowExpression") {
+    if (!allowOwnedBorrow) {
+      return fail("BORROW_ESCAPE", "BORROW_ESCAPE: Owned borrows are valid only as immediate capability arguments or method receivers.",
+        expression.location)
+    }
+    if (expression.mode != "shared" && expression.mode != "exclusive") {
+      return fail("INVALID_RESOURCE_BORROW", "INVALID_RESOURCE_BORROW: Owned borrow mode must be shared or exclusive.",
+        expression.location)
+    }
+    const borrowed = inferValueExpressionType(expression.expression, scope, functions, records, fail, normalizeOperations, "an owned borrow")
+
+    if (borrowed.kind != "OwnedResourceType" && borrowed.kind != "OwnedReferenceType") {
+      return fail("INVALID_RESOURCE_BORROW", "Borrowed expression must be an owned resource or owned reference.", expression.location)
+    }
+    if (!sameType(borrowed, expression.type)) {
+      fail("RESOURCE_TYPE_MISMATCH", "Borrow metadata does not match its resource place.", expression.location)
+    }
+    return borrowed
+  }
+
+  if (expression.kind == "OwnedMoveExpression") {
+    const moved = inferValueExpressionType(expression.expression, scope, functions, records, fail, normalizeOperations, "an owned move")
+
+    if (moved.kind != "OwnedResourceType" && moved.kind != "OwnedReferenceType") {
+      return fail("INVALID_RESOURCE_TRANSFER", "Moved expression must be an owned resource or owned reference.", expression.location)
+    }
+    if (!sameType(moved, expression.type)) {
+      fail("RESOURCE_TYPE_MISMATCH", "Move metadata does not match its resource place.", expression.location)
+    }
+    return moved
   }
 
   if (expression.kind == "ErrorMessageRead") {
@@ -1741,11 +1927,39 @@ function inferExpressionType(expression, scope, functions, records, fail, normal
 
     return scalarType("integer")
   }
+  if (expression.kind == "EffectCallExpression") {
+    if (!Array.isArray(expression.arguments) || expression.arguments.length != expression.resolution.parameterTypes.length) {
+      return fail("TYPE_MISMATCH", "Effect call argument count does not match its authorized operation.", expression.location)
+    }
+    const resourceFlow = expression.resolution.resourceFlow
+
+    if (resourceFlow.kind == "borrow" || resourceFlow.kind == "close") {
+      const borrow = expression.arguments[resourceFlow.parameterIndex]
+      const expectedMode = resourceFlow.kind == "close" ? "exclusive" : "shared"
+
+      if (borrow?.kind != "OwnedBorrowExpression" || borrow.mode != expectedMode) {
+        fail("INVALID_RESOURCE_BORROW", `INVALID_RESOURCE_BORROW: ${resourceFlow.kind} requires an immediate ${expectedMode} borrow.`,
+          borrow?.location ?? expression.location)
+      }
+    }
+    for (let index = 0; index < expression.arguments.length; index += 1) {
+      const expected = identityAsValueType(expression.resolution.parameterTypes[index], expression.arguments[index].location, fail)
+      const actual = inferValueExpressionType(expression.arguments[index], scope, functions, records, fail, normalizeOperations,
+        "an effect argument", expected)
+
+      if (!sameType(actual, expected)) {
+        fail("RESOURCE_TYPE_MISMATCH", `Effect argument type ${typeDescription(actual)}; expected ${typeDescription(expected)}.`,
+          expression.arguments[index].location)
+      }
+    }
+    if (expression.resolution.returnType == "void") return "void"
+    return identityAsValueType(expression.resolution.returnType, expression.location, fail)
+  }
   if (expression.kind == "ReferenceConstruction") {
     const referenceType = validateValueTypeReference(expression.reference, expression.location, fail, undefined, records,
       scope.typeParameters)
 
-    if (referenceType.kind != "ReferenceType") {
+    if (referenceType.kind != "ReferenceType" && referenceType.kind != "OwnedReferenceType") {
       return fail("TYPE_MISMATCH", "Reference construction requires a nominal reference class type.", expression.location)
     }
     const declaration = referenceClassesFor(records).get(referenceType.declarationId)
@@ -1763,6 +1977,7 @@ function inferExpressionType(expression, scope, functions, records, fail, normal
       validateValueTypeReference(parameter.type, parameter.location, fail, undefined, records))
 
     for (let index = 0; index < expression.arguments.length; index += 1) {
+      expression.arguments[index] = normalizeOwnedMove(expression.arguments[index], parameterTypes[index], normalizeOperations, fail)
       const actual = inferValueExpressionType(expression.arguments[index], scope, functions, records, fail,
         normalizeOperations, "a constructor argument", parameterTypes[index])
 
@@ -1786,7 +2001,7 @@ function inferExpressionType(expression, scope, functions, records, fail, normal
     const receiverType = inferValueExpressionType(expression.receiver, scope, functions, records, fail,
       normalizeOperations, "a method receiver")
 
-    if (receiverType.kind != "ReferenceType") {
+    if (receiverType.kind != "ReferenceType" && receiverType.kind != "OwnedReferenceType") {
       return fail("INVALID_METHOD_RECEIVER", "Method call receiver must have a reference class type.", expression.receiver.location)
     }
     const declaration = referenceClassesFor(records).get(receiverType.declarationId)
@@ -1807,6 +2022,7 @@ function inferExpressionType(expression, scope, functions, records, fail, normal
       validateValueTypeReference(parameter.type, parameter.location, fail, undefined, records))
 
     for (let index = 0; index < expression.arguments.length; index += 1) {
+      expression.arguments[index] = normalizeOwnedMove(expression.arguments[index], parameterTypes[index], normalizeOperations, fail)
       const actual = inferValueExpressionType(expression.arguments[index], scope, functions, records, fail,
         normalizeOperations, "a method argument", parameterTypes[index])
 
@@ -1816,11 +2032,38 @@ function inferExpressionType(expression, scope, functions, records, fail, normal
       }
     }
     const returnType = validateReturnTypeReference(method.returnType, method.location, fail, records)
+    const resourceFlow = declaration.ownership?.kind == "ownedResource"
+      ? ownedMethodResourceFlow(declaration, method, fail) : undefined
     const resolution = {
       declarationId: /** @type {string} */ (method.id),
       kind: /** @type {const} */ ("ResolvedMethodSignature"),
       parameterTypes: parameterTypes.map((type) => /** @type {import("./types.js").SemanticTypeIdentity} */ (typeIdentity(type))),
-      returnType: typeIdentity(returnType)
+      returnType: typeIdentity(returnType),
+      ...(resourceFlow ? {resourceFlow} : {})
+    }
+
+    if (expression.receiver.kind == "OwnedBorrowExpression" && resourceFlow) {
+      const expectedMode = resourceFlow.kind == "terminal" ? "exclusive" : "shared"
+
+      if (expression.receiver.mode != expectedMode) {
+        fail("INVALID_RESOURCE_BORROW", `INVALID_RESOURCE_BORROW: Owned method requires an immediate ${expectedMode} receiver borrow.`,
+          expression.receiver.location)
+      }
+    }
+
+    if (receiverType.kind == "OwnedReferenceType" && expression.receiver.kind != "OwnedBorrowExpression") {
+      if (!normalizeOperations) fail("INVALID_RESOURCE_BORROW", "Owned method receiver requires an immediate borrow.", expression.receiver.location)
+      if (expression.receiver.kind != "IdentifierExpression") {
+        fail("BORROW_ESCAPE", "Owned method receiver borrow must name one immediate binding.", expression.receiver.location)
+      }
+      expression.receiver = {
+        expression: expression.receiver,
+        kind: "OwnedBorrowExpression",
+        location: expression.receiver.location,
+        mode: resourceFlow?.kind == "terminal" ? "exclusive" : "shared",
+        sourceProvenance: expression.receiver.sourceProvenance,
+        type: receiverType
+      }
     }
 
     if (normalizeOperations) expression.resolution = resolution
@@ -1895,6 +2138,9 @@ function inferExpressionType(expression, scope, functions, records, fail, normal
     const parameterTypes = functionDeclaration.parameters.map((parameter) => validateValueTypeReference(
       parameter.type, parameter.location, fail, undefined, records, declarationTypeParameters
     ))
+    for (let index = 0; index < expression.arguments.length; index += 1) {
+      expression.arguments[index] = normalizeOwnedMove(expression.arguments[index], parameterTypes[index], normalizeOperations, fail)
+    }
     for (let index = 0; index < expression.arguments.length; index++) {
       const argument = expression.arguments[index]
       const expectedType = parameterTypes[index]
@@ -1926,6 +2172,9 @@ function inferExpressionType(expression, scope, functions, records, fail, normal
         }
         fail("GENERIC_INFERENCE_FAILURE", `Cannot infer type parameter '${parameter.name}' from call arguments.`, expression.location)
       }
+    }
+    if ([...substitutions.values()].some((type) => containsOwnedType(type))) {
+      fail("RESOURCE_ALIAS", "Owned resources and references cannot be inferred as generic arguments.", expression.location)
     }
     for (let index = 0; index < functionDeclaration.parameters.length; index += 1) {
       const expected = substituteValueType(functionDeclaration.parameters[index].type, substitutions)
@@ -2264,8 +2513,10 @@ function validateResolution(actual, expected, location, fail) {
  * @returns {void}
  */
 function validateReferenceResolution(actual, expected, location, fail, role) {
+  const expectedMethod = role == "method" ? /** @type {import("./types.js").ResolvedMethodSignature} */ (expected) : undefined
   const expectedKeys = role == "constructor" ? "declarationId,kind,parameterTypes" :
-    "declarationId,kind,parameterTypes,returnType"
+    expectedMethod?.resourceFlow ? "declarationId,kind,parameterTypes,resourceFlow,returnType" :
+      "declarationId,kind,parameterTypes,returnType"
 
   if (!actual || typeof actual != "object" || Array.isArray(actual) || Object.keys(actual).sort().join(",") != expectedKeys) {
     fail("TYPE_MISMATCH", `Reference ${role} call is missing an exact resolved ${role} signature.`, location)
@@ -2277,9 +2528,132 @@ function validateReferenceResolution(actual, expected, location, fail, role) {
     candidate.parameterTypes.some((type, index) => !validTypeIdentity(type, false) ||
       !sameTypeIdentity(type, expected.parameterTypes[index])) ||
     role == "method" && (!validTypeIdentity(candidate.returnType, true) ||
-      !sameTypeIdentity(candidate.returnType, /** @type {import("./types.js").ResolvedMethodSignature} */ (expected).returnType))) {
+      !sameTypeIdentity(candidate.returnType, /** @type {import("./types.js").ResolvedMethodSignature} */ (expected).returnType) ||
+      JSON.stringify(candidate.resourceFlow) != JSON.stringify(expectedMethod?.resourceFlow))) {
     fail("TYPE_MISMATCH", `Resolved ${role} signature does not match its declaration.`, location)
   }
+}
+
+/**
+ * Makes a source identifier's ownership transfer explicit in normalized IR.
+ * @param {import("./types.js").Expression} expression - Candidate transfer expression.
+ * @param {import("./types.js").SemanticFunctionReturnType} expected - Destination type.
+ * @param {boolean} normalize - Whether parser intent may be normalized.
+ * @param {SemanticFail} fail - Located failure.
+ * @returns {import("./types.js").Expression} Explicit expression.
+ */
+function normalizeOwnedMove(expression, expected, normalize, fail) {
+  if (expected.kind != "OwnedResourceType" && expected.kind != "OwnedReferenceType") return expression
+  if (expression.kind == "OwnedMoveExpression") return expression
+  if (expression.kind == "PrivateFieldRead") {
+    return fail("INVALID_RESOURCE_TRANSFER", "Private resource fields cannot be moved or exposed; transfer the owning reference.",
+      expression.location)
+  }
+  if (expression.kind != "IdentifierExpression") return expression
+  if (!normalize) return fail("RESOURCE_MOVE_REQUIRED", "Owned transfer requires an explicit move expression.", expression.location)
+
+  return {
+    expression,
+    kind: "OwnedMoveExpression",
+    location: expression.location,
+    sourceProvenance: expression.sourceProvenance,
+    type: expected
+  }
+}
+
+/**
+ * Classifies the deliberately bounded Task 034 receiver transition.
+ * @param {import("./types.js").ClassDeclaration} declaration - Owned class.
+ * @param {import("./types.js").MethodDeclaration} method - Candidate method.
+ * @param {SemanticFail} fail - Located failure.
+ * @returns {{kind: "preserve" | "terminal", terminalFailureId?: string}} Receiver transition.
+ */
+function ownedMethodResourceFlow(declaration, method, fail) {
+  const effectStatements = method.body.statements.flatMap((statement) => {
+    const expression = statement.kind == "ExpressionStatement" || statement.kind == "ReturnStatement" ? statement.expression :
+      statement.kind == "LocalDeclaration" ? statement.initializer : undefined
+
+    return expression?.kind == "EffectCallExpression" ? [expression] : []
+  })
+  const allEffects = methodEffectExpressions(method.body)
+
+  if (allEffects.length == 0) return {kind: "preserve"}
+  if (method.body.statements.length != 1 || effectStatements.length != 1 || allEffects.length != 1 ||
+    allEffects[0] !== effectStatements[0]) {
+    return fail("UNSUPPORTED_STATEMENT",
+      `Owned method '${method.name}' must contain one direct resource operation or only pure statements.`, method.location)
+  }
+  const operation = effectStatements[0]
+  const flow = operation.resolution.resourceFlow
+
+  if (flow.kind == "none" || flow.kind == "acquire") return {kind: "preserve"}
+  const argument = operation.arguments[flow.parameterIndex]
+
+  const owned = declaration.ownership?.kind == "ownedResource" ? declaration.ownership : undefined
+  const borrowedParameterName = argument?.kind == "OwnedBorrowExpression" && argument.expression.kind == "IdentifierExpression"
+    ? argument.expression.name : undefined
+  const borrowedParameter = borrowedParameterName !== undefined &&
+    method.parameters.some((parameter) => parameter.name == borrowedParameterName && containsOwnedType(parameter.type))
+
+  if (borrowedParameter) return {kind: "preserve"}
+
+  if (!argument || argument.kind != "OwnedBorrowExpression" || argument.expression.kind != "PrivateFieldRead" ||
+    argument.expression.field != owned?.fieldId) {
+    return fail("INVALID_RESOURCE_BORROW", `Owned method '${method.name}' must operate on its private resource field.`, operation.location)
+  }
+  return {kind: flow.kind == "close" ? "terminal" : "preserve", terminalFailureId: flow.terminalFailureId}
+}
+
+/**
+ * Collects every host-effect site nested in one owned method body.
+ * @param {import("./types.js").Block} block - Method body.
+ * @returns {import("./types.js").Expression[]} Effectful expressions.
+ */
+function methodEffectExpressions(block) {
+  /** @type {import("./types.js").Expression[]} */
+  const effects = []
+  const pending = [/** @type {unknown} */ (block)]
+  const seen = new Set()
+
+  while (pending.length > 0) {
+    const value = pending.pop()
+
+    if (!value || typeof value != "object" || seen.has(value)) continue
+    seen.add(value)
+    if (!Array.isArray(value) && (Reflect.get(value, "kind") == "EffectCallExpression" ||
+      typeof Reflect.get(value, "effectSiteId") == "string")) {
+      effects.push(/** @type {import("./types.js").Expression} */ (value))
+    }
+    for (const [key, child] of Object.entries(value)) {
+      if (["location", "resolution", "sourceProvenance"].includes(key)) continue
+      if (Array.isArray(child)) pending.push(...child)
+      else if (child && typeof child == "object") pending.push(child)
+    }
+  }
+  return effects
+}
+
+/**
+ * Rehydrates a closed capability type identity for ordinary expression checks.
+ * @param {import("./types.js").FunctionReturnTypeIdentity} identity - Closed identity.
+ * @param {import("./types.js").SourceLocation} location - Diagnostic location.
+ * @param {SemanticFail} fail - Located failure.
+ * @returns {import("./types.js").SemanticValueType} Value type.
+ */
+function identityAsValueType(identity, location, fail) {
+  if (typeof identity == "string") {
+    if (!isScalarTypeName(identity)) return fail("TYPE_MISMATCH", "Void or invalid identity used as an effect value type.", location)
+    return scalarType(identity)
+  }
+  if (!identity || typeof identity != "object" || Array.isArray(identity)) {
+    return fail("TYPE_MISMATCH", "Malformed effect type identity.", location)
+  }
+  const candidate = /** @type {Exclude<import("./types.js").SemanticTypeIdentity, string>} */ (identity)
+
+  if (candidate.kind == "OwnedResourceType") return {kind: "OwnedResourceType", resourceId: candidate.resourceId}
+  if (candidate.kind == "OwnedReferenceType") return {declarationId: candidate.declarationId, kind: "OwnedReferenceType"}
+  if (candidate.kind == "OptionalType") return {kind: "OptionalType", valueType: identityAsValueType(candidate.valueType, location, fail)}
+  return fail("TYPE_MISMATCH", "Unsupported effect type identity.", location)
 }
 
 /**
@@ -2297,6 +2671,8 @@ function typeIdentity(type) {
       /** @type {import("./types.js").SemanticTypeIdentity} */ (typeIdentity(argument)))} : {})
   }
   if (type.kind == "ReferenceType") return {declarationId: type.declarationId, kind: "ReferenceType"}
+  if (type.kind == "OwnedResourceType") return {kind: "OwnedResourceType", resourceId: type.resourceId}
+  if (type.kind == "OwnedReferenceType") return {declarationId: type.declarationId, kind: "OwnedReferenceType"}
   if (type.kind == "ListType") return {elementType: /** @type {import("./types.js").SemanticTypeIdentity} */ (typeIdentity(type.elementType)), kind: "ListType"}
   if (type.kind == "OptionalType") return {kind: "OptionalType", valueType: /** @type {import("./types.js").SemanticTypeIdentity} */ (typeIdentity(type.valueType))}
   if (type.kind == "OrderedMapType") return {
@@ -2351,6 +2727,10 @@ function validTypeIdentity(type, allowVoid, seen = new Set()) {
   } else if (candidate.kind == "ReferenceType" && Object.keys(candidate).sort().join(",") == "declarationId,kind") {
     valid = typeof candidate.declarationId == "string" &&
       /^(?:[a-z][a-z0-9._-]*#)?class:[0-9]+$/u.test(candidate.declarationId)
+  } else if (candidate.kind == "OwnedResourceType" && Object.keys(candidate).sort().join(",") == "kind,resourceId") {
+    valid = typeof candidate.resourceId == "string" && /^capability:[0-9]+\/resource:[0-9]+$/u.test(candidate.resourceId)
+  } else if (candidate.kind == "OwnedReferenceType" && Object.keys(candidate).sort().join(",") == "declarationId,kind") {
+    valid = typeof candidate.declarationId == "string" && /^(?:[a-z][a-z0-9._-]*#)?class:[0-9]+$/u.test(candidate.declarationId)
   }
   seen.delete(type)
 
@@ -2396,6 +2776,8 @@ function sameTypeIdentity(left, right) {
       leftArguments.every((argument, index) => sameTypeIdentity(argument, rightArguments[index]))
   }
   if (leftType.kind == "ReferenceType") return leftType.declarationId == rightType.declarationId
+  if (leftType.kind == "OwnedResourceType") return leftType.resourceId == rightType.resourceId
+  if (leftType.kind == "OwnedReferenceType") return leftType.declarationId == rightType.declarationId
   if (leftType.kind == "MapType" || leftType.kind == "OrderedMapType") {
     return sameTypeIdentity(leftType.keyType, rightType.keyType) && sameTypeIdentity(leftType.valueType, rightType.valueType)
   }
@@ -2424,12 +2806,39 @@ function typeDescription(type) {
   if (type.kind == "RecordType") return `record<${type.declarationId}${type.arguments?.length
     ? `, ${type.arguments.map(typeDescription).join(", ")}` : ""}>`
   if (type.kind == "ReferenceType") return `reference<${type.declarationId}>`
+  if (type.kind == "OwnedResourceType") return `owned-resource<${type.resourceId}>`
+  if (type.kind == "OwnedReferenceType") return `owned-reference<${type.declarationId}>`
   if (type.kind == "ErrorType") return `error<${type.declarationId}>`
   if (type.kind == "ListType") return `list<${typeDescription(type.elementType)}>`
   if (type.kind == "OptionalType") return `optional<${typeDescription(type.valueType)}>`
   if (type.kind == "OrderedMapType") return `ordered-map<string, ${typeDescription(type.valueType)}, insertion>`
 
   return `map<string, ${typeDescription(type.valueType)}>`
+}
+
+/**
+ * Checks whether a type graph contains linear ownership.
+ * @param {unknown} type - Candidate semantic type.
+ * @param {Set<object>} [seen] - Visited type containers.
+ * @returns {boolean} Whether ownership occurs at any depth.
+ */
+function containsOwnedType(type, seen = new Set()) {
+  if (!type || typeof type != "object" || Array.isArray(type) || seen.has(type)) return false
+  seen.add(type)
+  const kind = Reflect.get(type, "kind")
+
+  if (kind == "OwnedResourceType" || kind == "OwnedReferenceType") return true
+  if (kind == "ListType") return containsOwnedType(Reflect.get(type, "elementType"), seen)
+  if (kind == "OptionalType") return containsOwnedType(Reflect.get(type, "valueType"), seen)
+  if (kind == "MapType" || kind == "OrderedMapType") {
+    return containsOwnedType(Reflect.get(type, "keyType"), seen) || containsOwnedType(Reflect.get(type, "valueType"), seen)
+  }
+  if (kind == "RecordType") {
+    const arguments_ = Reflect.get(type, "arguments")
+
+    return Array.isArray(arguments_) && arguments_.some((argument) => containsOwnedType(argument, seen))
+  }
+  return false
 }
 
 /**

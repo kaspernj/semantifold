@@ -6,10 +6,12 @@ import {missingType, parseFailure, unsupportedSyntax} from "../diagnostic.js"
 import {locationFromOffsets, moduleLocation} from "../semantic/location.js"
 import {withAdaptedOperation} from "../semantic/operators.js"
 import {withParserRanges} from "../semantic/provenance.js"
+import {isTask034ResourceProbe} from "../semantic/capabilities.js"
+import {hasExactEffectSupport} from "../backends/effects.js"
 import {hasOnlyUnicodeScalars, scalarType} from "../semantic/scalars.js"
 import {typeContainsAnyVariable} from "../semantic/generics.js"
 import {requireSourceReturnType, requireSourceScalarType, sourceScalarType} from "./scalars.js"
-import {documentedValueType, instantiatedRecordFieldType, iterationBindingType, iterationOperandType, knownCallParameterTypes, knownCallReturnType, optionalType, orderedMapTypeFromMap, preservesGenericOptionalEvidence, recordType, referenceType, sameValueType} from "./types.js"
+import {capabilityFunctionSignatures, documentedValueType, instantiatedRecordFieldType, iterationBindingType, iterationOperandType, knownCallParameterTypes, knownCallReturnType, optionalType, orderedMapTypeFromMap, ownedResourceType, preservesGenericOptionalEvidence, recordType, referenceType, sameValueType} from "./types.js"
 const parser = new PhpParser.Engine({
   ast: {withPositions: true},
   parser: {extractDoc: true, suppressErrors: false}
@@ -42,7 +44,7 @@ const phpBinaryOperations = new Map([
  * @property {Map<string, import("../semantic/types.js").ErrorDeclaration>} errors - Error declarations by identity.
  * @property {Map<string, PhpFunctionSignature>} functions - Explicit module function signatures.
  * @property {Set<object>} [orderedMapDeclarations] - Exact local declarations selected by parser-owned pair iteration.
- * @property {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} recordNames - Nominal declarations by source name.
+ * @property {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").EffectResourceDeclaration>} recordNames - Nominal declarations by source name.
  * @property {Map<string, import("../semantic/types.js").RecordDeclaration>} records - Record declarations by identity.
  * @property {import("../semantic/types.js").SemanticFunctionReturnType | undefined} returnType - Enclosing return type.
  * @property {Map<string, import("../semantic/types.js").TypeParameter>} [typeParameters] - Declaration-scoped parameters.
@@ -305,6 +307,9 @@ function convertExpression(node, filename, source, context, expectedType, preser
       kind: /** @type {const} */ ("ReferenceConstruction"), location,
       reference: referenceType(/** @type {string} */ (declaration.id), classLocation)}, {class: classLocation})
     }
+    if (declaration.kind == "EffectResourceDeclaration") {
+      return unsupportedSyntax("php", "owned resource construction", nodeLocation(construction, filename, source))
+    }
     const contextualTypeArguments = expectedType?.kind == "RecordType" && expectedType.declarationId == declaration.id
       ? expectedType.arguments
       : undefined
@@ -452,7 +457,7 @@ function convertExpression(node, filename, source, context, expectedType, preser
           nodeLocation(unsupportedArgument, filename, source))
         return withParserRanges({arguments: call.arguments.map((argument, index) =>
           convertExpression(argument, filename, source, context, method?.parameters[index]?.type)),
-        kind: /** @type {const} */ ("MethodCallExpression"), location, method: method?.name ?? member.name,
+        kind: /** @type {const} */ ("MethodCallExpression"), location, method: method?.id ?? member.name,
         receiver: convertExpression(lookup.what, filename, source, context)}, {member: nodeLocation(member, filename, source)})
       }
     }
@@ -689,7 +694,7 @@ function convertReturn(node, filename, source, context) {
  * @param {string} name - Local name.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} recordNames - Nominal declarations by source name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").EffectResourceDeclaration>} recordNames - Nominal declarations by source name.
  * @param {Map<string, import("../semantic/types.js").TypeParameter>} [typeParameters] - Declaration-scoped parameters.
  * @returns {{immutable: boolean, type: import("../semantic/types.js").SemanticValueType} | undefined} Metadata when present.
  */
@@ -1088,7 +1093,7 @@ function convertBlock(node, filename, source, context) {
  * @param {import("../semantic/types.js").SourceLocation} location - Source location.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} [recordNames] - Nominal declarations by source name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").EffectResourceDeclaration>} [recordNames] - Nominal declarations by source name.
  * @returns {import("../semantic/types.js").SemanticValueType} Semantic type.
  */
 function convertType(sourceType, subject, location, filename, source, recordNames = new Map()) {
@@ -1104,7 +1109,9 @@ function convertType(sourceType, subject, location, filename, source, recordName
 
   if (declaration?.id) return declaration.kind == "ClassDeclaration"
     ? referenceType(declaration.id, typeLocation)
-    : recordType(declaration.id, typeLocation)
+    : declaration.kind == "EffectResourceDeclaration"
+      ? ownedResourceType(declaration.id, typeLocation)
+      : recordType(declaration.id, typeLocation)
 
   return requireSourceScalarType("php", typeName, subject, location, typeLocation)
 }
@@ -1222,7 +1229,7 @@ function nullableType(valueType, sourceType, ownerStart, filename, source) {
  * @param {import("../semantic/types.js").SourceLocation} location - Function location.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} [recordNames] - Nominal declarations by source name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").EffectResourceDeclaration>} [recordNames] - Nominal declarations by source name.
  * @returns {import("../semantic/types.js").SemanticFunctionReturnType} Semantic return type.
  */
 function convertReturnType(sourceType, subject, location, filename, source, recordNames = new Map()) {
@@ -1235,7 +1242,9 @@ function convertReturnType(sourceType, subject, location, filename, source, reco
 
   if (declaration?.id) return declaration.kind == "ClassDeclaration"
     ? referenceType(declaration.id, nodeLocation(sourceType, filename, source))
-    : recordType(declaration.id, nodeLocation(sourceType, filename, source))
+    : declaration.kind == "EffectResourceDeclaration"
+      ? ownedResourceType(declaration.id, nodeLocation(sourceType, filename, source))
+      : recordType(declaration.id, nodeLocation(sourceType, filename, source))
 
   return requireSourceReturnType("php", typeName, subject, location, nodeLocation(sourceType, filename, source))
 }
@@ -1245,7 +1254,7 @@ function convertReturnType(sourceType, subject, location, filename, source, reco
  * @param {import("php-parser").Function} node - PHP function node.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} recordNames - Nominal declarations by source name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").EffectResourceDeclaration>} recordNames - Nominal declarations by source name.
  * @param {string} ownerId - Stable function identity.
  * @returns {PhpFunctionSignature} Typed function signature.
  */
@@ -1346,7 +1355,7 @@ function convertFunctionSignature(node, filename, source, recordNames, ownerId) 
  * @param {string | undefined} nativeType - Native PHP type name.
  * @param {boolean} nativeNullable - Whether the native carrier has PHP's nullable marker.
  * @param {import("../semantic/types.js").SemanticValueType} documentedType - Exact semantic document type.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} records - Visible nominal declarations by name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").EffectResourceDeclaration>} records - Visible nominal declarations by name.
  * @returns {boolean} Whether the native carrier agrees without changing meaning.
  */
 function phpDocumentedNativeTypeMatches(nativeType, nativeNullable, documentedType, records) {
@@ -1380,7 +1389,7 @@ function phpDocumentedNativeTypeMatches(nativeType, nativeNullable, documentedTy
  * @param {import("php-parser").Function} node - PHP function node.
  * @param {PhpFunctionSignature} signature - Preconverted explicit signature.
  * @param {Map<string, PhpFunctionSignature>} functions - Module function signatures.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} recordNames - Nominal declarations by source name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").EffectResourceDeclaration>} recordNames - Nominal declarations by source name.
  * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} records - Record declarations by identity.
  * @param {Map<string, import("../semantic/types.js").ClassDeclaration>} classes - Reference classes by identity.
  * @param {Map<string, import("../semantic/types.js").ErrorDeclaration>} errorNames - Error declarations by source name.
@@ -1502,7 +1511,7 @@ function convertPhpError(node, declaration, filename, source) {
 /**
  * Reads one exact public PHP constructor or instance-method signature.
  * @param {import("php-parser").Method} node - Parser-owned method.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} nominalNames - Visible nominal declarations.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").EffectResourceDeclaration>} nominalNames - Visible nominal declarations.
  * @param {string} ownerId - Stable callable identity.
  * @param {boolean} constructor - Whether this is the sole constructor.
  * @param {string} filename - Source filename.
@@ -1589,7 +1598,7 @@ function convertPhpClassCallableSignature(node, nominalNames, ownerId, construct
  * Converts the bounded final/private-field PHP reference-class profile.
  * @param {import("php-parser").Class} node - Parser class.
  * @param {import("../semantic/types.js").ClassDeclaration} declaration - Predeclared class identity.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} nominalNames - Visible nominal declarations.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").EffectResourceDeclaration>} nominalNames - Visible nominal declarations.
  * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} records - Records by identity.
  * @param {Map<string, import("../semantic/types.js").ClassDeclaration>} classes - Classes by identity.
  * @param {Map<string, PhpFunctionSignature>} functions - Top-level signatures.
@@ -1881,13 +1890,14 @@ function convertPrint(node, filename, source, context) {
  * @param {object} input - Parser input.
  * @param {string} input.filename - Source filename.
  * @param {string} input.source - Source text.
+ * @param {readonly import("../semantic/types.js").EffectCapabilityDeclaration[]} [input.capabilities] - Compiler-authorized declarations.
  * @param {{isEntry: boolean, functions: Map<string, import("../semantic/types.js").FunctionDeclaration>, records: Map<string, import("../semantic/types.js").RecordDeclaration>, errors?: Map<string, import("../semantic/types.js").ErrorDeclaration>}} [input.program] - Resolved program imports and entry role.
  * @returns {import("../semantic/types.js").SemanticModule} Semantic module.
  */
-export function parsePhp({filename, source, program: programContext}) {
+export function parsePhp({capabilities = [], filename, source, program: programContext}) {
   const program = parsePhpProgram(filename, source)
   validateDeclareNodes(program.children, filename, source)
-  let body = program.children
+  let body = task034PhpBody(program.children, capabilities, filename, source)
 
   if (programContext) {
     inspectPhpModule({filename, source})
@@ -1926,9 +1936,13 @@ export function parsePhp({filename, source, program: programContext}) {
     location: nodeLocation(node, filename, source), methods: [],
     name: typeof node.name == "string" ? node.name : node.name.name
   }))
-  const recordNames = /** @type {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} */ (
+  const recordNames = /** @type {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").EffectResourceDeclaration>} */ (
     new Map(programContext?.records ?? []))
+  for (const resource of capabilities.flatMap(({resources}) => resources)) recordNames.set(resource.name, resource)
   const errorNames = new Map(programContext?.errors ?? [])
+  for (const failure of capabilities.flatMap(({failures}) => failures)) {
+    errorNames.set(failure.name, /** @type {import("../semantic/types.js").ErrorDeclaration} */ (/** @type {unknown} */ (failure)))
+  }
   for (const declaration of errorDeclarations) errorNames.set(declaration.name, declaration)
   const errorsById = new Map([...errorNames.values()].map((declaration) => [/** @type {string} */ (declaration.id), declaration]))
   const errors = errorNodes.map((node, index) => convertPhpError(node, errorDeclarations[index], filename, source))
@@ -1942,7 +1956,8 @@ export function parsePhp({filename, source, program: programContext}) {
     /** @type {Map<string, import("../semantic/types.js").RecordDeclaration>} */ (/** @type {unknown} */ (recordNames)), filename, source))
   const functionNodes = /** @type {import("php-parser").Function[]} */ (body.filter((node) => node.kind == "function"))
   const signatures = functionNodes.map((node, index) => convertFunctionSignature(node, filename, source, recordNames, `function:${index}`))
-  const functionSignatures = new Map([...(programContext?.functions ?? [])].map(([localName, declaration]) => [localName, {
+  const functionSignatures = new Map([...capabilityFunctionSignatures(capabilities, moduleLocation(filename, source)),
+    ...(programContext?.functions ?? [])].map(([localName, declaration]) => [localName, {
     location: declaration.location,
     name: localName,
     nameLocation: declaration.location,
@@ -1998,6 +2013,42 @@ export function parsePhp({filename, source, program: programContext}) {
     ...(classes.length > 0 ? {classes} : {}),
     ...(records.length > 0 ? {records} : {})
   }
+}
+
+/**
+ * Removes exact protected PHP probe support before portable conversion.
+ * @param {import("php-parser").Statement[]} body - Parsed top-level statements.
+ * @param {readonly import("../semantic/types.js").EffectCapabilityDeclaration[]} capabilities - Authorized declarations.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @returns {import("php-parser").Statement[]} Portable statements.
+ */
+function task034PhpBody(body, capabilities, filename, source) {
+  if (!isTask034ResourceProbe(capabilities)) return body
+  const start = body.findIndex((node) => node.leadingComments?.some(({value}) => value == "/* semantifold-task034-support */"))
+
+  if (start < 0) return body
+  if (!hasExactEffectSupport(source, "php")) {
+    return unsupportedSyntax("php", "malformed protected Task 034 support", nodeLocation(body[start], filename, source))
+  }
+  const expected = [
+    ["class", "ProbeOperationFailure"], ["class", "ProbeAcquireFailure"], ["class", "ProbeReadFailure"],
+    ["class", "ProbeCloseFailure"], ["class", "ProbeResourceClosed"], ["class", "ProbeResource"],
+    ["expressionstatement", undefined], ["function", "probeEffect"], ["function", "probeAcquire"],
+    ["function", "probeRead"], ["function", "probeClose"], ["function", "probeTrace"]
+  ]
+  const matches = expected.every(([kind, name], index) => {
+    const node = body[start + index]
+    const rawName = node ? Reflect.get(node, "name") : undefined
+    const actualName = typeof rawName == "string" ? rawName : rawName && typeof rawName == "object" ? Reflect.get(rawName, "name") : undefined
+    return node?.kind == kind && actualName == name
+  })
+  const next = body[start + expected.length]
+
+  if (!matches || next && !next.leadingComments?.some(({value}) => value == "/* semantifold-task034-support-end */")) {
+    return unsupportedSyntax("php", "malformed protected Task 034 support", nodeLocation(body[start], filename, source))
+  }
+  return [...body.slice(0, start), ...body.slice(start + expected.length)]
 }
 
 /**

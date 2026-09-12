@@ -1,6 +1,6 @@
 # 033 — Reference classes, methods, and constructors
 
-- Status: `implemented and proposed in PR #43; independent review, TensorBuzz CI, and merge pending`
+- Status: `delivered through PR #43 at exact head 98a9fa5bb1048fbe44e798acdefd65b9d6d2560e; merged as f2e7f44aa8065f785c314b66e1f1d55992b7c998`
 - Phase/priority: Phase S / P1
 - Dependencies: [005-general-function-signatures-and-calls.md](005-general-function-signatures-and-calls.md), [009-closed-records-and-member-access.md](009-closed-records-and-member-access.md)
 
@@ -69,4 +69,6 @@ The candidate adds parser-neutral nominal `ClassDeclaration`, `ReferenceType`, e
 
 The smallest correct adoption cohort is PHP, Ruby, JavaScript/JSDoc, TypeScript, and Java: these are the existing general-function, record, optional, generic, and loop cohort and all have parser-backed canonical class forms plus real runtime/compiler acceptance. The other eight source roles and browser Wasm advertise `referenceClasses: false` and reject the capability transactionally. This task remains single-module; both Task 010 program APIs reject class-bearing modules before resolution or output. Constructors and methods may handle Task 011 errors internally but cannot expose unchecked-error effects through receiver calls, and target lifecycle/protocol hooks remain reserved.
 
-Focused semantic, frontend, backend-validation, backend/round-trip, provenance/mapping, registry, cross-language behavior, and real-toolchain specs pass individually. They cover fresh independent state, aliasing, value- and void-returning methods, reference passage, receiver-before-argument and constructor argument order, complete initialization, privacy, exact resolution/signatures, deterministic output, unsupported roles, inheritance/reopening/reflection exclusions, and malformed caller IR. The implementation is proposed in PR #43; aggregate TensorBuzz CI, independent review, merge, and release remain coordinator-owned.
+Focused semantic, frontend, backend-validation, backend/round-trip, provenance/mapping, registry, cross-language behavior, and real-toolchain specs pass individually. They cover fresh independent state, aliasing, value- and void-returning methods, reference passage, receiver-before-argument and constructor argument order, complete initialization, privacy, exact resolution/signatures, deterministic output, unsupported roles, inheritance/reopening/reflection exclusions, and malformed caller IR.
+
+Task 033 was delivered through PR #43 at exact head `98a9fa5bb1048fbe44e798acdefd65b9d6d2560e` and merge commit `f2e7f44aa8065f785c314b66e1f1d55992b7c998`. Exact-head TensorBuzz group `9e842b5e-30d2-493a-8f6d-051ee631077d` succeeded; the sole automatic Codex review completed, all material threads were resolved, all PR routes were retired, and post-merge acceptance completed 24/24 focused checks plus 11/11 registry checks.

@@ -1,6 +1,7 @@
 // @ts-check
 
 import {emitExpression, emitType, requiresCanonicalZeroRendering} from "./shared.js"
+import {emitEffectPrefixes, emitEffectSupport} from "./effects.js"
 
 /**
  * Emits an independently executable JavaScript program with JSDoc types.
@@ -15,6 +16,7 @@ export function generateJavaScript(module, writer) {
   const errors = module.errors ?? []
 
   emitProgramImports(module, writer)
+  emitEffectSupport(writer, module, "javascript")
 
   errors.forEach((error, errorIndex) => {
     const path = `/errors/${errorIndex}`
@@ -320,6 +322,8 @@ function emitBlock(writer, block, indent, blockPath, canonicalizeZero) {
  * @returns {void}
  */
 function emitStatement(writer, statement, indent, path, canonicalizeZero) {
+  emitEffectPrefixes(writer, statement, indent, path, "javascript",
+    (expression, expressionPath) => emitExpression(writer, expression, expressionPath, "javascript", identity))
   if (statement.kind == "LocalDeclaration" || statement.kind == "AssignmentStatement") return emitLocal(writer, statement, indent, path)
 
   writer.synthetic(indent, "indentation", [statement], [path])

@@ -397,10 +397,16 @@ function validateReferenceClassTargets(classes, records, errors, functions, lang
     const keys = declaration && typeof declaration == "object" && !Array.isArray(declaration)
       ? Object.keys(declaration).filter((key) => key != "sourceProvenance").sort().join(",") : ""
 
-    if (!declaration || declaration.kind != "ClassDeclaration" || keys != "constructor,fields,id,kind,location,methods,name" ||
+    if (!declaration || declaration.kind != "ClassDeclaration" ||
+      !["constructor,fields,id,kind,location,methods,name", "constructor,fields,id,kind,location,methods,name,ownership"].includes(keys) ||
       !isDenseArray(declaration.fields) || declaration.fields.length == 0 || !isDenseArray(declaration.methods) ||
       declaration.id != `class:${classIndex}`) {
       unsupportedCapability(language, "missing or invalid reference class declaration", location)
+    }
+    if (declaration.ownership !== undefined && declaration.ownership?.kind != "ordinary" &&
+      (declaration.ownership?.kind != "ownedResource" || typeof declaration.ownership.fieldId != "string" ||
+      typeof declaration.ownership.resourceId != "string")) {
+      unsupportedCapability(language, "malformed reference class resource ownership", location)
     }
     const declarationLocation = requireSemanticLocation(declaration.location, language, "reference class declaration location", moduleLocation)
 
@@ -1366,7 +1372,7 @@ function validateStatement(statement, language, ownerLocation, loopContext, acti
     const expression = Reflect.get(statement, "expression")
 
     if (!expression || typeof expression != "object" ||
-      !["CallExpression", "MethodCallExpression"].includes(String(Reflect.get(expression, "kind")))) {
+      !["CallExpression", "EffectCallExpression", "MethodCallExpression"].includes(String(Reflect.get(expression, "kind")))) {
       unsupportedCapability(language, "expression statement other than a direct or receiver call", location)
     }
     validateExpression(expression, language, location, false, new Set(), externalDeclarationIds)
@@ -1566,7 +1572,7 @@ function validateErrorTypeShape(/** @type {unknown} */ type,
     ? /** @type {Record<string, unknown>} */ (type) : {}
 
   if (candidate.kind != "ErrorType" || fields != "declarationId,kind" || typeof candidate.declarationId != "string" ||
-    !/^(?:[a-z][a-z0-9._-]*#)?error:[0-9]+$/u.test(candidate.declarationId)) {
+    !/^(?:(?:[a-z][a-z0-9._-]*#)?error:[0-9]+|capability:[0-9]+\/failure:[0-9]+)$/u.test(candidate.declarationId)) {
     unsupportedCapability(language, "missing or invalid error type", ownerLocation)
   }
 }
@@ -1698,6 +1704,15 @@ function validateExpression(expression, language, ownerLocation, allowJavaNegate
     validateExpression(candidate.receiver, language, location, false, expressionPath, externalDeclarationIds)
     return
   }
+  if (candidate.kind == "OwnedMoveExpression" || candidate.kind == "OwnedBorrowExpression") {
+    const fields = Object.keys(candidate).filter((key) => key != "sourceProvenance").sort().join(",")
+    const expected = candidate.kind == "OwnedMoveExpression" ? "expression,kind,location,type" : "expression,kind,location,mode,type"
+
+    if (fields != expected || candidate.expression.kind != "IdentifierExpression" && candidate.expression.kind != "ReceiverExpression" &&
+      candidate.expression.kind != "PrivateFieldRead") unsupportedCapability(language, `malformed ${candidate.kind}`, location)
+    validateExpression(candidate.expression, language, location, false, expressionPath, externalDeclarationIds)
+    return
+  }
   if (candidate.kind == "IntegerLiteral") {
     if (!Number.isSafeInteger(candidate.value)) {
       unsupportedCapability(language, "non-safe integer literal", location)
@@ -1809,11 +1824,25 @@ function validateExpression(expression, language, ownerLocation, allowJavaNegate
     }
     return
   }
+  if (candidate.kind == "EffectCallExpression") {
+    const fields = Object.keys(candidate).filter((key) => key != "sourceProvenance").sort().join(",")
+    const resolution = candidate.resolution
+
+    if (fields != "arguments,effectSiteId,kind,location,operation,resolution" || !isDenseArray(candidate.arguments) ||
+      typeof candidate.effectSiteId != "string" || typeof candidate.operation != "string" || !resolution ||
+      resolution.kind != "ResolvedEffectOperationSignature" || resolution.operationId != candidate.operation ||
+      !isDenseArray(resolution.parameterTypes) || !isDenseArray(resolution.failureIds) || resolution.effects?.join(",") != "host") {
+      unsupportedCapability(language, "malformed authorized effect call", location)
+    }
+    for (const argument of candidate.arguments) validateExpression(argument, language, location, false, expressionPath, externalDeclarationIds)
+    return
+  }
   if (candidate.kind == "ReferenceConstruction") {
     const fields = Object.keys(candidate).filter((key) => key != "sourceProvenance").sort().join(",")
     const resolution = candidate.resolution
 
-    if (fields != "arguments,kind,location,reference,resolution" || candidate.reference?.kind != "ReferenceType" ||
+    if (fields != "arguments,kind,location,reference,resolution" ||
+      candidate.reference?.kind != "ReferenceType" && candidate.reference?.kind != "OwnedReferenceType" ||
       typeof candidate.reference.declarationId != "string" || !isDenseArray(candidate.arguments) ||
       !resolution || resolution.kind != "ResolvedConstructorSignature" ||
       resolution.declarationId != `${candidate.reference.declarationId}:constructor` || !isDenseArray(resolution.parameterTypes)) {
@@ -1828,10 +1857,17 @@ function validateExpression(expression, language, ownerLocation, allowJavaNegate
     const fields = Object.keys(candidate).filter((key) => key != "sourceProvenance").sort().join(",")
     const resolution = candidate.resolution
 
-    if (fields != "arguments,kind,location,method,receiver,resolution" || typeof candidate.method != "string" ||
+    const effectfulFields = "arguments,effectSiteId,effects,failureIds,kind,location,method,receiver,resolution"
+    const pureFields = "arguments,kind,location,method,receiver,resolution"
+
+    if (![pureFields, effectfulFields].includes(fields) || typeof candidate.method != "string" ||
       !isDenseArray(candidate.arguments) || !resolution || resolution.kind != "ResolvedMethodSignature" ||
       resolution.declarationId != candidate.method || !isDenseArray(resolution.parameterTypes) ||
-      !Object.hasOwn(resolution, "returnType")) {
+      !Object.hasOwn(resolution, "returnType") || Object.hasOwn(resolution, "resourceFlow") &&
+      (!resolution.resourceFlow || !["preserve", "terminal"].includes(String(resolution.resourceFlow.kind)) ||
+        Object.hasOwn(resolution.resourceFlow, "terminalFailureId") && typeof resolution.resourceFlow.terminalFailureId != "string") ||
+      fields == effectfulFields &&
+      (typeof candidate.effectSiteId != "string" || candidate.effects?.join(",") != "host" || !isDenseArray(candidate.failureIds))) {
       unsupportedCapability(language, "malformed receiver call or resolved method signature", location)
     }
     validateExpression(candidate.receiver, language, location, false, expressionPath, externalDeclarationIds)
@@ -1984,6 +2020,16 @@ export function emitType(writer, type, path, language, javaBoxed = false) {
     })
     return
   }
+  if (type.kind == "OwnedResourceType") {
+    const resource = writer.resourceForId(type.resourceId)
+    writer.mapped(resource.name, {mappingKind: "exact", name: resource.name, node: type, path, role: "type"})
+    return
+  }
+  if (type.kind == "OwnedReferenceType") {
+    const declaration = writer.classForId(type.declarationId)
+    writer.mapped(writer.classNameForId(type.declarationId), {mappingKind: "exact", name: declaration.name, node: type, path, role: "type"})
+    return
+  }
   if (type.kind == "TypeReference") {
     const spelling = language == "java" && javaBoxed
       ? type.name == "integer" ? "Integer" : type.name == "boolean" ? "Boolean" : type.name == "string" ? "String" : "void"
@@ -2028,6 +2074,12 @@ export function emitType(writer, type, path, language, javaBoxed = false) {
  * @returns {void}
  */
 export function emitExpression(writer, expression, path, language, emitIdentifier) {
+  const effectTemporary = writer.effectReplacementName(expression)
+
+  if (effectTemporary) {
+    writer.synthetic(emitIdentifier(effectTemporary), "exactly-once effect temporary read", [expression], [path])
+    return
+  }
   if (expression.kind == "IdentifierExpression") {
     writer.mapped(emitIdentifier(expression.name), {mappingKind: "exact", node: expression, path, role: "name"})
     return
@@ -2035,6 +2087,25 @@ export function emitExpression(writer, expression, path, language, emitIdentifie
   if (expression.kind == "ReceiverExpression") {
     writer.mapped(language == "php" ? "$this" : language == "ruby" ? "self" : "this",
       {mappingKind: "exact", node: expression, path, role: "receiver"})
+    return
+  }
+  if (expression.kind == "OwnedMoveExpression" || expression.kind == "OwnedBorrowExpression") {
+    if (expression.expression.kind == "IdentifierExpression") {
+      writer.mapped(emitIdentifier(expression.expression.name), {mappingKind: "exact", name: expression.expression.name,
+        node: expression, path, role: "name"})
+    } else if (expression.expression.kind == "ReceiverExpression") {
+      writer.mapped(language == "php" ? "$this" : language == "ruby" ? "self" : "this",
+        {mappingKind: "exact", node: expression, path, role: "receiver"})
+    } else {
+      const field = writer.privateFieldForId(expression.expression.field)
+
+      if (language != "ruby") {
+        emitExpression(writer, expression.expression.receiver, `${path}/expression/receiver`, language, emitIdentifier)
+      }
+      writer.mapped(language == "php" ? `->${field.name}` : language == "javascript" ? `.#${field.name}` :
+        language == "ruby" ? `@${field.name}` : `.${field.name}`,
+      {mappingKind: "exact", name: field.name, node: expression, path, role: "member"})
+    }
     return
   }
   if (expression.kind == "IntegerLiteral") {
@@ -2160,6 +2231,20 @@ export function emitExpression(writer, expression, path, language, emitIdentifie
     writer.mapped("(", {mappingKind: "anchor", node: expression, path})
     expression.arguments.forEach((argument, index) => {
       if (index > 0) writer.synthetic(", ", "argument separator", [expression], [path])
+      emitExpression(writer, argument, `${path}/arguments/${index}`, language, emitIdentifier)
+    })
+    writer.mapped(")", {mappingKind: "anchor", node: expression, path})
+    return
+  }
+  if (expression.kind == "EffectCallExpression") {
+    const operation = writer.effectOperationForId(expression.operation)
+    if (language == "java" && writer.referenceClassEmissionDepth > 0) {
+      writer.synthetic("Main.", "protected Task 034 host support owner", [expression], [path])
+    }
+    writer.mapped(operation.name, {mappingKind: "exact", name: operation.name, node: expression, path, role: "callee"})
+    writer.mapped("(", {mappingKind: "anchor", node: expression, path})
+    expression.arguments.forEach((argument, index) => {
+      if (index > 0) writer.synthetic(", ", "effect argument separator", [expression], [path])
       emitExpression(writer, argument, `${path}/arguments/${index}`, language, emitIdentifier)
     })
     writer.mapped(")", {mappingKind: "anchor", node: expression, path})

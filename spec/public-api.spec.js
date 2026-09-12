@@ -5,6 +5,7 @@ import {
   canonicalToolchains,
   composeMappings,
   composeSourceMaps,
+  createCapabilityAuthority,
   createByteMapping,
   createGeneratedArtifactSet,
   discoverCanonicalToolchain,
@@ -41,6 +42,7 @@ describe("public API", () => {
     expect(supportedLanguages).toEqual(["php", "ruby", "javascript", "typescript", "java", "kotlin", "python", "csharp", "go", "c", "cpp", "rust", "swift"])
     expect(Object.isFrozen(supportedLanguages)).toBeTrue()
     expect(typeof parse).toEqual("function")
+    expect(typeof createCapabilityAuthority).toEqual("function")
     expect(typeof generate).toEqual("function")
     expect(typeof generateArtifact).toEqual("function")
     expect(typeof generateArtifactSet).toEqual("function")
@@ -52,6 +54,8 @@ describe("public API", () => {
     expect(languageCapabilities.filter(({features}) => features.orderedMapIteration).map(({id}) => id))
       .toEqual(["php", "ruby", "javascript", "typescript", "java"])
     expect(languageCapabilities.filter(({features}) => features.conditionControlledLoops).map(({id}) => id))
+      .toEqual(["php", "ruby", "javascript", "typescript", "java"])
+    expect(languageCapabilities.filter(({features}) => features.effectfulCapabilitiesAndResources).map(({id}) => id))
       .toEqual(["php", "ruby", "javascript", "typescript", "java"])
     expect(typeof canonicalToolchains).toEqual("object")
     expect(typeof SemantifoldDiagnostic).toEqual("function")

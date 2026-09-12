@@ -38,8 +38,21 @@ const registryKeys = new Set([
 ])
 
 /** @typedef {"frontend" | "textBackend" | "binaryBackend" | "applicationBackend" | "interoperability"} RegistryRole */
-/** @typedef {(input: {filename: string, source: string, program?: {isEntry: boolean, functions: Map<string, import("./semantic/types.js").FunctionDeclaration>, records: Map<string, import("./semantic/types.js").RecordDeclaration>, errors?: Map<string, import("./semantic/types.js").ErrorDeclaration>, valueRecords?: Map<string, import("./semantic/types.js").RecordDeclaration>}}) => import("./semantic/types.js").SemanticModule} Frontend */
 /** @typedef {(...values: unknown[]) => unknown} RegistryImplementation */
+
+/**
+ * @typedef FrontendInput
+ * @property {readonly import("./semantic/types.js").EffectCapabilityDeclaration[]} [capabilities] - Compiler-authorized declarations.
+ * @property {string} filename - Source filename.
+ * @property {string} source - Source text.
+ * @property {{isEntry: boolean, functions: Map<string, import("./semantic/types.js").FunctionDeclaration>, records: Map<string, import("./semantic/types.js").RecordDeclaration>, errors?: Map<string, import("./semantic/types.js").ErrorDeclaration>, valueRecords?: Map<string, import("./semantic/types.js").RecordDeclaration>}} [program] - Program conversion context.
+ */
+
+/**
+ * @callback Frontend
+ * @param {FrontendInput} input - Frontend request.
+ * @returns {import("./semantic/types.js").SemanticModule} Semantic module.
+ */
 
 /**
  * @typedef LanguageRegistryRecord
@@ -105,6 +118,7 @@ export function createLanguageRegistry(candidateRecords) {
     const featuresCandidate = candidate.features ?? {
       closedRecords: false,
       conditionControlledLoops: false,
+      effectfulCapabilitiesAndResources: false,
       generalFunctionsAndCalls: false,
       immutableCollections: false,
       optionalValues: false,
@@ -116,9 +130,10 @@ export function createLanguageRegistry(candidateRecords) {
     }
 
     if (!isPlainObject(featuresCandidate) ||
-      Object.keys(featuresCandidate).sort().join(",") != "closedRecords,conditionControlledLoops,generalFunctionsAndCalls,immutableCollections,optionalValues,orderedListIteration,orderedMapIteration,referenceClasses,typeParametersAndGenerics,typedErrors" ||
+      Object.keys(featuresCandidate).sort().join(",") != "closedRecords,conditionControlledLoops,effectfulCapabilitiesAndResources,generalFunctionsAndCalls,immutableCollections,optionalValues,orderedListIteration,orderedMapIteration,referenceClasses,typeParametersAndGenerics,typedErrors" ||
       typeof featuresCandidate.closedRecords != "boolean" ||
       typeof featuresCandidate.conditionControlledLoops != "boolean" ||
+      typeof featuresCandidate.effectfulCapabilitiesAndResources != "boolean" ||
       typeof featuresCandidate.generalFunctionsAndCalls != "boolean" ||
       typeof featuresCandidate.immutableCollections != "boolean" ||
       typeof featuresCandidate.optionalValues != "boolean" ||
@@ -132,6 +147,7 @@ export function createLanguageRegistry(candidateRecords) {
     const features = deepFreeze(/** @type {import("./semantic/types.js").LanguageFeatureCapabilities} */ ({
       closedRecords: featuresCandidate.closedRecords,
       conditionControlledLoops: featuresCandidate.conditionControlledLoops,
+      effectfulCapabilitiesAndResources: featuresCandidate.effectfulCapabilitiesAndResources,
       generalFunctionsAndCalls: featuresCandidate.generalFunctionsAndCalls,
       immutableCollections: featuresCandidate.immutableCollections,
       optionalValues: featuresCandidate.optionalValues,
@@ -289,31 +305,31 @@ export function createLanguageRegistry(candidateRecords) {
  * PHP registry frontend wrapper.
  * @type {Frontend}
  */
-const phpFrontend = ({filename, program, source}) => parsePhp({filename, program, source})
+const phpFrontend = ({capabilities, filename, program, source}) => parsePhp({capabilities, filename, program, source})
 
 /**
  * Ruby registry frontend wrapper.
  * @type {Frontend}
  */
-const rubyFrontend = ({filename, program, source}) => parseRuby({filename, program, source})
+const rubyFrontend = ({capabilities, filename, program, source}) => parseRuby({capabilities, filename, program, source})
 
 /**
  * JavaScript registry frontend wrapper.
  * @type {Frontend}
  */
-const javaScriptFrontend = ({filename, program, source}) => parseJavaScriptTypeScript({filename, language: "javascript", program, source})
+const javaScriptFrontend = ({capabilities, filename, program, source}) => parseJavaScriptTypeScript({capabilities, filename, language: "javascript", program, source})
 
 /**
  * TypeScript registry frontend wrapper.
  * @type {Frontend}
  */
-const typeScriptFrontend = ({filename, program, source}) => parseJavaScriptTypeScript({filename, language: "typescript", program, source})
+const typeScriptFrontend = ({capabilities, filename, program, source}) => parseJavaScriptTypeScript({capabilities, filename, language: "typescript", program, source})
 
 /**
  * Java registry frontend wrapper.
  * @type {Frontend}
  */
-const javaFrontend = ({filename, program, source}) => parseJava({filename, program, source})
+const javaFrontend = ({capabilities, filename, program, source}) => parseJava({capabilities, filename, program, source})
 
 /**
  * Kotlin registry frontend wrapper.
@@ -440,7 +456,7 @@ const records = [
     artifactMultiplicity: "multiple",
     binaryBackend: generateBrowserWasm,
     defaultFilename: "program.wasm",
-    features: {closedRecords: false, conditionControlledLoops: false, generalFunctionsAndCalls: false, immutableCollections: false, optionalValues: false, orderedListIteration: false, orderedMapIteration: false, referenceClasses: false, typedErrors: false, typeParametersAndGenerics: false},
+    features: {closedRecords: false, conditionControlledLoops: false, effectfulCapabilitiesAndResources: false, generalFunctionsAndCalls: false, immutableCollections: false, optionalValues: false, orderedListIteration: false, orderedMapIteration: false, referenceClasses: false, typedErrors: false, typeParametersAndGenerics: false},
     id: "wasm",
     mapping: {binaryRanges: true, richText: true, sourceMapV3: true},
     mediaType: "application/wasm",
@@ -466,6 +482,7 @@ function language(values) {
     features: {
       closedRecords: ["php", "ruby", "javascript", "typescript", "java"].includes(String(values.id)),
       conditionControlledLoops: ["php", "ruby", "javascript", "typescript", "java"].includes(String(values.id)),
+      effectfulCapabilitiesAndResources: ["php", "ruby", "javascript", "typescript", "java"].includes(String(values.id)),
       generalFunctionsAndCalls: ["php", "ruby", "javascript", "typescript", "java"].includes(String(values.id)),
       immutableCollections: ["php", "ruby", "javascript", "typescript", "java"].includes(String(values.id)),
       optionalValues: ["php", "ruby", "javascript", "typescript", "java"].includes(String(values.id)),
