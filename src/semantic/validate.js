@@ -1200,34 +1200,16 @@ function inferExpressionType(expression, scope, functions, records, fail, normal
     if (expectedType?.kind == "MapType" && !isScalarType(expectedType.keyType, "string")) {
       return fail("TYPE_MISMATCH", "Map key type must be string.", typeLocation(expectedType.keyType, expression.location))
     }
-    if (!Array.isArray(expression.entries)) {
-      return fail("TYPE_MISMATCH", "Map literal entries must be a dense source-ordered array.", expression.location)
-    }
-    if (!expectedType && expression.entries.length == 0) {
+    const entries = validateMapLiteralEntries(expression, scope, functions, records, fail, normalizeOperations,
+      inferCollectionElements)
+
+    if (!expectedType && entries.length == 0) {
       return fail("MISSING_TYPE", "Empty map literal requires an explicit recursive map type.", expression.location)
     }
-    const keys = new Set()
     /** @type {import("./types.js").SemanticValueType | undefined} */
     let inferredValueType
 
-    for (let index = 0; index < expression.entries.length; index++) {
-      if (!Object.hasOwn(expression.entries, index)) {
-        fail("TYPE_MISMATCH", "Sparse map literals are outside the implemented subset.", expression.location)
-      }
-      const entry = expression.entries[index]
-
-      if (!entry || entry.kind != "MapEntry" || !entry.key || entry.key.kind != "StringLiteral") {
-        fail("TYPE_MISMATCH", "Map entries require literal string keys.", entry?.location ?? expression.location)
-      }
-      inferValueExpressionType(entry.key, scope, functions, records, fail, normalizeOperations, "a map key",
-        expectedType?.kind == "MapType" ? expectedType.keyType : scalarType("string"), inferCollectionElements)
-      if (isNumericString(entry.key.value)) {
-        fail("INVALID_MAP_KEY", "Map initializer keys must be nonnumeric strings.", entry.key.location)
-      }
-      if (keys.has(entry.key.value)) {
-        fail("DUPLICATE_MAP_KEY", `Duplicate map key '${entry.key.value}'.`, entry.key.location)
-      }
-      keys.add(entry.key.value)
+    for (const entry of entries) {
       const actual = inferValueExpressionType(
         entry.value, scope, functions, records, fail, normalizeOperations, "a map value",
         expectedType?.kind == "MapType" ? expectedType.valueType : inferredValueType, inferCollectionElements
@@ -1379,22 +1361,18 @@ function inferExpressionType(expression, scope, functions, records, fail, normal
     const parameterTypes = functionDeclaration.parameters.map((parameter) => validateValueTypeReference(
       parameter.type, parameter.location, fail, undefined, records, declarationTypeParameters
     ))
-    /** @type {number[]} */
-    const evidenceFreeArguments = []
     for (let index = 0; index < expression.arguments.length; index++) {
       const argument = expression.arguments[index]
       const expectedType = parameterTypes[index]
       const gathersGenericEvidence = typeContainsAnyVariable(expectedType)
 
-      if (gathersGenericEvidence &&
-        (argument.kind == "OptionalNone" || argument.kind == "ListLiteral" && argument.elements.length == 0 ||
-          argument.kind == "MapLiteral" && argument.entries.length == 0)) {
-        evidenceFreeArguments.push(index)
+      if (gathersGenericEvidence) {
+        inferGenericArgumentEvidence(expectedType, argument, substitutions, scope, functions, records, fail,
+          normalizeOperations)
         continue
       }
       const actualType = inferValueExpressionType(
-        argument, scope, functions, records, fail, normalizeOperations, "a call argument",
-        gathersGenericEvidence ? undefined : expectedType, gathersGenericEvidence
+        argument, scope, functions, records, fail, normalizeOperations, "a call argument", expectedType
       )
 
       if ((functionDeclaration.typeParameters?.length ?? 0) > 0) {
@@ -1405,10 +1383,10 @@ function inferExpressionType(expression, scope, functions, records, fail, normal
     }
     for (const parameter of functionDeclaration.typeParameters ?? []) {
       if (!substitutions.has(/** @type {string} */ (parameter.id))) {
-        const evidenceFreeIndex = evidenceFreeArguments.find((index) =>
-          typeContainsVariable(parameterTypes[index], /** @type {string} */ (parameter.id)))
+        const evidenceFreeIndex = parameterTypes.findIndex((type) =>
+          typeContainsVariable(type, /** @type {string} */ (parameter.id)))
 
-        if (evidenceFreeIndex !== undefined) {
+        if (evidenceFreeIndex >= 0) {
           fail("GENERIC_INFERENCE_FAILURE", "Cannot infer a type parameter from an evidence-free call argument.",
             expression.arguments[evidenceFreeIndex].location)
         }
@@ -1482,6 +1460,95 @@ function inferExpressionType(expression, scope, functions, records, fail, normal
   const unexpected = /** @type {{kind: string, location: import("./types.js").SourceLocation}} */ (expression)
 
   return fail("TYPE_MISMATCH", unexpected.kind, unexpected.location)
+}
+
+/**
+ * Validates map layout and fixed string keys independently of contextual value inference.
+ * @param {import("./types.js").MapLiteral} expression - Candidate map literal.
+ * @param {Scope} scope - Visible lexical scope.
+ * @param {Map<string, import("./types.js").FunctionDeclaration>} functions - Module function signatures.
+ * @param {RecordRegistry} records - Record declarations by identity.
+ * @param {SemanticFail} fail - Diagnostic callback.
+ * @param {boolean} normalizeOperations - Whether to normalize frontend intent.
+ * @param {boolean} inferCollectionElements - Whether nested collection evidence may be inferred.
+ * @returns {import("./types.js").MapEntry[]} Validated dense entries.
+ */
+function validateMapLiteralEntries(expression, scope, functions, records, fail, normalizeOperations,
+  inferCollectionElements) {
+  if (!Array.isArray(expression.entries)) {
+    return fail("TYPE_MISMATCH", "Map literal entries must be a dense source-ordered array.", expression.location)
+  }
+  if (!isDenseArray(expression.entries)) {
+    return fail("TYPE_MISMATCH", "Sparse map literals are outside the implemented subset.", expression.location)
+  }
+  const keys = new Set()
+
+  for (const entry of expression.entries) {
+    if (!entry || entry.kind != "MapEntry" || !entry.key || entry.key.kind != "StringLiteral") {
+      fail("TYPE_MISMATCH", "Map entries require literal string keys.", entry?.location ?? expression.location)
+    }
+    inferValueExpressionType(entry.key, scope, functions, records, fail, normalizeOperations, "a map key",
+      scalarType("string"), inferCollectionElements)
+    if (isNumericString(entry.key.value)) {
+      fail("INVALID_MAP_KEY", "Map initializer keys must be nonnumeric strings.", entry.key.location)
+    }
+    if (keys.has(entry.key.value)) {
+      fail("DUPLICATE_MAP_KEY", `Duplicate map key '${entry.key.value}'.`, entry.key.location)
+    }
+    keys.add(entry.key.value)
+  }
+
+  return expression.entries
+}
+
+/**
+ * Collects argument-only generic evidence while deferring recursively contextual literals.
+ * The complete argument is validated against its closed substituted type after inference.
+ * @param {import("./types.js").SemanticValueType} formal - Open declaration parameter type.
+ * @param {import("./types.js").Expression} expression - Call argument or nested collection value.
+ * @param {Map<string, import("./types.js").SemanticValueType>} substitutions - Inference state.
+ * @param {Scope} scope - Visible lexical scope.
+ * @param {Map<string, import("./types.js").FunctionDeclaration>} functions - Module function signatures.
+ * @param {RecordRegistry} records - Record declarations by identity.
+ * @param {SemanticFail} fail - Diagnostic callback.
+ * @param {boolean} normalizeOperations - Whether to normalize frontend intent.
+ * @returns {void}
+ */
+function inferGenericArgumentEvidence(formal, expression, substitutions, scope, functions, records, fail,
+  normalizeOperations) {
+  if (expression.kind == "OptionalNone") return
+  if (formal.kind == "OptionalType" && expression.kind == "OptionalSome") {
+    inferGenericArgumentEvidence(formal.valueType, expression.value, substitutions, scope, functions, records, fail,
+      normalizeOperations)
+    return
+  }
+  if (formal.kind == "ListType" && expression.kind == "ListLiteral") {
+    if (!Array.isArray(expression.elements)) {
+      fail("TYPE_MISMATCH", "List literal elements must be a dense source-ordered array.", expression.location)
+    }
+    if (!isDenseArray(expression.elements)) {
+      fail("TYPE_MISMATCH", "Sparse list literals are outside the implemented subset.", expression.location)
+    }
+    for (const element of expression.elements) {
+      inferGenericArgumentEvidence(formal.elementType, element, substitutions, scope, functions, records, fail,
+        normalizeOperations)
+    }
+    return
+  }
+  if (formal.kind == "MapType" && expression.kind == "MapLiteral") {
+    const entries = validateMapLiteralEntries(expression, scope, functions, records, fail, normalizeOperations, true)
+
+    for (const entry of entries) {
+      inferGenericArgumentEvidence(formal.valueType, entry.value, substitutions, scope, functions, records, fail,
+        normalizeOperations)
+    }
+    return
+  }
+  const actual = inferValueExpressionType(
+    expression, scope, functions, records, fail, normalizeOperations, "a call argument", undefined, true
+  )
+
+  inferTypeArguments(formal, actual, substitutions, expression.location, fail)
 }
 
 /**
@@ -1626,8 +1693,8 @@ function validateResolution(actual, expected, location, fail) {
   if (expected.typeArguments) {
     const candidateTypeArguments = candidate.typeArguments
 
-    if (!Array.isArray(candidateTypeArguments) || candidateTypeArguments.length != expected.typeArguments.length ||
-      candidateTypeArguments.some((type, index) => !Object.hasOwn(candidateTypeArguments, index) ||
+    if (!isDenseArray(candidateTypeArguments) || candidateTypeArguments.length != expected.typeArguments.length ||
+      candidateTypeArguments.some((type, index) =>
         !validTypeIdentity(type, false) || !sameTypeIdentity(type, expected.typeArguments?.[index]))) {
       fail("TYPE_MISMATCH", "Call resolution does not match its inferred type arguments.", location)
     }
@@ -1695,12 +1762,27 @@ function validTypeIdentity(type, allowVoid, seen = new Set()) {
     const candidateArguments = candidate.arguments
 
     valid = typeof candidate.declarationId == "string" && /^(?:[a-z][a-z0-9._-]*#)?record:[0-9]+$/u.test(candidate.declarationId) &&
-      (candidateArguments === undefined || Array.isArray(candidateArguments) && candidateArguments.every((argument, index) =>
-        Object.hasOwn(candidateArguments, index) && validTypeIdentity(argument, false, seen)))
+      (candidateArguments === undefined || isDenseArray(candidateArguments) &&
+        candidateArguments.every((argument) => validTypeIdentity(argument, false, seen)))
   }
   seen.delete(type)
 
   return valid
+}
+
+/**
+ * Checks array identity without relying on iteration methods that skip sparse slots.
+ * @param {unknown} value - Candidate array.
+ * @returns {value is unknown[]} Whether every indexed slot is present.
+ */
+function isDenseArray(value) {
+  if (!Array.isArray(value)) return false
+
+  for (let index = 0; index < value.length; index += 1) {
+    if (!Object.hasOwn(value, index)) return false
+  }
+
+  return true
 }
 
 /**

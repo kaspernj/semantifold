@@ -343,6 +343,52 @@ if (result !== null) { console.log(result) }
     expect(call.resolution.returnType).toEqual({kind: "OptionalType", valueType: "string"})
   })
 
+  it("normalizes recursively evidence-free generic list arguments in every original-five frontend", () => {
+    const profiles = [
+      ["php", "program.php", `<?php
+declare(strict_types=1);
+/** @template T
+ * @param list<?T> $values
+ * @param T $fallback
+ * @return T
+ */
+function pick(array $values, $fallback) { return $fallback; }
+echo pick([null], "picked"), PHP_EOL;
+`],
+      ["ruby", "program.rb", `# @template T
+# @param values [Array[T?]]
+# @param fallback [T]
+# @return [T]
+def pick(values, fallback)
+  return fallback
+end
+puts pick([nil], "picked")
+`],
+      ["javascript", "program.js", `/** @template T
+ * @param {ReadonlyArray<T|null>} values
+ * @param {T} fallback
+ * @returns {T}
+ */
+function pick(values, fallback) { return fallback }
+console.log(pick([null], "picked"))
+`],
+      ["typescript", "program.ts", `function pick<T>(values: ReadonlyArray<T | null>, fallback: T): T { return fallback }
+console.log(pick([null], "picked"))
+`],
+      ["java", "Main.java", `public final class Main {
+  private static <T> T pick(java.util.List<java.util.Optional<T>> values, T fallback) { return fallback; }
+  public static void main(String[] args) {
+    System.out.println(pick(java.util.List.of(java.util.Optional.empty()), "picked"));
+  }
+}
+`]
+    ]
+    const meanings = profiles.map(([language, filename, source]) =>
+      semanticMeaning(parse({filename, language, source})))
+
+    for (const meaning of meanings.slice(1)) expect(meaning).toEqual(meanings[0])
+  })
+
   it("classifies instantiated generic call results and explicit construction members in original-five syntax", () => {
     const profiles = [
       ["javascript", "program.js", `/** @template T */

@@ -136,6 +136,35 @@ console.log(trailingEvidence([], "trailing"))
       "GENERIC_INFERENCE_FAILURE")
   })
 
+  it("defers recursively evidence-free collection arguments until sibling arguments infer their variables", () => {
+    const source = `class Box<T> { constructor(readonly value: T) {} }
+function pickList<T>(values: ReadonlyArray<T | null>, fallback: T): T { return fallback }
+function pickLeading<T>(fallback: T, values: ReadonlyArray<T | null>): T { return fallback }
+function pickMap<T>(values: ReadonlyMap<string, ReadonlyArray<T | null>>, fallback: T): T { return fallback }
+function pickRecords<T>(values: ReadonlyMap<string, Box<T> | null>, fallback: T): T { return fallback }
+console.log(pickList([null], "list"))
+console.log(pickLeading("leading", [null]))
+console.log(pickList([null, "present"], "mixed"))
+console.log(pickMap(new Map([["missing", [null]]]), "map"))
+console.log(pickRecords(new Map([["missing", null]]), "record"))
+`
+    const module = parse({filename: "nested-inference.ts", language: "typescript", source})
+    const calls = module.entryPoint.body.statements.map((statement) =>
+      /** @type {import("../src/semantic/types.js").CallExpression} */ (
+        /** @type {import("../src/semantic/types.js").PrintStatement} */ (statement).expression))
+
+    expect(calls.map(({resolution}) => resolution.typeArguments)).toEqual([
+      ["string"],
+      ["string"],
+      ["string"],
+      ["string"],
+      ["string"]
+    ])
+    rejects(`function pick<T>(values: ReadonlyArray<T | null>, fallback: T): T { return fallback }
+console.log(pick([null, 1], "conflict"))
+`, "GENERIC_INFERENCE_CONFLICT")
+  })
+
   it("rejects explicit argument arrays on non-generic record references in external semantic IR", () => {
     const source = `class Plain { constructor(readonly value: string) {} }
 function keep(value: string): string { return value }

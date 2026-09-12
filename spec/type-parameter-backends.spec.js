@@ -81,6 +81,38 @@ describe("type parameter backends", () => {
     }
   })
 
+  it("rejects sparse inferred type-argument identities at the external module boundary", () => {
+    const source = `class Box<T> { constructor(readonly value: T) {} }
+function identity<T>(value: T): T { return value }
+const box: Box<string> = new Box<string>("value")
+console.log(identity(box).value)
+`
+    const sparseModules = [
+      parse({filename: "sparse.ts", language: "typescript", source}),
+      parse({filename: "sparse.ts", language: "typescript", source})
+    ]
+    const calls = sparseModules.map((module) => {
+      const print = /** @type {import("../src/semantic/types.js").PrintStatement} */ (module.entryPoint.body.statements[1])
+
+      return /** @type {import("../src/semantic/types.js").CallExpression} */ (
+        /** @type {import("../src/semantic/types.js").MemberRead} */ (print.expression).receiver)
+    })
+
+    calls[0].resolution.typeArguments = new Array(1)
+    const nested = /** @type {{arguments: import("../src/semantic/types.js").SemanticTypeIdentity[]}} */ (
+      calls[1].resolution.typeArguments[0])
+
+    nested.arguments = new Array(1)
+    for (const module of sparseModules) {
+      assert.throws(
+        () => generate({language: "typescript", module}),
+        (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
+          error.language == "typescript" && error.location?.filename == "sparse.ts" &&
+          error.message.includes("inferred type arguments")
+      )
+    }
+  })
+
   it("emits valid faithful optional type-variable documentation that reparses recursively", () => {
     const source = `function preserve<T>(value: T | null, values: ReadonlyArray<T | null>): T | null { return value }
 console.log("ok")

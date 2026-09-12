@@ -65,11 +65,17 @@ describe("type parameter runtime execution", () => {
 function optionalIdentity<T>(value: T | null): T | null { return value }
 function leadingEvidence<T>(value: T, values: ReadonlyArray<T>): T { return value }
 function trailingEvidence<T>(values: ReadonlyArray<T>, value: T): T { return value }
+function pickList<T>(values: ReadonlyArray<T | null>, fallback: T): T { return fallback }
+function pickMap<T>(values: ReadonlyMap<string, ReadonlyArray<T | null>>, fallback: T): T { return fallback }
+function pickRecords<T>(values: ReadonlyMap<string, Box<T> | null>, fallback: T): T { return fallback }
 const box: Box<string | null> = new Box<string | null>(null)
 const present: string | null = optionalIdentity("present")
 if (present !== null) { console.log(present) }
 console.log(leadingEvidence("leading", []))
 console.log(trailingEvidence([], "trailing"))
+console.log(pickList([null], "list"))
+console.log(pickMap(new Map([["missing", [null]]]), "map"))
+console.log(pickRecords(new Map([["missing", null]]), "record"))
 const boxed: string | null = box.value
 if (boxed !== null) { console.log(boxed) }
 `
@@ -80,8 +86,8 @@ if (boxed !== null) { console.log(boxed) }
       const filename = language == "java" ? "Main.java" : language == "ruby" ? "program.rb" :
         language == "javascript" ? "program.js" : language == "typescript" ? "program.ts" : "program.php"
 
-      expect(parse({filename, language, source: generated}).functions).toHaveLength(3)
-      expect(await execute(language, generated)).toEqual("present\nleading\ntrailing\n")
+      expect(parse({filename, language, source: generated}).functions).toHaveLength(6)
+      expect(await execute(language, generated)).toEqual("present\nleading\ntrailing\nlist\nmap\nrecord\n")
     }
   })
 
