@@ -11,6 +11,7 @@ import {emitExpression, emitType, requiresCanonicalZeroRendering} from "./shared
 export function generateJavaScript(module, writer) {
   const canonicalizeZero = requiresCanonicalZeroRendering(module)
   const records = module.records ?? []
+  const classes = module.classes ?? []
   const errors = module.errors ?? []
 
   emitProgramImports(module, writer)
@@ -65,6 +66,12 @@ export function generateJavaScript(module, writer) {
   })
   if (records.length > 0) writer.synthetic("\n\n", "record/function separator", [module])
 
+  classes.forEach((declaration, classIndex) => {
+    if (classIndex > 0) writer.synthetic("\n\n", "reference class separator", [declaration], [`/classes/${classIndex}`])
+    emitReferenceClass(writer, declaration, classIndex, canonicalizeZero)
+  })
+  if (classes.length > 0) writer.synthetic("\n\n", "reference class/function separator", [module])
+
   module.functions.forEach((declaration, functionIndex) => {
     if (functionIndex > 0) writer.synthetic("\n\n", "declaration separator", [declaration])
 
@@ -116,6 +123,98 @@ export function generateJavaScript(module, writer) {
     writer.synthetic("\n\n", "entry-point separator", [module.entryPoint])
     emitBlock(writer, module.entryPoint.body, "", "/entryPoint/body", canonicalizeZero)
   }
+}
+
+/**
+ * Emits one native JavaScript private-field reference class.
+ * @param {import("./writer.js").SourceWriter} writer - Source-aware writer.
+ * @param {import("../semantic/types.js").ClassDeclaration} declaration - Reference class.
+ * @param {number} classIndex - Module class index.
+ * @param {boolean} canonicalizeZero - Whether scalar output canonicalizes zero.
+ * @returns {void}
+ */
+function emitReferenceClass(writer, declaration, classIndex, canonicalizeZero) {
+  const path = `/classes/${classIndex}`
+
+  writer.mapped("class", {mappingKind: "anchor", node: declaration, path})
+  writer.synthetic(" ", "reference class spacing", [declaration], [path])
+  writer.mapped(declaration.name, {mappingKind: "exact", node: declaration, path, role: "name"})
+  writer.synthetic(" {\n", "reference class open", [declaration], [path])
+  declaration.fields.forEach((field, index) => {
+    const fieldPath = `${path}/fields/${index}`
+
+    writer.synthetic("  /** @type {", "private field type scaffolding", [field], [fieldPath])
+    emitType(writer, field.type, `${fieldPath}/type`, "javascript")
+    writer.synthetic("} */\n  #", "private field scaffolding", [field], [fieldPath])
+    writer.mapped(field.name, {mappingKind: "exact", node: field, path: fieldPath, role: "name"})
+    writer.synthetic("\n", "line break", [field], [fieldPath])
+  })
+  const constructor = declaration.constructor
+  const constructorPath = `${path}/constructor`
+
+  emitJsdoc(writer, constructor.parameters, undefined, `${constructorPath}/parameters`, undefined)
+  writer.synthetic("  ", "constructor indentation", [constructor], [constructorPath])
+  writer.mapped("constructor", {mappingKind: "exact", node: constructor, path: constructorPath, role: "constructor"})
+  emitBareParameters(writer, constructor.parameters, `${constructorPath}/parameters`)
+  writer.synthetic(" {\n", "constructor open", [constructor], [constructorPath])
+  emitBlock(writer, constructor.body, "    ", `${constructorPath}/body`, canonicalizeZero)
+  writer.synthetic("  }", "constructor close", [constructor], [constructorPath])
+  declaration.methods.forEach((method, index) => {
+    const methodPath = `${path}/methods/${index}`
+
+    writer.synthetic("\n\n", "method spacing", [method], [methodPath])
+    emitJsdoc(writer, method.parameters, method.returnType, `${methodPath}/parameters`, `${methodPath}/returnType`)
+    writer.synthetic("  ", "method indentation", [method], [methodPath])
+    writer.mapped(method.name, {mappingKind: "exact", node: method, path: methodPath, role: "name"})
+    emitBareParameters(writer, method.parameters, `${methodPath}/parameters`)
+    writer.synthetic(" {\n", "method open", [method], [methodPath])
+    emitBlock(writer, method.body, "    ", `${methodPath}/body`, canonicalizeZero)
+    writer.synthetic("  }", "method close", [method], [methodPath])
+  })
+  writer.synthetic("\n", "line break", [declaration], [path])
+  writer.mapped("}", {mappingKind: "anchor", node: declaration, path})
+}
+
+/**
+ * Emits exact JavaScript callable type documentation.
+ * @param {import("./writer.js").SourceWriter} writer - Source-aware writer.
+ * @param {import("../semantic/types.js").Parameter[]} parameters - Ordered parameters.
+ * @param {import("../semantic/types.js").SemanticFunctionReturnType | undefined} returnType - Optional return type.
+ * @param {string} parameterPath - Parameter collection path.
+ * @param {string | undefined} returnPath - Return type path.
+ * @returns {void}
+ */
+function emitJsdoc(writer, parameters, returnType, parameterPath, returnPath) {
+  writer.synthetic("\n  /**\n", "JavaScript callable documentation", parameters)
+  for (const [index, parameter] of parameters.entries()) {
+    writer.synthetic("   * @param {", "parameter type scaffolding", [parameter], [`${parameterPath}/${index}`])
+    emitType(writer, parameter.type, `${parameterPath}/${index}/type`, "javascript")
+    writer.synthetic("} ", "parameter documentation", [parameter], [`${parameterPath}/${index}`])
+    writer.mapped(parameter.name, {mappingKind: "exact", node: parameter, path: `${parameterPath}/${index}`, role: "name"})
+    writer.synthetic("\n", "line break", [parameter])
+  }
+  if (returnType && returnPath) {
+    writer.synthetic("   * @returns {", "return type scaffolding", [])
+    emitType(writer, returnType, returnPath, "javascript")
+    writer.synthetic("}\n", "line break", [])
+  }
+  writer.synthetic("   */\n", "JavaScript callable documentation close", parameters)
+}
+
+/**
+ * Emits one untyped JavaScript parameter list.
+ * @param {import("./writer.js").SourceWriter} writer - Source-aware writer.
+ * @param {import("../semantic/types.js").Parameter[]} parameters - Ordered parameters.
+ * @param {string} path - Parameter collection path.
+ * @returns {void}
+ */
+function emitBareParameters(writer, parameters, path) {
+  writer.synthetic("(", "parameter list open", parameters)
+  parameters.forEach((parameter, index) => {
+    if (index) writer.synthetic(", ", "parameter separator", parameters)
+    writer.mapped(parameter.name, {mappingKind: "exact", node: parameter, path: `${path}/${index}`, role: "name"})
+  })
+  writer.synthetic(")", "parameter list close", parameters)
 }
 
 /**
@@ -224,6 +323,16 @@ function emitStatement(writer, statement, indent, path, canonicalizeZero) {
   if (statement.kind == "LocalDeclaration" || statement.kind == "AssignmentStatement") return emitLocal(writer, statement, indent, path)
 
   writer.synthetic(indent, "indentation", [statement], [path])
+  if (statement.kind == "PrivateFieldWriteStatement") {
+    emitExpression(writer, statement.receiver, `${path}/receiver`, "javascript", identity)
+    const field = writer.privateFieldForId(statement.field)
+
+    writer.mapped(`.#${field.name}`, {mappingKind: "exact", name: field.name, node: statement, path, role: "member"})
+    writer.synthetic(" = ", "private field assignment", [statement], [path])
+    emitExpression(writer, statement.expression, `${path}/expression`, "javascript", identity)
+    writer.synthetic("\n", "line break", [statement], [path])
+    return
+  }
   if (statement.kind == "BreakStatement" || statement.kind == "ContinueStatement") {
     writer.mapped(statement.kind == "BreakStatement" ? "break" : "continue", {mappingKind: "exact", node: statement, path})
     writer.synthetic("\n", "line break", [statement], [path])

@@ -36,6 +36,7 @@ describe("language role registry", () => {
           optionalValues: false,
           orderedListIteration: false,
           orderedMapIteration: false,
+          referenceClasses: false,
           typeParametersAndGenerics: false,
           typedErrors: false
         })
@@ -66,6 +67,7 @@ describe("language role registry", () => {
         optionalValues: originalFive.includes(descriptor.id),
         orderedListIteration: originalFive.includes(descriptor.id),
         orderedMapIteration: originalFive.includes(descriptor.id),
+        referenceClasses: originalFive.includes(descriptor.id),
         typeParametersAndGenerics: originalFive.includes(descriptor.id),
         typedErrors: originalFive.includes(descriptor.id)
       })

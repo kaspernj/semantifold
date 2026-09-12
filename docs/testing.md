@@ -116,6 +116,26 @@ LANG=C.UTF-8 LC_ALL=C.UTF-8 npx velocious-test spec/condition-controlled-loop-ru
 
 This capability remains original-five-only. It adds no post-condition, infinite-shorthand, basic, range, iterator, or async loop; no labels, numeric levels, valued control, or loop `else`; and no stdlib-specific recognition, compatibility facade, canonical capability, provider, pairwise adapter, publication, or deployment behavior.
 
+## Task 033 reference classes, methods, and constructors
+
+Task 033 uses eight focused specs plus the changed registry contract spec. They cover parser-neutral nominal identities and exact resolutions, all five canonical source and target profiles, complete initialization and declaring-receiver privacy, target preflight and reserved protocol hooks, deterministic provenance/mappings/artifacts, fail-loud non-cohort routing, and native execution. The runtime fixture proves fresh independent state, reference aliasing and passage, void and value methods, receiver-before-argument order, and left-to-right constructor arguments through real `php`, `ruby`, `node`, `tsc`, `javac`, and `java` commands. Missing tools fail.
+
+Run each file individually and sequentially; locale normalization is mandatory for the real-toolchain proof:
+
+```sh
+npx velocious-test spec/reference-classes-methods-and-constructors.spec.js
+npx velocious-test spec/reference-class-frontends.spec.js
+npx velocious-test spec/reference-class-semantic-validation.spec.js
+npx velocious-test spec/reference-class-backends.spec.js
+npx velocious-test spec/reference-class-backend-validation.spec.js
+npx velocious-test spec/reference-class-language-registry.spec.js
+npx velocious-test spec/reference-class-provenance-and-mapping.spec.js
+LANG=C.UTF-8 LC_ALL=C.UTF-8 npx velocious-test spec/reference-class-runtime-execution.spec.js
+npx velocious-test spec/language-registry.spec.js
+```
+
+The adopted cohort is PHP, Ruby, JavaScript/JSDoc, TypeScript, and Java. Task 033 is single-module and does not add inheritance, open or virtual classes, arbitrary host objects, identity operators, escaping unchecked-error effects, resources, standard-library contracts, facades, providers, publication, or deployment behavior.
+
 ## Task 025 core expanded-language acceptance
 
 Task 025 uses two data-driven focused specs instead of duplicating the eight owning language suites. `spec/core-language-baseline-acceptance.spec.js` normalizes all five Tasks 001–004 profiles for Python, C#, C, C++, Rust, Swift, Kotlin/JVM, and Go; generates, reparses, and really executes one operator round trip per language; runs the eleven-path spanning matrix documented in [language support](language-support.md#task-025-core-expanded-language-acceptance); checks deterministic artifact bytes/mappings/provenance; and asserts the public registry contract. Its ordered program checks eager left-before-right calls and both short-circuit sides. C and C++ run the exact ordered-region source at O0/O2 with and without sanitizers, Rust runs debug/release, and Swift runs debug/`-O`.

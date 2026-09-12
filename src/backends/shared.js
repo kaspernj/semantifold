@@ -36,6 +36,16 @@ const task011Languages = new Set(["php", "ruby", "javascript", "typescript", "ja
 const task012Languages = new Set(["php", "ruby", "javascript", "typescript", "java"])
 const task014Languages = new Set(["php", "ruby", "javascript", "typescript", "java"])
 const task032Languages = new Set(["php", "ruby", "javascript", "typescript", "java"])
+const task033Languages = new Set(["php", "ruby", "javascript", "typescript", "java"])
+const javaReferenceMethodHooks = new Set(["clone", "equals", "finalize", "getClass", "hashCode", "notify", "notifyAll", "toString", "wait"])
+const javascriptReferenceMethodHooks = new Set([
+  "__defineGetter__", "__defineSetter__", "__lookupGetter__", "__lookupSetter__", "__proto__", "constructor",
+  "hasOwnProperty", "isPrototypeOf", "propertyIsEnumerable", "toLocaleString", "toString", "valueOf"
+])
+const rubyReferenceMethodHooks = new Set([
+  "__send__", "extend", "fetch", "instance_eval", "instance_exec", "method", "method_missing", "public_send",
+  "respond_to_missing?", "send", "singleton_class", "size"
+])
 const javaObjectInstanceMethodSignatures = new Set([
   "clone()", "equals(Object)", "finalize()", "getClass()", "hashCode()", "notify()", "notifyAll()", "toString()",
   "wait()", "wait(long)", "wait(long,int)"
@@ -57,13 +67,16 @@ export function validateBackendModule(module, language, options = {}) {
     module.entryPoint.kind != "EntryPoint") unsupportedCapability(language, "missing or invalid module members", module.location)
   const declaredRecords = module.records
   const records = declaredRecords === undefined ? [] : declaredRecords
+  const declaredClasses = module.classes
+  const classes = declaredClasses === undefined ? [] : declaredClasses
   const declaredErrors = module.errors
   const errors = declaredErrors === undefined ? [] : declaredErrors
 
   if (!Array.isArray(records)) unsupportedCapability(language, "missing or invalid record declarations", module.location)
+  if (!Array.isArray(classes)) unsupportedCapability(language, "missing or invalid reference class declarations", module.location)
   if (!Array.isArray(errors)) unsupportedCapability(language, "missing or invalid error declarations", module.location)
   if (module.functions.length == 0 && (!options.program ||
-    records.length == 0 && errors.length == 0 && module.entryPoint.body?.statements?.length == 0)) {
+    records.length == 0 && classes.length == 0 && errors.length == 0 && module.entryPoint.body?.statements?.length == 0)) {
     unsupportedCapability(language, "module without declarations or executable entry", module.location)
   }
   if (!task012Languages.has(language) && moduleHasTypeParameters(module)) {
@@ -72,14 +85,27 @@ export function validateBackendModule(module, language, options = {}) {
   if (records.length > 0 && !task009Languages.has(language)) {
     unsupportedCapability(language, "Task 009 closed records", records[0]?.location ?? module.location)
   }
+  if (classes.length > 0 && !task033Languages.has(language)) {
+    unsupportedCapability(language, "Task 033 reference classes, methods, and constructors", classes[0]?.location ?? module.location)
+  }
   if (!task011Languages.has(language)) rejectTypedErrors(module, language)
   if (!task032Languages.has(language)) rejectConditionControlledLoops(module, language)
   if (!task014Languages.has(language)) rejectOrderedMapCapability(module, language)
   validateRecordTargets(records, module.functions, language, module.location)
+  validateReferenceClassTargets(classes, records, errors, module.functions, language, module.location)
   if (!task008Languages.has(language)) rejectIterationStatements(module, language)
   if (!task007Languages.has(language)) rejectOptionalTypes(module, language)
   if (!task006Languages.has(language)) rejectCollectionTypes(module, language)
   const loopOwners = collectLoopOwners(module, language)
+
+  for (const declaration of classes) {
+    validateBlock(declaration.constructor.body, language, declaration.constructor.location,
+      {active: [], owner: declaration.constructor, owners: loopOwners}, new Set(), options.externalDeclarationIds)
+    for (const method of declaration.methods) {
+      validateBlock(method.body, language, method.location,
+        {active: [], owner: method, owners: loopOwners}, new Set(), options.externalDeclarationIds)
+    }
+  }
 
   validateBlock(module.entryPoint.body, language, module.entryPoint.location,
     {active: [], owner: module.entryPoint, owners: loopOwners}, new Set(), options.externalDeclarationIds)
@@ -341,6 +367,134 @@ function validateRecordTargets(records, functions, language, moduleLocation) {
       if (fieldNames.has(normalized)) unsupportedCapability(language, `duplicate target record field '${field.name}'`, field.location)
       fieldNames.add(normalized)
     }
+  }
+}
+
+/**
+ * Validates the exact target-visible shape of every reference class before output allocation.
+ * @param {import("../semantic/types.js").ClassDeclaration[]} classes - Candidate classes.
+ * @param {import("../semantic/types.js").RecordDeclaration[]} records - Existing records.
+ * @param {import("../semantic/types.js").ErrorDeclaration[]} errors - Existing typed errors.
+ * @param {import("../semantic/types.js").FunctionDeclaration[]} functions - Existing functions.
+ * @param {import("../semantic/types.js").BackendLanguage} language - Target language.
+ * @param {import("../semantic/types.js").SourceLocation | undefined} moduleLocation - Fallback location.
+ * @returns {void}
+ */
+function validateReferenceClassTargets(classes, records, errors, functions, language, moduleLocation) {
+  const targetNames = new Set([...records, ...errors, ...functions].map(({name}) => language == "php" ? name.toLowerCase() : name))
+
+  for (let classIndex = 0; classIndex < classes.length; classIndex += 1) {
+    const declaration = classes[classIndex]
+    const location = diagnosticLocation(declaration?.location, moduleLocation)
+    const keys = declaration && typeof declaration == "object" && !Array.isArray(declaration)
+      ? Object.keys(declaration).filter((key) => key != "sourceProvenance").sort().join(",") : ""
+
+    if (!declaration || declaration.kind != "ClassDeclaration" || keys != "constructor,fields,id,kind,location,methods,name" ||
+      !isDenseArray(declaration.fields) || declaration.fields.length == 0 || !isDenseArray(declaration.methods) ||
+      declaration.id != `class:${classIndex}`) {
+      unsupportedCapability(language, "missing or invalid reference class declaration", location)
+    }
+    const declarationLocation = requireSemanticLocation(declaration.location, language, "reference class declaration location", moduleLocation)
+
+    validateTargetTypeIdentifier(language, declaration.name, declarationLocation)
+    const targetName = language == "php" ? declaration.name.toLowerCase() : declaration.name
+
+    if (targetNames.has(targetName)) unsupportedCapability(language, `reference class collision '${declaration.name}'`, declarationLocation)
+    targetNames.add(targetName)
+    const fieldNames = new Set()
+
+    for (let fieldIndex = 0; fieldIndex < declaration.fields.length; fieldIndex += 1) {
+      const field = declaration.fields[fieldIndex]
+      const fieldLocation = diagnosticLocation(field?.location, location)
+      const fieldKeys = field && typeof field == "object" && !Array.isArray(field)
+        ? Object.keys(field).filter((key) => key != "sourceProvenance").sort().join(",") : ""
+
+      if (!field || field.kind != "PrivateField" || fieldKeys != "id,kind,location,name,type" ||
+        field.id != `${declaration.id}:field:${fieldIndex}`) {
+        unsupportedCapability(language, "missing or invalid private field", fieldLocation)
+      }
+      const exactFieldLocation = requireSemanticLocation(field.location, language, "private field location", declarationLocation)
+
+      validateTargetIdentifier(language, field.name, "private field", exactFieldLocation)
+      const normalized = language == "php" ? field.name.toLowerCase() : field.name
+
+      if (fieldNames.has(normalized)) unsupportedCapability(language, `duplicate target private field '${field.name}'`, exactFieldLocation)
+      fieldNames.add(normalized)
+    }
+    const constructor = declaration.constructor
+    const constructorLocation = diagnosticLocation(constructor?.location, location)
+    const constructorKeys = constructor && typeof constructor == "object" && !Array.isArray(constructor)
+      ? Object.keys(constructor).filter((key) => key != "sourceProvenance").sort().join(",") : ""
+
+    if (!constructor || constructor.kind != "ConstructorDeclaration" || constructorKeys != "body,id,kind,location,parameters" ||
+      constructor.id != `${declaration.id}:constructor` || !isDenseArray(constructor.parameters)) {
+      unsupportedCapability(language, "missing or invalid constructor declaration", constructorLocation)
+    }
+    const exactConstructorLocation = requireSemanticLocation(constructor.location, language, "constructor declaration location", declarationLocation)
+
+    validateReferenceClassParameters(constructor.parameters, "constructor", language, exactConstructorLocation)
+    const methodNames = new Set()
+
+    for (let methodIndex = 0; methodIndex < declaration.methods.length; methodIndex += 1) {
+      const method = declaration.methods[methodIndex]
+      const methodLocation = diagnosticLocation(method?.location, location)
+      const methodKeys = method && typeof method == "object" && !Array.isArray(method)
+        ? Object.keys(method).filter((key) => key != "sourceProvenance").sort().join(",") : ""
+
+      if (!method || method.kind != "MethodDeclaration" || methodKeys != "body,id,kind,location,name,parameters,returnType" ||
+        method.id != `${declaration.id}:method:${methodIndex}` || !isDenseArray(method.parameters)) {
+        unsupportedCapability(language, "missing or invalid method declaration", methodLocation)
+      }
+      const exactMethodLocation = requireSemanticLocation(method.location, language, "method declaration location", declarationLocation)
+      const lifecycleName = language == "php" ? "__construct" : language == "ruby" ? "initialize" :
+        language == "javascript" || language == "typescript" ? "constructor" : undefined
+
+      if (method.name == lifecycleName) {
+        unsupportedCapability(language, `reserved reference lifecycle method '${method.name}'`, exactMethodLocation)
+      }
+      const reservedHook = language == "php" ? /^__/u.test(method.name) :
+        language == "ruby" ? rubyReferenceMethodHooks.has(method.name) :
+          language == "java" ? javaReferenceMethodHooks.has(method.name) :
+            language == "javascript" || language == "typescript" ? javascriptReferenceMethodHooks.has(method.name) : false
+
+      if (reservedHook) unsupportedCapability(language, `reserved reference method '${method.name}'`, exactMethodLocation)
+      if (language == "ruby") {
+        if (typeof method.name != "string" || !/^[A-Za-z_][A-Za-z0-9_]*[!?=]?$/u.test(method.name)) {
+          unsupportedCapability(language, `method identifier '${String(method.name)}'`, exactMethodLocation)
+        }
+      } else validateTargetIdentifier(language, method.name, "method", exactMethodLocation)
+      const normalized = language == "php" ? method.name.toLowerCase() : method.name
+
+      if (methodNames.has(normalized)) unsupportedCapability(language, `duplicate target method '${method.name}'`, exactMethodLocation)
+      if (language == "typescript" && fieldNames.has(normalized)) {
+        unsupportedCapability(language, `target class member collision '${method.name}'`, exactMethodLocation)
+      }
+      methodNames.add(normalized)
+      validateReferenceClassParameters(method.parameters, "method", language, exactMethodLocation)
+    }
+  }
+}
+
+/**
+ * Validates one reference callable's exact parameter shape and target names.
+ * @param {import("../semantic/types.js").Parameter[]} parameters - Candidate parameters.
+ * @param {"constructor" | "method"} owner - Callable kind.
+ * @param {import("../semantic/types.js").BackendLanguage} language - Target language.
+ * @param {import("../semantic/types.js").SourceLocation | undefined} ownerLocation - Fallback location.
+ * @returns {void}
+ */
+function validateReferenceClassParameters(parameters, owner, language, ownerLocation) {
+  for (const parameter of parameters) {
+    const location = diagnosticLocation(parameter?.location, ownerLocation)
+    const keys = parameter && typeof parameter == "object" && !Array.isArray(parameter)
+      ? Object.keys(parameter).filter((key) => key != "sourceProvenance").sort().join(",") : ""
+
+    if (!parameter || parameter.kind != "Parameter" || keys != "kind,location,name,type") {
+      unsupportedCapability(language, `missing or invalid ${owner} parameter`, location)
+    }
+    const exactLocation = requireSemanticLocation(parameter.location, language, `${owner} parameter location`, ownerLocation)
+
+    validateTargetBindingIdentifier(language, parameter.name, "parameter", exactLocation)
   }
 }
 
@@ -655,6 +809,39 @@ function validateScaffoldingNames(module, language) {
     ["javascript", "typescript"].includes(language) ? javascriptOwnedNames :
     needsPhpCount ? new Set(["count"]) :
     language == "ruby" ? new Set(["puts", "send", "public_send", "__send__"]) : new Set()
+  /**
+   * Protects print/factory spellings inside one callable scope.
+   * @param {import("../semantic/types.js").Parameter[]} parameters - Callable parameters.
+   * @param {import("../semantic/types.js").Block} body - Callable body.
+   * @param {"function" | "constructor" | "method"} owner - Diagnostic owner.
+   */
+  const validateCallableBindings = (parameters, body, owner) => {
+    for (const parameter of parameters) {
+      if (ownedPrintReceiverNames.has(parameter.name)) {
+        unsupportedCapability(language, `${owner} parameter '${parameter.name}' captures backend scaffolding`, parameter.location)
+      }
+    }
+    for (const statement of allStatements(body)) {
+      if (statement.kind == "LocalDeclaration" && ownedPrintReceiverNames.has(statement.name)) {
+        unsupportedCapability(language, `${owner} local '${statement.name}' captures backend scaffolding`, statement.location)
+      }
+      if (statement.kind == "ForEachStatement" && ownedPrintReceiverNames.has(statement.valueBinding.name)) {
+        unsupportedCapability(language, `${owner} iteration binding '${statement.valueBinding.name}' captures backend scaffolding`,
+          statement.valueBinding.location)
+      }
+      if (statement.kind == "ForEachMapStatement") {
+        for (const binding of [statement.keyBinding, statement.valueBinding]) {
+          if (ownedPrintReceiverNames.has(binding.name)) {
+            unsupportedCapability(language, `${owner} iteration binding '${binding.name}' captures backend scaffolding`, binding.location)
+          }
+        }
+      }
+      if (statement.kind == "TryStatement" && ownedPrintReceiverNames.has(statement.catchBinding.name)) {
+        unsupportedCapability(language, `${owner} catch binding '${statement.catchBinding.name}' captures backend scaffolding`,
+          statement.catchBinding.location)
+      }
+    }
+  }
 
   for (const statement of allStatements(module.entryPoint.body)) {
     if (statement.kind == "LocalDeclaration" && ownedEntryNames.has(statement.name)) {
@@ -693,31 +880,11 @@ function validateScaffoldingNames(module, language) {
         )
       }
     }
-    for (const parameter of declaration.parameters) {
-      if (ownedPrintReceiverNames.has(parameter.name)) {
-        unsupportedCapability(language, `function parameter '${parameter.name}' captures backend scaffolding`, parameter.location)
-      }
-    }
-    for (const statement of allStatements(declaration.body)) {
-      if (statement.kind == "LocalDeclaration" && ownedPrintReceiverNames.has(statement.name)) {
-        unsupportedCapability(language, `function local '${statement.name}' captures backend scaffolding`, statement.location)
-      }
-      if (statement.kind == "ForEachStatement" && ownedPrintReceiverNames.has(statement.valueBinding.name)) {
-        unsupportedCapability(language, `function iteration binding '${statement.valueBinding.name}' captures backend scaffolding`,
-          statement.valueBinding.location)
-      }
-      if (statement.kind == "ForEachMapStatement") {
-        for (const binding of [statement.keyBinding, statement.valueBinding]) {
-          if (ownedPrintReceiverNames.has(binding.name)) {
-            unsupportedCapability(language, `function iteration binding '${binding.name}' captures backend scaffolding`, binding.location)
-          }
-        }
-      }
-      if (statement.kind == "TryStatement" && ownedPrintReceiverNames.has(statement.catchBinding.name)) {
-        unsupportedCapability(language, `function catch binding '${statement.catchBinding.name}' captures backend scaffolding`,
-          statement.catchBinding.location)
-      }
-    }
+    validateCallableBindings(declaration.parameters, declaration.body, "function")
+  }
+  for (const declaration of module.classes ?? []) {
+    validateCallableBindings(declaration.constructor.parameters, declaration.constructor.body, "constructor")
+    for (const method of declaration.methods) validateCallableBindings(method.parameters, method.body, "method")
   }
   if (language == "java") validateJavaUtilFactoryNames(module)
 }
@@ -732,13 +899,14 @@ function validateRecordConstructorNames(module, language) {
   if (language != "javascript" && language != "typescript") return
   const recordNames = new Set([
     ...(module.records ?? []).map((record) => record.name),
+    ...(module.classes ?? []).map((declaration) => declaration.name),
     ...(module.errors ?? []).map((error) => error.name)
   ])
 
   /**
    * Checks declarations nested beneath one owning block.
    * @param {import("../semantic/types.js").Block} block - Block to inspect.
-   * @param {"entry" | "function"} owner - Owning scope kind.
+   * @param {"entry" | "function" | "constructor" | "method"} owner - Owning scope kind.
    * @returns {void}
    */
   const validateBlockNames = (block, owner) => {
@@ -780,6 +948,24 @@ function validateRecordConstructorNames(module, language) {
     }
     validateBlockNames(declaration.body, "function")
   }
+  for (const declaration of module.classes ?? []) {
+    for (const parameter of declaration.constructor.parameters) {
+      if (recordNames.has(parameter.name)) {
+        unsupportedCapability(language, `constructor parameter '${parameter.name}' captures nominal constructor`,
+          bindingNameLocation(parameter))
+      }
+    }
+    validateBlockNames(declaration.constructor.body, "constructor")
+    for (const method of declaration.methods) {
+      for (const parameter of method.parameters) {
+        if (recordNames.has(parameter.name)) {
+          unsupportedCapability(language, `method parameter '${parameter.name}' captures nominal constructor`,
+            bindingNameLocation(parameter))
+        }
+      }
+      validateBlockNames(method.body, "method")
+    }
+  }
 }
 
 /**
@@ -792,7 +978,7 @@ function validateJavaUtilFactoryNames(module) {
    * Walks one lexical block while retaining only a currently visible capture.
    * @param {import("../semantic/types.js").Block} block - Block to inspect in semantic order.
    * @param {{detail: string, location: import("../semantic/types.js").SourceLocation} | undefined} inherited - Visible capture.
-   * @param {"entry" | "function"} owner - Owning scope kind.
+   * @param {"entry" | "function" | "constructor" | "method"} owner - Owning scope kind.
    * @returns {void}
    */
   const validateBlockNames = (block, inherited, owner) => {
@@ -811,6 +997,7 @@ function validateJavaUtilFactoryNames(module) {
           statement.kind == "ForEachMapStatement" ? statement.map :
         statement.kind == "LocalDeclaration" ? statement.initializer :
           statement.kind == "AssignmentStatement" ? statement.expression :
+            statement.kind == "PrivateFieldWriteStatement" ? statement.expression :
             statement.kind == "ReturnStatement" ? statement.expression :
               statement.kind == "ExpressionStatement" || statement.kind == "PrintStatement" ? statement.expression :
                 statement.kind == "RaiseStatement" ? statement.error.message : undefined
@@ -865,6 +1052,22 @@ function validateJavaUtilFactoryNames(module) {
 
     validateBlockNames(declaration.body, capture, "function")
   }
+  for (const declaration of module.classes ?? []) {
+    const callables = [
+      {body: declaration.constructor.body, owner: /** @type {const} */ ("constructor"), parameters: declaration.constructor.parameters},
+      ...declaration.methods.map((method) => ({body: method.body, owner: /** @type {const} */ ("method"), parameters: method.parameters}))
+    ]
+
+    for (const callable of callables) {
+      const parameter = callable.parameters.find(({name}) => name == "java")
+      const capture = parameter ? {
+        detail: `${callable.owner} parameter 'java' captures java.util factory syntax`,
+        location: parameter.location
+      } : undefined
+
+      validateBlockNames(callable.body, capture, callable.owner)
+    }
+  }
 }
 
 /**
@@ -874,7 +1077,11 @@ function validateJavaUtilFactoryNames(module) {
  * @returns {boolean} Whether the kind occurs.
  */
 function moduleContainsExpressionKind(module, kind) {
-  return [module.entryPoint.body, ...module.functions.map((declaration) => declaration.body)].some((block) =>
+  const classBlocks = (module.classes ?? []).flatMap((declaration) => [
+    declaration.constructor.body, ...declaration.methods.map((method) => method.body)
+  ])
+
+  return [module.entryPoint.body, ...module.functions.map((declaration) => declaration.body), ...classBlocks].some((block) =>
     allStatements(block).some((statement) => {
       const expression = statement.kind == "IfStatement" ? statement.condition :
         statement.kind == "WhileStatement" ? statement.condition :
@@ -882,6 +1089,7 @@ function moduleContainsExpressionKind(module, kind) {
           statement.kind == "ForEachMapStatement" ? statement.map :
         statement.kind == "LocalDeclaration" ? statement.initializer :
           statement.kind == "AssignmentStatement" ? statement.expression :
+            statement.kind == "PrivateFieldWriteStatement" ? statement.expression :
             statement.kind == "ReturnStatement" ? statement.expression :
               statement.kind == "ExpressionStatement" || statement.kind == "PrintStatement" ? statement.expression :
                 statement.kind == "RaiseStatement" ? statement.error.message : undefined
@@ -903,10 +1111,16 @@ function expressionContainsKind(expression, kind) {
     return expressionContainsKind(expression.left, kind) || expressionContainsKind(expression.right, kind)
   }
   if (expression.kind == "CallExpression") return expression.arguments.some((argument) => expressionContainsKind(argument, kind))
-  if (expression.kind == "RecordConstruction") {
+  if (expression.kind == "MethodCallExpression") {
+    return expressionContainsKind(expression.receiver, kind) ||
+      expression.arguments.some((argument) => expressionContainsKind(argument, kind))
+  }
+  if (expression.kind == "RecordConstruction" || expression.kind == "ReferenceConstruction") {
     return expression.arguments.some((argument) => expressionContainsKind(argument, kind))
   }
-  if (expression.kind == "MemberRead") return expressionContainsKind(expression.receiver, kind)
+  if (expression.kind == "MemberRead" || expression.kind == "PrivateFieldRead") {
+    return expressionContainsKind(expression.receiver, kind)
+  }
   if (expression.kind == "ListLiteral") return expression.elements.some((element) => expressionContainsKind(element, kind))
   if (expression.kind == "MapLiteral" || expression.kind == "OrderedMapLiteral") {
     return expression.entries.some((entry) => expressionContainsKind(entry.key, kind) || expressionContainsKind(entry.value, kind))
@@ -995,8 +1209,9 @@ function allStatements(block) {
  */
 function collectLoopOwners(module, language) {
   const owners = new Map()
+  const classOwners = (module.classes ?? []).flatMap((declaration) => [declaration.constructor, ...declaration.methods])
 
-  for (const owner of [...module.functions, module.entryPoint]) {
+  for (const owner of [...classOwners, ...module.functions, module.entryPoint]) {
     if (owner && typeof owner == "object" && !Array.isArray(owner)) visit(Reflect.get(owner, "body"), owner)
   }
 
@@ -1114,6 +1329,18 @@ function validateStatement(statement, language, ownerLocation, loopContext, acti
     validateExpression(assignment.expression, language, location, false, new Set(), externalDeclarationIds)
     return
   }
+  if (kind == "PrivateFieldWriteStatement") {
+    const assignment = /** @type {import("../semantic/types.js").PrivateFieldWriteStatement} */ (statement)
+    const fields = Object.keys(assignment).filter((key) => key != "sourceProvenance").sort().join(",")
+
+    if (fields != "expression,field,kind,location,receiver" || typeof assignment.field != "string" ||
+      assignment.receiver?.kind != "ReceiverExpression") {
+      unsupportedCapability(language, "malformed private field receiver or private field identity", location)
+    }
+    validateExpression(assignment.receiver, language, location, false, new Set(), externalDeclarationIds)
+    validateExpression(assignment.expression, language, location, false, new Set(), externalDeclarationIds)
+    return
+  }
   if (kind == "ReturnStatement") {
     const expression = Reflect.get(statement, "expression")
 
@@ -1129,8 +1356,9 @@ function validateStatement(statement, language, ownerLocation, loopContext, acti
     }
     const expression = Reflect.get(statement, "expression")
 
-    if (!expression || typeof expression != "object" || Reflect.get(expression, "kind") != "CallExpression") {
-      unsupportedCapability(language, "expression statement other than a direct call", location)
+    if (!expression || typeof expression != "object" ||
+      !["CallExpression", "MethodCallExpression"].includes(String(Reflect.get(expression, "kind")))) {
+      unsupportedCapability(language, "expression statement other than a direct or receiver call", location)
     }
     validateExpression(expression, language, location, false, new Set(), externalDeclarationIds)
     return
@@ -1444,6 +1672,14 @@ function validateExpression(expression, language, ownerLocation, allowJavaNegate
     validateTargetIdentifier(language, candidate.name, "reference", location)
     return
   }
+  if (candidate.kind == "ReceiverExpression") {
+    const fields = Object.keys(candidate).filter((key) => key != "sourceProvenance").sort().join(",")
+
+    if (fields != "classId,kind,location" || typeof candidate.classId != "string" || !/^class:[0-9]+$/u.test(candidate.classId)) {
+      unsupportedCapability(language, "malformed private field receiver", location)
+    }
+    return
+  }
   if (candidate.kind == "ErrorMessageRead") {
     const fields = Object.keys(candidate).filter((key) => key != "sourceProvenance").sort().join(",")
 
@@ -1564,6 +1800,37 @@ function validateExpression(expression, language, ownerLocation, allowJavaNegate
     }
     return
   }
+  if (candidate.kind == "ReferenceConstruction") {
+    const fields = Object.keys(candidate).filter((key) => key != "sourceProvenance").sort().join(",")
+    const resolution = candidate.resolution
+
+    if (fields != "arguments,kind,location,reference,resolution" || candidate.reference?.kind != "ReferenceType" ||
+      typeof candidate.reference.declarationId != "string" || !isDenseArray(candidate.arguments) ||
+      !resolution || resolution.kind != "ResolvedConstructorSignature" ||
+      resolution.declarationId != `${candidate.reference.declarationId}:constructor` || !isDenseArray(resolution.parameterTypes)) {
+      unsupportedCapability(language, "malformed reference construction or resolved constructor signature", location)
+    }
+    for (const argument of candidate.arguments) {
+      validateExpression(argument, language, location, false, expressionPath, externalDeclarationIds)
+    }
+    return
+  }
+  if (candidate.kind == "MethodCallExpression") {
+    const fields = Object.keys(candidate).filter((key) => key != "sourceProvenance").sort().join(",")
+    const resolution = candidate.resolution
+
+    if (fields != "arguments,kind,location,method,receiver,resolution" || typeof candidate.method != "string" ||
+      !isDenseArray(candidate.arguments) || !resolution || resolution.kind != "ResolvedMethodSignature" ||
+      resolution.declarationId != candidate.method || !isDenseArray(resolution.parameterTypes) ||
+      !Object.hasOwn(resolution, "returnType")) {
+      unsupportedCapability(language, "malformed receiver call or resolved method signature", location)
+    }
+    validateExpression(candidate.receiver, language, location, false, expressionPath, externalDeclarationIds)
+    for (const argument of candidate.arguments) {
+      validateExpression(argument, language, location, false, expressionPath, externalDeclarationIds)
+    }
+    return
+  }
   if (candidate.kind == "RecordConstruction") {
     const fields = Object.keys(candidate).filter((key) => key != "sourceProvenance").sort().join(",")
 
@@ -1581,6 +1848,16 @@ function validateExpression(expression, language, ownerLocation, allowJavaNegate
 
     if (fields != "field,kind,location,receiver" || typeof candidate.field != "string") {
       unsupportedCapability(language, "malformed MemberRead", location)
+    }
+    validateExpression(candidate.receiver, language, location, false, expressionPath, externalDeclarationIds)
+    return
+  }
+  if (candidate.kind == "PrivateFieldRead") {
+    const fields = Object.keys(candidate).filter((key) => key != "sourceProvenance").sort().join(",")
+
+    if (fields != "field,kind,location,receiver" || typeof candidate.field != "string" ||
+      candidate.receiver?.kind != "ReceiverExpression") {
+      unsupportedCapability(language, "malformed private field receiver or private field identity", location)
     }
     validateExpression(candidate.receiver, language, location, false, expressionPath, externalDeclarationIds)
     return
@@ -1690,6 +1967,14 @@ export function emitType(writer, type, path, language, javaBoxed = false) {
     }
     return
   }
+  if (type.kind == "ReferenceType") {
+    const declaration = writer.classForId(type.declarationId)
+
+    writer.mapped(writer.classNameForId(type.declarationId), {
+      mappingKind: "exact", name: declaration.name, node: type, path, role: "type"
+    })
+    return
+  }
   if (type.kind == "TypeReference") {
     const spelling = language == "java" && javaBoxed
       ? type.name == "integer" ? "Integer" : type.name == "boolean" ? "Boolean" : type.name == "string" ? "String" : "void"
@@ -1736,6 +2021,11 @@ export function emitType(writer, type, path, language, javaBoxed = false) {
 export function emitExpression(writer, expression, path, language, emitIdentifier) {
   if (expression.kind == "IdentifierExpression") {
     writer.mapped(emitIdentifier(expression.name), {mappingKind: "exact", node: expression, path, role: "name"})
+    return
+  }
+  if (expression.kind == "ReceiverExpression") {
+    writer.mapped(language == "php" ? "$this" : language == "ruby" ? "self" : "this",
+      {mappingKind: "exact", node: expression, path, role: "receiver"})
     return
   }
   if (expression.kind == "IntegerLiteral") {
@@ -1866,6 +2156,35 @@ export function emitExpression(writer, expression, path, language, emitIdentifie
     writer.mapped(")", {mappingKind: "anchor", node: expression, path})
     return
   }
+  if (expression.kind == "ReferenceConstruction") {
+    const declaration = writer.classForId(expression.reference.declarationId)
+    const name = writer.classNameForId(expression.reference.declarationId)
+    const prefix = language == "ruby" ? `${name}.new` : `new ${name}`
+
+    writer.mapped(prefix, {mappingKind: "exact", name: declaration.name, node: expression, path, role: "class"})
+    writer.mapped("(", {mappingKind: "anchor", node: expression, path})
+    expression.arguments.forEach((argument, index) => {
+      if (index > 0) writer.synthetic(", ", "constructor argument separator", [expression], [path])
+      emitExpression(writer, argument, `${path}/arguments/${index}`, language, emitIdentifier)
+    })
+    writer.mapped(")", {mappingKind: "anchor", node: expression, path})
+    return
+  }
+  if (expression.kind == "MethodCallExpression") {
+    emitExpression(writer, expression.receiver, `${path}/receiver`, language, emitIdentifier)
+    const method = writer.methodForId(expression.method)
+
+    writer.mapped(`${language == "php" ? "->" : "."}${method.name}`, {
+      mappingKind: "exact", name: method.name, node: expression, path, role: "member"
+    })
+    writer.mapped("(", {mappingKind: "anchor", node: expression, path})
+    expression.arguments.forEach((argument, index) => {
+      if (index > 0) writer.synthetic(", ", "method argument separator", [expression], [path])
+      emitExpression(writer, argument, `${path}/arguments/${index}`, language, emitIdentifier)
+    })
+    writer.mapped(")", {mappingKind: "anchor", node: expression, path})
+    return
+  }
   if (expression.kind == "RecordConstruction") {
     const record = writer.recordForId(expression.record.declarationId)
     const targetName = writer.recordNameForId(expression.record.declarationId, true)
@@ -1898,6 +2217,18 @@ export function emitExpression(writer, expression, path, language, emitIdentifie
       language == "java" ? `.${field.name}()` : `.${field.name}`
 
     writer.mapped(spelling, {mappingKind: "exact", node: expression, path, role: "member"})
+    return
+  }
+  if (expression.kind == "PrivateFieldRead") {
+    const field = writer.privateFieldForId(expression.field)
+
+    if (language == "ruby") {
+      writer.mapped(`@${field.name}`, {mappingKind: "exact", name: field.name, node: expression, path, role: "member"})
+      return
+    }
+    emitExpression(writer, expression.receiver, `${path}/receiver`, language, emitIdentifier)
+    writer.mapped(language == "php" ? `->${field.name}` : language == "javascript" ? `.#${field.name}` : `.${field.name}`,
+      {mappingKind: "exact", name: field.name, node: expression, path, role: "member"})
     return
   }
   if (expression.kind == "ErrorMessageRead") {

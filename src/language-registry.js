@@ -110,12 +110,13 @@ export function createLanguageRegistry(candidateRecords) {
       optionalValues: false,
       orderedListIteration: false,
       orderedMapIteration: false,
+      referenceClasses: false,
       typedErrors: false,
       typeParametersAndGenerics: false
     }
 
     if (!isPlainObject(featuresCandidate) ||
-      Object.keys(featuresCandidate).sort().join(",") != "closedRecords,conditionControlledLoops,generalFunctionsAndCalls,immutableCollections,optionalValues,orderedListIteration,orderedMapIteration,typeParametersAndGenerics,typedErrors" ||
+      Object.keys(featuresCandidate).sort().join(",") != "closedRecords,conditionControlledLoops,generalFunctionsAndCalls,immutableCollections,optionalValues,orderedListIteration,orderedMapIteration,referenceClasses,typeParametersAndGenerics,typedErrors" ||
       typeof featuresCandidate.closedRecords != "boolean" ||
       typeof featuresCandidate.conditionControlledLoops != "boolean" ||
       typeof featuresCandidate.generalFunctionsAndCalls != "boolean" ||
@@ -123,6 +124,7 @@ export function createLanguageRegistry(candidateRecords) {
       typeof featuresCandidate.optionalValues != "boolean" ||
       typeof featuresCandidate.orderedListIteration != "boolean" ||
       typeof featuresCandidate.orderedMapIteration != "boolean" ||
+      typeof featuresCandidate.referenceClasses != "boolean" ||
       typeof featuresCandidate.typedErrors != "boolean" ||
       typeof featuresCandidate.typeParametersAndGenerics != "boolean") {
       invalidRegistry(`Registry record '${id}' has an invalid feature declaration.`, id)
@@ -135,6 +137,7 @@ export function createLanguageRegistry(candidateRecords) {
       optionalValues: featuresCandidate.optionalValues,
       orderedListIteration: featuresCandidate.orderedListIteration,
       orderedMapIteration: featuresCandidate.orderedMapIteration,
+      referenceClasses: featuresCandidate.referenceClasses,
       typedErrors: featuresCandidate.typedErrors,
       typeParametersAndGenerics: featuresCandidate.typeParametersAndGenerics
     }))
@@ -437,7 +440,7 @@ const records = [
     artifactMultiplicity: "multiple",
     binaryBackend: generateBrowserWasm,
     defaultFilename: "program.wasm",
-    features: {closedRecords: false, conditionControlledLoops: false, generalFunctionsAndCalls: false, immutableCollections: false, optionalValues: false, orderedListIteration: false, orderedMapIteration: false, typedErrors: false, typeParametersAndGenerics: false},
+    features: {closedRecords: false, conditionControlledLoops: false, generalFunctionsAndCalls: false, immutableCollections: false, optionalValues: false, orderedListIteration: false, orderedMapIteration: false, referenceClasses: false, typedErrors: false, typeParametersAndGenerics: false},
     id: "wasm",
     mapping: {binaryRanges: true, richText: true, sourceMapV3: true},
     mediaType: "application/wasm",
@@ -468,6 +471,7 @@ function language(values) {
       optionalValues: ["php", "ruby", "javascript", "typescript", "java"].includes(String(values.id)),
       orderedListIteration: ["php", "ruby", "javascript", "typescript", "java"].includes(String(values.id)),
       orderedMapIteration: ["php", "ruby", "javascript", "typescript", "java"].includes(String(values.id)),
+      referenceClasses: ["php", "ruby", "javascript", "typescript", "java"].includes(String(values.id)),
       typedErrors: ["php", "ruby", "javascript", "typescript", "java"].includes(String(values.id)),
       typeParametersAndGenerics: ["php", "ruby", "javascript", "typescript", "java"].includes(String(values.id))
     },

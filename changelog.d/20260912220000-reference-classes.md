@@ -1,0 +1,1 @@
+Add bounded nominal reference classes, exact constructors, private instance state, and resolved receiver methods for PHP, Ruby, JavaScript/JSDoc, TypeScript, and Java, with deterministic identity/provenance and fail-loud validation for unsupported roles and forms.

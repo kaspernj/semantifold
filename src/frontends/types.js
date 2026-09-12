@@ -54,6 +54,7 @@ export function iterationBindingType(type, location) {
 
   if (type.kind == "RecordType") return recordType(type.declarationId, location,
     type.arguments?.map((argument) => iterationBindingType(argument, location)))
+  if (type.kind == "ReferenceType") return referenceType(type.declarationId, location)
 
   return optionalType(iterationBindingType(type.valueType, location), location, location)
 }
@@ -151,6 +152,19 @@ export function recordType(declarationId, location, arguments_) {
 }
 
 /**
+ * Builds one nominal reference-class type with a parser-owned name range.
+ * @param {string} declarationId - Stable class identity.
+ * @param {import("../semantic/types.js").SourceLocation} location - Class type-name range.
+ * @returns {import("../semantic/types.js").ReferenceType} Reference type.
+ */
+export function referenceType(declarationId, location) {
+  const type = {declarationId, kind: /** @type {const} */ ("ReferenceType")}
+
+  setParserRanges(type, {type: location})
+  return type
+}
+
+/**
  * Builds one declaration-scoped type-variable reference.
  * @param {string} parameterId - Stable type-parameter identity.
  * @param {import("../semantic/types.js").SourceLocation} location - Exact reference range.
@@ -186,6 +200,7 @@ export function sameValueType(left, right) {
     return left.declarationId == right.declarationId && leftArguments.length == rightArguments.length &&
       leftArguments.every((argument, index) => sameValueType(argument, rightArguments[index]))
   }
+  if (left.kind == "ReferenceType" && right.kind == "ReferenceType") return left.declarationId == right.declarationId
 
   return false
 }
@@ -303,6 +318,7 @@ function collectKnownSubstitutions(formal, actual, substitutions) {
   }
   if (formal.kind != actual.kind) return false
   if (formal.kind == "TypeReference") return sameValueType(formal, actual)
+  if (formal.kind == "ReferenceType" && actual.kind == "ReferenceType") return sameValueType(formal, actual)
   if (formal.kind == "RecordType" && actual.kind == "RecordType") {
     if (formal.declarationId != actual.declarationId || (formal.arguments?.length ?? 0) != (actual.arguments?.length ?? 0)) return false
 
@@ -330,7 +346,7 @@ function collectKnownSubstitutions(formal, actual, substitutions) {
  * @param {"javascript" | "php" | "ruby"} input.language - Comment profile.
  * @param {import("../semantic/types.js").SourceLocation} input.location - Exact type token range.
  * @param {import("../semantic/types.js").SourceLocation} input.ownerLocation - Owning declaration range.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} [input.records] - Available nominal records by source name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} [input.records] - Available nominal declarations by source name.
  * @param {Map<string, import("../semantic/types.js").TypeParameter>} [input.typeParameters] - Declaration-scoped parameters by name.
  * @param {string} input.source - Complete parser input for exact subranges.
  * @param {string | undefined} input.sourceType - Exact comment-parser/Prism-owned type token.
@@ -387,7 +403,9 @@ export function documentedValueType({language, location, ownerLocation, records 
     : sourceType
   const directRecord = records.get(unwrappedName)
 
-  if (directRecord?.id) return recordType(directRecord.id, location)
+  if (directRecord?.id) return directRecord.kind == "ClassDeclaration"
+    ? referenceType(directRecord.id, location)
+    : recordType(directRecord.id, location)
   const directTypeParameter = typeParameters.get(unwrappedName)
 
   if (directTypeParameter?.id) return typeVariable(directTypeParameter.id, location)
@@ -418,7 +436,7 @@ class DocumentedTypeParser {
    * @param {string} text - Parser-owned type text.
    * @param {import("../semantic/types.js").SourceLocation} location - Whole token location.
    * @param {string} source - Complete source.
-   * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} records - Available nominal records.
+   * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} records - Available nominal declarations.
    * @param {Map<string, import("../semantic/types.js").TypeParameter>} typeParameters - Declaration-scoped parameters.
    */
   constructor(language, text, location, source, records, typeParameters) {
@@ -512,7 +530,9 @@ class DocumentedTypeParser {
     }
 
     if (record?.id && this.text[this.offset] != "<" && this.text[this.offset] != "[") {
-      const type = recordType(record.id, this.range(start, nameEnd))
+      const type = record.kind == "ClassDeclaration"
+        ? referenceType(record.id, this.range(start, nameEnd))
+        : recordType(record.id, this.range(start, nameEnd))
 
       if (this.language == "ruby" && this.consume("?")) {
         return optionalType(type, this.range(start, this.offset), this.typeRange(type, start, nameEnd))

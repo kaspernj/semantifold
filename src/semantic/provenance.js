@@ -483,6 +483,9 @@ export function semanticEntries(module) {
         node.imports.forEach((child, index) => visit(child, `/imports/${index}`, location))
       }
       ;(node.records ?? []).forEach((child, index) => visit(child, `/records/${index}`, location))
+      if (!("sourceFilename" in node)) {
+        ;(node.classes ?? []).forEach((child, index) => visit(child, `/classes/${index}`, location))
+      }
       ;(node.errors ?? []).forEach((child, index) => visit(child, `/errors/${index}`, location))
       node.functions.forEach((child, index) => visit(child, `/functions/${index}`, location))
       if ("exports" in node) {
@@ -492,6 +495,19 @@ export function semanticEntries(module) {
     } else if (node.kind == "RecordDeclaration") {
       ;(node.typeParameters ?? []).forEach((child, index) => visit(child, `${path}/typeParameters/${index}`, location))
       node.fields.forEach((child, index) => visit(child, `${path}/fields/${index}`, location))
+    } else if (node.kind == "ClassDeclaration") {
+      node.fields.forEach((child, index) => visit(child, `${path}/fields/${index}`, location))
+      visit(node.constructor, `${path}/constructor`, location)
+      node.methods.forEach((child, index) => visit(child, `${path}/methods/${index}`, location))
+    } else if (node.kind == "PrivateField") {
+      visit(node.type, `${path}/type`, location)
+    } else if (node.kind == "ConstructorDeclaration") {
+      node.parameters.forEach((child, index) => visit(child, `${path}/parameters/${index}`, location))
+      visit(node.body, `${path}/body`, location)
+    } else if (node.kind == "MethodDeclaration") {
+      node.parameters.forEach((child, index) => visit(child, `${path}/parameters/${index}`, location))
+      visit(node.returnType, `${path}/returnType`, location)
+      visit(node.body, `${path}/body`, location)
     } else if (node.kind == "RecordField") {
       visit(node.type, `${path}/type`, location)
     } else if (node.kind == "FunctionDeclaration") {
@@ -521,6 +537,9 @@ export function semanticEntries(module) {
       visit(node.initializer, `${path}/initializer`, location)
     } else if (node.kind == "AssignmentStatement") {
       visit(node.target, `${path}/target`, location)
+      visit(node.expression, `${path}/expression`, location)
+    } else if (node.kind == "PrivateFieldWriteStatement") {
+      visit(node.receiver, `${path}/receiver`, location)
       visit(node.expression, `${path}/expression`, location)
     } else if (node.kind == "ReturnStatement") {
       if (node.expression) visit(node.expression, `${path}/expression`, location)
@@ -558,10 +577,18 @@ export function semanticEntries(module) {
       visit(node.right, `${path}/right`, location)
     } else if (node.kind == "CallExpression") {
       node.arguments.forEach((child, index) => visit(child, `${path}/arguments/${index}`, location))
+    } else if (node.kind == "MethodCallExpression") {
+      visit(node.receiver, `${path}/receiver`, location)
+      node.arguments.forEach((child, index) => visit(child, `${path}/arguments/${index}`, location))
+    } else if (node.kind == "ReferenceConstruction") {
+      visit(node.reference, `${path}/reference`, location)
+      node.arguments.forEach((child, index) => visit(child, `${path}/arguments/${index}`, location))
     } else if (node.kind == "RecordConstruction") {
       visit(node.record, `${path}/record`, location)
       node.arguments.forEach((child, index) => visit(child, `${path}/arguments/${index}`, location))
     } else if (node.kind == "MemberRead") {
+      visit(node.receiver, `${path}/receiver`, location)
+    } else if (node.kind == "PrivateFieldRead") {
       visit(node.receiver, `${path}/receiver`, location)
     } else if (node.kind == "ErrorConstruction") {
       visit(node.error, `${path}/error`, location)
@@ -609,6 +636,12 @@ function resolveSymbols(module, records) {
   /** @type {Map<string, string>} */
   const fieldSymbols = new Map()
   /** @type {Map<string, string>} */
+  const classSymbols = new Map()
+  /** @type {Map<string, string>} */
+  const constructorSymbols = new Map()
+  /** @type {Map<string, string>} */
+  const methodSymbols = new Map()
+  /** @type {Map<string, string>} */
   const typeParameterSymbols = new Map()
 
   for (const [index, declaration] of (module.records ?? []).entries()) {
@@ -633,6 +666,27 @@ function resolveSymbols(module, records) {
     const symbol = declare(declaration, declaration.name, "error", `/errors/${index}`)
 
     if (declaration.id) errorSymbols.set(declaration.id, symbol)
+  }
+
+  for (const [index, declaration] of (module.classes ?? []).entries()) {
+    const declarationPath = `/classes/${index}`
+    const classSymbol = declare(declaration, declaration.name, "class", declarationPath)
+
+    if (declaration.id) classSymbols.set(declaration.id, classSymbol)
+    for (const [fieldIndex, field] of declaration.fields.entries()) {
+      const symbol = declare(field, field.name, "field", `${declarationPath}/fields/${fieldIndex}`)
+
+      if (field.id) fieldSymbols.set(field.id, symbol)
+      visitType(field.type, `${declarationPath}/fields/${fieldIndex}/type`)
+    }
+    const constructorSymbol = declare(declaration.constructor, "constructor", "constructor", `${declarationPath}/constructor`)
+
+    if (declaration.constructor.id) constructorSymbols.set(declaration.constructor.id, constructorSymbol)
+    for (const [methodIndex, method] of declaration.methods.entries()) {
+      const symbol = declare(method, method.name, "method", `${declarationPath}/methods/${methodIndex}`)
+
+      if (method.id) methodSymbols.set(method.id, symbol)
+    }
   }
 
   for (const [index, declaration] of (module.records ?? []).entries()) {
@@ -664,13 +718,39 @@ function resolveSymbols(module, records) {
     visitBlock(declaration.body, scope, `${declarationPath}/body`)
   }
 
+  for (const [classIndex, declaration] of (module.classes ?? []).entries()) {
+    const declarationPath = `/classes/${classIndex}`
+    const constructorScope = new Map()
+
+    for (const [parameterIndex, parameter] of declaration.constructor.parameters.entries()) {
+      const path = `${declarationPath}/constructor/parameters/${parameterIndex}`
+
+      constructorScope.set(parameter.name, declare(parameter, parameter.name, "parameter", path))
+      visitType(parameter.type, `${path}/type`)
+    }
+    visitBlock(declaration.constructor.body, constructorScope, `${declarationPath}/constructor/body`)
+    for (const [methodIndex, method] of declaration.methods.entries()) {
+      const methodPath = `${declarationPath}/methods/${methodIndex}`
+      const scope = new Map()
+
+      for (const [parameterIndex, parameter] of method.parameters.entries()) {
+        const path = `${methodPath}/parameters/${parameterIndex}`
+
+        scope.set(parameter.name, declare(parameter, parameter.name, "parameter", path))
+        visitType(parameter.type, `${path}/type`)
+      }
+      visitType(method.returnType, `${methodPath}/returnType`)
+      visitBlock(method.body, scope, `${methodPath}/body`)
+    }
+  }
+
   visitBlock(module.entryPoint.body, new Map(), "/entryPoint/body")
 
   return symbols
 
   /**
    * Declares one canonical symbol.
-   * @param {import("./types.js").RecordDeclaration | import("./types.js").ErrorDeclaration | import("./types.js").RecordField | import("./types.js").FunctionDeclaration | import("./types.js").TypeParameter | import("./types.js").Parameter | import("./types.js").LocalDeclaration | import("./types.js").ValueBinding | import("./types.js").CatchBinding} node - Declaration.
+   * @param {import("./types.js").RecordDeclaration | import("./types.js").ClassDeclaration | import("./types.js").ErrorDeclaration | import("./types.js").RecordField | import("./types.js").PrivateField | import("./types.js").ConstructorDeclaration | import("./types.js").MethodDeclaration | import("./types.js").FunctionDeclaration | import("./types.js").TypeParameter | import("./types.js").Parameter | import("./types.js").LocalDeclaration | import("./types.js").ValueBinding | import("./types.js").CatchBinding} node - Declaration.
    * @param {string} name - Symbol name.
    * @param {import("./types.js").SemanticSymbolKind} kind - Symbol kind.
    * @param {string} path - Declaration occurrence path.
@@ -692,8 +772,8 @@ function resolveSymbols(module, records) {
       location,
       name,
       references: [],
-      ...(["record", "error", "field", "function", "typeParameter"].includes(kind)
-        ? {semanticDeclarationId: /** @type {import("./types.js").RecordDeclaration | import("./types.js").ErrorDeclaration | import("./types.js").RecordField | import("./types.js").FunctionDeclaration | import("./types.js").TypeParameter} */ (node).id}
+      ...(["record", "class", "error", "field", "constructor", "method", "function", "typeParameter"].includes(kind)
+        ? {semanticDeclarationId: /** @type {import("./types.js").RecordDeclaration | import("./types.js").ClassDeclaration | import("./types.js").ErrorDeclaration | import("./types.js").RecordField | import("./types.js").PrivateField | import("./types.js").ConstructorDeclaration | import("./types.js").MethodDeclaration | import("./types.js").FunctionDeclaration | import("./types.js").TypeParameter} */ (node).id}
         : {})
     })
 
@@ -719,6 +799,10 @@ function resolveSymbols(module, records) {
         scope.set(statement.name, declare(statement, statement.name, "local", statementPath))
       } else if (statement.kind == "AssignmentStatement") {
         reference(statement.target, scope.get(statement.target.name), "write", `${statementPath}/target`)
+        visitExpression(statement.expression, scope, `${statementPath}/expression`)
+      } else if (statement.kind == "PrivateFieldWriteStatement") {
+        reference(statement, fieldSymbols.get(statement.field), "write", statementPath)
+        visitExpression(statement.receiver, scope, `${statementPath}/receiver`)
         visitExpression(statement.expression, scope, `${statementPath}/expression`)
       } else if (statement.kind == "ReturnStatement") {
         if (statement.expression) visitExpression(statement.expression, scope, `${statementPath}/expression`)
@@ -787,6 +871,7 @@ function resolveSymbols(module, records) {
    */
   function visitExpression(expression, scope, path) {
     if (expression.kind == "IdentifierExpression") reference(expression, scope.get(expression.name), "read", path)
+    else if (expression.kind == "ReceiverExpression") reference(expression, classSymbols.get(expression.classId), "read", path)
     else if (expression.kind == "CallExpression") {
       const declaration = module.functions.find((candidate) => candidate.id == expression.resolution?.declarationId)
 
@@ -795,7 +880,17 @@ function resolveSymbols(module, records) {
     } else if (expression.kind == "RecordConstruction") {
       reference(expression, recordSymbols.get(expression.record.declarationId), "construct", path)
       for (const [index, argument] of expression.arguments.entries()) visitExpression(argument, scope, `${path}/arguments/${index}`)
+    } else if (expression.kind == "ReferenceConstruction") {
+      reference(expression, constructorSymbols.get(/** @type {string} */ (expression.resolution?.declarationId)), "construct", path)
+      for (const [index, argument] of expression.arguments.entries()) visitExpression(argument, scope, `${path}/arguments/${index}`)
+    } else if (expression.kind == "MethodCallExpression") {
+      reference(expression, methodSymbols.get(expression.method), "call", path)
+      visitExpression(expression.receiver, scope, `${path}/receiver`)
+      for (const [index, argument] of expression.arguments.entries()) visitExpression(argument, scope, `${path}/arguments/${index}`)
     } else if (expression.kind == "MemberRead") {
+      reference(expression, fieldSymbols.get(expression.field), "member", path)
+      visitExpression(expression.receiver, scope, `${path}/receiver`)
+    } else if (expression.kind == "PrivateFieldRead") {
       reference(expression, fieldSymbols.get(expression.field), "member", path)
       visitExpression(expression.receiver, scope, `${path}/receiver`)
     } else if (expression.kind == "ErrorMessageRead") {
@@ -840,6 +935,7 @@ function resolveSymbols(module, records) {
       for (const [index, argument] of (type.arguments ?? []).entries()) visitType(argument, `${path}/arguments/${index}`)
     }
     else if (type.kind == "ErrorType") reference(type, errorSymbols.get(type.declarationId), "type", path)
+    else if (type.kind == "ReferenceType") reference(type, classSymbols.get(type.declarationId), "type", path)
     else if (type.kind == "ListType") visitType(type.elementType, `${path}/elementType`)
     else if (type.kind == "MapType" || type.kind == "OrderedMapType") {
       visitType(type.keyType, `${path}/keyType`)
@@ -849,7 +945,7 @@ function resolveSymbols(module, records) {
 
   /**
    * Attaches one resolved symbol reference.
-   * @param {import("./types.js").IdentifierExpression | import("./types.js").CallExpression | import("./types.js").TypeVariableReference | import("./types.js").RecordType | import("./types.js").RecordConstruction | import("./types.js").MemberRead | import("./types.js").ErrorType | import("./types.js").ErrorConstruction} node - Reference node.
+   * @param {import("./types.js").IdentifierExpression | import("./types.js").ReceiverExpression | import("./types.js").CallExpression | import("./types.js").MethodCallExpression | import("./types.js").TypeVariableReference | import("./types.js").RecordType | import("./types.js").ReferenceType | import("./types.js").RecordConstruction | import("./types.js").ReferenceConstruction | import("./types.js").MemberRead | import("./types.js").PrivateFieldRead | import("./types.js").PrivateFieldWriteStatement | import("./types.js").ErrorType | import("./types.js").ErrorConstruction} node - Reference node.
    * @param {string | undefined} symbolId - Resolved symbol.
    * @param {"type" | "construct" | "member" | "read" | "write" | "call"} role - Reference role.
    * @param {string} path - Reference occurrence path.
@@ -863,7 +959,9 @@ function resolveSymbols(module, records) {
 
     if (!record || !symbol) throw new Error(`Missing provenance while resolving ${node.kind}.`)
 
-    const rangeRole = role == "call" ? "callee" : role == "construct" ? (node.kind == "ErrorConstruction" ? "type" : "record") : role == "member" ? "member" : role == "type" ? "type" : "name"
+    const rangeRole = role == "call" ? (node.kind == "MethodCallExpression" ? "member" : "callee") :
+      role == "construct" ? (node.kind == "ErrorConstruction" ? "type" : node.kind == "ReferenceConstruction" ? "class" : "record") :
+        role == "member" || role == "write" && node.kind == "PrivateFieldWriteStatement" ? "member" : role == "type" ? "type" : "name"
     const location = record.ranges[rangeRole] ?? ("location" in node ? node.location : primaryLocation(record.origin))
 
     record.symbolId = symbolId

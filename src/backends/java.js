@@ -14,6 +14,7 @@ const generatedNames = new WeakMap()
 export function generateJava(module, writer) {
   generatedNames.set(writer, collectNames(module))
   const records = module.records ?? []
+  const classes = module.classes ?? []
   const errors = module.errors ?? []
   const programModule = writer.program?.modules.find(({id}) => id == Reflect.get(module, "id"))
 
@@ -112,7 +113,11 @@ export function generateJava(module, writer) {
     writer.synthetic("\n", "Java source terminator", [module])
     return
   }
-  if (records.length > 0) writer.synthetic("\n\n", "record/Main separator", [module])
+  classes.forEach((declaration, classIndex) => {
+    if (records.length > 0 || classIndex > 0) writer.synthetic("\n\n", "reference class separator", [declaration], [`/classes/${classIndex}`])
+    emitReferenceClass(writer, declaration, classIndex)
+  })
+  if (records.length + classes.length > 0) writer.synthetic("\n\n", "nominal/Main separator", [module])
   const className = programModule
     ? writer.isProgramEntry() ? "Main" : writer.programModuleName(programModule.id)
     : "Main"
@@ -123,7 +128,8 @@ export function generateJava(module, writer) {
     if (functionIndex > 0) writer.synthetic("\n\n", "declaration separator", [declaration])
 
     writer.synthetic("  ", "indentation", [declaration])
-    writer.mapped(programModule && writer.isExported(declaration.id) ? "public static" : "private static",
+    writer.mapped(programModule && writer.isExported(declaration.id) ? "public static" :
+      !programModule && classes.length > 0 ? "static" : "private static",
       {mappingKind: "anchor", node: declaration})
     writer.synthetic(" ", "method spacing", [declaration])
     emitTypeParameters(writer, declaration.typeParameters ?? [], `/functions/${functionIndex}/typeParameters`)
@@ -169,6 +175,84 @@ export function generateJava(module, writer) {
 }
 
 /**
+ * Emits one package-private final Java reference class.
+ * @param {import("./writer.js").SourceWriter} writer - Source-aware writer.
+ * @param {import("../semantic/types.js").ClassDeclaration} declaration - Reference class.
+ * @param {number} classIndex - Module class index.
+ * @returns {void}
+ */
+function emitReferenceClass(writer, declaration, classIndex) {
+  const path = `/classes/${classIndex}`
+
+  writer.mapped("final class", {mappingKind: "anchor", node: declaration, path})
+  writer.synthetic(" ", "reference class spacing", [declaration], [path])
+  writer.mapped(declaration.name, {mappingKind: "exact", node: declaration, path, role: "name"})
+  writer.synthetic(" {\n", "reference class open", [declaration], [path])
+  declaration.fields.forEach((field, index) => {
+    const fieldPath = `${path}/fields/${index}`
+
+    writer.synthetic("  private ", "private field scaffolding", [field], [fieldPath])
+    emitType(writer, field.type, `${fieldPath}/type`, "java")
+    writer.synthetic(" ", "private field spacing", [field], [fieldPath])
+    writer.mapped(field.name, {mappingKind: "exact", node: field, path: fieldPath, role: "name"})
+    writer.synthetic(";\n", "line break", [field], [fieldPath])
+  })
+  const constructor = declaration.constructor
+  const constructorPath = `${path}/constructor`
+
+  writer.synthetic("\n  ", "constructor spacing", [constructor], [constructorPath])
+  writer.mapped(declaration.name, {mappingKind: "exact", node: constructor, path: constructorPath, role: "constructor"})
+  emitJavaParameters(writer, constructor.parameters, `${constructorPath}/parameters`)
+  writer.synthetic(" {\n", "constructor open", [constructor], [constructorPath])
+  writer.beginReferenceClassEmission()
+  try {
+    emitBlock(writer, constructor.body, "    ", `${constructorPath}/body`)
+  } finally {
+    writer.endReferenceClassEmission()
+  }
+  writer.synthetic("  }", "constructor close", [constructor], [constructorPath])
+  declaration.methods.forEach((method, index) => {
+    const methodPath = `${path}/methods/${index}`
+
+    writer.synthetic("\n\n  ", "method spacing", [method], [methodPath])
+    emitType(writer, method.returnType, `${methodPath}/returnType`, "java")
+    writer.synthetic(" ", "method spacing", [method], [methodPath])
+    writer.mapped(method.name, {mappingKind: "exact", node: method, path: methodPath, role: "name"})
+    emitJavaParameters(writer, method.parameters, `${methodPath}/parameters`)
+    writer.synthetic(" {\n", "method open", [method], [methodPath])
+    writer.beginReferenceClassEmission()
+    try {
+      emitBlock(writer, method.body, "    ", `${methodPath}/body`)
+    } finally {
+      writer.endReferenceClassEmission()
+    }
+    writer.synthetic("  }", "method close", [method], [methodPath])
+  })
+  writer.synthetic("\n", "line break", [declaration], [path])
+  writer.mapped("}", {mappingKind: "anchor", node: declaration, path})
+}
+
+/**
+ * Emits one Java parameter list.
+ * @param {import("./writer.js").SourceWriter} writer - Source-aware writer.
+ * @param {import("../semantic/types.js").Parameter[]} parameters - Ordered parameters.
+ * @param {string} path - Parameter collection path.
+ * @returns {void}
+ */
+function emitJavaParameters(writer, parameters, path) {
+  writer.synthetic("(", "parameter list open", parameters)
+  parameters.forEach((parameter, index) => {
+    const parameterPath = `${path}/${index}`
+
+    if (index) writer.synthetic(", ", "parameter separator", parameters)
+    emitType(writer, parameter.type, `${parameterPath}/type`, "java")
+    writer.synthetic(" ", "parameter spacing", [parameter], [parameterPath])
+    writer.mapped(parameter.name, {mappingKind: "exact", node: parameter, path: parameterPath, role: "name"})
+  })
+  writer.synthetic(")", "parameter list close", parameters)
+}
+
+/**
  * Emits native invariant Java declaration parameters.
  * @param {import("./writer.js").SourceWriter} writer - Source-aware writer.
  * @param {import("../semantic/types.js").TypeParameter[]} parameters - Ordered type parameters.
@@ -207,6 +291,17 @@ function emitBlock(writer, block, indent, path) {
 function emitStatement(writer, statement, indent, path) {
   if (statement.kind == "LocalDeclaration" || statement.kind == "AssignmentStatement") return emitLocal(writer, statement, indent, path)
   writer.synthetic(indent, "indentation", [statement], [path])
+  if (statement.kind == "PrivateFieldWriteStatement") {
+    emitExpression(writer, statement.receiver, `${path}/receiver`, "java", identity)
+    const field = writer.privateFieldForId(statement.field)
+
+    writer.mapped(`.${field.name}`, {mappingKind: "exact", name: field.name, node: statement, path, role: "member"})
+    writer.synthetic(" = ", "private field assignment", [statement], [path])
+    emitExpression(writer, statement.expression, `${path}/expression`, "java", identity)
+    writer.mapped(";", {mappingKind: "anchor", node: statement, path})
+    writer.synthetic("\n", "line break", [statement], [path])
+    return
+  }
   if (statement.kind == "BreakStatement" || statement.kind == "ContinueStatement") {
     writer.mapped(statement.kind == "BreakStatement" ? "break" : "continue", {mappingKind: "exact", node: statement, path})
     writer.mapped(";", {mappingKind: "anchor", node: statement, path})
