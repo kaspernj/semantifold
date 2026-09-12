@@ -2,7 +2,7 @@
 
 Date: 2026-09-05
 
-Status: dependency-ordered plan; Task 032 is delivered, Task 033 is implemented and locally focused-validated with PR publication pending, and Tasks 034–037 remain planned.
+Status: dependency-ordered plan; Task 032 is delivered, Task 033 is implemented and proposed in PR #43 with review, TensorBuzz CI, and merge pending, and Tasks 034–037 remain planned.
 
 ## Goal and architecture reference
 
@@ -17,7 +17,7 @@ The sequence therefore establishes general language semantics first, then define
 ## Dependency-ordered sequence
 
 1. [Task 004](../../todo/004-statement-sequencing-and-conditionals.md), [Task 005](../../todo/005-general-function-signatures-and-calls.md), and [Task 032 — condition-controlled loops and break/continue](../../todo/032-condition-controlled-loops-and-break.md) are delivered. Task 032 supplies a general strict-Boolean loop model without recognizing stdlib-specific read-loop idioms.
-2. [Task 009](../../todo/009-closed-records-and-member-access.md) is delivered, and [Task 033 — reference classes, methods, and constructors](../../todo/033-reference-classes-methods-and-constructors.md) is implemented and locally focused-validated for the original five with PR publication pending. Its bounded nominal reference identity, private state, construction, and receiver calls are single-module semantics; immutable records alone are insufficient for executable facades.
+2. [Task 009](../../todo/009-closed-records-and-member-access.md) is delivered, and [Task 033 — reference classes, methods, and constructors](../../todo/033-reference-classes-methods-and-constructors.md) is implemented and proposed in PR #43 for the original five, with review, TensorBuzz CI, and merge pending. Its bounded nominal reference identity, private state, construction, and receiver calls are single-module semantics; immutable records alone are insufficient for executable facades.
 3. Build on optionals, typed failures, and reference classes with [Task 034 — effectful capabilities and resource lifetime](../../todo/034-effectful-capabilities-and-resource-lifetime.md). It defines explicit host effects, resource ownership, deterministic close, and typed failure boundaries without claiming async, concurrency, `finally`, or RAII.
 4. Build project/module and effect foundations into [Task 035 — versioned standard-library contracts and provider linking](../../todo/035-versioned-standard-library-contracts-and-provider-linking.md). This owns canonical capability modules, provider registry/negotiation, protected native bindings, transactional linking, and tree-shaking.
 5. Add [Task 036 — language compatibility stdlib/facades](../../todo/036-language-compatibility-stdlib-facades.md). It owns proved stdlib identity, executable source-language facades, collision-safe target names, and same-language recursion isolation.
@@ -43,4 +43,4 @@ Negative acceptance covers unresolved or shadowed `TCPSocket` or `puts`, monkey-
 
 Each behavior task must add focused specs, exact public contracts, documentation, and a changelog fragment. Runtime-generation coverage must invoke the real required tools and a real local socket; source snapshots are insufficient. Implementations must validate and return deterministic complete artifact sets, retain semantic/synthetic provenance, and fail if a required tool is unavailable.
 
-The plan itself adds no compiler/runtime behavior or implementation authority. Task 032 is delivered and Task 033 is a separate implementation candidate; Tasks 034–037 remain unimplemented here. Neither this plan nor those semantic prerequisites trigger release, CI-topology changes, external task mutation, or expansion into later facade/provider tasks.
+The plan itself adds no compiler/runtime behavior or implementation authority. Task 032 is delivered and Task 033 is proposed separately in PR #43; Tasks 034–037 remain unimplemented here. Neither this plan nor those semantic prerequisites trigger release, CI-topology changes, external task mutation, or expansion into later facade/provider tasks.

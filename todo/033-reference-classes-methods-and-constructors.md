@@ -1,6 +1,6 @@
 # 033 — Reference classes, methods, and constructors
 
-- Status: `implementation complete and locally focused-validated; PR publication pending`
+- Status: `implemented and proposed in PR #43; independent review, TensorBuzz CI, and merge pending`
 - Phase/priority: Phase S / P1
 - Dependencies: [005-general-function-signatures-and-calls.md](005-general-function-signatures-and-calls.md), [009-closed-records-and-member-access.md](009-closed-records-and-member-access.md)
 
@@ -69,4 +69,4 @@ The candidate adds parser-neutral nominal `ClassDeclaration`, `ReferenceType`, e
 
 The smallest correct adoption cohort is PHP, Ruby, JavaScript/JSDoc, TypeScript, and Java: these are the existing general-function, record, optional, generic, and loop cohort and all have parser-backed canonical class forms plus real runtime/compiler acceptance. The other eight source roles and browser Wasm advertise `referenceClasses: false` and reject the capability transactionally. This task remains single-module; both Task 010 program APIs reject class-bearing modules before resolution or output. Constructors and methods may handle Task 011 errors internally but cannot expose unchecked-error effects through receiver calls, and target lifecycle/protocol hooks remain reserved.
 
-Focused semantic, frontend, backend-validation, backend/round-trip, provenance/mapping, registry, cross-language behavior, and real-toolchain specs pass individually. They cover fresh independent state, aliasing, value- and void-returning methods, reference passage, receiver-before-argument and constructor argument order, complete initialization, privacy, exact resolution/signatures, deterministic output, unsupported roles, inheritance/reopening/reflection exclusions, and malformed caller IR. Aggregate TensorBuzz CI, independent review, merge, and release remain coordinator-owned.
+Focused semantic, frontend, backend-validation, backend/round-trip, provenance/mapping, registry, cross-language behavior, and real-toolchain specs pass individually. They cover fresh independent state, aliasing, value- and void-returning methods, reference passage, receiver-before-argument and constructor argument order, complete initialization, privacy, exact resolution/signatures, deterministic output, unsupported roles, inheritance/reopening/reflection exclusions, and malformed caller IR. The implementation is proposed in PR #43; aggregate TensorBuzz CI, independent review, merge, and release remain coordinator-owned.
