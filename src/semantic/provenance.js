@@ -509,7 +509,7 @@ export function semanticEntries(module) {
       visit(node.type, `${path}/type`, location)
     } else if (node.kind == "ListType") {
       visit(node.elementType, `${path}/elementType`, location)
-    } else if (node.kind == "MapType") {
+    } else if (node.kind == "MapType" || node.kind == "OrderedMapType") {
       visit(node.keyType, `${path}/keyType`, location)
       visit(node.valueType, `${path}/valueType`, location)
     } else if (node.kind == "OptionalType") {
@@ -532,6 +532,11 @@ export function semanticEntries(module) {
       if (node.alternate) visit(node.alternate, `${path}/alternate`, location)
     } else if (node.kind == "ForEachStatement") {
       visit(node.list, `${path}/list`, location)
+      visit(node.valueBinding, `${path}/valueBinding`, location)
+      visit(node.body, `${path}/body`, location)
+    } else if (node.kind == "ForEachMapStatement") {
+      visit(node.map, `${path}/map`, location)
+      visit(node.keyBinding, `${path}/keyBinding`, location)
       visit(node.valueBinding, `${path}/valueBinding`, location)
       visit(node.body, `${path}/body`, location)
     } else if (node.kind == "RaiseStatement") {
@@ -562,7 +567,7 @@ export function semanticEntries(module) {
       visit(node.receiver, `${path}/receiver`, location)
     } else if (node.kind == "ListLiteral") {
       node.elements.forEach((child, index) => visit(child, `${path}/elements/${index}`, location))
-    } else if (node.kind == "MapLiteral") {
+    } else if (node.kind == "MapLiteral" || node.kind == "OrderedMapLiteral") {
       node.entries.forEach((child, index) => visit(child, `${path}/entries/${index}`, location))
     } else if (node.kind == "MapEntry") {
       visit(node.key, `${path}/key`, location)
@@ -733,6 +738,19 @@ function resolveSymbols(module, records) {
           `${statementPath}/valueBinding`
         ))
         visitBlock(statement.body, bodyScope, `${statementPath}/body`)
+      } else if (statement.kind == "ForEachMapStatement") {
+        visitExpression(statement.map, scope, `${statementPath}/map`)
+        const bodyScope = new Map(scope)
+
+        visitType(statement.keyBinding.type, `${statementPath}/keyBinding/type`)
+        visitType(statement.valueBinding.type, `${statementPath}/valueBinding/type`)
+        bodyScope.set(statement.keyBinding.name, declare(
+          statement.keyBinding, statement.keyBinding.name, "iteration", `${statementPath}/keyBinding`
+        ))
+        bodyScope.set(statement.valueBinding.name, declare(
+          statement.valueBinding, statement.valueBinding.name, "iteration", `${statementPath}/valueBinding`
+        ))
+        visitBlock(statement.body, bodyScope, `${statementPath}/body`)
       } else if (statement.kind == "RaiseStatement") {
         visitType(statement.error.error, `${statementPath}/error/error`)
         reference(statement.error, errorSymbols.get(statement.error.error.declarationId), "construct", `${statementPath}/error`)
@@ -783,7 +801,7 @@ function resolveSymbols(module, records) {
       visitExpression(expression.right, scope, `${path}/right`)
     } else if (expression.kind == "ListLiteral") {
       for (const [index, element] of expression.elements.entries()) visitExpression(element, scope, `${path}/elements/${index}`)
-    } else if (expression.kind == "MapLiteral") {
+    } else if (expression.kind == "MapLiteral" || expression.kind == "OrderedMapLiteral") {
       for (const [index, entry] of expression.entries.entries()) {
         visitExpression(entry.key, scope, `${path}/entries/${index}/key`)
         visitExpression(entry.value, scope, `${path}/entries/${index}/value`)
@@ -817,7 +835,7 @@ function resolveSymbols(module, records) {
     }
     else if (type.kind == "ErrorType") reference(type, errorSymbols.get(type.declarationId), "type", path)
     else if (type.kind == "ListType") visitType(type.elementType, `${path}/elementType`)
-    else if (type.kind == "MapType") {
+    else if (type.kind == "MapType" || type.kind == "OrderedMapType") {
       visitType(type.keyType, `${path}/keyType`)
       visitType(type.valueType, `${path}/valueType`)
     } else if (type.kind == "OptionalType") visitType(type.valueType, `${path}/valueType`)

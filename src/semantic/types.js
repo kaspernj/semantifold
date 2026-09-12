@@ -42,6 +42,7 @@
  * @property {boolean} immutableCollections - Task 006 recursive immutable lists/maps, total access, and size.
  * @property {boolean} optionalValues - Task 007 explicit optional values, presence tests, and guarded unwrap.
  * @property {boolean} orderedListIteration - Task 008 ordered immutable-list iteration and nearest-loop control.
+ * @property {boolean} orderedMapIteration - Task 014 insertion-ordered immutable-map pair iteration.
  * @property {boolean} closedRecords - Task 009 nominal closed immutable records, construction, and member reads.
  * @property {boolean} typedErrors - Task 011 nominal unchecked errors, raises, and exact typed catches.
  * @property {boolean} typeParametersAndGenerics - Task 012 invariant unbounded type parameters and closed generic applications.
@@ -329,6 +330,15 @@
  */
 
 /**
+ * @typedef OrderedMapType
+ * @property {"OrderedMapType"} kind - Distinct insertion-ordered map-type discriminator.
+ * @property {TypeReference} keyType - Exact supported string key type.
+ * @property {SemanticValueType} valueType - Homogeneous value type.
+ * @property {"insertion"} order - Canonical first-insertion encounter order.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned outer and argument ranges.
+ */
+
+/**
  * @typedef OptionalType
  * @property {"OptionalType"} kind - Explicit presence/absence type discriminator.
  * @property {SemanticValueType} valueType - Exact present-value type.
@@ -350,7 +360,7 @@
  * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned type-name range.
  */
 
-/** @typedef {TypeReference | TypeVariableReference | ListType | MapType | OptionalType | RecordType} SemanticValueType */
+/** @typedef {TypeReference | TypeVariableReference | ListType | MapType | OrderedMapType | OptionalType | RecordType} SemanticValueType */
 /** @typedef {SemanticValueType | ErrorType} SemanticBindingType */
 
 /**
@@ -362,7 +372,7 @@
 
 /** @typedef {SemanticValueType | FunctionReturnTypeReference} SemanticFunctionReturnType */
 
-/** @typedef {SemanticTypeName | {kind: "TypeVariableReference", parameterId: string} | {kind: "ListType", elementType: SemanticTypeIdentity} | {kind: "MapType", keyType: SemanticTypeIdentity, valueType: SemanticTypeIdentity} | {kind: "OptionalType", valueType: SemanticTypeIdentity} | {kind: "RecordType", declarationId: string, arguments?: SemanticTypeIdentity[]}} SemanticTypeIdentity */
+/** @typedef {SemanticTypeName | {kind: "TypeVariableReference", parameterId: string} | {kind: "ListType", elementType: SemanticTypeIdentity} | {kind: "MapType", keyType: SemanticTypeIdentity, valueType: SemanticTypeIdentity} | {kind: "OrderedMapType", keyType: SemanticTypeIdentity, valueType: SemanticTypeIdentity, order: "insertion"} | {kind: "OptionalType", valueType: SemanticTypeIdentity} | {kind: "RecordType", declarationId: string, arguments?: SemanticTypeIdentity[]}} SemanticTypeIdentity */
 /** @typedef {SemanticTypeIdentity | "void"} FunctionReturnTypeIdentity */
 
 /**
@@ -405,6 +415,14 @@
  * @property {"MapLiteral"} kind - Immutable map literal; entry order is diagnostic-only.
  * @property {MapEntry[]} entries - Source initializer order.
  * @property {SourceLocation} location - Source location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
+ */
+
+/**
+ * @typedef OrderedMapLiteral
+ * @property {"OrderedMapLiteral"} kind - Immutable map literal with observable first-insertion order.
+ * @property {MapEntry[]} entries - Source-ordered unique entries.
+ * @property {SourceLocation} location - Complete ordered construction boundary.
  * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
  */
 
@@ -557,7 +575,7 @@
  * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned message-member range.
  */
 
-/** @typedef {IdentifierExpression | IntegerLiteral | BooleanLiteral | StringLiteral | OptionalNone | OptionalSome | OptionalIsPresent | OptionalUnwrap | ListLiteral | MapLiteral | ListIndexExpression | MapLookupExpression | CollectionSizeExpression | UnaryExpression | BinaryExpression | CallExpression | RecordConstruction | MemberRead | ErrorMessageRead} Expression */
+/** @typedef {IdentifierExpression | IntegerLiteral | BooleanLiteral | StringLiteral | OptionalNone | OptionalSome | OptionalIsPresent | OptionalUnwrap | ListLiteral | MapLiteral | OrderedMapLiteral | ListIndexExpression | MapLookupExpression | CollectionSizeExpression | UnaryExpression | BinaryExpression | CallExpression | RecordConstruction | MemberRead | ErrorMessageRead} Expression */
 
 /**
  * @typedef LocalDeclaration
@@ -626,6 +644,17 @@
  */
 
 /**
+ * @typedef ForEachMapStatement
+ * @property {"ForEachMapStatement"} kind - Insertion-ordered map pair-iteration discriminator.
+ * @property {Expression} map - Ordered-map expression evaluated exactly once before traversal.
+ * @property {ValueBinding} keyBinding - Immutable string-key binding scoped to the body.
+ * @property {ValueBinding} valueBinding - Immutable homogeneous value binding scoped to the body.
+ * @property {Block} body - Loop body.
+ * @property {SourceLocation} location - Complete loop source location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
+ */
+
+/**
  * @typedef BreakStatement
  * @property {"BreakStatement"} kind - Nearest-loop break discriminator.
  * @property {SourceLocation} location - Keyword source location.
@@ -678,7 +707,7 @@
  */
 
 /** @typedef {LocalDeclaration | AssignmentStatement} LocalStatement */
-/** @typedef {LocalStatement | ExpressionStatement | IfStatement | ForEachStatement | BreakStatement | ContinueStatement | ReturnStatement | PrintStatement | RaiseStatement | TryStatement} Statement */
+/** @typedef {LocalStatement | ExpressionStatement | IfStatement | ForEachStatement | ForEachMapStatement | BreakStatement | ContinueStatement | ReturnStatement | PrintStatement | RaiseStatement | TryStatement} Statement */
 
 /**
  * @typedef Block

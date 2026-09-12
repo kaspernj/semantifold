@@ -118,15 +118,17 @@ console.log(wait(values).length)
     expect(generate({language: "java", module})).toContain("wait(java.util.List<Integer> values)")
   })
 
-  it("rejects collection runtime-helper capture before JavaScript-family or PHP emission", () => {
-    const mapCapture = parse({
-      filename: "map-capture.ts",
-      language: "typescript",
-      source: `function Map(value: number): number { return value }
+  it("rejects shadowed Map construction and collection runtime-helper capture before emission", () => {
+    const mapCaptureSource = `function Map(value: number): number { return value }
 const values: ReadonlyMap<string, number> = new Map([["answer", 42]])
 console.log(values.size)
 `
-    })
+
+    assert.throws(
+      () => parse({filename: "map-capture.ts", language: "typescript", source: mapCaptureSource}),
+      (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_SYNTAX" &&
+        mapCaptureSource.slice(error.location.start.offset, error.location.end.offset) == "Map"
+    )
     const countCapture = parse({
       filename: "count-capture.ts",
       language: "typescript",
@@ -136,9 +138,6 @@ console.log(values.length)
 `
     })
 
-    for (const language of ["javascript", "typescript"]) {
-      assert.throws(() => generate({language, module: mapCapture}), backendFailure(language))
-    }
     assert.throws(() => generate({language: "php", module: countCapture}), backendFailure("php"))
   })
 

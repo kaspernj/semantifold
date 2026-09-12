@@ -22,7 +22,7 @@ export function recordTypeSubstitutions(type, declaration) {
 export function substituteValueType(type, substitutions) {
   if (type.kind == "TypeVariableReference") return substitutions.get(type.parameterId) ?? type
   if (type.kind == "ListType") return {...type, elementType: substituteValueType(type.elementType, substitutions)}
-  if (type.kind == "MapType") return {
+  if (type.kind == "MapType" || type.kind == "OrderedMapType") return {
     ...type,
     keyType: /** @type {import("./types.js").TypeReference} */ (substituteValueType(type.keyType, substitutions)),
     valueType: substituteValueType(type.valueType, substitutions)
@@ -48,7 +48,7 @@ export function typeContainsAnyVariable(type, visibleParameterIds = new Set()) {
     return type.arguments?.some((argument) => typeContainsAnyVariable(argument, visibleParameterIds)) ?? false
   }
   if (type.kind == "ListType") return typeContainsAnyVariable(type.elementType, visibleParameterIds)
-  if (type.kind == "MapType") {
+  if (type.kind == "MapType" || type.kind == "OrderedMapType") {
     return typeContainsAnyVariable(type.keyType, visibleParameterIds) ||
       typeContainsAnyVariable(type.valueType, visibleParameterIds)
   }

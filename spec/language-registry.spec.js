@@ -34,6 +34,7 @@ describe("language role registry", () => {
           immutableCollections: false,
           optionalValues: false,
           orderedListIteration: false,
+          orderedMapIteration: false,
           typeParametersAndGenerics: false,
           typedErrors: false
         })
@@ -62,6 +63,7 @@ describe("language role registry", () => {
         immutableCollections: originalFive.includes(descriptor.id),
         optionalValues: originalFive.includes(descriptor.id),
         orderedListIteration: originalFive.includes(descriptor.id),
+        orderedMapIteration: originalFive.includes(descriptor.id),
         typeParametersAndGenerics: originalFive.includes(descriptor.id),
         typedErrors: originalFive.includes(descriptor.id)
       })
@@ -114,7 +116,7 @@ console.log(choose(true, "no"))
       [{...record, id: ""}],
       [{...record, artifactMultiplicity: "many"}],
       [{...record, surprise: true}],
-      [{...record, features: {closedRecords: false, generalFunctionsAndCalls: "yes", immutableCollections: false, optionalValues: false, orderedListIteration: false, typeParametersAndGenerics: false, typedErrors: false}}],
+      [{...record, features: {closedRecords: false, generalFunctionsAndCalls: "yes", immutableCollections: false, optionalValues: false, orderedListIteration: false, orderedMapIteration: false, typeParametersAndGenerics: false, typedErrors: false}}],
       [{...record, features: {closedRecords: false, generalFunctionsAndCalls: false, immutableCollections: false}}],
       [{...record, acceptance: {stages: ["execute", "parse"], toolchains: []}}],
       [{...record, acceptance: {stages: ["parse", "parse"], toolchains: []}}],

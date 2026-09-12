@@ -247,6 +247,7 @@ function emitProgramHeader(module, writer) {
  */
 function phpTypeNeedsDocumentation(type) {
   return type.kind == "TypeVariableReference" || type.kind == "ListType" || type.kind == "MapType" ||
+    type.kind == "OrderedMapType" ||
     type.kind == "RecordType" && (type.arguments?.length ?? 0) > 0 ||
     type.kind == "OptionalType" && phpTypeNeedsDocumentation(type.valueType)
 }
@@ -331,6 +332,27 @@ function emitStatement(writer, statement, indent, path) {
       mappingKind: "exact", node: statement.valueBinding, path: `${path}/valueBinding`, role: "name"
     })
     writer.synthetic(") ", "loop scaffolding", [statement], [path])
+    writer.mapped("{", {mappingKind: "anchor", node: statement.body, path: `${path}/body`})
+    writer.synthetic("\n", "line break", [statement], [path])
+    emitBlock(writer, statement.body, `${indent}    `, `${path}/body`)
+    writer.synthetic(indent, "indentation", [statement], [path])
+    writer.mapped("}", {mappingKind: "anchor", node: statement.body, path: `${path}/body`})
+    writer.synthetic("\n", "line break", [statement], [path])
+    return
+  }
+  if (statement.kind == "ForEachMapStatement") {
+    writer.mapped("foreach", {mappingKind: "anchor", node: statement, path})
+    writer.synthetic(" (", "map loop scaffolding", [statement], [path])
+    emitExpression(writer, statement.map, `${path}/map`, "php", phpIdentifier)
+    writer.synthetic(" as ", "map loop scaffolding", [statement], [path])
+    writer.mapped(`$${statement.keyBinding.name}`, {
+      mappingKind: "exact", node: statement.keyBinding, path: `${path}/keyBinding`, role: "name"
+    })
+    writer.synthetic(" => ", "map iteration binding separator", [statement], [path])
+    writer.mapped(`$${statement.valueBinding.name}`, {
+      mappingKind: "exact", node: statement.valueBinding, path: `${path}/valueBinding`, role: "name"
+    })
+    writer.synthetic(") ", "map loop scaffolding", [statement], [path])
     writer.mapped("{", {mappingKind: "anchor", node: statement.body, path: `${path}/body`})
     writer.synthetic("\n", "line break", [statement], [path])
     emitBlock(writer, statement.body, `${indent}    `, `${path}/body`)

@@ -7,7 +7,7 @@ import {withAdaptedOperation} from "../semantic/operators.js"
 import {withParserRanges} from "../semantic/provenance.js"
 import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
 import {requireSourceReturnType, sourceScalarType} from "./scalars.js"
-import {instantiatedRecordFieldType, iterationBindingType, iterationOperandType, knownCallReturnType, listType, mapType, optionalType, recordType, sameValueType, typeVariable} from "./types.js"
+import {instantiatedRecordFieldType, iterationBindingType, iterationOperandType, knownCallReturnType, listType, mapType, optionalType, orderedMapType, recordType, sameValueType, typeVariable} from "./types.js"
 
 /** @type {Readonly<Record<string, string>>} */
 const simpleStringEscapes = Object.freeze({
@@ -40,6 +40,7 @@ const javaBinaryOperations = new Map([
  * @property {Map<string, import("../semantic/types.js").SemanticBindingType>} bindings - Explicitly typed visible bindings.
  * @property {Map<string, import("../semantic/types.js").ErrorDeclaration>} errorNames - Errors by source name.
  * @property {Map<string, import("../semantic/types.js").ErrorDeclaration>} errors - Errors by identity.
+ * @property {Set<string>} erasedBindingNames - Source bindings consumed by exact semantic folds in this scope.
  * @property {Map<string, JavaFunctionSignature>} functions - Explicit module function signatures.
  * @property {Map<string, import("../semantic/types.js").RecordDeclaration>} recordNames - Records by source name.
  * @property {Map<string, import("../semantic/types.js").RecordDeclaration>} records - Records by identity.
@@ -397,7 +398,8 @@ function convertExpression(node, filename, source, context, expectedType) {
     if (receiver && method == "get" && argumentNodes.length == 1) {
       const receiverType = receiver.name == "Identifier" ? context.bindings.get(nodeText(receiver, source)) : undefined
 
-      if (receiverType?.kind == "MapType" || (!receiverType && argumentNodes[0].name == "StringLiteral")) {
+      if (receiverType?.kind == "MapType" || receiverType?.kind == "OrderedMapType" ||
+        (!receiverType && argumentNodes[0].name == "StringLiteral")) {
         return withParserRanges({
           collection: convertExpression(receiver, filename, source, context),
           key: convertExpression(argumentNodes[0], filename, source, context),
@@ -741,6 +743,10 @@ function convertLocalStatement(statement, filename, source, context) {
     }
 
     const name = nodeText(definition, source)
+
+    if (context.erasedBindingNames.has(name)) {
+      return unsupportedSyntax("java", "local binding collides with a consumed source binding", nodeLocation(definition, filename, source))
+    }
     const type = convertType(typeNode, `Local '${name}'`, location, filename, source, context.recordNames, context.typeParameters)
     const initializer = convertExpression(initializerNodes[0], filename, source, context, type)
 
@@ -914,8 +920,8 @@ function convertJavaTry(statement, filename, source, context) {
   const catchType = withParserRanges({declarationId: /** @type {string} */ (declaration.id), kind: /** @type {const} */ ("ErrorType")}, {
     type: caughtLocation
   })
-  const bodyContext = {...context, bindings: new Map(context.bindings)}
-  const catchContext = {...context, bindings: new Map(context.bindings)}
+  const bodyContext = {...context, bindings: new Map(context.bindings), erasedBindingNames: new Set(context.erasedBindingNames)}
+  const catchContext = {...context, bindings: new Map(context.bindings), erasedBindingNames: new Set(context.erasedBindingNames)}
   const name = nodeText(definition, source)
 
   catchContext.bindings.set(name, catchType)
@@ -941,7 +947,7 @@ function convertJavaTry(statement, filename, source, context) {
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
  * @param {JavaConversionContext} context - Typed lexical context.
- * @returns {import("../semantic/types.js").ForEachStatement} Semantic loop.
+ * @returns {import("../semantic/types.js").ForEachStatement | import("../semantic/types.js").ForEachMapStatement} Semantic loop.
  */
 function convertForEach(node, filename, source, context) {
   const location = nodeLocation(node, filename, source)
@@ -967,6 +973,73 @@ function convertForEach(node, filename, source, context) {
 
     return unsupportedSyntax("java", "enhanced for modifiers", nodeLocation(modifiers, filename, source))
   }
+
+  if (collectionNode.name == "MethodInvocation") {
+    const methodName = collectionNode.getChild("MethodName")
+    const argumentList = collectionNode.getChild("ArgumentList")
+    const mapNode = structuralChildren(collectionNode).find((child) => child.name != "MethodName" && child.name != "ArgumentList")
+    const mapType_ = mapNode ? knownExpressionType(mapNode, filename, source, context) : undefined
+
+    if (methodName && argumentList && mapNode?.name == "Identifier" &&
+      nodeText(methodName, source) == "sequencedEntrySet" && structuralChildren(argumentList).length == 0 &&
+      mapType_?.kind == "OrderedMapType") {
+      const entryType = typeNode.name == "GenericType" ? structuralChildren(typeNode) : []
+      const entryArguments = entryType[1]?.name == "TypeArguments" ? structuralChildren(entryType[1]) : []
+      const parsedKeyType = entryArguments[0]
+        ? convertJavaTypeArgument(entryArguments[0], "Map entry key", nodeLocation(typeNode, filename, source), filename, source,
+          context.recordNames, context.typeParameters)
+        : undefined
+      const parsedValueType = entryArguments[1]
+        ? convertJavaTypeArgument(entryArguments[1], "Map entry value", nodeLocation(typeNode, filename, source), filename, source,
+          context.recordNames, context.typeParameters)
+        : undefined
+
+      if (entryType.length != 2 || nodeText(entryType[0], source) != "java.util.Map.Entry" || entryArguments.length != 2 ||
+        !parsedKeyType || !parsedValueType || !sameValueType(parsedKeyType, mapType_.keyType) ||
+        !sameValueType(parsedValueType, mapType_.valueType)) {
+        return unsupportedSyntax("java", "ordered-map entry type", nodeLocation(typeNode, filename, source))
+      }
+      const bodyStatements = structuralChildren(body)
+
+      if (bodyStatements.length < 2) {
+        return unsupportedSyntax("java", "ordered-map pair bindings", nodeLocation(body, filename, source))
+      }
+      const entryName = nodeText(bindingNode, source)
+
+      if (context.bindings.has(entryName) || context.erasedBindingNames.has(entryName)) {
+        return unsupportedSyntax("java", "ordered-map entry binding collision", nodeLocation(bindingNode, filename, source))
+      }
+      const bodyContext = {
+        ...context,
+        bindings: new Map(context.bindings),
+        erasedBindingNames: new Set(context.erasedBindingNames).add(entryName)
+      }
+      const keyBinding = convertJavaMapPairBinding(
+        bodyStatements[0], entryName, "getKey", mapType_.keyType, filename, source, bodyContext
+      )
+      const valueBinding = convertJavaMapPairBinding(
+        bodyStatements[1], entryName, "getValue", mapType_.valueType, filename, source, bodyContext
+      )
+
+      bodyContext.bindings.set(keyBinding.name, keyBinding.type)
+      bodyContext.bindings.set(valueBinding.name, valueBinding.type)
+      return withParserRanges({
+        body: {
+          kind: /** @type {const} */ ("Block"),
+          location: nodeLocation(body, filename, source),
+          statements: convertStatements(bodyStatements.slice(2), filename, source, bodyContext)
+        },
+        keyBinding,
+        kind: /** @type {const} */ ("ForEachMapStatement"),
+        location,
+        map: convertExpression(mapNode, filename, source, context),
+        valueBinding
+      }, {operator: nodeLocation(children[colonIndex], filename, source)})
+    }
+    if (methodName && ["entrySet", "sequencedEntrySet"].includes(nodeText(methodName, source))) {
+      return unsupportedSyntax("java", "unordered or unsupported map iteration", nodeLocation(collectionNode, filename, source))
+    }
+  }
   const bindingLocation = nodeLocation(bindingNode, filename, source)
   const declaredType = convertJavaTypeArgument(typeNode, `Iteration binding '${nodeText(bindingNode, source)}'`, bindingLocation,
     filename, source, context.recordNames, context.typeParameters)
@@ -982,7 +1055,7 @@ function convertForEach(node, filename, source, context) {
     name: nodeText(bindingNode, source),
     type: declaredType
   }, {name: bindingLocation})
-  const bodyContext = {...context, bindings: new Map(context.bindings)}
+  const bodyContext = {...context, bindings: new Map(context.bindings), erasedBindingNames: new Set(context.erasedBindingNames)}
 
   bodyContext.bindings.set(valueBinding.name, iterationBindingType(declaredType, bindingLocation))
   return withParserRanges({
@@ -992,6 +1065,62 @@ function convertForEach(node, filename, source, context) {
     location,
     valueBinding
   }, {operator: nodeLocation(children[colonIndex], filename, source)})
+}
+
+/**
+ * Converts one exact immutable local extracted from a Java ordered-map entry.
+ * @param {import("@lezer/common").SyntaxNode} statement - Pair-binding declaration.
+ * @param {string} entryName - Enhanced-for entry binding name.
+ * @param {"getKey" | "getValue"} accessor - Required entry accessor.
+ * @param {import("../semantic/types.js").SemanticValueType} expectedType - Canonical binding type.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @param {JavaConversionContext} context - Typed context.
+ * @returns {import("../semantic/types.js").ValueBinding} Pair binding.
+ */
+function convertJavaMapPairBinding(statement, entryName, accessor, expectedType, filename, source, context) {
+  const location = nodeLocation(statement, filename, source)
+  const modifiers = statement.getChild("Modifiers")
+  const declarators = statement.getChildren("VariableDeclarator")
+  const declarator = declarators[0]
+  const definition = declarator?.getChild("Definition")
+  const assignment = declarator?.getChild("AssignOp")
+  const initializer = declarator
+    ? directChildren(declarator).find((child) => child.name != "Definition" && child.name != "AssignOp")
+    : undefined
+  const methodName = initializer?.getChild("MethodName")
+  const argumentList = initializer?.getChild("ArgumentList")
+  const receiver = initializer?.name == "MethodInvocation"
+    ? structuralChildren(initializer).find((child) => child.name != "MethodName" && child.name != "ArgumentList")
+    : undefined
+  const typeNode = declarationType(statement)
+
+  if (statement.name != "LocalVariableDeclaration" || nodeText(modifiers ?? statement, source) != "final" ||
+    declarators.length != 1 || !definition || !assignment || nodeText(assignment, source) != "=" || !initializer ||
+    initializer.name != "MethodInvocation" || !methodName || nodeText(methodName, source) != accessor ||
+    !argumentList || structuralChildren(argumentList).length != 0 || receiver?.name != "Identifier" ||
+    nodeText(receiver, source) != entryName || !typeNode) {
+    return unsupportedSyntax("java", `ordered-map ${accessor} binding`, location)
+  }
+  const name = nodeText(definition, source)
+
+  if (context.erasedBindingNames.has(name)) {
+    return unsupportedSyntax("java", `ordered-map ${accessor} binding collision`, nodeLocation(definition, filename, source))
+  }
+  const type = convertType(typeNode, `Map iteration binding '${name}'`, location,
+    filename, source, context.recordNames, context.typeParameters)
+
+  if (!sameValueType(type, expectedType)) {
+    return unsupportedSyntax("java", `ordered-map ${accessor} binding type`, nodeLocation(typeNode, filename, source))
+  }
+
+  return withParserRanges({
+    kind: /** @type {const} */ ("ValueBinding"),
+    location,
+    mutable: /** @type {const} */ (false),
+    name,
+    type
+  }, {name: nodeLocation(definition, filename, source)})
 }
 
 /**
@@ -1038,7 +1167,9 @@ function knownExpressionType(node, filename, source, context) {
         return receiverType.valueType
       }
       if (arguments_.length == 1 && receiverType?.kind == "ListType") return receiverType.elementType
-      if (arguments_.length == 1 && receiverType?.kind == "MapType") return receiverType.valueType
+      if (arguments_.length == 1 && (receiverType?.kind == "MapType" || receiverType?.kind == "OrderedMapType")) {
+        return receiverType.valueType
+      }
     }
     if (methodName && receiver && argumentList && structuralChildren(argumentList).length == 0) {
       const receiverType = knownExpressionType(receiver, filename, source, context)
@@ -1090,7 +1221,179 @@ function convertBlock(node, filename, source, context) {
   return {
     kind: "Block",
     location: nodeLocation(node, filename, source),
-    statements: structuralChildren(node).map((statement) => convertStatement(statement, filename, source, context))
+    statements: convertStatements(structuralChildren(node), filename, source, context)
+  }
+}
+
+/**
+ * Converts a Java statement sequence, folding the exact protected ordered-map construction profile.
+ * @param {import("@lezer/common").SyntaxNode[]} statements - Direct block statements.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @param {JavaConversionContext} context - Typed lexical conversion context.
+ * @returns {import("../semantic/types.js").Statement[]} Semantic statements.
+ */
+function convertStatements(statements, filename, source, context) {
+  const converted = []
+
+  for (let index = 0; index < statements.length;) {
+    const ordered = convertJavaOrderedMapSequence(statements, index, filename, source, context)
+
+    if (ordered) {
+      converted.push(ordered.statement)
+      index = ordered.nextIndex
+    } else {
+      converted.push(convertStatement(statements[index], filename, source, context))
+      index += 1
+    }
+  }
+
+  return converted
+}
+
+/**
+ * Recognizes construction through a private LinkedHashMap backing followed by an unmodifiable SequencedMap boundary.
+ * @param {import("@lezer/common").SyntaxNode[]} statements - Direct block statements.
+ * @param {number} start - Candidate backing-declaration index.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @param {JavaConversionContext} context - Typed lexical conversion context.
+ * @returns {{statement: import("../semantic/types.js").LocalDeclaration, nextIndex: number} | undefined} Folded declaration.
+ */
+function convertJavaOrderedMapSequence(statements, start, filename, source, context) {
+  const backingStatement = statements[start]
+  const backingTypeNode = backingStatement?.name == "LocalVariableDeclaration" ? declarationType(backingStatement) : null
+  const backingTypeChildren = backingTypeNode?.name == "GenericType" ? structuralChildren(backingTypeNode) : []
+
+  if (backingTypeChildren.length != 2 || nodeText(backingTypeChildren[0], source) != "java.util.LinkedHashMap") return undefined
+
+  const location = nodeLocation(backingStatement, filename, source)
+  const backingModifiers = backingStatement.getChild("Modifiers")
+  const backingDeclarators = backingStatement.getChildren("VariableDeclarator")
+  const backingDeclarator = backingDeclarators[0]
+  const backingDefinition = backingDeclarator?.getChild("Definition")
+  const backingAssignment = backingDeclarator?.getChild("AssignOp")
+  const backingInitializer = backingDeclarator
+    ? directChildren(backingDeclarator).find((child) => child.name != "Definition" && child.name != "AssignOp")
+    : undefined
+  const constructionType = backingInitializer?.name == "ObjectCreationExpression"
+    ? structuralChildren(backingInitializer).find((child) => child.name == "GenericType")
+    : undefined
+  const constructionTypeChildren = constructionType ? structuralChildren(constructionType) : []
+  const constructionArguments = backingInitializer?.getChild("ArgumentList")
+  const backingArgumentsNode = backingTypeChildren[1]
+  const backingArguments = backingArgumentsNode?.name == "TypeArguments" ? structuralChildren(backingArgumentsNode) : []
+
+  if (nodeText(backingModifiers ?? backingStatement, source) != "final" || backingDeclarators.length != 1 ||
+    !backingDefinition || !backingAssignment || nodeText(backingAssignment, source) != "=" || !backingInitializer ||
+    backingInitializer.name != "ObjectCreationExpression" || backingInitializer.getChild("ClassBody") ||
+    constructionTypeChildren.length != 2 || nodeText(constructionTypeChildren[0], source) != "java.util.LinkedHashMap" ||
+    structuralChildren(constructionTypeChildren[1]).length != 0 || !constructionArguments ||
+    structuralChildren(constructionArguments).length != 0 || backingArguments.length != 2) {
+    return unsupportedSyntax("java", "ordered-map LinkedHashMap backing", location)
+  }
+
+  const backingName = nodeText(backingDefinition, source)
+
+  if (context.bindings.has(backingName) || context.erasedBindingNames.has(backingName)) {
+    return unsupportedSyntax("java", "ordered-map backing binding collision", nodeLocation(backingDefinition, filename, source))
+  }
+  const keyType = convertJavaTypeArgument(backingArguments[0], "Ordered map key", location, filename, source,
+    context.recordNames, context.typeParameters)
+  const valueType = convertJavaTypeArgument(backingArguments[1], "Ordered map value", location, filename, source,
+    context.recordNames, context.typeParameters)
+  const entries = []
+  let index = start + 1
+
+  while (index < statements.length) {
+    const putStatement = statements[index]
+    const invocation = putStatement.name == "ExpressionStatement" ? putStatement.getChild("MethodInvocation") : null
+    const methodName = invocation?.getChild("MethodName")
+    const argumentList = invocation?.getChild("ArgumentList")
+    const receiver = invocation
+      ? structuralChildren(invocation).find((child) => child.name != "MethodName" && child.name != "ArgumentList")
+      : undefined
+
+    if (!invocation || receiver?.name != "Identifier" || nodeText(receiver, source) != backingName ||
+      !methodName || nodeText(methodName, source) != "put") break
+    const arguments_ = argumentList ? structuralChildren(argumentList) : []
+
+    if (arguments_.length != 2 || arguments_[0].name != "StringLiteral") {
+      return unsupportedSyntax("java", "ordered-map put", nodeLocation(putStatement, filename, source))
+    }
+    entries.push(withParserRanges({
+      key: /** @type {import("../semantic/types.js").StringLiteral} */ (
+        convertExpression(arguments_[0], filename, source, context, keyType)
+      ),
+      kind: /** @type {const} */ ("MapEntry"),
+      location: nodeLocation(invocation, filename, source),
+      value: convertExpression(arguments_[1], filename, source, context, valueType)
+    }, {operator: nodeLocation(methodName, filename, source)}))
+    index += 1
+  }
+
+  const sealStatement = statements[index]
+  const sealTypeNode = sealStatement?.name == "LocalVariableDeclaration" ? declarationType(sealStatement) : null
+  const sealDeclarators = sealStatement?.name == "LocalVariableDeclaration" ? sealStatement.getChildren("VariableDeclarator") : []
+  const sealDeclarator = sealDeclarators[0]
+  const sealDefinition = sealDeclarator?.getChild("Definition")
+  const sealAssignment = sealDeclarator?.getChild("AssignOp")
+  const sealInitializer = sealDeclarator
+    ? directChildren(sealDeclarator).find((child) => child.name != "Definition" && child.name != "AssignOp")
+    : undefined
+  const sealMethod = sealInitializer?.getChild("MethodName")
+  const sealArgumentsNode = sealInitializer?.getChild("ArgumentList")
+  const sealArguments = sealArgumentsNode ? structuralChildren(sealArgumentsNode) : []
+  const sealReceiver = sealInitializer?.name == "MethodInvocation"
+    ? structuralChildren(sealInitializer).find((child) => child.name != "MethodName" && child.name != "ArgumentList")
+    : undefined
+
+  if (!sealStatement || nodeText(sealStatement.getChild("Modifiers") ?? sealStatement, source) != "final" ||
+    !sealTypeNode || sealDeclarators.length != 1 || !sealDefinition || !sealAssignment || nodeText(sealAssignment, source) != "=" ||
+    sealInitializer?.name != "MethodInvocation" || nodeText(sealReceiver ?? sealStatement, source) != "java.util.Collections" ||
+    !sealMethod || nodeText(sealMethod, source) != "unmodifiableSequencedMap" || sealArguments.length != 1 ||
+    sealArguments[0].name != "Identifier" || nodeText(sealArguments[0], source) != backingName) {
+    return unsupportedSyntax("java", "ordered-map unmodifiable SequencedMap boundary", location)
+  }
+  const name = nodeText(sealDefinition, source)
+
+  if (name == backingName) {
+    return unsupportedSyntax("java", "ordered-map boundary binding collision", nodeLocation(sealDefinition, filename, source))
+  }
+  const boundaryType = convertType(sealTypeNode, `Local '${name}'`, nodeLocation(sealStatement, filename, source),
+    filename, source, context.recordNames, context.typeParameters)
+  const sealTypeChildren = sealTypeNode.name == "GenericType" ? structuralChildren(sealTypeNode) : []
+  const sealTypeArguments = sealTypeChildren[1]?.name == "TypeArguments" ? structuralChildren(sealTypeChildren[1]) : []
+
+  if (sealTypeChildren.length != 2 || nodeText(sealTypeChildren[0], source) != "java.util.SequencedMap" ||
+    sealTypeArguments.length != 2 || boundaryType.kind != "MapType" || !sameValueType(boundaryType.keyType, keyType) ||
+    !sameValueType(boundaryType.valueType, valueType)) {
+    return unsupportedSyntax("java", "ordered-map boundary type mismatch", nodeLocation(sealTypeNode, filename, source))
+  }
+  const type = orderedMapType(
+    boundaryType.keyType,
+    boundaryType.valueType,
+    nodeLocation(sealTypeNode, filename, source),
+    nodeLocation(sealTypeArguments[0], filename, source),
+    nodeLocation(sealTypeArguments[1], filename, source)
+  )
+
+  context.bindings.set(name, type)
+  context.erasedBindingNames.add(backingName)
+  return {
+    nextIndex: index + 1,
+    statement: withParserRanges({
+      initializer: withParserRanges({
+        entries,
+        kind: /** @type {const} */ ("OrderedMapLiteral"),
+        location: locationFromOffsets(filename, source, backingInitializer.from, sealInitializer.to)
+      }, {factory: nodeLocation(backingInitializer, filename, source)}),
+      kind: /** @type {const} */ ("LocalDeclaration"),
+      location: locationFromOffsets(filename, source, backingStatement.from, sealStatement.to),
+      mutable: /** @type {const} */ (false),
+      name,
+      type
+    }, {name: nodeLocation(sealDefinition, filename, source), operator: nodeLocation(sealAssignment, filename, source)})
   }
 }
 
@@ -1130,6 +1433,20 @@ function convertType(sourceType, subject, location, filename, source, recordName
       const keyType = convertJavaTypeArgument(arguments_[0], subject, location, filename, source, recordNames, typeParameters)
 
       if (keyType.kind != "TypeReference") {
+        return unsupportedSyntax("java", "map key type other than string", nodeLocation(arguments_[0], filename, source))
+      }
+      return mapType(
+        keyType,
+        convertJavaTypeArgument(arguments_[1], subject, location, filename, source, recordNames, typeParameters),
+        nodeLocation(sourceType, filename, source),
+        nodeLocation(arguments_[0], filename, source),
+        nodeLocation(arguments_[1], filename, source)
+      )
+    }
+    if (name == "java.util.SequencedMap" && arguments_.length == 2) {
+      const keyType = convertJavaTypeArgument(arguments_[0], subject, location, filename, source, recordNames, typeParameters)
+
+      if (keyType.kind != "TypeReference" || keyType.name != "string") {
         return unsupportedSyntax("java", "map key type other than string", nodeLocation(arguments_[0], filename, source))
       }
       return mapType(
@@ -1346,6 +1663,7 @@ function convertFunction(node, signature, functions, recordNames, records, error
   const context = {
     bindings: new Map(signature.parameters.map((parameter) => [parameter.name, parameter.type])),
     errorNames,
+    erasedBindingNames: new Set(),
     errors,
     functions,
     recordNames,
@@ -1570,8 +1888,8 @@ function convertIf(node, filename, source, context) {
 
   const semanticCondition = convertExpression(condition, filename, source, context)
   let alternate
-  const consequentContext = {...context, bindings: new Map(context.bindings)}
-  const alternateContext = {...context, bindings: new Map(context.bindings)}
+  const consequentContext = {...context, bindings: new Map(context.bindings), erasedBindingNames: new Set(context.erasedBindingNames)}
+  const alternateContext = {...context, bindings: new Map(context.bindings), erasedBindingNames: new Set(context.erasedBindingNames)}
 
   if (alternateNode?.name == "Block") {
     alternate = convertBlock(alternateNode, filename, source, alternateContext)
@@ -1628,6 +1946,7 @@ function convertEntryPoint(node, filename, source, functions, recordNames, recor
   const body = convertBlock(block, filename, source, {
     bindings: new Map(),
     errorNames,
+    erasedBindingNames: new Set(),
     errors,
     functions,
     recordNames,

@@ -48,10 +48,10 @@ import {withAdaptedOperation} from "../semantic/operators.js"
 import {withParserRanges} from "../semantic/provenance.js"
 import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
 import {requireSourceReturnType} from "./scalars.js"
-import {documentedValueType, instantiatedRecordFieldType, iterationBindingType, iterationOperandType, knownCallReturnType, preservesGenericOptionalEvidence, recordType, sameValueType} from "./types.js"
+import {documentedValueType, instantiatedRecordFieldType, iterationBindingType, iterationOperandType, knownCallReturnType, orderedMapTypeFromMap, preservesGenericOptionalEvidence, recordType, sameValueType} from "./types.js"
 const parsePrism = await loadPrism()
 /** @typedef {{name: string, nameLocation: import("../semantic/types.js").SourceLocation, parameters: import("../semantic/types.js").Parameter[], returnType: import("../semantic/types.js").SemanticFunctionReturnType, typeParameters?: import("../semantic/types.js").TypeParameter[], location: import("../semantic/types.js").SourceLocation}} RubyFunctionSignature */
-/** @typedef {{bindings: Map<string, import("../semantic/types.js").SemanticBindingType>, errorNames: Map<string, import("../semantic/types.js").ErrorDeclaration>, errors: Map<string, import("../semantic/types.js").ErrorDeclaration>, functions: Map<string, RubyFunctionSignature>, records: Map<string, import("../semantic/types.js").RecordDeclaration>, recordNames: Map<string, import("../semantic/types.js").RecordDeclaration>, loopDepth?: number, returnType?: import("../semantic/types.js").SemanticFunctionReturnType, typeParameters?: Map<string, import("../semantic/types.js").TypeParameter>}} RubyConversionContext */
+/** @typedef {{bindings: Map<string, import("../semantic/types.js").SemanticBindingType>, errorNames: Map<string, import("../semantic/types.js").ErrorDeclaration>, errors: Map<string, import("../semantic/types.js").ErrorDeclaration>, functions: Map<string, RubyFunctionSignature>, orderedMapDeclarations?: Set<object>, records: Map<string, import("../semantic/types.js").RecordDeclaration>, recordNames: Map<string, import("../semantic/types.js").RecordDeclaration>, loopDepth?: number, returnType?: import("../semantic/types.js").SemanticFunctionReturnType, typeParameters?: Map<string, import("../semantic/types.js").TypeParameter>}} RubyConversionContext */
 const rubyBinaryOperations = new Map([
   ["+", "Add"],
   ["-", "Subtract"],
@@ -227,7 +227,8 @@ function convertExpression(node, filename, source, context, expectedType, preser
   }
 
   if (node instanceof HashNode) {
-    const valueType = expectedType?.kind == "MapType" ? expectedType.valueType : undefined
+    const valueType = expectedType?.kind == "MapType" || expectedType?.kind == "OrderedMapType"
+      ? expectedType.valueType : undefined
     const entries = node.elements.map((element) => {
       if (!(element instanceof AssocNode) || !element.operatorLoc ||
         slicePrismSource(source, element.operatorLoc.startOffset, element.operatorLoc.startOffset + element.operatorLoc.length) != "=>") {
@@ -246,7 +247,13 @@ function convertExpression(node, filename, source, context, expectedType, preser
       }, {operator: prismLocation(element.operatorLoc, filename, source)})
     })
 
-    return withParserRanges({entries, kind: /** @type {const} */ ("MapLiteral"), location}, {
+    return withParserRanges({
+      entries,
+      kind: expectedType?.kind == "OrderedMapType"
+        ? /** @type {const} */ ("OrderedMapLiteral")
+        : /** @type {const} */ ("MapLiteral"),
+      location
+    }, {
       close: prismLocation(node.closingLoc, filename, source),
       open: prismLocation(node.openingLoc, filename, source)
     })
@@ -482,7 +489,7 @@ function knownExpressionType(node, context) {
   if (node instanceof CallNode && node.receiver && node.name == "fetch") {
     const collectionType = knownValueExpressionType(node.receiver, context)
 
-    if (collectionType?.kind == "MapType") return collectionType.valueType
+    if (collectionType?.kind == "MapType" || collectionType?.kind == "OrderedMapType") return collectionType.valueType
   }
   if (node instanceof CallNode && (node.receiver instanceof ConstantReadNode || node.receiver instanceof ConstantPathNode) && node.name == "new") {
     const declaration = context.recordNames.get(constantPathName(node.receiver))
@@ -742,20 +749,31 @@ function convertLocalStatement(node, comments, context, filename, source) {
   const metadata = localMetadata(comments, node, filename, source, context.recordNames, context.typeParameters)
 
   if (metadata) {
+    let declaredType = metadata.type
+
+    if (metadata.immutable && declaredType.kind == "MapType" && context.orderedMapDeclarations?.has(node) &&
+      node.value instanceof HashNode) {
+      declaredType = orderedMapTypeFromMap(declaredType, location)
+    }
     const semantic = withParserRanges({
-      initializer: convertExpression(node.value, filename, source, context, metadata.type),
+      initializer: convertExpression(node.value, filename, source, context, declaredType),
       kind: /** @type {const} */ ("LocalDeclaration"),
       location,
       mutable: !metadata.immutable,
       name: node.name,
-      type: metadata.type
+      type: declaredType
     }, {name: prismLocation(node.nameLoc, filename, source), operator: prismLocation(node.operatorLoc, filename, source)})
 
-    context.bindings.set(node.name, metadata.type)
+    context.bindings.set(node.name, declaredType)
     return semantic
   }
 
-  if (!context.bindings.has(node.name)) return missingType("ruby", `Local '${node.name}'`, location)
+  if (!context.bindings.has(node.name)) {
+    if (node.value instanceof LocalVariableReadNode && context.bindings.get(node.value.name)?.kind == "OrderedMapType") {
+      return unsupportedSyntax("ruby", "ordered map alias escape", location)
+    }
+    return missingType("ruby", `Local '${node.name}'`, location)
+  }
 
   const targetLocation = prismLocation(node.nameLoc, filename, source)
   const target = withParserRanges({kind: /** @type {const} */ ("IdentifierExpression"), location: targetLocation, name: node.name}, {
@@ -900,7 +918,7 @@ function convertRubyTry(node, comments, context, filename, source) {
  * @param {RubyConversionContext} context - Typed lexical context.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
- * @returns {import("../semantic/types.js").ForEachStatement} Semantic loop.
+ * @returns {import("../semantic/types.js").ForEachStatement | import("../semantic/types.js").ForEachMapStatement} Semantic loop.
  */
 function convertForEach(node, comments, context, filename, source) {
   const location = nodeLocation(node, filename, source)
@@ -929,23 +947,63 @@ function convertForEach(node, comments, context, filename, source) {
       : nodeLocation(block, filename, source))
   }
   const parameters = block.parameters.parameters
-  const unsupportedParameter = parameters.requireds.length != 1
-    ? parameters.requireds[1] ?? parameters.requireds[0] ?? block.parameters
-    : parameters.requireds[0] instanceof RequiredParameterNode && parameters.optionals.length == 0 && !parameters.rest &&
+  const supportedRequireds = parameters.requireds.length == 1 || parameters.requireds.length == 2
+  const unsupportedParameter = !supportedRequireds
+    ? parameters.requireds[2] ?? parameters.requireds[1] ?? parameters.requireds[0] ?? block.parameters
+    : parameters.requireds.every((parameter) => parameter instanceof RequiredParameterNode) &&
+        parameters.optionals.length == 0 && !parameters.rest &&
         parameters.posts.length == 0 && parameters.keywords.length == 0 && !parameters.keywordRest && !parameters.block
       ? undefined
       : parameters.optionals[0] ?? parameters.rest ?? parameters.posts[0] ?? parameters.keywords[0] ??
         parameters.keywordRest ?? parameters.block ?? parameters.requireds[0]
 
   if (unsupportedParameter) return unsupportedSyntax("ruby", "each block parameter arity or shape", nodeLocation(unsupportedParameter, filename, source))
-  const parameter = /** @type {RequiredParameterNode} */ (parameters.requireds[0])
   const collectionType = iterationOperandType(knownExpressionType(node.receiver, context))
 
-  if (!collectionType || collectionType.kind != "ListType" && collectionType.kind != "MapType") {
+  if (parameters.requireds.length == 2) {
+    if (collectionType?.kind == "MapType") {
+      return unsupportedSyntax("ruby", "unordered map iteration", nodeLocation(node.receiver, filename, source))
+    }
+    if (!collectionType || collectionType.kind != "OrderedMapType") {
+      return missingType("ruby", "Ordered map iteration collection", nodeLocation(node.receiver, filename, source))
+    }
+    const [keyParameter, valueParameter] = /** @type {[RequiredParameterNode, RequiredParameterNode]} */ (parameters.requireds)
+    const keyLocation = nodeLocation(keyParameter, filename, source)
+    const valueLocation = nodeLocation(valueParameter, filename, source)
+    const keyType = iterationBindingType(collectionType.keyType, keyLocation)
+    const valueType = iterationBindingType(collectionType.valueType, valueLocation)
+    const keyBinding = withParserRanges({
+      kind: /** @type {const} */ ("ValueBinding"), location: keyLocation, mutable: /** @type {const} */ (false),
+      name: keyParameter.name, type: keyType
+    }, {name: keyLocation})
+    const valueBinding = withParserRanges({
+      kind: /** @type {const} */ ("ValueBinding"), location: valueLocation, mutable: /** @type {const} */ (false),
+      name: valueParameter.name, type: valueType
+    }, {name: valueLocation})
+    const bodyContext = {...context, bindings: new Map(context.bindings), loopDepth: (context.loopDepth ?? 0) + 1}
+
+    bodyContext.bindings.set(keyParameter.name, keyType)
+    bodyContext.bindings.set(valueParameter.name, valueType)
+    return withParserRanges({
+      body: convertBlock(block.body instanceof StatementsNode ? block.body : null, comments, bodyContext, filename,
+        source, nodeLocation(block, filename, source)),
+      keyBinding,
+      kind: /** @type {const} */ ("ForEachMapStatement"),
+      location,
+      map: convertExpression(node.receiver, filename, source, context),
+      valueBinding
+    }, {operator: prismLocation(node.messageLoc, filename, source)})
+  }
+  const parameter = /** @type {RequiredParameterNode} */ (parameters.requireds[0])
+
+  if (collectionType?.kind == "MapType" || collectionType?.kind == "OrderedMapType") {
+    return unsupportedSyntax("ruby", "map iteration without key/value pair binding", nodeLocation(node.receiver, filename, source))
+  }
+  if (!collectionType || collectionType.kind != "ListType") {
     return missingType("ruby", "Iteration collection", nodeLocation(node.receiver, filename, source))
   }
   const bindingLocation = nodeLocation(parameter, filename, source)
-  const inferredType = collectionType.kind == "ListType" ? collectionType.elementType : collectionType.valueType
+  const inferredType = collectionType.elementType
   const bindingType = iterationBindingType(inferredType, bindingLocation)
   const valueBinding = withParserRanges({
     kind: /** @type {const} */ ("ValueBinding"),
@@ -1125,6 +1183,7 @@ function convertFunction(node, signature, functions, recordNames, records, error
     errorNames,
     errors,
     functions,
+    orderedMapDeclarations: orderedMapDeclarationsForRuby(node.body instanceof StatementsNode ? node.body.body : []),
     recordNames,
     records,
     returnType: signature.returnType,
@@ -1148,6 +1207,48 @@ function convertFunction(node, signature, functions, recordNames, records, error
     returnType: signature.returnType,
     ...(signature.typeParameters ? {typeParameters: signature.typeParameters} : {})
   }, {name: signature.nameLocation})
+}
+
+/**
+ * Resolves parser-owned pair blocks to exact declarations inside one lexical owner.
+ * Ambiguous same-name declarations produce no evidence and fail during loop conversion.
+ * @param {import("@ruby/prism").Node[]} nodes - Function body or entry-point roots.
+ * @returns {Set<object>} Exact pair-iterated parser declarations.
+ */
+function orderedMapDeclarationsForRuby(nodes) {
+  /** @type {{declaration: LocalVariableWriteNode, name: string, offset: number}[]} */
+  const declarations = []
+  /** @type {{name: string, offset: number}[]} */
+  const receivers = []
+  /**
+   * Visits one parser candidate.
+   * @param {import("@ruby/prism").Node} node - Parser candidate.
+   */
+  const visit = (node) => {
+    if (node instanceof DefNode || node instanceof ClassNode) return
+    if (node instanceof LocalVariableWriteNode) declarations.push({
+      declaration: node,
+      name: node.name,
+      offset: node.location.startOffset
+    })
+    if (node instanceof CallNode && node.receiver instanceof LocalVariableReadNode && node.name == "each" &&
+      node.block instanceof BlockNode && node.block.parameters instanceof BlockParametersNode &&
+      node.block.parameters.parameters?.requireds.length == 2) receivers.push({
+      name: node.receiver.name,
+      offset: node.location.startOffset
+    })
+    for (const child of node.compactChildNodes()) visit(child)
+  }
+
+  for (const node of nodes) visit(node)
+  const selected = new Set()
+  for (const receiver of receivers) {
+    const matches = declarations.filter(({name, offset}) => name == receiver.name && offset < receiver.offset)
+
+    if (matches.length == 1) selected.add(matches[0].declaration)
+  }
+
+  return selected
 }
 
 /**
@@ -1448,7 +1549,8 @@ export function parseRuby({filename, source, program}) {
   }]))
   for (const signature of signatures) functionSignatures.set(signature.name, signature)
   const functions = functionNodes.map((node, index) =>
-    convertFunction(node, signatures[index], functionSignatures, recordNames, recordsById, errorNames, errorsById, result.comments, filename, source))
+    convertFunction(node, signatures[index], functionSignatures, recordNames, recordsById, errorNames, errorsById,
+      result.comments, filename, source))
   const entryNodes = body.filter((node) => !(node instanceof DefNode) && !(node instanceof ClassNode))
   const location = moduleLocation(filename, source)
 
@@ -1466,7 +1568,8 @@ export function parseRuby({filename, source, program}) {
       (entryNodes.at(-1)?.location.startOffset ?? 0) + (entryNodes.at(-1)?.location.length ?? 0)
     )
   ) : location
-  const entryContext = {bindings: new Map(), errorNames, errors: errorsById, functions: functionSignatures, recordNames, records: recordsById}
+  const entryContext = {bindings: new Map(), errorNames, errors: errorsById, functions: functionSignatures,
+    orderedMapDeclarations: orderedMapDeclarationsForRuby(entryNodes), recordNames, records: recordsById}
   const entryBlock = {
     kind: /** @type {const} */ ("Block"),
     location: entryLocation,

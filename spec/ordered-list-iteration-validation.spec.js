@@ -26,7 +26,7 @@ describe("ordered list iteration semantic validation", () => {
     rejects(`${prefix}const value: number = 1\nconst values: readonly number[] = [1]\nfor (const value of values) {}\n`,
       "DUPLICATE_BINDING", "value")
     rejects(`${prefix}const values: ReadonlyMap<string, number> = new Map([["a", 1]])\nfor (const value of values) {}\n`,
-      "TYPE_MISMATCH", "values")
+      "UNSUPPORTED_SYNTAX", "values")
 
     const module = parse({filename: "program.ts", language: "typescript", source: fixture})
     const loop = module.functions[1].body.statements[1]

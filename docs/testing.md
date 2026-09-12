@@ -79,6 +79,24 @@ LANG=C.UTF-8 LC_ALL=C.UTF-8 npm test
 
 Task 013 adds no stdlib, pairwise adapter, source-to-target call rewrite, map iteration, Phase 2/3 syntax, expanded-language matrix, application lane, release, or deployment behavior. TensorBuzz repeats the aggregate coverage after the required local handoff gate; it does not replace that local proof.
 
+## Task 014 ordered map iteration
+
+Task 014 uses six focused specs plus the existing public registry/API and packaging regressions. Frontend coverage parses equivalent Ruby, JavaScript/JSDoc, TypeScript, PHP, and Java fixtures; proves empty, singleton, and non-lexically ordered multi-entry construction; preserves lookup and size; and rejects ordinary maps, duplicate/numeric-string keys, heterogeneous values, mutation/alias escape, malformed pair bindings, and every prohibited Java map/backing family. Semantic validation locks the distinct homogeneous `OrderedMapType`, insertion order, immutable exact key/value bindings, body-only scope, and ordinary-map rejection. Backend and provenance coverage require semantic round-trip, one-time loop operand spelling, collision-safe Java lowering, safe Java expression positions, complete mappings, and transactional rejection from every non-cohort target. Runtime coverage generates, reparses, and executes all five targets with real PHP, Ruby, Node, local TypeScript, and Java toolchains; exact `3\n2\nb\n2\nc\n3\n` output proves size, lookup, pair values, first-insertion order, `continue`, and `break`.
+
+Run every file individually and sequentially; do not replace these commands with suite or directory discovery:
+
+```sh
+npx velocious-test spec/ordered-map-iteration-validation.spec.js
+npx velocious-test spec/ordered-map-iteration-frontends.spec.js
+npx velocious-test spec/ordered-map-iteration-backends.spec.js
+npx velocious-test spec/ordered-map-iteration-provenance-and-mapping.spec.js
+npx velocious-test spec/ordered-map-iteration-language-registry.spec.js
+LANG=C.UTF-8 LC_ALL=C.UTF-8 npx velocious-test spec/ordered-map-iteration-runtime-execution.spec.js
+npx velocious-test spec/public-api.spec.js
+```
+
+This capability remains original-five-only. It does not assign iteration order to Task 006 `MapType`, widen Task 008, add sorting or arbitrary iterators, or introduce a standard-library contract, compatibility facade, host provider, pairwise adapter, publication, or deployment behavior.
+
 ## Task 025 core expanded-language acceptance
 
 Task 025 uses two data-driven focused specs instead of duplicating the eight owning language suites. `spec/core-language-baseline-acceptance.spec.js` normalizes all five Tasks 001–004 profiles for Python, C#, C, C++, Rust, Swift, Kotlin/JVM, and Go; generates, reparses, and really executes one operator round trip per language; runs the eleven-path spanning matrix documented in [language support](language-support.md#task-025-core-expanded-language-acceptance); checks deterministic artifact bytes/mappings/provenance; and asserts the public registry contract. Its ordered program checks eager left-before-right calls and both short-circuit sides. C and C++ run the exact ordered-region source at O0/O2 with and without sanitizers, Rust runs debug/release, and Swift runs debug/`-O`.

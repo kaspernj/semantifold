@@ -246,6 +246,27 @@ function emitStatement(writer, statement, indent, path, canonicalizeZero) {
     writer.synthetic("\n", "line break", [statement], [path])
     return
   }
+  if (statement.kind == "ForEachMapStatement") {
+    writer.mapped("for", {mappingKind: "anchor", node: statement, path})
+    writer.synthetic(" (const [", "map loop scaffolding", [statement], [path])
+    writer.mapped(statement.keyBinding.name, {
+      mappingKind: "exact", node: statement.keyBinding, path: `${path}/keyBinding`, role: "name"
+    })
+    writer.synthetic(", ", "map iteration binding separator", [statement], [path])
+    writer.mapped(statement.valueBinding.name, {
+      mappingKind: "exact", node: statement.valueBinding, path: `${path}/valueBinding`, role: "name"
+    })
+    writer.synthetic("] of ", "map loop scaffolding", [statement], [path])
+    emitExpression(writer, statement.map, `${path}/map`, "javascript", identity)
+    writer.synthetic(") ", "map loop scaffolding", [statement], [path])
+    writer.mapped("{", {mappingKind: "anchor", node: statement.body, path: `${path}/body`})
+    writer.synthetic("\n", "line break", [statement], [path])
+    emitBlock(writer, statement.body, `${indent}  `, `${path}/body`, canonicalizeZero)
+    writer.synthetic(indent, "indentation", [statement], [path])
+    writer.mapped("}", {mappingKind: "anchor", node: statement.body, path: `${path}/body`})
+    writer.synthetic("\n", "line break", [statement], [path])
+    return
+  }
   if (statement.kind == "RaiseStatement") {
     const type = statement.error.error
     const error = writer.errorForId(type.declarationId)

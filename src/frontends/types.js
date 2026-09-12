@@ -34,10 +34,16 @@ export function iterationBindingType(type, location) {
   if (type.kind == "ListType") {
     return listType(iterationBindingType(type.elementType, location), location, location)
   }
-  if (type.kind == "MapType") {
+  if (type.kind == "MapType" || type.kind == "OrderedMapType") {
     const keyType = iterationBindingType(type.keyType, location)
 
-    return mapType(
+    return type.kind == "OrderedMapType" ? orderedMapType(
+      /** @type {import("../semantic/types.js").TypeReference} */ (keyType),
+      iterationBindingType(type.valueType, location),
+      location,
+      location,
+      location
+    ) : mapType(
       /** @type {import("../semantic/types.js").TypeReference} */ (keyType),
       iterationBindingType(type.valueType, location),
       location,
@@ -80,6 +86,40 @@ export function mapType(keyType, valueType, location, keyLocation, valueLocation
 
   setParserRanges(type, {keyType: keyLocation, type: location, valueType: valueLocation})
   return type
+}
+
+/**
+ * Builds one insertion-ordered recursive semantic map type.
+ * @param {import("../semantic/types.js").TypeReference} keyType - Key type.
+ * @param {import("../semantic/types.js").SemanticValueType} valueType - Value type.
+ * @param {import("../semantic/types.js").SourceLocation} location - Complete type range.
+ * @param {import("../semantic/types.js").SourceLocation} keyLocation - Key range.
+ * @param {import("../semantic/types.js").SourceLocation} valueLocation - Value range.
+ * @returns {import("../semantic/types.js").OrderedMapType} Ordered-map type.
+ */
+export function orderedMapType(keyType, valueType, location, keyLocation, valueLocation) {
+  const type = {keyType, kind: /** @type {const} */ ("OrderedMapType"), order: /** @type {const} */ ("insertion"), valueType}
+
+  setParserRanges(type, {keyType: keyLocation, type: location, valueType: valueLocation})
+  return type
+}
+
+/**
+ * Promotes one parser-proven ordinary map annotation into the distinct ordered-map capability.
+ * @param {import("../semantic/types.js").MapType} type - Parsed homogeneous map type.
+ * @param {import("../semantic/types.js").SourceLocation} fallbackLocation - Owning declaration location.
+ * @returns {import("../semantic/types.js").OrderedMapType} Ordered counterpart with the same parser ranges.
+ */
+export function orderedMapTypeFromMap(type, fallbackLocation) {
+  const ranges = type.sourceProvenance?.ranges
+
+  return orderedMapType(
+    type.keyType,
+    type.valueType,
+    ranges?.type ?? fallbackLocation,
+    ranges?.keyType ?? fallbackLocation,
+    ranges?.valueType ?? fallbackLocation
+  )
 }
 
 /**
@@ -135,7 +175,8 @@ export function sameValueType(left, right) {
   if (left.kind == "TypeVariableReference" && right.kind == "TypeVariableReference") return left.parameterId == right.parameterId
   if (left.kind == "ListType" && right.kind == "ListType") return sameValueType(left.elementType, right.elementType)
   if (left.kind == "OptionalType" && right.kind == "OptionalType") return sameValueType(left.valueType, right.valueType)
-  if (left.kind == "MapType" && right.kind == "MapType") {
+  if ((left.kind == "MapType" && right.kind == "MapType") ||
+    (left.kind == "OrderedMapType" && right.kind == "OrderedMapType")) {
     return sameValueType(left.keyType, right.keyType) && sameValueType(left.valueType, right.valueType)
   }
   if (left.kind == "RecordType" && right.kind == "RecordType") {
@@ -272,7 +313,8 @@ function collectKnownSubstitutions(formal, actual, substitutions) {
   if (formal.kind == "ListType" && actual.kind == "ListType") {
     return collectKnownSubstitutions(formal.elementType, actual.elementType, substitutions)
   }
-  if (formal.kind == "MapType" && actual.kind == "MapType") {
+  if ((formal.kind == "MapType" && actual.kind == "MapType") ||
+    (formal.kind == "OrderedMapType" && actual.kind == "OrderedMapType")) {
     return collectKnownSubstitutions(formal.keyType, actual.keyType, substitutions) &&
       collectKnownSubstitutions(formal.valueType, actual.valueType, substitutions)
   }
