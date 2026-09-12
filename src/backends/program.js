@@ -8,6 +8,7 @@ import {languageRegistry} from "../language-registry.js"
 import {finalizeMapping, toSourceMapV3} from "../mapping.js"
 import {createCoordinateIndex, indexedPointAt, moduleLocation} from "../semantic/location.js"
 import {semanticEntries} from "../semantic/provenance.js"
+import {moduleUncheckedErrorEffects} from "../semantic/validate.js"
 import {validateTargetBindingIdentifier, validateTargetIdentifier, validateTargetTypeIdentifier} from "./identifiers.js"
 import {validateBackendModule} from "./shared.js"
 import {programImportName, SourceWriter} from "./writer.js"
@@ -159,11 +160,12 @@ function samePoint(candidate, expected) {
  * @returns {import("../semantic/types.js").SemanticModule[]} Emission views in dependency order.
  */
 function prepareEmissionModules(program, language) {
-  /** @type {Map<string, import("../semantic/types.js").FunctionDeclaration | import("../semantic/types.js").RecordDeclaration>} */
+  /** @type {Map<string, import("../semantic/types.js").FunctionDeclaration | import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ErrorDeclaration>} */
   const declarations = new Map()
 
   for (const module of program.modules) {
     for (const declaration of module.records ?? []) declarations.set(/** @type {string} */ (declaration.id), declaration)
+    for (const declaration of module.errors ?? []) declarations.set(/** @type {string} */ (declaration.id), declaration)
     for (const declaration of module.functions) declarations.set(/** @type {string} */ (declaration.id), declaration)
   }
   const modules = program.modules.map((module) => /** @type {import("../semantic/types.js").SemanticModule} */ ({
@@ -174,11 +176,15 @@ function prepareEmissionModules(program, language) {
       location: module.location
     }
   }))
+  /** @type {Map<string, Set<string>>} */
+  const callEffectsByDeclarationId = new Map()
 
   for (const module of modules) {
     const programModule = /** @type {import("../semantic/types.js").SemanticProgramModule} */ (/** @type {unknown} */ (module))
     const visibleFunctions = new Map()
+    const visibleCallEffects = new Map()
     const visibleRecords = new Map()
+    const visibleErrors = new Map()
     const externalDeclarationIds = new Set()
 
     for (const imported of programModule.imports) {
@@ -188,11 +194,26 @@ function prepareEmissionModules(program, language) {
       externalDeclarationIds.add(imported.declarationId)
       if (imported.symbolKind == "function") {
         visibleFunctions.set(imported.localName, /** @type {import("../semantic/types.js").FunctionDeclaration} */ (declaration))
-      } else {
+        visibleCallEffects.set(imported.localName, new Set(callEffectsByDeclarationId.get(imported.declarationId) ?? []))
+      } else if (imported.symbolKind == "record") {
         visibleRecords.set(imported.declarationId, /** @type {import("../semantic/types.js").RecordDeclaration} */ (declaration))
+      } else {
+        visibleErrors.set(imported.declarationId, /** @type {import("../semantic/types.js").ErrorDeclaration} */ (declaration))
       }
     }
-    validateBackendModule(module, language, {externalDeclarationIds, program: true, visibleFunctions, visibleRecords})
+    validateBackendModule(module, language, {
+      externalDeclarationIds,
+      program: true,
+      visibleCallEffects,
+      visibleErrors,
+      visibleFunctions,
+      visibleRecords
+    })
+    const localCallEffects = moduleUncheckedErrorEffects(module, {callEffects: visibleCallEffects, functions: visibleFunctions})
+
+    for (const declaration of module.functions) {
+      callEffectsByDeclarationId.set(/** @type {string} */ (declaration.id), new Set(localCallEffects.get(declaration.name) ?? []))
+    }
   }
 
   return modules
@@ -211,7 +232,7 @@ function validateProgram(candidate, language) {
   }
   const program = /** @type {import("../semantic/types.js").SemanticProgram} */ (candidate)
   const modules = new Map()
-  /** @type {Map<string, {declaration: import("../semantic/types.js").FunctionDeclaration | import("../semantic/types.js").RecordDeclaration, module: import("../semantic/types.js").SemanticProgramModule}>} */
+  /** @type {Map<string, {declaration: import("../semantic/types.js").FunctionDeclaration | import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ErrorDeclaration, module: import("../semantic/types.js").SemanticProgramModule}>} */
   const declarations = new Map()
   let entryCount = 0
   const sourceIds = new Set()
@@ -231,6 +252,7 @@ function validateProgram(candidate, language) {
     if (!isPlainObject(module) || module.kind != "Module" || typeof module.id != "string" ||
       !/^[a-z][a-z0-9_]*(?:[.-][a-z][a-z0-9_]*)*$/u.test(module.id) || modules.has(module.id) ||
       !isDenseArray(module.functions) || module.records !== undefined && !isDenseArray(module.records) ||
+      module.errors !== undefined && !isDenseArray(module.errors) ||
       !isDenseArray(module.imports) || !isDenseArray(module.exports)) {
       unsupportedCapability(language, "malformed or duplicate semantic program module", module?.location)
     }
@@ -241,7 +263,7 @@ function validateProgram(candidate, language) {
       entryCount++
       if (module.id != program.entryModule) unsupportedCapability(language, "entry point on an unselected module", module.entryPoint.location)
     }
-    for (const declaration of [...module.records ?? [], ...module.functions]) {
+    for (const declaration of [...module.records ?? [], ...module.errors ?? [], ...module.functions]) {
       if (!isPlainObject(declaration) || typeof declaration.id != "string" ||
         !declaration.id.startsWith(`${module.id}#`) || declarations.has(declaration.id)) {
         unsupportedCapability(language, "duplicate or unstable program declaration identity", declaration?.location ?? module.location)
@@ -251,14 +273,14 @@ function validateProgram(candidate, language) {
     for (const imported of module.imports) {
       if (!isPlainObject(imported) || imported.kind != "Import" || typeof imported.moduleId != "string" ||
         typeof imported.importedName != "string" || typeof imported.localName != "string" ||
-        typeof imported.declarationId != "string" || !["function", "record"].includes(imported.symbolKind) ||
+        typeof imported.declarationId != "string" || !["function", "record", "error"].includes(imported.symbolKind) ||
         typeof imported.typeOnly != "boolean") {
         unsupportedCapability(language, "malformed semantic program import", imported?.location ?? module.location)
       }
     }
     for (const exported of module.exports) {
       if (!isPlainObject(exported) || exported.kind != "Export" || typeof exported.exportedName != "string" ||
-        typeof exported.declarationId != "string" || !["function", "record"].includes(exported.symbolKind)) {
+        typeof exported.declarationId != "string" || !["function", "record", "error"].includes(exported.symbolKind)) {
         unsupportedCapability(language, "malformed semantic program export", exported?.location ?? module.location)
       }
     }
@@ -277,9 +299,10 @@ function validateProgram(candidate, language) {
   const earlier = new Set()
 
   for (const module of program.modules) {
-    const localTargetNames = new Set([...module.records ?? [], ...module.functions].map(({name}) => targetName(language, name)))
+    const localTargetNames = new Set([...module.records ?? [], ...module.errors ?? [], ...module.functions].map(({name}) => targetName(language, name)))
     const importedTargetNames = new Set()
-    const localJavaClass = module.records?.[0]?.name ?? (module.id == program.entryModule ? "Main" : moduleClassName(module.id))
+    const localJavaClass = module.records?.[0]?.name ?? module.errors?.[0]?.name ??
+      (module.id == program.entryModule ? "Main" : moduleClassName(module.id))
     const javaImportClasses = new Map(language == "java" ? [[localJavaClass, module.id]] : [])
 
     for (const imported of module.imports) {
@@ -291,7 +314,8 @@ function validateProgram(candidate, language) {
         !remoteExport) {
         unsupportedCapability(language, "unresolved, private, cyclic, or out-of-order program import", imported.location ?? module.location)
       }
-      const declarationKind = resolved.declaration.kind == "FunctionDeclaration" ? "function" : "record"
+      const declarationKind = resolved.declaration.kind == "FunctionDeclaration" ? "function" :
+        resolved.declaration.kind == "RecordDeclaration" ? "record" : "error"
 
       if (imported.symbolKind != remoteExport.symbolKind || imported.symbolKind != declarationKind ||
         imported.typeOnly && declarationKind != "record") {
@@ -300,7 +324,7 @@ function validateProgram(candidate, language) {
       const importName = programImportName(program, module, imported)
 
       if (language != "ruby" && language != "java") {
-        if (imported.symbolKind == "record") validateTargetTypeIdentifier(language, importName, imported.location)
+        if (imported.symbolKind != "function") validateTargetTypeIdentifier(language, importName, imported.location)
         else validateTargetBindingIdentifier(language, importName, "import", imported.location)
       }
       const name = targetName(language, importName)
@@ -309,7 +333,7 @@ function validateProgram(candidate, language) {
         unsupportedCapability(language, `target import-name collision '${importName}'`, imported.location)
       }
       if (language == "java") {
-        const importedClass = imported.symbolKind == "record" ? resolved.declaration.name : moduleClassName(resolved.module.id)
+        const importedClass = imported.symbolKind == "function" ? moduleClassName(resolved.module.id) : resolved.declaration.name
         const existingOwner = javaImportClasses.get(importedClass)
 
         if (existingOwner && existingOwner != resolved.module.id) {
@@ -348,7 +372,8 @@ function validateProgram(candidate, language) {
       if (!resolved || resolved.module.id != module.id || exportNames.has(name)) {
         unsupportedCapability(language, `unresolved or colliding target export '${exported.exportedName}'`, exported.location ?? module.location)
       }
-      const declarationKind = resolved.declaration.kind == "FunctionDeclaration" ? "function" : "record"
+      const declarationKind = resolved.declaration.kind == "FunctionDeclaration" ? "function" :
+        resolved.declaration.kind == "RecordDeclaration" ? "record" : "error"
 
       if (exported.symbolKind != declarationKind) {
         unsupportedCapability(language, "program export declaration kind mismatch", exported.location ?? module.location)
@@ -361,7 +386,7 @@ function validateProgram(candidate, language) {
     }
     if (language == "php") {
       const exportedDeclarationIds = new Set(module.exports.map(({declarationId}) => declarationId))
-      const privateDeclaration = [...module.records ?? [], ...module.functions].find(({id}) =>
+      const privateDeclaration = [...module.records ?? [], ...module.errors ?? [], ...module.functions].find(({id}) =>
         typeof id == "string" && !exportedDeclarationIds.has(id))
 
       if (privateDeclaration) {
@@ -445,11 +470,14 @@ function planModulePaths(program, language) {
 
     if (language == "java") {
       for (const segment of module.id.split(".")) validateTargetIdentifier(language, segment, "module", module.location)
-      if (module.id.includes("-") || (module.records?.length ?? 0) > 1 ||
-        (module.records?.length ?? 0) > 0 && (module.functions.length > 0 || module.entryPoint)) {
+      const nominalCount = (module.records?.length ?? 0) + (module.errors?.length ?? 0)
+
+      if (module.id.includes("-") || nominalCount > 1 ||
+        nominalCount > 0 && (module.functions.length > 0 || module.entryPoint)) {
         unsupportedCapability(language, "Java module layout requiring multiple public declarations in one semantic module", module.location)
       }
-      const className = module.records?.[0]?.name ?? (module.id == program.entryModule ? "Main" : targetModuleName)
+      const className = module.records?.[0]?.name ?? module.errors?.[0]?.name ??
+        (module.id == program.entryModule ? "Main" : targetModuleName)
 
       if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/u.test(className)) {
         unsupportedCapability(language, `invalid Java public class name '${className}'`, module.location)

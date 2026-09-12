@@ -37,7 +37,9 @@ const javaBinaryOperations = new Map([
 
 /**
  * @typedef JavaConversionContext
- * @property {Map<string, import("../semantic/types.js").SemanticValueType>} bindings - Explicitly typed visible bindings.
+ * @property {Map<string, import("../semantic/types.js").SemanticBindingType>} bindings - Explicitly typed visible bindings.
+ * @property {Map<string, import("../semantic/types.js").ErrorDeclaration>} errorNames - Errors by source name.
+ * @property {Map<string, import("../semantic/types.js").ErrorDeclaration>} errors - Errors by identity.
  * @property {Map<string, JavaFunctionSignature>} functions - Explicit module function signatures.
  * @property {Map<string, import("../semantic/types.js").RecordDeclaration>} recordNames - Records by source name.
  * @property {Map<string, import("../semantic/types.js").RecordDeclaration>} records - Records by identity.
@@ -285,6 +287,19 @@ function convertExpression(node, filename, source, context, expectedType) {
     const receiver = structuralChildren(node).find((child) => child.name != "MethodName" && child.name != "ArgumentList")
     const method = nodeText(methodName, source)
     const receiverText = receiver ? nodeText(receiver, source) : ""
+
+    if (receiver?.name == "Identifier" && method == "getMessage" && argumentNodes.length == 0 &&
+      context.bindings.get(receiverText)?.kind == "ErrorType") {
+      const receiverLocation = nodeLocation(receiver, filename, source)
+
+      return withParserRanges({
+        kind: /** @type {const} */ ("ErrorMessageRead"),
+        location,
+        receiver: withParserRanges({kind: /** @type {const} */ ("IdentifierExpression"), location: receiverLocation, name: receiverText}, {
+          name: receiverLocation
+        })
+      }, {member: nodeLocation(methodName, filename, source)})
+    }
 
     if (receiver && isJavaOptionalSymbol(receiver, source)) {
       const factoryLocation = nodeLocation(methodName, filename, source)
@@ -749,7 +764,8 @@ function convertLocalStatement(statement, filename, source, context) {
 
     const targetName = nodeText(target, source)
     const bindingType = context.bindings.get(targetName)
-    const value = convertExpression(expression, filename, source, context, bindingType)
+    const value = convertExpression(expression, filename, source, context,
+      bindingType?.kind == "ErrorType" ? undefined : bindingType)
 
     return withParserRanges({
       expression: value,
@@ -773,6 +789,8 @@ function convertLocalStatement(statement, filename, source, context) {
 function convertStatement(statement, filename, source, context) {
   if (statement.name == "ReturnStatement") return convertReturn(statement, filename, source, context)
   if (statement.name == "IfStatement") return convertIf(statement, filename, source, context)
+  if (statement.name == "ThrowStatement") return convertJavaRaise(statement, filename, source, context)
+  if (statement.name == "TryStatement") return convertJavaTry(statement, filename, source, context)
   if (statement.name == "EnhancedForStatement") return convertForEach(statement, filename, source, context)
   if (statement.name == "BreakStatement" || statement.name == "ContinueStatement") {
     const label = statement.getChild("Label")
@@ -814,6 +832,93 @@ function convertStatement(statement, filename, source, context) {
   }
 
   return unsupportedSyntax("java", statement.name, nodeLocation(statement, filename, source))
+}
+
+/**
+ * Converts exact `throw new DeclaredError(message)`.
+ * @param {import("@lezer/common").SyntaxNode} statement - Java throw statement.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @param {JavaConversionContext} context - Typed lexical context.
+ * @returns {import("../semantic/types.js").RaiseStatement} Semantic raise.
+ */
+function convertJavaRaise(statement, filename, source, context) {
+  const location = nodeLocation(statement, filename, source)
+  const construction = statement.getChild("ObjectCreationExpression")
+  const typeNode = construction?.getChild("TypeName")
+  const argumentsNode = construction?.getChild("ArgumentList")
+  const arguments_ = argumentsNode ? structuralChildren(argumentsNode) : []
+  const declaration = typeNode ? context.errorNames.get(nodeText(typeNode, source)) : undefined
+
+  if (!construction || !typeNode || !argumentsNode || !declaration || arguments_.length != 1 || construction.getChild("ClassBody")) {
+    return unsupportedSyntax("java", "throw other than exact declared error construction", location)
+  }
+  const typeLocation = nodeLocation(typeNode, filename, source)
+
+  return withParserRanges({
+    error: withParserRanges({
+      error: withParserRanges({declarationId: /** @type {string} */ (declaration.id), kind: /** @type {const} */ ("ErrorType")}, {type: typeLocation}),
+      kind: /** @type {const} */ ("ErrorConstruction"),
+      location: nodeLocation(construction, filename, source),
+      message: convertExpression(arguments_[0], filename, source, context)
+    }, {type: typeLocation}),
+    kind: /** @type {const} */ ("RaiseStatement"),
+    location
+  }, {keyword: nodeLocation(requiredChild(statement, "throw", filename, source), filename, source)})
+}
+
+/**
+ * Converts one exact catch with no resources or finally.
+ * @param {import("@lezer/common").SyntaxNode} statement - Java try statement.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @param {JavaConversionContext} context - Typed lexical context.
+ * @returns {import("../semantic/types.js").TryStatement} Semantic exact handler.
+ */
+function convertJavaTry(statement, filename, source, context) {
+  const location = nodeLocation(statement, filename, source)
+  const body = statement.getChild("Block")
+  const catches = statement.getChildren("CatchClause")
+
+  if (!body || catches.length != 1 || statement.getChild("FinallyClause") || statement.getChild("ResourceSpecification")) {
+    return unsupportedSyntax("java", "try without one catch and no resources or finally", location)
+  }
+  const handler = catches[0]
+  const parameter = handler.getChild("CatchFormalParameter")
+  const caught = parameter?.getChild("CatchType")
+  const typeNodes = caught ? structuralChildren(caught) : []
+  const definition = parameter?.getChild("Definition")
+  const catchBody = handler.getChild("Block")
+  const typeNode = typeNodes[0]
+  const declaration = typeNode ? context.errorNames.get(nodeText(typeNode, source)) : undefined
+
+  if (!parameter || !caught || typeNodes.length != 1 || typeNode?.name != "TypeName" || !definition || !catchBody || !declaration ||
+    parameter.getChild("Modifiers")) {
+    return unsupportedSyntax("java", "broad, multiple, or malformed catch", nodeLocation(handler, filename, source))
+  }
+  const caughtLocation = nodeLocation(typeNode, filename, source)
+  const catchType = withParserRanges({declarationId: /** @type {string} */ (declaration.id), kind: /** @type {const} */ ("ErrorType")}, {
+    type: caughtLocation
+  })
+  const bodyContext = {...context, bindings: new Map(context.bindings)}
+  const catchContext = {...context, bindings: new Map(context.bindings)}
+  const name = nodeText(definition, source)
+
+  catchContext.bindings.set(name, catchType)
+  return withParserRanges({
+    body: convertBlock(body, filename, source, bodyContext),
+    catchBinding: withParserRanges({
+      kind: /** @type {const} */ ("CatchBinding"),
+      location: nodeLocation(definition, filename, source),
+      mutable: /** @type {const} */ (false),
+      name,
+      type: catchType
+    }, {name: nodeLocation(definition, filename, source)}),
+    catchBody: convertBlock(catchBody, filename, source, catchContext),
+    catchType,
+    kind: /** @type {const} */ ("TryStatement"),
+    location
+  }, {catch: nodeLocation(handler, filename, source), try: nodeLocation(requiredChild(statement, "try", filename, source), filename, source)})
 }
 
 /**
@@ -879,7 +984,7 @@ function convertForEach(node, filename, source, context) {
  * @param {import("@lezer/common").SyntaxNode} node - Parser expression.
  * @param {JavaConversionContext} context - Typed context.
  * @param {string} source - Complete source.
- * @returns {import("../semantic/types.js").SemanticFunctionReturnType | undefined} Known type.
+ * @returns {import("../semantic/types.js").SemanticFunctionReturnType | import("../semantic/types.js").ErrorType | undefined} Known type.
  */
 function knownExpressionType(node, context, source) {
   if (node.name == "ParenthesizedExpression") {
@@ -1135,14 +1240,18 @@ function convertFunctionSignature(node, filename, source, recordNames, programFu
  * @param {Map<string, JavaFunctionSignature>} functions - Module function signatures.
  * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} recordNames - Record declarations by source name.
  * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} records - Record declarations by identity.
+ * @param {Map<string, import("../semantic/types.js").ErrorDeclaration>} errorNames - Error declarations by source name.
+ * @param {Map<string, import("../semantic/types.js").ErrorDeclaration>} errors - Error declarations by identity.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
  * @returns {import("../semantic/types.js").FunctionDeclaration} Semantic function.
  */
-function convertFunction(node, signature, functions, recordNames, records, filename, source) {
+function convertFunction(node, signature, functions, recordNames, records, errorNames, errors, filename, source) {
   const block = requiredChild(node, "Block", filename, source)
   const context = {
     bindings: new Map(signature.parameters.map((parameter) => [parameter.name, parameter.type])),
+    errorNames,
+    errors,
     functions,
     recordNames,
     records,
@@ -1157,6 +1266,56 @@ function convertFunction(node, signature, functions, recordNames, records, filen
     parameters: signature.parameters,
     returnType: signature.returnType
   }, {name: signature.nameLocation})
+}
+
+/**
+ * Converts one exact final RuntimeException subclass.
+ * @param {import("@lezer/common").SyntaxNode} node - Java class declaration.
+ * @param {import("../semantic/types.js").ErrorDeclaration} declaration - Predeclared semantic error.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @param {boolean} [programError] - Whether public program visibility is admitted.
+ * @returns {import("../semantic/types.js").ErrorDeclaration} Semantic error declaration.
+ */
+function convertJavaError(node, declaration, filename, source, programError = false) {
+  const location = nodeLocation(node, filename, source)
+  const modifiers = node.getChild("Modifiers")
+  const modifierText = modifiers ? structuralChildren(modifiers).map((modifier) => modifier.name).join(" ") : ""
+  const superclass = node.getChild("Superclass")
+  const superclassChildren = superclass ? structuralChildren(superclass) : []
+  const parent = superclassChildren.at(-1)
+  const body = node.getChild("ClassBody")
+  const members = body ? structuralChildren(body) : []
+  const constructor = members[0]
+  const parameters = constructor?.getChild("FormalParameters")
+  const parameterNodes = parameters ? structuralChildren(parameters) : []
+  const parameter = parameterNodes[0]
+  const parameterType = parameter ? declarationType(parameter) : null
+  const parameterName = parameter?.getChild("Definition")
+  const constructorBody = constructor?.getChild("ConstructorBody")
+  const constructorStatements = constructorBody ? structuralChildren(constructorBody) : []
+  const superCall = constructorStatements[0]
+  const superArguments = superCall?.getChild("ArgumentList")
+  const superValues = superArguments ? structuralChildren(superArguments) : []
+
+  if ((programError ? !["public final", "final"].includes(modifierText) : modifierText != "final") ||
+    !superclass || superclassChildren.length != 2 || parent?.name != "TypeName" || nodeText(parent, source) != "RuntimeException" ||
+    node.getChild("SuperInterfaces") || node.getChild("TypeParameters") || !body || members.length != 1 ||
+    constructor?.name != "ConstructorDeclaration" ||
+    (programError ? nodeText(constructor.getChild("Modifiers") ?? constructor, source) != "public" : constructor.getChild("Modifiers")) ||
+    constructor.getChild("Throws") ||
+    nodeText(constructor.getChild("Definition") ?? node, source) != declaration.name || parameterNodes.length != 1 ||
+    parameter?.name != "FormalParameter" || nodeText(parameterType ?? node, source) != "String" ||
+    nodeText(parameterName ?? node, source) != "message" || !constructorBody || constructorStatements.length != 1 ||
+    superCall?.name != "ExplicitConstructorInvocation" || !superCall.getChild("super") || superValues.length != 1 ||
+    superValues[0].name != "Identifier" || nodeText(superValues[0], source) != "message") {
+    return unsupportedSyntax("java", "noncanonical typed error declaration", location)
+  }
+
+  return withParserRanges(declaration, {
+    name: nodeLocation(requiredChild(node, "Definition", filename, source), filename, source),
+    type: nodeLocation(parent, filename, source)
+  })
 }
 
 /**
@@ -1343,9 +1502,11 @@ function convertIf(node, filename, source, context) {
  * @param {Map<string, JavaFunctionSignature>} functions - Module function signatures.
  * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} recordNames - Record declarations by source name.
  * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} records - Record declarations by identity.
+ * @param {Map<string, import("../semantic/types.js").ErrorDeclaration>} errorNames - Error declarations by source name.
+ * @param {Map<string, import("../semantic/types.js").ErrorDeclaration>} errors - Error declarations by identity.
  * @returns {import("../semantic/types.js").EntryPoint} Semantic entry point.
  */
-function convertEntryPoint(node, filename, source, functions, recordNames, records) {
+function convertEntryPoint(node, filename, source, functions, recordNames, records, errorNames, errors) {
   const location = nodeLocation(node, filename, source)
   const modifiers = node.getChild("Modifiers")
   const parameters = node.getChild("FormalParameters")
@@ -1366,6 +1527,8 @@ function convertEntryPoint(node, filename, source, functions, recordNames, recor
   const block = requiredChild(node, "Block", filename, source)
   const body = convertBlock(block, filename, source, {
     bindings: new Map(),
+    errorNames,
+    errors,
     functions,
     recordNames,
     records,
@@ -1414,7 +1577,7 @@ function convertPrint(statement, filename, source, context) {
  * @param {object} input - Parser input.
  * @param {string} input.filename - Source filename.
  * @param {string} input.source - Source text.
- * @param {{isEntry: boolean, functions: Map<string, import("../semantic/types.js").FunctionDeclaration>, records: Map<string, import("../semantic/types.js").RecordDeclaration>}} [input.program] - Resolved program imports and entry role.
+ * @param {{isEntry: boolean, functions: Map<string, import("../semantic/types.js").FunctionDeclaration>, records: Map<string, import("../semantic/types.js").RecordDeclaration>, errors?: Map<string, import("../semantic/types.js").ErrorDeclaration>}} [input.program] - Resolved program imports and entry role.
  * @returns {import("../semantic/types.js").SemanticModule} Semantic module.
  */
 export function parseJava({filename, source, program}) {
@@ -1466,7 +1629,18 @@ export function parseJava({filename, source, program}) {
   if (functionMethods.length == 0) return unsupportedSyntax("java", "class without a semantic function", location)
   if (!mainMethod || mainMethods.length != 1) return unsupportedSyntax("java", "class without one unambiguous main", location)
 
-  const recordNodes = classDeclarations.filter((declaration) => declaration != classDeclaration)
+  const nominalNodes = classDeclarations.filter((declaration) => declaration != classDeclaration)
+  const errorNodes = nominalNodes.filter((declaration) => {
+    const parent = declaration.getChild("Superclass")
+    return parent && nodeText(parent, source) == "extends RuntimeException"
+  })
+  const recordNodes = nominalNodes.filter((declaration) => !errorNodes.includes(declaration))
+  const errorDeclarations = errorNodes.map((errorNode, index) => ({
+    id: `error:${index}`,
+    kind: /** @type {const} */ ("ErrorDeclaration"),
+    location: nodeLocation(errorNode, filename, source),
+    name: nodeText(requiredChild(errorNode, "Definition", filename, source), source)
+  }))
   const recordDeclarations = recordNodes.map((recordNode, index) => ({
     fields: [],
     id: `record:${index}`,
@@ -1475,16 +1649,19 @@ export function parseJava({filename, source, program}) {
     name: nodeText(requiredChild(recordNode, "Definition", filename, source), source)
   }))
   const recordNames = new Map(recordDeclarations.map((declaration) => [declaration.name, declaration]))
+  const errorNames = new Map(errorDeclarations.map((declaration) => [declaration.name, declaration]))
+  const errorsById = new Map(errorDeclarations.map((declaration) => [/** @type {string} */ (declaration.id), declaration]))
+  const errors = errorNodes.map((errorNode, index) => convertJavaError(errorNode, errorDeclarations[index], filename, source))
   const recordsById = new Map(recordDeclarations.map((declaration) => [/** @type {string} */ (declaration.id), declaration]))
   const records = recordNodes.map((recordNode, index) =>
     convertJavaRecord(recordNode, recordDeclarations[index], recordNames, filename, source))
   const signatures = functionMethods.map((method) => convertFunctionSignature(method, filename, source, recordNames))
   const functionSignatures = new Map(signatures.map((signature) => [signature.name, signature]))
   const functions = functionMethods.map((method, index) =>
-    convertFunction(method, signatures[index], functionSignatures, recordNames, recordsById, filename, source))
-  const entryPoint = convertEntryPoint(mainMethod, filename, source, functionSignatures, recordNames, recordsById)
+    convertFunction(method, signatures[index], functionSignatures, recordNames, recordsById, errorNames, errorsById, filename, source))
+  const entryPoint = convertEntryPoint(mainMethod, filename, source, functionSignatures, recordNames, recordsById, errorNames, errorsById)
 
-  return {entryPoint, functions, kind: "Module", location, ...(records.length > 0 ? {records} : {})}
+  return {entryPoint, functions, kind: "Module", location, ...(errors.length > 0 ? {errors} : {}), ...(records.length > 0 ? {records} : {})}
 }
 
 /**
@@ -1492,7 +1669,7 @@ export function parseJava({filename, source, program}) {
  * @param {import("@lezer/common").SyntaxNode} root - Error-free Program node.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source text.
- * @param {{isEntry: boolean, functions: Map<string, import("../semantic/types.js").FunctionDeclaration>, records: Map<string, import("../semantic/types.js").RecordDeclaration>}} program - Resolved program imports and entry role.
+ * @param {{isEntry: boolean, functions: Map<string, import("../semantic/types.js").FunctionDeclaration>, records: Map<string, import("../semantic/types.js").RecordDeclaration>, errors?: Map<string, import("../semantic/types.js").ErrorDeclaration>}} program - Resolved program imports and entry role.
  * @returns {import("../semantic/types.js").SemanticModule} Semantic module.
  */
 function parseJavaProgramModule(root, filename, source, program) {
@@ -1504,7 +1681,9 @@ function parseJavaProgramModule(root, filename, source, program) {
   const members = structuralChildren(classBody)
   const mainMethods = members.filter((method) => method.name == "MethodDeclaration" &&
     nodeText(requiredChild(method, "Definition", filename, source), source) == "main")
-  const isRecord = members.some((member) => member.name == "FieldDeclaration" || member.name == "ConstructorDeclaration")
+  const superclass = classDeclaration.getChild("Superclass")
+  const isError = Boolean(superclass && nodeText(superclass, source) == "extends RuntimeException")
+  const isRecord = !isError && members.some((member) => member.name == "FieldDeclaration" || member.name == "ConstructorDeclaration")
   const location = moduleLocation(filename, source)
 
   if (program.isEntry && classModifierNames.join(" ") != "public final") {
@@ -1512,7 +1691,16 @@ function parseJavaProgramModule(root, filename, source, program) {
   }
   if (program.isEntry && mainMethods.length != 1) return unsupportedSyntax("java", "selected entry class without one main method", location)
   if (!program.isEntry && mainMethods.length > 0) return unsupportedSyntax("java", "main method outside the selected entry module", nodeLocation(mainMethods[0], filename, source))
-  if (isRecord && mainMethods.length > 0) return unsupportedSyntax("java", "record class containing main", nodeLocation(classDeclaration, filename, source))
+  if ((isRecord || isError) && mainMethods.length > 0) {
+    return unsupportedSyntax("java", "nominal class containing main", nodeLocation(classDeclaration, filename, source))
+  }
+
+  const errorDeclarations = isError ? [{
+    id: "error:0",
+    kind: /** @type {const} */ ("ErrorDeclaration"),
+    location: nodeLocation(classDeclaration, filename, source),
+    name: nodeText(requiredChild(classDeclaration, "Definition", filename, source), source)
+  }] : []
 
   const recordDeclarations = isRecord ? [{
     fields: [],
@@ -1522,12 +1710,16 @@ function parseJavaProgramModule(root, filename, source, program) {
     name: nodeText(requiredChild(classDeclaration, "Definition", filename, source), source)
   }] : []
   const recordNames = new Map(program.records)
+  const errorNames = new Map(program.errors ?? [])
 
   for (const declaration of recordDeclarations) recordNames.set(declaration.name, declaration)
+  for (const declaration of errorDeclarations) errorNames.set(declaration.name, declaration)
+  const errorsById = new Map([...errorNames.values()].map((declaration) => [/** @type {string} */ (declaration.id), declaration]))
+  const errors = errorDeclarations.map((declaration) => convertJavaError(classDeclaration, declaration, filename, source, true))
   const recordsById = new Map([...recordNames.values()].map((declaration) => [/** @type {string} */ (declaration.id), declaration]))
   const records = recordDeclarations.map((declaration) =>
     convertJavaRecord(classDeclaration, declaration, recordNames, filename, source, true))
-  const functionMethods = isRecord ? [] : members.filter((member) => member.name == "MethodDeclaration" && !mainMethods.includes(member))
+  const functionMethods = isRecord || isError ? [] : members.filter((member) => member.name == "MethodDeclaration" && !mainMethods.includes(member))
   const signatures = functionMethods.map((method) => convertFunctionSignature(method, filename, source, recordNames, true))
   const functionSignatures = new Map([...program.functions].map(([localName, declaration]) => [localName, {
     location: declaration.location,
@@ -1539,13 +1731,20 @@ function parseJavaProgramModule(root, filename, source, program) {
 
   for (const signature of signatures) functionSignatures.set(signature.name, signature)
   const functions = functionMethods.map((method, index) =>
-    convertFunction(method, signatures[index], functionSignatures, recordNames, recordsById, filename, source))
+    convertFunction(method, signatures[index], functionSignatures, recordNames, recordsById, errorNames, errorsById, filename, source))
   const emptyBlock = {kind: /** @type {const} */ ("Block"), location, statements: []}
   const entryPoint = program.isEntry
-    ? convertEntryPoint(mainMethods[0], filename, source, functionSignatures, recordNames, recordsById)
+    ? convertEntryPoint(mainMethods[0], filename, source, functionSignatures, recordNames, recordsById, errorNames, errorsById)
     : {body: emptyBlock, kind: /** @type {const} */ ("EntryPoint"), location}
 
-  return {entryPoint, functions, kind: "Module", location, ...(records.length > 0 ? {records} : {})}
+  return {
+    entryPoint,
+    functions,
+    kind: "Module",
+    location,
+    ...(errors.length > 0 ? {errors} : {}),
+    ...(records.length > 0 ? {records} : {})
+  }
 }
 
 /**

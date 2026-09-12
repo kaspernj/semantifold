@@ -6,7 +6,7 @@ import {SemantifoldDiagnostic, semanticFailure, unsupportedRole} from "../diagno
 import {languageRegistry} from "../language-registry.js"
 import {moduleLocation} from "../semantic/location.js"
 import {annotateParsedModule} from "../semantic/provenance.js"
-import {validateParsedModule} from "../semantic/validate.js"
+import {moduleUncheckedErrorEffects, validateParsedModule} from "../semantic/validate.js"
 import {inspectJavaScriptTypeScriptModule} from "./javascript-typescript.js"
 import {inspectJavaModule} from "./java.js"
 import {inspectPhpModule} from "./php.js"
@@ -74,6 +74,8 @@ export function parseProgramSource(input) {
   const orderedIds = topologicalOrder(sources, graph)
   /** @type {Map<string, import("../semantic/types.js").SemanticProgramModule>} */
   const parsed = new Map()
+  /** @type {Map<string, Set<string>>} */
+  const callEffectsByDeclarationId = new Map()
 
   for (const moduleId of orderedIds) {
     const {requests, source} = requiredMapValue(graph, moduleId)
@@ -81,9 +83,12 @@ export function parseProgramSource(input) {
     const header = requiredMapValue(headers, moduleId)
     const localNames = new Set()
     const visibleFunctions = new Map()
+    const visibleCallEffects = new Map()
     const visibleRecordsByName = new Map()
     const visibleValueRecordsByName = new Map()
     const visibleRecordsById = new Map()
+    const visibleErrorsByName = new Map()
+    const visibleErrorsById = new Map()
     const consumedBindings = new Set()
     /** @type {import("../semantic/types.js").SemanticImport[]} */
     const imports = []
@@ -121,7 +126,8 @@ export function parseProgramSource(input) {
           semanticFailure(source.language, "DUPLICATE_IMPORT_BINDING", `Duplicate import binding '${localName}'.`, importLocation)
         }
         localNames.add(localName)
-        if (nativeBinding && nativeBinding.symbolKind != exported.symbolKind) {
+        if (nativeBinding && nativeBinding.symbolKind != exported.symbolKind &&
+          !(nativeBinding.symbolKind == "record" && exported.symbolKind == "error")) {
           semanticFailure(source.language, "IMPORT_KIND_MISMATCH", `Import '${nativeBinding.importedName}' has the wrong declaration kind.`, importLocation)
         }
         if (request.typeOnly && exported.symbolKind != "record") {
@@ -131,13 +137,21 @@ export function parseProgramSource(input) {
         const declaration = declarationFor(dependency, exported)
         const typeOnly = nativeBinding?.typeOnly ?? request.typeOnly
 
-        if (exported.symbolKind == "function") visibleFunctions.set(localName, /** @type {import("../semantic/types.js").FunctionDeclaration} */ (declaration))
-        else {
+        if (exported.symbolKind == "function") {
+          visibleFunctions.set(localName, /** @type {import("../semantic/types.js").FunctionDeclaration} */ (declaration))
+          visibleCallEffects.set(localName, new Set(callEffectsByDeclarationId.get(exported.declarationId) ?? []))
+        }
+        else if (exported.symbolKind == "record") {
           const record = /** @type {import("../semantic/types.js").RecordDeclaration} */ (declaration)
 
           visibleRecordsByName.set(localName, record)
           if (!typeOnly) visibleValueRecordsByName.set(localName, record)
           visibleRecordsById.set(/** @type {string} */ (record.id), record)
+        } else {
+          const error = /** @type {import("../semantic/types.js").ErrorDeclaration} */ (declaration)
+
+          visibleErrorsByName.set(localName, error)
+          visibleErrorsById.set(/** @type {string} */ (error.id), error)
         }
         /** @type {Record<string, import("../semantic/types.js").SourceLocation>} */
         const ranges = {
@@ -177,6 +191,7 @@ export function parseProgramSource(input) {
       program: {
         functions: visibleFunctions,
         isEntry: source.id == input.entryModule,
+        errors: visibleErrorsByName,
         records: visibleRecordsByName,
         valueRecords: visibleValueRecordsByName
       },
@@ -186,15 +201,26 @@ export function parseProgramSource(input) {
     if (source.id == input.entryModule && raw.entryPoint.body.statements.length == 0) {
       semanticFailure(source.language, "INVALID_ENTRY_MODULE", `Selected entry module '${source.id}' has no executable statements.`, raw.entryPoint.location)
     }
-    validateParsedModule(raw, source.language, {functions: visibleFunctions, records: visibleRecordsById})
+    validateParsedModule(raw, source.language, {
+      callEffects: visibleCallEffects,
+      errors: visibleErrorsById,
+      functions: visibleFunctions,
+      records: visibleRecordsById
+    })
     rekeyDeclarations(raw, source.id)
+    const localCallEffects = moduleUncheckedErrorEffects(raw, {callEffects: visibleCallEffects, functions: visibleFunctions})
+
+    for (const declaration of raw.functions) {
+      callEffectsByDeclarationId.set(/** @type {string} */ (declaration.id), new Set(localCallEffects.get(declaration.name) ?? []))
+    }
     annotateParsedModule(raw, source)
     rebaseParsedModuleProvenance(raw, registeredSources, sourceId)
 
-    /** @type {Map<string, {declaration: import("../semantic/types.js").FunctionDeclaration | import("../semantic/types.js").RecordDeclaration, symbolKind: import("../semantic/types.js").SemanticDeclarationKind}>} */
+    /** @type {Map<string, {declaration: import("../semantic/types.js").FunctionDeclaration | import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ErrorDeclaration, symbolKind: import("../semantic/types.js").SemanticDeclarationKind}>} */
     const declarationsByName = new Map()
 
     for (const declaration of raw.records ?? []) declarationsByName.set(declaration.name, {declaration, symbolKind: "record"})
+    for (const declaration of raw.errors ?? []) declarationsByName.set(declaration.name, {declaration, symbolKind: "error"})
     for (const declaration of raw.functions) declarationsByName.set(declaration.name, {declaration, symbolKind: "function"})
     /** @type {import("../semantic/types.js").SemanticExport[]} */
     const exports = header.exports.map((request) => {
@@ -374,13 +400,13 @@ function resolveImportModule(source, specifier, location, sources, headers) {
  */
 function qualifiedImportName(language, nativeName, exported) {
   if (!nativeName) throw new Error("Namespace import dependency has no parser-owned native name.")
-  if (language == "ruby") return `${nativeName}${exported.symbolKind == "record" ? "::" : "."}${exported.exportedName}`
+  if (language == "ruby") return `${nativeName}${exported.symbolKind == "function" ? "." : "::"}${exported.exportedName}`
   if (language == "java") {
     const className = nativeName.split(".").at(-1)
 
     if (!className) throw new Error("Java import dependency has no class name.")
 
-    return exported.symbolKind == "record" ? className : `${className}.${exported.exportedName}`
+    return exported.symbolKind == "function" ? `${className}.${exported.exportedName}` : className
   }
 
   throw new Error(`Unsupported namespace import profile '${language}'.`)
@@ -425,10 +451,11 @@ function topologicalOrder(sources, graph) {
  * Looks up one already-resolved exported declaration.
  * @param {import("../semantic/types.js").SemanticProgramModule} module - Exporting module.
  * @param {import("../semantic/types.js").SemanticExport} exported - Resolved export.
- * @returns {import("../semantic/types.js").FunctionDeclaration | import("../semantic/types.js").RecordDeclaration} Declaration.
+ * @returns {import("../semantic/types.js").FunctionDeclaration | import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ErrorDeclaration} Declaration.
  */
 function declarationFor(module, exported) {
-  const declarations = exported.symbolKind == "function" ? module.functions : module.records ?? []
+  const declarations = exported.symbolKind == "function" ? module.functions :
+    exported.symbolKind == "record" ? module.records ?? [] : module.errors ?? []
   const declaration = declarations.find(({id}) => id == exported.declarationId)
 
   if (!declaration) throw new Error(`Resolved export '${exported.declarationId}' has no declaration.`)
@@ -449,12 +476,14 @@ function rekeyDeclarations(module, moduleId) {
     replacements.set(declaration.id, `${moduleId}#${declaration.id}`)
     for (const field of declaration.fields) replacements.set(field.id, `${moduleId}#${field.id}`)
   }
+  for (const declaration of module.errors ?? []) replacements.set(declaration.id, `${moduleId}#${declaration.id}`)
   for (const declaration of module.functions) replacements.set(declaration.id, `${moduleId}#${declaration.id}`)
 
   for (const declaration of module.records ?? []) {
     declaration.id = replacements.get(declaration.id)
     for (const field of declaration.fields) field.id = /** @type {string} */ (replacements.get(field.id))
   }
+  for (const declaration of module.errors ?? []) declaration.id = replacements.get(declaration.id)
   for (const declaration of module.functions) declaration.id = replacements.get(declaration.id)
 
   const seen = new WeakSet()
@@ -467,7 +496,7 @@ function rekeyDeclarations(module, moduleId) {
     seen.add(value)
     const object = /** @type {Record<string, unknown>} */ (value)
 
-    if ((object.kind == "RecordType" || object.kind == "ResolvedFunctionSignature") &&
+    if ((object.kind == "RecordType" || object.kind == "ErrorType" || object.kind == "ResolvedFunctionSignature") &&
       typeof object.declarationId == "string" && replacements.has(object.declarationId)) {
       object.declarationId = replacements.get(object.declarationId)
     }

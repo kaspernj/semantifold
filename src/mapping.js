@@ -763,11 +763,13 @@ export function validateMapping(value) {
 
   for (const symbol of mapping.symbols) {
     if (!symbol || typeof symbol != "object" || typeof symbol.id != "string" || symbol.id.length == 0 || symbolIds.has(symbol.id) ||
-      typeof symbol.name != "string" || symbol.name.length == 0 || !["record", "field", "function", "parameter", "local", "iteration"].includes(symbol.kind) ||
+      typeof symbol.name != "string" || symbol.name.length == 0 ||
+      !["record", "error", "field", "function", "parameter", "local", "iteration", "catch"].includes(symbol.kind) ||
       !nodeIds.has(symbol.declarationNodeId) || !Array.isArray(symbol.references) ||
       symbol.semanticDeclarationId !== undefined && (typeof symbol.semanticDeclarationId != "string" || !(
         symbol.kind == "function" && /^(?:[a-z][a-z0-9._-]*#)?function:[0-9]+$/u.test(symbol.semanticDeclarationId) ||
         symbol.kind == "record" && /^(?:[a-z][a-z0-9._-]*#)?record:[0-9]+$/u.test(symbol.semanticDeclarationId) ||
+        symbol.kind == "error" && /^(?:[a-z][a-z0-9._-]*#)?error:[0-9]+$/u.test(symbol.semanticDeclarationId) ||
         symbol.kind == "field" && /^(?:[a-z][a-z0-9._-]*#)?record:[0-9]+:field:[0-9]+$/u.test(symbol.semanticDeclarationId)
       ))) {
       throw new TypeError("Malformed or duplicate semantic symbol identity.")

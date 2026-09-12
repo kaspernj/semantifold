@@ -34,7 +34,9 @@ const phpBinaryOperations = new Map([
 
 /**
  * @typedef PhpConversionContext
- * @property {Map<string, import("../semantic/types.js").SemanticValueType>} bindings - Explicitly typed visible bindings.
+ * @property {Map<string, import("../semantic/types.js").SemanticBindingType>} bindings - Explicitly typed visible bindings.
+ * @property {Map<string, import("../semantic/types.js").ErrorDeclaration>} errorNames - Error declarations by source name.
+ * @property {Map<string, import("../semantic/types.js").ErrorDeclaration>} errors - Error declarations by identity.
  * @property {Map<string, PhpFunctionSignature>} functions - Explicit module function signatures.
  * @property {Map<string, import("../semantic/types.js").RecordDeclaration>} recordNames - Record declarations by source name.
  * @property {Map<string, import("../semantic/types.js").RecordDeclaration>} records - Record declarations by identity.
@@ -371,6 +373,24 @@ function convertExpression(node, filename, source, context, expectedType, preser
   if (node.kind == "call") {
     const call = /** @type {import("php-parser").Call} */ (node)
 
+    if (call.what.kind == "propertylookup" && call.arguments.length == 0) {
+      const lookup = /** @type {import("php-parser").PropertyLookup} */ (/** @type {unknown} */ (call.what))
+      const receiver = lookup.what.kind == "variable" ? /** @type {import("php-parser").Variable} */ (lookup.what) : undefined
+      const member = lookup.offset.kind == "identifier" ? /** @type {import("php-parser").Identifier} */ (lookup.offset) : undefined
+
+      if (receiver && typeof receiver.name == "string" && member?.name == "getMessage" && context.bindings.get(receiver.name)?.kind == "ErrorType") {
+        const receiverLocation = nodeLocation(receiver, filename, source)
+
+        return withParserRanges({
+          kind: /** @type {const} */ ("ErrorMessageRead"),
+          location,
+          receiver: withParserRanges({kind: /** @type {const} */ ("IdentifierExpression"), location: receiverLocation, name: receiver.name}, {
+            name: receiverLocation
+          })
+        }, {member: nodeLocation(member, filename, source)})
+      }
+    }
+
     if (call.what.kind == "name" && call.what.name == "count" && call.arguments.length == 1) {
       return withParserRanges({
         collection: convertExpression(call.arguments[0], filename, source, context),
@@ -417,7 +437,7 @@ function convertExpression(node, filename, source, context, expectedType, preser
  * Resolves only result types established by explicit signatures and bindings.
  * @param {import("php-parser").Expression} node - Parser-owned expression.
  * @param {PhpConversionContext} context - Typed conversion context.
- * @returns {import("../semantic/types.js").SemanticFunctionReturnType | undefined} Known result type.
+ * @returns {import("../semantic/types.js").SemanticFunctionReturnType | import("../semantic/types.js").ErrorType | undefined} Known result type.
  */
 function knownExpressionType(node, context) {
   if (node.kind == "variable") {
@@ -554,6 +574,9 @@ function convertLocalStatement(node, filename, source, context) {
 
   if (assignment.operator != "=") return unsupportedSyntax("php", `assignment ${assignment.operator}`, location)
   if (assignment.left.kind != "variable") return unsupportedSyntax("php", assignment.left.kind, nodeLocation(assignment.left, filename, source))
+  if (assignment.right.kind == "throw") {
+    return unsupportedSyntax("php", "throw expression in a value context", nodeLocation(assignment.right, filename, source))
+  }
 
   const variable = /** @type {import("php-parser").Variable} */ (assignment.left)
   const targetLocation = nodeLocation(variable, filename, source)
@@ -605,7 +628,8 @@ function convertLocalStatement(node, filename, source, context) {
   const target = withParserRanges({kind: /** @type {const} */ ("IdentifierExpression"), location: targetLocation, name: variable.name}, {
     name: targetLocation
   })
-  const value = convertExpression(assignment.right, filename, source, context, bindingType)
+  const value = convertExpression(assignment.right, filename, source, context,
+    bindingType.kind == "ErrorType" ? undefined : bindingType)
 
   return withParserRanges({
     expression: value,
@@ -628,6 +652,8 @@ function convertLocalStatement(node, filename, source, context) {
 function convertStatement(node, filename, source, context) {
   if (node.kind == "return") return convertReturn(node, filename, source, context)
   if (node.kind == "if") return convertIf(/** @type {import("php-parser").If} */ (node), filename, source, context)
+  if (node.kind == "throw") return convertPhpRaise(node, filename, source, context)
+  if (node.kind == "try") return convertPhpTry(node, filename, source, context)
   if (node.kind == "foreach") return convertForEach(/** @type {import("php-parser").Foreach} */ (node), filename, source, context)
   if (node.kind == "break" || node.kind == "continue") {
     const control = /** @type {import("php-parser").Break | import("php-parser").Continue} */ (node)
@@ -658,6 +684,89 @@ function convertStatement(node, filename, source, context) {
   }
 
   return unsupportedSyntax("php", node.kind, nodeLocation(node, filename, source))
+}
+
+/**
+ * Converts exact `throw new DeclaredError(message)`.
+ * @param {import("php-parser").Node} node - PHP throw node.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @param {PhpConversionContext} context - Typed lexical context.
+ * @returns {import("../semantic/types.js").RaiseStatement} Semantic raise.
+ */
+function convertPhpRaise(node, filename, source, context) {
+  const location = nodeLocation(node, filename, source)
+  const construction = Reflect.get(node, "what")
+
+  if (!construction || construction.kind != "new" || construction.what?.kind != "name" ||
+    construction.what.resolution != "uqn" || !context.errorNames.has(construction.what.name) ||
+    !Array.isArray(construction.arguments) || construction.arguments.length != 1 ||
+    construction.arguments[0].kind == "namedargument" || construction.arguments[0].kind == "variadic") {
+    return unsupportedSyntax("php", "throw other than exact declared error construction", location)
+  }
+  const declaration = /** @type {import("../semantic/types.js").ErrorDeclaration} */ (context.errorNames.get(construction.what.name))
+  const typeLocation = nodeLocation(construction.what, filename, source)
+
+  return withParserRanges({
+    error: withParserRanges({
+      error: withParserRanges({declarationId: /** @type {string} */ (declaration.id), kind: /** @type {const} */ ("ErrorType")}, {type: typeLocation}),
+      kind: /** @type {const} */ ("ErrorConstruction"),
+      location: nodeLocation(construction, filename, source),
+      message: convertExpression(construction.arguments[0], filename, source, context)
+    }, {type: typeLocation}),
+    kind: /** @type {const} */ ("RaiseStatement"),
+    location
+  }, {keyword: tokenLocation("throw", node.loc?.start.offset ?? 0, construction.loc?.start.offset ?? source.length, filename, source)})
+}
+
+/**
+ * Converts one exact typed catch with no finally.
+ * @param {import("php-parser").Node} node - PHP try node.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @param {PhpConversionContext} context - Typed lexical context.
+ * @returns {import("../semantic/types.js").TryStatement} Semantic exact handler.
+ */
+function convertPhpTry(node, filename, source, context) {
+  const location = nodeLocation(node, filename, source)
+  const catches = Reflect.get(node, "catches")
+  const body = Reflect.get(node, "body")
+
+  if (Reflect.get(node, "always") || !Array.isArray(catches) || catches.length != 1 || body?.kind != "block") {
+    return unsupportedSyntax("php", "try without one typed catch and no finally", location)
+  }
+  const handler = catches[0]
+  const caught = handler.what?.[0]
+  const binding = handler.variable
+
+  if (handler.what?.length != 1 || caught?.kind != "name" || caught.resolution != "uqn" ||
+    !context.errorNames.has(caught.name) || binding?.kind != "variable" || typeof binding.name != "string" ||
+    binding.curly || handler.body?.kind != "block") {
+    return unsupportedSyntax("php", "broad, multiple, or malformed catch", nodeLocation(handler, filename, source))
+  }
+  const declaration = /** @type {import("../semantic/types.js").ErrorDeclaration} */ (context.errorNames.get(caught.name))
+  const caughtLocation = nodeLocation(caught, filename, source)
+  const catchType = withParserRanges({declarationId: /** @type {string} */ (declaration.id), kind: /** @type {const} */ ("ErrorType")}, {
+    type: caughtLocation
+  })
+  const bodyContext = {...context, bindings: new Map(context.bindings)}
+  const catchContext = {...context, bindings: new Map(context.bindings)}
+
+  catchContext.bindings.set(binding.name, catchType)
+  return withParserRanges({
+    body: convertBlock(body, filename, source, bodyContext),
+    catchBinding: withParserRanges({
+      kind: /** @type {const} */ ("CatchBinding"),
+      location: nodeLocation(binding, filename, source),
+      mutable: /** @type {const} */ (false),
+      name: binding.name,
+      type: catchType
+    }, {name: nodeLocation(binding, filename, source)}),
+    catchBody: convertBlock(handler.body, filename, source, catchContext),
+    catchType,
+    kind: /** @type {const} */ ("TryStatement"),
+    location
+  }, {catch: nodeLocation(handler, filename, source), try: tokenLocation("try", node.loc?.start.offset ?? 0, body.loc?.start.offset ?? source.length, filename, source)})
 }
 
 /**
@@ -950,14 +1059,18 @@ function convertFunctionSignature(node, filename, source, recordNames) {
  * @param {Map<string, PhpFunctionSignature>} functions - Module function signatures.
  * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} recordNames - Record declarations by source name.
  * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} records - Record declarations by identity.
+ * @param {Map<string, import("../semantic/types.js").ErrorDeclaration>} errorNames - Error declarations by source name.
+ * @param {Map<string, import("../semantic/types.js").ErrorDeclaration>} errors - Error declarations by identity.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
  * @returns {import("../semantic/types.js").FunctionDeclaration} Semantic function.
  */
-function convertFunction(node, signature, functions, recordNames, records, filename, source) {
+function convertFunction(node, signature, functions, recordNames, records, errorNames, errors, filename, source) {
   if (!node.body) return unsupportedSyntax("php", "function body", signature.location)
   const context = {
     bindings: new Map(signature.parameters.map((parameter) => [parameter.name, parameter.type])),
+    errorNames,
+    errors,
     functions,
     recordNames,
     records,
@@ -972,6 +1085,30 @@ function convertFunction(node, signature, functions, recordNames, records, filen
     parameters: signature.parameters,
     returnType: signature.returnType
   }, {name: signature.nameLocation})
+}
+
+/**
+ * Converts one exact final RuntimeException subclass.
+ * @param {import("php-parser").Class} node - PHP class declaration.
+ * @param {import("../semantic/types.js").ErrorDeclaration} declaration - Predeclared semantic error.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @returns {import("../semantic/types.js").ErrorDeclaration} Semantic error declaration.
+ */
+function convertPhpError(node, declaration, filename, source) {
+  const location = nodeLocation(node, filename, source)
+  const parent = node.extends
+  const parentName = parent?.kind == "name" ? /** @type {import("php-parser").Name} */ (/** @type {unknown} */ (parent)) : undefined
+
+  if (node.isAnonymous || !node.isFinal || node.isReadonly || node.isAbstract || node.implements?.length ||
+    node.attrGroups.length || node.body.length != 0 || !parentName ||
+    !(parentName.name == "RuntimeException" && parentName.resolution == "uqn" ||
+      parentName.name == "\\RuntimeException" && parentName.resolution == "fqn")) {
+    return unsupportedSyntax("php", "noncanonical typed error declaration", location)
+  }
+  const nameNode = typeof node.name == "string" ? node : node.name
+
+  return withParserRanges(declaration, {name: nodeLocation(nameNode, filename, source), type: nodeLocation(parentName, filename, source)})
 }
 
 /**
@@ -1113,7 +1250,7 @@ function convertPrint(node, filename, source, context) {
  * @param {object} input - Parser input.
  * @param {string} input.filename - Source filename.
  * @param {string} input.source - Source text.
- * @param {{isEntry: boolean, functions: Map<string, import("../semantic/types.js").FunctionDeclaration>, records: Map<string, import("../semantic/types.js").RecordDeclaration>}} [input.program] - Resolved program imports and entry role.
+ * @param {{isEntry: boolean, functions: Map<string, import("../semantic/types.js").FunctionDeclaration>, records: Map<string, import("../semantic/types.js").RecordDeclaration>, errors?: Map<string, import("../semantic/types.js").ErrorDeclaration>}} [input.program] - Resolved program imports and entry role.
  * @returns {import("../semantic/types.js").SemanticModule} Semantic module.
  */
 export function parsePhp({filename, source, program: programContext}) {
@@ -1127,7 +1264,16 @@ export function parsePhp({filename, source, program: programContext}) {
 
     body = namespace.children.filter((node) => node.kind != "usegroup" && !isPhpRequireOnce(node))
   }
-  const recordNodes = /** @type {import("php-parser").Class[]} */ (body.filter((node) => node.kind == "class"))
+  const classNodes = /** @type {import("php-parser").Class[]} */ (body.filter((node) => node.kind == "class"))
+  const errorNodes = classNodes.filter((node) => node.extends?.kind == "name" &&
+    ["RuntimeException", "\\RuntimeException"].includes(node.extends.name))
+  const recordNodes = classNodes.filter((node) => !errorNodes.includes(node))
+  const errorDeclarations = errorNodes.map((node, index) => ({
+    id: `error:${index}`,
+    kind: /** @type {const} */ ("ErrorDeclaration"),
+    location: nodeLocation(node, filename, source),
+    name: typeof node.name == "string" ? node.name : node.name.name
+  }))
   const recordDeclarations = recordNodes.map((node, index) => ({
     fields: [],
     id: `record:${index}`,
@@ -1136,6 +1282,10 @@ export function parsePhp({filename, source, program: programContext}) {
     name: typeof node.name == "string" ? node.name : node.name.name
   }))
   const recordNames = new Map(programContext?.records ?? [])
+  const errorNames = new Map(programContext?.errors ?? [])
+  for (const declaration of errorDeclarations) errorNames.set(declaration.name, declaration)
+  const errorsById = new Map([...errorNames.values()].map((declaration) => [/** @type {string} */ (declaration.id), declaration]))
+  const errors = errorNodes.map((node, index) => convertPhpError(node, errorDeclarations[index], filename, source))
   for (const declaration of recordDeclarations) recordNames.set(declaration.name, declaration)
   const recordsById = new Map([...recordNames.values()].map((declaration) => [/** @type {string} */ (declaration.id), declaration]))
   const records = recordNodes.map((node, index) => convertPhpRecord(node, recordDeclarations[index], recordNames, filename, source))
@@ -1150,7 +1300,7 @@ export function parsePhp({filename, source, program: programContext}) {
   }]))
   for (const signature of signatures) functionSignatures.set(signature.name, signature)
   const functions = functionNodes.map((node, index) =>
-    convertFunction(node, signatures[index], functionSignatures, recordNames, recordsById, filename, source))
+    convertFunction(node, signatures[index], functionSignatures, recordNames, recordsById, errorNames, errorsById, filename, source))
   const executableNodes = body.filter((node) => !["class", "function", "declare", "noop"].includes(node.kind))
   const location = moduleLocation(filename, source)
 
@@ -1165,6 +1315,8 @@ export function parsePhp({filename, source, program: programContext}) {
     : location
   const entryContext = {
     bindings: new Map(),
+    errorNames,
+    errors: errorsById,
     functions: functionSignatures,
     recordNames,
     records: recordsById,
@@ -1185,6 +1337,7 @@ export function parsePhp({filename, source, program: programContext}) {
     functions,
     kind: "Module",
     location,
+    ...(errors.length > 0 ? {errors} : {}),
     ...(records.length > 0 ? {records} : {})
   }
 }

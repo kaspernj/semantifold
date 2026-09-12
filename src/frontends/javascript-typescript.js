@@ -13,7 +13,7 @@ import {documentedValueType, iterationBindingType, iterationOperandType, listTyp
 /** @typedef {NonNullable<import("@babel/parser").ParseResult<import("@babel/types").File>["tokens"]>[number]} BabelToken */
 /** @typedef {{byStart: Map<number, BabelToken>, tokens: BabelToken[]}} BabelTokenIndex */
 /** @typedef {{name: string, nameLocation: import("../semantic/types.js").SourceLocation, parameters: import("../semantic/types.js").Parameter[], returnType: import("../semantic/types.js").SemanticFunctionReturnType, location: import("../semantic/types.js").SourceLocation}} JavaScriptFunctionSignature */
-/** @typedef {{bindings: Map<string, import("../semantic/types.js").SemanticValueType>, functions: Map<string, JavaScriptFunctionSignature>, recordNames: Map<string, import("../semantic/types.js").RecordDeclaration>, records: Map<string, import("../semantic/types.js").RecordDeclaration>, returnType?: import("../semantic/types.js").SemanticFunctionReturnType, valueRecordNames: Map<string, import("../semantic/types.js").RecordDeclaration>}} JavaScriptConversionContext */
+/** @typedef {{bindings: Map<string, import("../semantic/types.js").SemanticBindingType>, errors: Map<string, import("../semantic/types.js").ErrorDeclaration>, errorNames: Map<string, import("../semantic/types.js").ErrorDeclaration>, functions: Map<string, JavaScriptFunctionSignature>, recordNames: Map<string, import("../semantic/types.js").RecordDeclaration>, records: Map<string, import("../semantic/types.js").RecordDeclaration>, returnType?: import("../semantic/types.js").SemanticFunctionReturnType, valueRecordNames: Map<string, import("../semantic/types.js").RecordDeclaration>}} JavaScriptConversionContext */
 
 /** @type {WeakMap<object, BabelTokenIndex>} */
 const nodeTokens = new WeakMap()
@@ -148,7 +148,7 @@ function commentTagLocation(comment, tag, field, filename, source) {
  * @param {boolean} [preserveOptional] - Whether an optional identifier remains wrapped.
  * @returns {import("../semantic/types.js").Expression} Semantic expression.
  */
-function convertExpression(node, language, filename, source, context = {bindings: new Map(), functions: new Map(), recordNames: new Map(), records: new Map(), valueRecordNames: new Map()}, expectedType, preserveOptional = false) {
+function convertExpression(node, language, filename, source, context = {bindings: new Map(), errors: new Map(), errorNames: new Map(), functions: new Map(), recordNames: new Map(), records: new Map(), valueRecordNames: new Map()}, expectedType, preserveOptional = false) {
   const location = nodeLocation(node, filename, source)
 
   if (node.type == "Identifier" && node.name == "undefined") {
@@ -296,6 +296,18 @@ function convertExpression(node, language, filename, source, context = {bindings
   }
 
   if (node.type == "MemberExpression" && !node.optional && node.object.type != "Super") {
+    if (!node.computed && node.object.type == "Identifier" && node.property.type == "Identifier" &&
+      node.property.name == "message" && context.bindings.get(node.object.name)?.kind == "ErrorType") {
+      const receiverLocation = identifierLocation(node.object, filename, source)
+
+      return withParserRanges({
+        kind: /** @type {const} */ ("ErrorMessageRead"),
+        location,
+        receiver: withParserRanges({kind: /** @type {const} */ ("IdentifierExpression"), location: receiverLocation, name: node.object.name}, {
+          name: receiverLocation
+        })
+      }, {member: identifierLocation(node.property, filename, source)})
+    }
     if (node.computed) {
       if (knownValueExpressionType(node.object, context)?.kind == "RecordType") {
         return unsupportedSyntax(language, "computed record member access", nodeLocation(node.property, filename, source))
@@ -457,7 +469,7 @@ function convertExpression(node, language, filename, source, context = {bindings
  * signatures and collection bindings.
  * @param {import("@babel/types").Expression} node - Parser-owned expression.
  * @param {JavaScriptConversionContext} context - Typed lexical context.
- * @returns {import("../semantic/types.js").SemanticFunctionReturnType | undefined} Known result type.
+ * @returns {import("../semantic/types.js").SemanticFunctionReturnType | import("../semantic/types.js").ErrorType | undefined} Known result type.
  */
 function knownExpressionType(node, context) {
   if (node.type == "TSNonNullExpression") return knownExpressionType(node.expression, context)
@@ -498,7 +510,7 @@ function knownExpressionType(node, context) {
  * Semantic validation separately proves that the unwrap occurs only on a present path.
  * @param {import("@babel/types").Expression} node - Parser-owned expression.
  * @param {JavaScriptConversionContext} context - Typed lexical context.
- * @returns {import("../semantic/types.js").SemanticFunctionReturnType | undefined} Converted value type.
+ * @returns {import("../semantic/types.js").SemanticFunctionReturnType | import("../semantic/types.js").ErrorType | undefined} Converted value type.
  */
 function knownValueExpressionType(node, context) {
   const type = knownExpressionType(node, context)
@@ -605,8 +617,10 @@ function convertLocalStatement(node, language, filename, source, context) {
       name: identifierLocation(assignment.left, filename, source)
     })
 
+    const bindingType = context.bindings.get(assignment.left.name)
     const semantic = withParserRanges({
-      expression: convertExpression(assignment.right, language, filename, source, context, context.bindings.get(assignment.left.name)),
+      expression: convertExpression(assignment.right, language, filename, source, context,
+        bindingType?.kind == "ErrorType" ? undefined : bindingType),
       kind: /** @type {const} */ ("AssignmentStatement"),
       location,
       target
@@ -672,6 +686,8 @@ function localJavaScriptType(node, name, filename, source, recordNames) {
 function convertStatement(node, language, filename, source, canonicalZeroRequired, context) {
   if (node.type == "ReturnStatement") return convertReturn(node, language, filename, source, context)
   if (node.type == "IfStatement") return convertIf(node, language, filename, source, canonicalZeroRequired, context)
+  if (node.type == "ThrowStatement") return convertTypedThrow(node, language, filename, source, context)
+  if (node.type == "TryStatement") return convertTypedTry(node, language, filename, source, canonicalZeroRequired, context)
   if (node.type == "ForOfStatement") return convertForEach(node, language, filename, source, canonicalZeroRequired, context)
   if (node.type == "BreakStatement" || node.type == "ContinueStatement") {
     if (node.label) return unsupportedSyntax(language, `labeled ${node.type == "BreakStatement" ? "break" : "continue"}`,
@@ -699,6 +715,102 @@ function convertStatement(node, language, filename, source, canonicalZeroRequire
   }
 
   return unsupportedSyntax(language, node.type, nodeLocation(node, filename, source))
+}
+
+/**
+ * Converts exact `throw new DeclaredError(message)`.
+ * @param {import("@babel/types").ThrowStatement} node - Babel throw statement.
+ * @param {"javascript" | "typescript"} language - Frontend language.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @param {JavaScriptConversionContext} context - Typed lexical context.
+ * @returns {import("../semantic/types.js").RaiseStatement} Semantic raise.
+ */
+function convertTypedThrow(node, language, filename, source, context) {
+  const location = nodeLocation(node, filename, source)
+  const argument = node.argument
+
+  if (!argument || argument.type != "NewExpression" || argument.callee.type != "Identifier" ||
+    context.bindings.has(argument.callee.name) || !context.errorNames.has(argument.callee.name) || argument.arguments.length != 1 ||
+    argument.arguments[0].type == "SpreadElement" || argument.arguments[0].type == "ArgumentPlaceholder" ||
+    argument.typeArguments || argument.typeParameters) {
+    return unsupportedSyntax(language, "throw other than exact declared error construction", location)
+  }
+  const declaration = /** @type {import("../semantic/types.js").ErrorDeclaration} */ (context.errorNames.get(argument.callee.name))
+  const typeLocation = identifierLocation(argument.callee, filename, source)
+
+  return withParserRanges({
+    error: withParserRanges({
+      error: withParserRanges({declarationId: /** @type {string} */ (declaration.id), kind: /** @type {const} */ ("ErrorType")}, {type: typeLocation}),
+      kind: /** @type {const} */ ("ErrorConstruction"),
+      location: nodeLocation(argument, filename, source),
+      message: convertExpression(argument.arguments[0], language, filename, source, context)
+    }, {type: typeLocation}),
+    kind: /** @type {const} */ ("RaiseStatement"),
+    location
+  }, {keyword: tokenLocation(node, "throw", node.start ?? 0, argument.start ?? node.end ?? source.length, filename, source)})
+}
+
+/**
+ * Converts one catch with the canonical `instanceof` guard and exact rethrow.
+ * @param {import("@babel/types").TryStatement} node - Babel try statement.
+ * @param {"javascript" | "typescript"} language - Frontend language.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @param {boolean} canonicalZeroRequired - Whether scalar output canonicalizes zero.
+ * @param {JavaScriptConversionContext} context - Typed lexical context.
+ * @returns {import("../semantic/types.js").TryStatement} Semantic exact handler.
+ */
+function convertTypedTry(node, language, filename, source, canonicalZeroRequired, context) {
+  const location = nodeLocation(node, filename, source)
+
+  if (node.finalizer || !node.handler || node.handler.param?.type != "Identifier" || node.handler.body.directives.length > 0) {
+    return unsupportedSyntax(language, "try without one explicit guarded catch", location)
+  }
+  const binding = node.handler.param
+  const guard = node.handler.body.body[0]
+
+  if (!guard || guard.type != "IfStatement" || guard.alternate || guard.test.type != "UnaryExpression" ||
+    guard.test.operator != "!" || guard.test.argument.type != "BinaryExpression" || guard.test.argument.operator != "instanceof" ||
+    guard.test.argument.left.type != "Identifier" || guard.test.argument.left.name != binding.name ||
+    guard.test.argument.right.type != "Identifier" || guard.test.argument.right.name == binding.name ||
+    context.bindings.has(guard.test.argument.right.name) || !context.errorNames.has(guard.test.argument.right.name) ||
+    guard.consequent.type != "BlockStatement" || guard.consequent.body.length != 1 || guard.consequent.directives.length > 0 ||
+    guard.consequent.body[0].type != "ThrowStatement" || guard.consequent.body[0].argument?.type != "Identifier" ||
+    guard.consequent.body[0].argument.name != binding.name) {
+    return unsupportedSyntax(language, "catch without exact instanceof guard and unmatched rethrow", nodeLocation(guard ?? node.handler, filename, source))
+  }
+  const declaration = /** @type {import("../semantic/types.js").ErrorDeclaration} */ (context.errorNames.get(guard.test.argument.right.name))
+  const caughtTypeLocation = identifierLocation(guard.test.argument.right, filename, source)
+  const catchType = withParserRanges({
+    declarationId: /** @type {string} */ (declaration.id),
+    kind: /** @type {const} */ ("ErrorType")
+  }, {type: caughtTypeLocation})
+  const bodyContext = {...context, bindings: new Map(context.bindings)}
+  const catchContext = {...context, bindings: new Map(context.bindings)}
+
+  catchContext.bindings.set(binding.name, catchType)
+  const catchStatements = node.handler.body.body.slice(1)
+
+  return withParserRanges({
+    body: convertBlock(node.block, language, filename, source, canonicalZeroRequired, bodyContext),
+    catchBinding: withParserRanges({
+      kind: /** @type {const} */ ("CatchBinding"),
+      location: identifierLocation(binding, filename, source),
+      mutable: /** @type {const} */ (false),
+      name: binding.name,
+      type: catchType
+    }, {name: identifierLocation(binding, filename, source)}),
+    catchBody: convertBlock(catchStatements, language, filename, source, canonicalZeroRequired, catchContext,
+      nodeLocation(node.handler.body, filename, source)),
+    catchType,
+    kind: /** @type {const} */ ("TryStatement"),
+    location
+  }, {
+    catch: tokenLocation(node.handler, "catch", node.handler.start ?? 0, binding.start ?? node.handler.end ?? source.length, filename, source),
+    guard: nodeLocation(guard, filename, source),
+    try: tokenLocation(node, "try", node.start ?? 0, node.block.start ?? node.end ?? source.length, filename, source)
+  })
 }
 
 /**
@@ -1048,15 +1160,19 @@ function convertFunctionSignature(node, language, filename, source, recordNames)
  * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} recordNames - Record declarations by name.
  * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} valueRecordNames - Record declarations available in value positions.
  * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} records - Record declarations by identity.
+ * @param {Map<string, import("../semantic/types.js").ErrorDeclaration>} errorNames - Error declarations by source name.
+ * @param {Map<string, import("../semantic/types.js").ErrorDeclaration>} errors - Error declarations by identity.
  * @param {"javascript" | "typescript"} language - Frontend language.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
  * @param {boolean} canonicalZeroRequired - Whether generated scalar output may contain signed zero.
  * @returns {import("../semantic/types.js").FunctionDeclaration} Semantic function.
  */
-function convertFunction(node, signature, functions, recordNames, valueRecordNames, records, language, filename, source, canonicalZeroRequired) {
+function convertFunction(node, signature, functions, recordNames, valueRecordNames, records, errorNames, errors, language, filename, source, canonicalZeroRequired) {
   const context = {
     bindings: new Map(signature.parameters.map((parameter) => [parameter.name, parameter.type])),
+    errorNames,
+    errors,
     functions,
     recordNames,
     records,
@@ -1073,6 +1189,30 @@ function convertFunction(node, signature, functions, recordNames, valueRecordNam
     parameters: signature.parameters,
     returnType: signature.returnType
   }, {name: signature.nameLocation})
+}
+
+/**
+ * Converts one exact empty native Error subclass.
+ * @param {import("@babel/types").ClassDeclaration} node - Babel class declaration.
+ * @param {import("../semantic/types.js").ErrorDeclaration} declaration - Predeclared semantic error.
+ * @param {"javascript" | "typescript"} language - Frontend language.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @returns {import("../semantic/types.js").ErrorDeclaration} Semantic error declaration.
+ */
+function convertJavaScriptError(node, declaration, language, filename, source) {
+  const location = nodeLocation(node, filename, source)
+
+  if (!node.id || node.superClass?.type != "Identifier" || node.superClass.name != "Error" ||
+    node.body.body.length != 0 || node.decorators?.length || node.typeParameters || node.superTypeParameters ||
+    Reflect.get(node, "abstract") || Reflect.get(node, "declare") || Reflect.get(node, "implements")?.length) {
+    return unsupportedSyntax(language, "noncanonical typed error declaration", location)
+  }
+
+  return withParserRanges(declaration, {
+    name: identifierLocation(node.id, filename, source),
+    type: identifierLocation(node.superClass, filename, source)
+  })
 }
 
 /**
@@ -1355,7 +1495,7 @@ function convertPrint(node, language, filename, source, canonicalZeroRequired, c
  * @param {string} input.filename - Source filename.
  * @param {"javascript" | "typescript"} input.language - Frontend language.
  * @param {string} input.source - Source text.
- * @param {{isEntry: boolean, functions: Map<string, import("../semantic/types.js").FunctionDeclaration>, records: Map<string, import("../semantic/types.js").RecordDeclaration>, valueRecords?: Map<string, import("../semantic/types.js").RecordDeclaration>}} [input.program] - Resolved program imports and entry role.
+ * @param {{isEntry: boolean, functions: Map<string, import("../semantic/types.js").FunctionDeclaration>, records: Map<string, import("../semantic/types.js").RecordDeclaration>, errors?: Map<string, import("../semantic/types.js").ErrorDeclaration>, valueRecords?: Map<string, import("../semantic/types.js").RecordDeclaration>}} [input.program] - Resolved program imports and entry role.
  * @returns {import("../semantic/types.js").SemanticModule} Semantic module.
  */
 export function parseJavaScriptTypeScript({filename, language, source, program}) {
@@ -1404,7 +1544,15 @@ export function parseJavaScriptTypeScript({filename, language, source, program})
     }
     semanticNodes.push(node)
   }
-  const recordNodes = semanticNodes.filter((node) => node.type == "ClassDeclaration")
+  const classNodes = semanticNodes.filter((node) => node.type == "ClassDeclaration")
+  const errorNodes = classNodes.filter((node) => node.superClass?.type == "Identifier" && node.superClass.name == "Error")
+  const recordNodes = classNodes.filter((node) => !errorNodes.includes(node))
+  const errorDeclarations = errorNodes.map((node, index) => ({
+    id: `error:${index}`,
+    kind: /** @type {const} */ ("ErrorDeclaration"),
+    location: nodeLocation(node, filename, source),
+    name: node.id?.name ?? ""
+  }))
   const recordDeclarations = recordNodes.map((node, index) => ({
     fields: [],
     id: `record:${index}`,
@@ -1414,6 +1562,10 @@ export function parseJavaScriptTypeScript({filename, language, source, program})
   }))
   const recordNames = new Map(program?.records ?? [])
   const valueRecordNames = new Map(program?.valueRecords ?? program?.records ?? [])
+  const errorNames = new Map(program?.errors ?? [])
+  for (const declaration of errorDeclarations) errorNames.set(declaration.name, declaration)
+  const errorsById = new Map([...errorNames.values()].map((declaration) => [/** @type {string} */ (declaration.id), declaration]))
+  const errors = errorNodes.map((node, index) => convertJavaScriptError(node, errorDeclarations[index], language, filename, source))
   for (const declaration of recordDeclarations) recordNames.set(declaration.name, declaration)
   for (const declaration of recordDeclarations) valueRecordNames.set(declaration.name, declaration)
   const recordsById = new Map([...recordNames.values()].map((declaration) => [/** @type {string} */ (declaration.id), declaration]))
@@ -1432,7 +1584,7 @@ export function parseJavaScriptTypeScript({filename, language, source, program})
   for (const signature of signatures) functionSignatures.set(signature.name, signature)
   const functions = functionNodes.map((node, index) =>
     convertFunction(node, signatures[index], functionSignatures, recordNames, valueRecordNames, recordsById,
-      language, filename, source, canonicalZeroRequired))
+      errorNames, errorsById, language, filename, source, canonicalZeroRequired))
   const entryNodes = semanticNodes.filter((node) => node.type != "FunctionDeclaration" && node.type != "ClassDeclaration")
   const location = moduleLocation(filename, source)
 
@@ -1452,7 +1604,7 @@ export function parseJavaScriptTypeScript({filename, language, source, program})
     filename,
     source,
     canonicalZeroRequired,
-    {bindings: new Map(), functions: functionSignatures, recordNames, records: recordsById, valueRecordNames},
+    {bindings: new Map(), errorNames, errors: errorsById, functions: functionSignatures, recordNames, records: recordsById, valueRecordNames},
     entryLocation
   )
 
@@ -1465,6 +1617,7 @@ export function parseJavaScriptTypeScript({filename, language, source, program})
     functions,
     kind: "Module",
     location,
+    ...(errors.length > 0 ? {errors} : {}),
     ...(records.length > 0 ? {records} : {})
   }
 }

@@ -18,7 +18,7 @@ function moduleClassName(id) {
  * @returns {string} Declaration name.
  */
 function declarationName(module, declarationId) {
-  const declaration = [...module.functions ?? [], ...module.records ?? []].find(({id}) => id == declarationId)
+  const declaration = [...module.functions ?? [], ...module.records ?? [], ...module.errors ?? []].find(({id}) => id == declarationId)
 
   if (!declaration) throw new RangeError(`Unknown program declaration '${declarationId}'.`)
 
@@ -62,12 +62,15 @@ export class SourceWriter {
     this.programPaths = programPaths
     this.index = index
     const programRecords = program?.modules.flatMap((programModule) => programModule.records ?? []) ?? module.records ?? []
+    const programErrors = program?.modules.flatMap((programModule) => programModule.errors ?? []) ?? module.errors ?? []
 
     this.records = new Map(programRecords.map((record) => [record.id, record]))
+    this.errors = new Map(programErrors.map((error) => [error.id, error]))
     this.fields = new Map(programRecords.flatMap((record) => record.fields.map((field) => [field.id, field])))
     /** @type {Map<string, import("../semantic/types.js").SemanticProgramModule>} */
     this.declarationModules = new Map(program?.modules.flatMap((programModule) => [
       ...(programModule.records ?? []).map((declaration) => /** @type {const} */ ([/** @type {string} */ (declaration.id), programModule])),
+      ...(programModule.errors ?? []).map((declaration) => /** @type {const} */ ([/** @type {string} */ (declaration.id), programModule])),
       ...programModule.functions.map((declaration) => /** @type {const} */ ([/** @type {string} */ (declaration.id), programModule]))
     ]) ?? [])
     /** @type {string[]} */
@@ -129,6 +132,39 @@ export class SourceWriter {
     }
 
     return record.name
+  }
+
+  /**
+   * Returns the validated nominal error declaration for an identity.
+   * @param {string} declarationId - Stable error identity.
+   * @returns {import("../semantic/types.js").ErrorDeclaration} Error declaration.
+   */
+  errorForId(declarationId) {
+    const error = this.errors.get(declarationId)
+
+    if (!error) throw new RangeError(`Unknown validated error identity '${declarationId}'.`)
+
+    return error
+  }
+
+  /**
+   * Returns the target-visible spelling for one nominal error identity.
+   * @param {string} declarationId - Stable error identity.
+   * @returns {string} Target-visible name.
+   */
+  errorNameForId(declarationId) {
+    const error = this.errorForId(declarationId)
+    const owner = this.declarationModules.get(declarationId)
+    const imported = this.#programModule()?.imports.find((item) => item.declarationId == declarationId)
+
+    if (this.program && owner && owner.id != Reflect.get(this.module, "id") && this.language == "ruby") {
+      return `${moduleClassName(owner.id)}::${error.name}`
+    }
+    if (imported && (this.language == "javascript" || this.language == "typescript" || this.language == "php")) {
+      return this.importNameFor(imported)
+    }
+
+    return error.name
   }
 
   /**

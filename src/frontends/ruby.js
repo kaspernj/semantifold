@@ -6,6 +6,7 @@ import {
   AssocNode,
   BlockNode,
   BlockParametersNode,
+  BeginNode,
   BreakNode,
   CallNode,
   ClassNode,
@@ -20,6 +21,7 @@ import {
   InstanceVariableWriteNode,
   InterpolatedStringNode,
   LocalVariableReadNode,
+  LocalVariableTargetNode,
   LocalVariableWriteNode,
   ModuleNode,
   NextNode,
@@ -29,6 +31,7 @@ import {
   ProgramNode,
   RequiredParameterNode,
   RedoNode,
+  RescueNode,
   ReturnNode,
   RetryNode,
   SelfNode,
@@ -48,7 +51,7 @@ import {requireSourceReturnType} from "./scalars.js"
 import {documentedValueType, iterationBindingType, iterationOperandType, recordType} from "./types.js"
 const parsePrism = await loadPrism()
 /** @typedef {{name: string, nameLocation: import("../semantic/types.js").SourceLocation, parameters: import("../semantic/types.js").Parameter[], returnType: import("../semantic/types.js").SemanticFunctionReturnType, location: import("../semantic/types.js").SourceLocation}} RubyFunctionSignature */
-/** @typedef {{bindings: Map<string, import("../semantic/types.js").SemanticValueType>, functions: Map<string, RubyFunctionSignature>, records: Map<string, import("../semantic/types.js").RecordDeclaration>, recordNames: Map<string, import("../semantic/types.js").RecordDeclaration>, loopDepth?: number, returnType?: import("../semantic/types.js").SemanticFunctionReturnType}} RubyConversionContext */
+/** @typedef {{bindings: Map<string, import("../semantic/types.js").SemanticBindingType>, errorNames: Map<string, import("../semantic/types.js").ErrorDeclaration>, errors: Map<string, import("../semantic/types.js").ErrorDeclaration>, functions: Map<string, RubyFunctionSignature>, records: Map<string, import("../semantic/types.js").RecordDeclaration>, recordNames: Map<string, import("../semantic/types.js").RecordDeclaration>, loopDepth?: number, returnType?: import("../semantic/types.js").SemanticFunctionReturnType}} RubyConversionContext */
 const rubyBinaryOperations = new Map([
   ["+", "Add"],
   ["-", "Subtract"],
@@ -391,6 +394,18 @@ function convertExpression(node, filename, source, context, expectedType, preser
       location
     }, {operator: prismLocation(node.messageLoc ?? node.location, filename, source)})
   }
+  if (node instanceof CallNode && node.receiver instanceof LocalVariableReadNode && node.name == "message" &&
+    !node.arguments_ && node.callOperatorLoc && !node.block && context.bindings.get(node.receiver.name)?.kind == "ErrorType") {
+    const receiverLocation = nodeLocation(node.receiver, filename, source)
+
+    return withParserRanges({
+      kind: /** @type {const} */ ("ErrorMessageRead"),
+      location,
+      receiver: withParserRanges({kind: /** @type {const} */ ("IdentifierExpression"), location: receiverLocation, name: node.receiver.name}, {
+        name: receiverLocation
+      })
+    }, {member: prismLocation(node.messageLoc ?? node.location, filename, source)})
+  }
   if (node instanceof CallNode && node.receiver && node.callOperatorLoc && !node.arguments_ && !node.block) {
     if (["send", "public_send", "__send__", "instance_variable_get", "method"].includes(node.name)) {
       return unsupportedSyntax("ruby", "dynamic or reflective member access", prismLocation(node.messageLoc ?? node.location, filename, source))
@@ -432,7 +447,7 @@ function convertExpression(node, filename, source, context, expectedType, preser
  * Resolves only result types established by explicit signatures and bindings.
  * @param {import("@ruby/prism").Node} node - Parser-owned expression.
  * @param {RubyConversionContext} context - Typed lexical context.
- * @returns {import("../semantic/types.js").SemanticFunctionReturnType | undefined} Known result type.
+ * @returns {import("../semantic/types.js").SemanticFunctionReturnType | import("../semantic/types.js").ErrorType | undefined} Known result type.
  */
 function knownExpressionType(node, context) {
   if (node instanceof ParenthesesNode && node.body instanceof StatementsNode && node.body.body.length == 1) {
@@ -473,7 +488,7 @@ function knownExpressionType(node, context) {
  * Semantic validation separately proves that the unwrap occurs only on a present path.
  * @param {import("@ruby/prism").Node} node - Parser-owned expression.
  * @param {RubyConversionContext} context - Typed lexical context.
- * @returns {import("../semantic/types.js").SemanticFunctionReturnType | undefined} Converted value type.
+ * @returns {import("../semantic/types.js").SemanticFunctionReturnType | import("../semantic/types.js").ErrorType | undefined} Converted value type.
  */
 function knownValueExpressionType(node, context) {
   if (node instanceof ParenthesesNode && node.body instanceof StatementsNode && node.body.body.length == 1) {
@@ -714,8 +729,10 @@ function convertLocalStatement(node, comments, context, filename, source) {
     name: targetLocation
   })
 
+  const bindingType = context.bindings.get(node.name)
   const semantic = withParserRanges({
-    expression: convertExpression(node.value, filename, source, context, context.bindings.get(node.name)),
+    expression: convertExpression(node.value, filename, source, context,
+      bindingType?.kind == "ErrorType" ? undefined : bindingType),
     kind: /** @type {const} */ ("AssignmentStatement"),
     location,
     target
@@ -739,6 +756,7 @@ function convertStatement(node, comments, context, filename, source) {
     return convertReturn(node, filename, source, context)
   }
   if (node instanceof IfNode || node instanceof UnlessNode) return convertIf(node, comments, context, filename, source)
+  if (node instanceof BeginNode) return convertRubyTry(node, comments, context, filename, source)
   if (node instanceof LocalVariableWriteNode) return convertLocalStatement(node, comments, context, filename, source)
   if (node instanceof BreakNode || node instanceof NextNode) {
     if (node.arguments_) return unsupportedSyntax("ruby", `${node instanceof BreakNode ? "break" : "next"} value`, nodeLocation(node.arguments_, filename, source))
@@ -750,6 +768,7 @@ function convertStatement(node, comments, context, filename, source) {
     }, {keyword: location})
   }
   if (node instanceof CallNode) {
+    if (!node.receiver && node.name == "raise") return convertRubyRaise(node, context, filename, source)
     if (node.block) return convertForEach(node, comments, context, filename, source)
     if (!node.receiver && node.name == "puts") return convertPrint(node, filename, source, context)
 
@@ -761,6 +780,84 @@ function convertStatement(node, comments, context, filename, source) {
   }
 
   return unsupportedSyntax("ruby", node.constructor.name, nodeLocation(node, filename, source))
+}
+
+/**
+ * Converts exact `raise DeclaredError, message`.
+ * @param {CallNode} node - Prism raise call.
+ * @param {RubyConversionContext} context - Typed lexical context.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @returns {import("../semantic/types.js").RaiseStatement} Semantic raise.
+ */
+function convertRubyRaise(node, context, filename, source) {
+  const location = nodeLocation(node, filename, source)
+  const arguments_ = node.arguments_?.arguments_ ?? []
+  const errorNode = arguments_[0]
+
+  if (node.block || node.callOperatorLoc || arguments_.length != 2 ||
+    !(errorNode instanceof ConstantReadNode) && !(errorNode instanceof ConstantPathNode) ||
+    !context.errorNames.has(constantPathName(errorNode))) {
+    return unsupportedSyntax("ruby", "raise other than exact declared error and message", location)
+  }
+  const declaration = /** @type {import("../semantic/types.js").ErrorDeclaration} */ (context.errorNames.get(constantPathName(errorNode)))
+  const typeLocation = nodeLocation(errorNode, filename, source)
+
+  return withParserRanges({
+    error: withParserRanges({
+      error: withParserRanges({declarationId: /** @type {string} */ (declaration.id), kind: /** @type {const} */ ("ErrorType")}, {type: typeLocation}),
+      kind: /** @type {const} */ ("ErrorConstruction"),
+      location,
+      message: convertExpression(arguments_[1], filename, source, context)
+    }, {type: typeLocation}),
+    kind: /** @type {const} */ ("RaiseStatement"),
+    location
+  }, {keyword: prismLocation(node.messageLoc ?? node.location, filename, source)})
+}
+
+/**
+ * Converts one exact typed rescue with no else/ensure.
+ * @param {BeginNode} node - Prism begin node.
+ * @param {import("@ruby/prism/src/deserialize.js").Comment[]} comments - Parser-owned comments.
+ * @param {RubyConversionContext} context - Typed lexical context.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @returns {import("../semantic/types.js").TryStatement} Semantic exact handler.
+ */
+function convertRubyTry(node, comments, context, filename, source) {
+  const location = nodeLocation(node, filename, source)
+  const handler = node.rescueClause
+
+  if (!(handler instanceof RescueNode) || handler.subsequent || node.elseClause || node.ensureClause ||
+    handler.exceptions.length != 1 ||
+    !(handler.exceptions[0] instanceof ConstantReadNode) && !(handler.exceptions[0] instanceof ConstantPathNode) ||
+    !context.errorNames.has(constantPathName(handler.exceptions[0])) || !(handler.reference instanceof LocalVariableTargetNode)) {
+    return unsupportedSyntax("ruby", "begin without one exact typed rescue and binding", location)
+  }
+  const errorNode = handler.exceptions[0]
+  const declaration = /** @type {import("../semantic/types.js").ErrorDeclaration} */ (context.errorNames.get(constantPathName(errorNode)))
+  const caughtLocation = nodeLocation(errorNode, filename, source)
+  const catchType = withParserRanges({declarationId: /** @type {string} */ (declaration.id), kind: /** @type {const} */ ("ErrorType")}, {
+    type: caughtLocation
+  })
+  const bodyContext = {...context, bindings: new Map(context.bindings)}
+  const catchContext = {...context, bindings: new Map(context.bindings)}
+
+  catchContext.bindings.set(handler.reference.name, catchType)
+  return withParserRanges({
+    body: convertBlock(node.statements, comments, bodyContext, filename, source, location),
+    catchBinding: withParserRanges({
+      kind: /** @type {const} */ ("CatchBinding"),
+      location: nodeLocation(handler.reference, filename, source),
+      mutable: /** @type {const} */ (false),
+      name: handler.reference.name,
+      type: catchType
+    }, {name: nodeLocation(handler.reference, filename, source)}),
+    catchBody: convertBlock(handler.statements, comments, catchContext, filename, source, nodeLocation(handler, filename, source)),
+    catchType,
+    kind: /** @type {const} */ ("TryStatement"),
+    location
+  }, {catch: nodeLocation(handler, filename, source), try: location})
 }
 
 /**
@@ -976,14 +1073,18 @@ function convertFunctionSignature(node, comments, filename, source, recordNames)
  * @param {Map<string, RubyFunctionSignature>} functions - Module signatures.
  * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} recordNames - Record declarations by source name.
  * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} records - Record declarations by identity.
+ * @param {Map<string, import("../semantic/types.js").ErrorDeclaration>} errorNames - Error declarations by source name.
+ * @param {Map<string, import("../semantic/types.js").ErrorDeclaration>} errors - Error declarations by identity.
  * @param {import("@ruby/prism/src/deserialize.js").Comment[]} comments - Prism comments.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
  * @returns {import("../semantic/types.js").FunctionDeclaration} Semantic function.
  */
-function convertFunction(node, signature, functions, recordNames, records, comments, filename, source) {
+function convertFunction(node, signature, functions, recordNames, records, errorNames, errors, comments, filename, source) {
   const context = {
     bindings: new Map(signature.parameters.map((parameter) => [parameter.name, parameter.type])),
+    errorNames,
+    errors,
     functions,
     recordNames,
     records,
@@ -1006,6 +1107,28 @@ function convertFunction(node, signature, functions, recordNames, records, comme
     parameters: signature.parameters,
     returnType: signature.returnType
   }, {name: signature.nameLocation})
+}
+
+/**
+ * Converts one exact empty StandardError subclass.
+ * @param {ClassNode} node - Prism class declaration.
+ * @param {import("../semantic/types.js").ErrorDeclaration} declaration - Predeclared semantic error.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @returns {import("../semantic/types.js").ErrorDeclaration} Semantic error declaration.
+ */
+function convertRubyError(node, declaration, filename, source) {
+  const location = nodeLocation(node, filename, source)
+
+  if (!(node.constantPath instanceof ConstantReadNode) || !(node.superclass instanceof ConstantReadNode) ||
+    node.superclass.name != "StandardError" || !node.inheritanceOperatorLoc || node.body) {
+    return unsupportedSyntax("ruby", "noncanonical typed error declaration", location)
+  }
+
+  return withParserRanges(declaration, {
+    name: nodeLocation(node.constantPath, filename, source),
+    type: nodeLocation(node.superclass, filename, source)
+  })
 }
 
 /**
@@ -1203,7 +1326,7 @@ function convertPrint(node, filename, source, context) {
  * @param {object} input - Parser input.
  * @param {string} input.filename - Source filename.
  * @param {string} input.source - Source text.
- * @param {{isEntry: boolean, functions: Map<string, import("../semantic/types.js").FunctionDeclaration>, records: Map<string, import("../semantic/types.js").RecordDeclaration>}} [input.program] - Resolved program imports and entry role.
+ * @param {{isEntry: boolean, functions: Map<string, import("../semantic/types.js").FunctionDeclaration>, records: Map<string, import("../semantic/types.js").RecordDeclaration>, errors?: Map<string, import("../semantic/types.js").ErrorDeclaration>}} [input.program] - Resolved program imports and entry role.
  * @returns {import("../semantic/types.js").SemanticModule} Semantic module.
  */
 export function parseRuby({filename, source, program}) {
@@ -1234,7 +1357,15 @@ export function parseRuby({filename, source, program}) {
     }
     body = body.filter((node) => !isModuleFunctionMarker(node) && !rubyVisibilityMarker(node))
   }
-  const recordNodes = body.filter((node) => node instanceof ClassNode)
+  const classNodes = body.filter((node) => node instanceof ClassNode)
+  const errorNodes = classNodes.filter((node) => node.superclass instanceof ConstantReadNode && node.superclass.name == "StandardError")
+  const recordNodes = classNodes.filter((node) => !errorNodes.includes(node))
+  const errorDeclarations = errorNodes.map((node, index) => ({
+    id: `error:${index}`,
+    kind: /** @type {const} */ ("ErrorDeclaration"),
+    location: nodeLocation(node, filename, source),
+    name: node.name
+  }))
   const recordDeclarations = recordNodes.map((node, index) => ({
     fields: [],
     id: `record:${index}`,
@@ -1243,6 +1374,10 @@ export function parseRuby({filename, source, program}) {
     name: node.name
   }))
   const recordNames = new Map(program?.records ?? [])
+  const errorNames = new Map(program?.errors ?? [])
+  for (const declaration of errorDeclarations) errorNames.set(declaration.name, declaration)
+  const errorsById = new Map([...errorNames.values()].map((declaration) => [/** @type {string} */ (declaration.id), declaration]))
+  const errors = errorNodes.map((node, index) => convertRubyError(node, errorDeclarations[index], filename, source))
   for (const declaration of recordDeclarations) recordNames.set(declaration.name, declaration)
   const recordsById = new Map([...recordNames.values()].map((declaration) => [/** @type {string} */ (declaration.id), declaration]))
   const records = recordNodes.map((node, index) =>
@@ -1258,7 +1393,7 @@ export function parseRuby({filename, source, program}) {
   }]))
   for (const signature of signatures) functionSignatures.set(signature.name, signature)
   const functions = functionNodes.map((node, index) =>
-    convertFunction(node, signatures[index], functionSignatures, recordNames, recordsById, result.comments, filename, source))
+    convertFunction(node, signatures[index], functionSignatures, recordNames, recordsById, errorNames, errorsById, result.comments, filename, source))
   const entryNodes = body.filter((node) => !(node instanceof DefNode) && !(node instanceof ClassNode))
   const location = moduleLocation(filename, source)
 
@@ -1276,7 +1411,7 @@ export function parseRuby({filename, source, program}) {
       (entryNodes.at(-1)?.location.startOffset ?? 0) + (entryNodes.at(-1)?.location.length ?? 0)
     )
   ) : location
-  const entryContext = {bindings: new Map(), functions: functionSignatures, recordNames, records: recordsById}
+  const entryContext = {bindings: new Map(), errorNames, errors: errorsById, functions: functionSignatures, recordNames, records: recordsById}
   const entryBlock = {
     kind: /** @type {const} */ ("Block"),
     location: entryLocation,
@@ -1292,6 +1427,7 @@ export function parseRuby({filename, source, program}) {
     functions,
     kind: "Module",
     location,
+    ...(errors.length > 0 ? {errors} : {}),
     ...(records.length > 0 ? {records} : {})
   }
 }

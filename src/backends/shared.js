@@ -32,6 +32,7 @@ const task006Languages = new Set(["php", "ruby", "javascript", "typescript", "ja
 const task007Languages = new Set(["php", "ruby", "javascript", "typescript", "java"])
 const task008Languages = new Set(["php", "ruby", "javascript", "typescript", "java"])
 const task009Languages = new Set(["php", "ruby", "javascript", "typescript", "java"])
+const task011Languages = new Set(["php", "ruby", "javascript", "typescript", "java"])
 const javaObjectInstanceMethodSignatures = new Set([
   "clone()", "equals(Object)", "finalize()", "getClass()", "hashCode()", "notify()", "notifyAll()", "toString()",
   "wait()", "wait(long)", "wait(long,int)"
@@ -41,7 +42,7 @@ const javaObjectInstanceMethodSignatures = new Set([
  * Checks the intentionally narrow backend contract.
  * @param {import("../semantic/types.js").SemanticModule} module - Semantic module.
  * @param {import("../semantic/types.js").BackendLanguage} language - Backend language or binary target.
- * @param {{externalDeclarationIds?: Set<string>, program?: boolean, visibleFunctions?: Map<string, import("../semantic/types.js").FunctionDeclaration>, visibleRecords?: Map<string, import("../semantic/types.js").RecordDeclaration>}} [options] - Resolved program validation context.
+ * @param {{externalDeclarationIds?: Set<string>, program?: boolean, visibleFunctions?: Map<string, import("../semantic/types.js").FunctionDeclaration>, visibleRecords?: Map<string, import("../semantic/types.js").RecordDeclaration>, visibleErrors?: Map<string, import("../semantic/types.js").ErrorDeclaration>, visibleCallEffects?: Map<string, Set<string>>}} [options] - Resolved program validation context.
  * @returns {void}
  */
 export function validateBackendModule(module, language, options = {}) {
@@ -53,15 +54,19 @@ export function validateBackendModule(module, language, options = {}) {
     module.entryPoint.kind != "EntryPoint") unsupportedCapability(language, "missing or invalid module members", module.location)
   const declaredRecords = module.records
   const records = declaredRecords === undefined ? [] : declaredRecords
+  const declaredErrors = module.errors
+  const errors = declaredErrors === undefined ? [] : declaredErrors
 
   if (!Array.isArray(records)) unsupportedCapability(language, "missing or invalid record declarations", module.location)
+  if (!Array.isArray(errors)) unsupportedCapability(language, "missing or invalid error declarations", module.location)
   if (module.functions.length == 0 && (!options.program ||
-    records.length == 0 && module.entryPoint.body?.statements?.length == 0)) {
+    records.length == 0 && errors.length == 0 && module.entryPoint.body?.statements?.length == 0)) {
     unsupportedCapability(language, "module without declarations or executable entry", module.location)
   }
   if (records.length > 0 && !task009Languages.has(language)) {
     unsupportedCapability(language, "Task 009 closed records", records[0]?.location ?? module.location)
   }
+  if (!task011Languages.has(language)) rejectTypedErrors(module, language)
   validateRecordTargets(records, module.functions, language, module.location)
   if (!task008Languages.has(language)) rejectIterationStatements(module, language)
   if (!task007Languages.has(language)) rejectOptionalTypes(module, language)
@@ -111,8 +116,108 @@ export function validateBackendModule(module, language, options = {}) {
       validateTargetBindingIdentifier(language, parameter.name, "parameter", parameter.location)
     }
   }
+  validateErrorTargets(errors, records, module.functions, language, module.location)
   validateScaffoldingNames(module, language)
-  validateBackendTypes(module, language, {functions: options.visibleFunctions, records: options.visibleRecords})
+  validateBackendTypes(module, language, {
+    callEffects: options.visibleCallEffects,
+    errors: options.visibleErrors,
+    functions: options.visibleFunctions,
+    records: options.visibleRecords
+  })
+}
+
+/**
+ * Rejects typed errors for a target outside the Task 011 cohort.
+ * @param {import("../semantic/types.js").SemanticModule} module - Candidate module.
+ * @param {import("../semantic/types.js").BackendLanguage} language - Target language.
+ * @returns {void}
+ */
+function rejectTypedErrors(/** @type {import("../semantic/types.js").SemanticModule} */ module,
+  /** @type {import("../semantic/types.js").BackendLanguage} */ language) {
+  if ((module.errors ?? []).length > 0) {
+    unsupportedCapability(language, "Task 011 typed errors and handling", module.errors?.[0]?.location ?? module.location)
+  }
+  for (const declaration of module.functions) rejectTypedErrorBlock(declaration?.body, language)
+  rejectTypedErrorBlock(module.entryPoint.body, language)
+}
+
+/**
+ * Finds typed-error statements without descending through malformed or cyclic blocks.
+ * @param {unknown} block - Candidate block.
+ * @param {import("../semantic/types.js").BackendLanguage} language - Target language.
+ * @param {Set<object>} [seen] - Visited blocks.
+ * @returns {void}
+ */
+function rejectTypedErrorBlock(/** @type {unknown} */ block,
+  /** @type {import("../semantic/types.js").BackendLanguage} */ language,
+  /** @type {Set<object>} */ seen = new Set()) {
+  if (!block || typeof block != "object" || Array.isArray(block) || seen.has(block)) return
+  seen.add(block)
+  const statements = Reflect.get(block, "statements")
+
+  if (!Array.isArray(statements)) return
+  for (const statement of statements) {
+    if (!statement || typeof statement != "object" || Array.isArray(statement)) continue
+    if (Reflect.get(statement, "kind") == "RaiseStatement" || Reflect.get(statement, "kind") == "TryStatement") {
+      unsupportedCapability(language, "Task 011 typed errors and handling",
+        diagnosticLocation(Reflect.get(statement, "location"), Reflect.get(block, "location")))
+    }
+    if (Reflect.get(statement, "kind") == "IfStatement") {
+      rejectTypedErrorBlock(Reflect.get(statement, "consequent"), language, seen)
+      rejectTypedErrorBlock(Reflect.get(statement, "alternate"), language, seen)
+    } else if (Reflect.get(statement, "kind") == "ForEachStatement") {
+      rejectTypedErrorBlock(Reflect.get(statement, "body"), language, seen)
+    }
+  }
+}
+
+/**
+ * Validates target-visible nominal error declarations before emission.
+ * @param {import("../semantic/types.js").ErrorDeclaration[]} errors - Error declarations.
+ * @param {import("../semantic/types.js").RecordDeclaration[]} records - Record declarations.
+ * @param {import("../semantic/types.js").FunctionDeclaration[]} functions - Function declarations.
+ * @param {import("../semantic/types.js").BackendLanguage} language - Target language.
+ * @param {import("../semantic/types.js").SourceLocation} moduleLocation - Module location.
+ * @returns {void}
+ */
+function validateErrorTargets(
+  /** @type {import("../semantic/types.js").ErrorDeclaration[]} */ errors,
+  /** @type {import("../semantic/types.js").RecordDeclaration[]} */ records,
+  /** @type {import("../semantic/types.js").FunctionDeclaration[]} */ functions,
+  /** @type {import("../semantic/types.js").BackendLanguage} */ language,
+  /** @type {import("../semantic/types.js").SourceLocation} */ moduleLocation
+) {
+  const ids = new Set()
+  const names = new Set([...records, ...functions].map(({name}) => language == "php" ? name.toLowerCase() : name))
+  const forbidden = language == "javascript" || language == "typescript" ? new Set(["Error", "AggregateError"]) :
+    language == "php" ? new Set(["Throwable", "Exception", "RuntimeException", "Error"]) :
+      language == "ruby" ? new Set(["Exception", "StandardError", "ScriptError", "SystemExit"]) :
+        language == "java" ? new Set(["Throwable", "Exception", "RuntimeException", "Error"]) : new Set()
+
+  for (let index = 0; index < errors.length; index += 1) {
+    const declaration = errors[index]
+    const location = diagnosticLocation(declaration?.location, moduleLocation)
+    const fields = declaration && typeof declaration == "object" && !Array.isArray(declaration)
+      ? Object.keys(declaration).filter((key) => key != "sourceProvenance").sort().join(",") : ""
+
+    if (!declaration || typeof declaration != "object" || Array.isArray(declaration) ||
+      declaration.kind != "ErrorDeclaration" || fields != "id,kind,location,name") {
+      unsupportedCapability(language, "missing or invalid error declaration", location)
+    }
+    requireSemanticLocation(declaration.location, language, "error declaration location", moduleLocation)
+    validateTargetTypeIdentifier(language, declaration.name, declaration.location)
+    if ((declaration.id != `error:${index}` &&
+      !new RegExp(`^[a-z][a-z0-9._-]*#error:${index}$`, "u").test(declaration.id ?? "")) || ids.has(declaration.id)) {
+      unsupportedCapability(language, "duplicate or invalid error declaration identity", declaration.location)
+    }
+    const normalized = language == "php" ? declaration.name.toLowerCase() : declaration.name
+
+    if (names.has(normalized) || forbidden.has(declaration.name)) {
+      unsupportedCapability(language, `error declaration collision '${declaration.name}'`, declaration.location)
+    }
+    ids.add(declaration.id)
+    names.add(normalized)
+  }
 }
 
 /**
@@ -229,6 +334,9 @@ function rejectBlockIteration(block, language, seen = new Set()) {
     if (kind == "IfStatement") {
       rejectBlockIteration(Reflect.get(statement, "consequent"), language, seen)
       rejectBlockIteration(Reflect.get(statement, "alternate"), language, seen)
+    } else if (kind == "TryStatement") {
+      rejectBlockIteration(Reflect.get(statement, "body"), language, seen)
+      rejectBlockIteration(Reflect.get(statement, "catchBody"), language, seen)
     }
   }
 }
@@ -279,6 +387,10 @@ function rejectBlockOptionalTypes(block, language) {
         unsupportedCapability(language, "Task 007 optional iteration binding type", statement.valueBinding.location ?? statement.location)
       }
       rejectBlockOptionalTypes(statement.body, language)
+    }
+    if (statement.kind == "TryStatement") {
+      rejectBlockOptionalTypes(statement.body, language)
+      rejectBlockOptionalTypes(statement.catchBody, language)
     }
   }
 }
@@ -350,6 +462,10 @@ function rejectBlockCollectionTypes(block, language) {
       }
       rejectBlockCollectionTypes(statement.body, language)
     }
+    if (statement.kind == "TryStatement") {
+      rejectBlockCollectionTypes(statement.body, language)
+      rejectBlockCollectionTypes(statement.catchBody, language)
+    }
   }
 }
 
@@ -397,6 +513,10 @@ function validateScaffoldingNames(module, language) {
       unsupportedCapability(language, `entry iteration binding '${statement.valueBinding.name}' captures backend scaffolding`,
         statement.valueBinding.location)
     }
+    if (statement.kind == "TryStatement" && ownedEntryNames.has(statement.catchBinding.name)) {
+      unsupportedCapability(language, `entry catch binding '${statement.catchBinding.name}' captures backend scaffolding`,
+        statement.catchBinding.location)
+    }
   }
   for (const declaration of module.functions) {
     const targetName = language == "php" ? declaration.name.toLowerCase() : declaration.name
@@ -428,6 +548,10 @@ function validateScaffoldingNames(module, language) {
         unsupportedCapability(language, `function iteration binding '${statement.valueBinding.name}' captures backend scaffolding`,
           statement.valueBinding.location)
       }
+      if (statement.kind == "TryStatement" && ownedPrintReceiverNames.has(statement.catchBinding.name)) {
+        unsupportedCapability(language, `function catch binding '${statement.catchBinding.name}' captures backend scaffolding`,
+          statement.catchBinding.location)
+      }
     }
   }
   if (language == "java") validateJavaUtilFactoryNames(module)
@@ -441,7 +565,10 @@ function validateScaffoldingNames(module, language) {
  */
 function validateRecordConstructorNames(module, language) {
   if (language != "javascript" && language != "typescript") return
-  const recordNames = new Set((module.records ?? []).map((record) => record.name))
+  const recordNames = new Set([
+    ...(module.records ?? []).map((record) => record.name),
+    ...(module.errors ?? []).map((error) => error.name)
+  ])
 
   /**
    * Checks declarations nested beneath one owning block.
@@ -459,6 +586,13 @@ function validateRecordConstructorNames(module, language) {
           language,
           `${owner} iteration binding '${statement.valueBinding.name}' captures record constructor`,
           bindingNameLocation(statement.valueBinding)
+        )
+      }
+      if (statement.kind == "TryStatement" && recordNames.has(statement.catchBinding.name)) {
+        unsupportedCapability(
+          language,
+          `${owner} catch binding '${statement.catchBinding.name}' captures nominal constructor`,
+          bindingNameLocation(statement.catchBinding)
         )
       }
     }
@@ -503,7 +637,8 @@ function validateJavaUtilFactoryNames(module) {
         statement.kind == "LocalDeclaration" ? statement.initializer :
           statement.kind == "AssignmentStatement" ? statement.expression :
             statement.kind == "ReturnStatement" ? statement.expression :
-              statement.kind == "ExpressionStatement" || statement.kind == "PrintStatement" ? statement.expression : undefined
+              statement.kind == "ExpressionStatement" || statement.kind == "PrintStatement" ? statement.expression :
+                statement.kind == "RaiseStatement" ? statement.error.message : undefined
 
       if (capture && expression && (expressionContainsKind(expression, "ListLiteral") ||
         expressionContainsKind(expression, "MapLiteral") || expressionContainsKind(expression, "OptionalNone") ||
@@ -521,6 +656,15 @@ function validateJavaUtilFactoryNames(module) {
         } : capture
 
         validateBlockNames(statement.body, loopCapture, owner)
+      }
+      if (statement.kind == "TryStatement") {
+        validateBlockNames(statement.body, capture, owner)
+        const catchCapture = statement.catchBinding.name == "java" ? {
+          detail: `${owner} catch binding 'java' captures java.util factory syntax`,
+          location: statement.catchBinding.location
+        } : capture
+
+        validateBlockNames(statement.catchBody, catchCapture, owner)
       }
     }
   }
@@ -551,7 +695,8 @@ function moduleContainsExpressionKind(module, kind) {
         statement.kind == "LocalDeclaration" ? statement.initializer :
           statement.kind == "AssignmentStatement" ? statement.expression :
             statement.kind == "ReturnStatement" ? statement.expression :
-              statement.kind == "ExpressionStatement" || statement.kind == "PrintStatement" ? statement.expression : undefined
+              statement.kind == "ExpressionStatement" || statement.kind == "PrintStatement" ? statement.expression :
+                statement.kind == "RaiseStatement" ? statement.error.message : undefined
 
       return expression ? expressionContainsKind(expression, kind) : false
     }))
@@ -604,7 +749,7 @@ function declarationNameLocation(declaration) {
 
 /**
  * Returns a parser-backed binding-name location when one survived semantic adaptation.
- * @param {import("../semantic/types.js").Parameter | import("../semantic/types.js").LocalDeclaration | import("../semantic/types.js").ValueBinding} binding - Semantic binding.
+ * @param {import("../semantic/types.js").Parameter | import("../semantic/types.js").LocalDeclaration | import("../semantic/types.js").ValueBinding | import("../semantic/types.js").CatchBinding} binding - Semantic binding.
  * @returns {import("../semantic/types.js").SourceLocation} Exact name or binding location.
  */
 function bindingNameLocation(binding) {
@@ -644,6 +789,7 @@ function allStatements(block) {
       return [statement, ...allStatements(statement.consequent), ...(statement.alternate ? allStatements(statement.alternate) : [])]
     }
     if (statement.kind == "ForEachStatement") return [statement, ...allStatements(statement.body)]
+    if (statement.kind == "TryStatement") return [statement, ...allStatements(statement.body), ...allStatements(statement.catchBody)]
 
     return [statement]
   })
@@ -790,8 +936,71 @@ function validateStatement(statement, language, ownerLocation, loopDepth = 0, ac
     validateBlock(loop.body, language, loopLocation, loopDepth + 1, activePath, externalDeclarationIds)
     return
   }
+  if (kind == "RaiseStatement") {
+    const fields = Object.keys(/** @type {object} */ (statement)).filter((key) => key != "sourceProvenance").sort().join(",")
+    const raised = Reflect.get(statement, "error")
+    const raiseLocation = requireSemanticLocation(ownLocation, language, "RaiseStatement location", ownerLocation)
+    const constructionFields = raised && typeof raised == "object" && !Array.isArray(raised)
+      ? Object.keys(raised).filter((key) => key != "sourceProvenance").sort().join(",") : ""
+
+    if (fields != "error,kind,location" || !raised || typeof raised != "object" || Array.isArray(raised) ||
+      raised.kind != "ErrorConstruction" || constructionFields != "error,kind,location,message") {
+      unsupportedCapability(language, "malformed RaiseStatement", raiseLocation)
+    }
+    requireSemanticLocation(raised.location, language, "error construction location", raiseLocation)
+    validateErrorTypeShape(raised.error, language, raised.location)
+    validateExpression(raised.message, language, raised.location, false, new Set(), externalDeclarationIds)
+    return
+  }
+  if (kind == "TryStatement") {
+    const handler = /** @type {import("../semantic/types.js").TryStatement} */ (statement)
+    const tryLocation = requireSemanticLocation(ownLocation, language, "TryStatement location", ownerLocation)
+    const fields = Object.keys(handler).filter((key) => key != "sourceProvenance").sort().join(",")
+
+    if (fields != "body,catchBinding,catchBody,catchType,kind,location") {
+      unsupportedCapability(language, "malformed TryStatement", tryLocation)
+    }
+    validateErrorTypeShape(handler.catchType, language, tryLocation)
+    const binding = handler.catchBinding
+    const bindingFields = binding && typeof binding == "object" && !Array.isArray(binding)
+      ? Object.keys(binding).filter((key) => key != "sourceProvenance").sort().join(",") : ""
+    const bindingLocation = requireSemanticLocation(binding?.location, language, "catch binding location", tryLocation)
+
+    if (!binding || binding.kind != "CatchBinding" || bindingFields != "kind,location,mutable,name,type" || binding.mutable !== false) {
+      unsupportedCapability(language, "malformed catch binding", bindingLocation)
+    }
+    validateTargetBindingIdentifier(language, binding.name, "catch binding", bindingLocation)
+    validateErrorTypeShape(binding.type, language, bindingLocation)
+    if (binding.type.declarationId != handler.catchType.declarationId) {
+      unsupportedCapability(language, "catch binding type mismatch", bindingLocation)
+    }
+    validateBlock(handler.body, language, tryLocation, loopDepth, activePath, externalDeclarationIds)
+    validateBlock(handler.catchBody, language, tryLocation, loopDepth, activePath, externalDeclarationIds)
+    return
+  }
 
   unsupportedCapability(language, `statement ${kind}`, location)
+}
+
+/**
+ * Validates the closed parser-neutral error type shape.
+ * @param {unknown} type - Candidate error type.
+ * @param {import("../semantic/types.js").BackendLanguage} language - Target language.
+ * @param {import("../semantic/types.js").SourceLocation} ownerLocation - Nearest owning location.
+ * @returns {void}
+ */
+function validateErrorTypeShape(/** @type {unknown} */ type,
+  /** @type {import("../semantic/types.js").BackendLanguage} */ language,
+  /** @type {import("../semantic/types.js").SourceLocation} */ ownerLocation) {
+  const fields = type && typeof type == "object" && !Array.isArray(type)
+    ? Object.keys(type).filter((key) => key != "sourceProvenance").sort().join(",") : ""
+  const candidate = type && typeof type == "object" && !Array.isArray(type)
+    ? /** @type {Record<string, unknown>} */ (type) : {}
+
+  if (candidate.kind != "ErrorType" || fields != "declarationId,kind" || typeof candidate.declarationId != "string" ||
+    !/^(?:[a-z][a-z0-9._-]*#)?error:[0-9]+$/u.test(candidate.declarationId)) {
+    unsupportedCapability(language, "missing or invalid error type", ownerLocation)
+  }
 }
 
 /**
@@ -901,6 +1110,15 @@ function validateExpression(expression, language, ownerLocation, allowJavaNegate
   }
   if (candidate.kind == "IdentifierExpression") {
     validateTargetIdentifier(language, candidate.name, "reference", location)
+    return
+  }
+  if (candidate.kind == "ErrorMessageRead") {
+    const fields = Object.keys(candidate).filter((key) => key != "sourceProvenance").sort().join(",")
+
+    if (fields != "kind,location,receiver" || candidate.receiver?.kind != "IdentifierExpression") {
+      unsupportedCapability(language, "malformed ErrorMessageRead", location)
+    }
+    validateExpression(candidate.receiver, language, location, false, expressionPath, externalDeclarationIds)
     return
   }
   if (candidate.kind == "IntegerLiteral") {
@@ -1316,6 +1534,13 @@ export function emitExpression(writer, expression, path, language, emitIdentifie
     writer.mapped(spelling, {mappingKind: "exact", node: expression, path, role: "member"})
     return
   }
+  if (expression.kind == "ErrorMessageRead") {
+    emitExpression(writer, expression.receiver, `${path}/receiver`, language, emitIdentifier)
+    writer.mapped(language == "php" ? "->getMessage()" : language == "java" ? ".getMessage()" : ".message", {
+      mappingKind: "exact", node: expression, path, role: "member"
+    })
+    return
+  }
 
   if (expression.kind == "UnaryExpression") {
     if (language == "kotlin" && expression.operation == "IntegerNegate") {
@@ -1463,6 +1688,10 @@ function blockContainsSignProducingOperation(block) {
     if (statement.kind == "ForEachStatement") {
       return expressionContainsSignProducingOperation(statement.list) || blockContainsSignProducingOperation(statement.body)
     }
+    if (statement.kind == "TryStatement") {
+      return blockContainsSignProducingOperation(statement.body) || blockContainsSignProducingOperation(statement.catchBody)
+    }
+    if (statement.kind == "RaiseStatement") return expressionContainsSignProducingOperation(statement.error.message)
     if (statement.kind == "LocalDeclaration") return expressionContainsSignProducingOperation(statement.initializer)
     if (statement.kind == "AssignmentStatement" || statement.kind == "ExpressionStatement" || statement.kind == "PrintStatement") {
       return expressionContainsSignProducingOperation(statement.expression)
