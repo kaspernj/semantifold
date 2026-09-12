@@ -244,7 +244,7 @@ export function validateTargetBindingIdentifier(language, name, role, location) 
   const invalidTypeScriptBinding = language == "typescript" && (name == "arguments" || name == "eval")
   const invalidPhpVariable = language == "php" && typeof name == "string" &&
     ((role == "parameter" && phpInvalidParameterBindings.has(name)) ||
-      ((role == "local" || role == "assignment target") && phpInvalidAssignedBindings.has(name)))
+      ((role == "local" || role == "assignment target" || role == "catch binding") && phpInvalidAssignedBindings.has(name)))
   const invalidRubyBinding = language == "ruby" && typeof name == "string" && /^_[1-9]$/u.test(name)
 
   if (invalidTypeScriptBinding || invalidPhpVariable || invalidRubyBinding) {

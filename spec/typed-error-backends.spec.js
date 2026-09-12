@@ -70,6 +70,28 @@ describe("typed error backends", () => {
     }
   })
 
+  it("rejects PHP assigned-only special names as catch bindings before emission", async () => {
+    const source = await readFile(new URL("fixtures/errors/program.ts", import.meta.url), "utf8")
+    const module = parse({filename: "program.ts", language: "typescript", source})
+
+    for (const name of ["this", "GLOBALS"]) {
+      const invalid = structuredClone(module)
+      const handler = /** @type {import("../src/semantic/types.js").TryStatement} */ (invalid.functions[0].body.statements[0])
+      const returned = /** @type {import("../src/semantic/types.js").ReturnStatement} */ (handler.catchBody.statements[0])
+      const message = /** @type {import("../src/semantic/types.js").ErrorMessageRead} */ (returned.expression)
+
+      handler.catchBinding.name = name
+      message.receiver.name = name
+      assert.throws(
+        () => generate({language: "php", module: invalid}),
+        (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
+          error.language == "php" && error.location?.filename == "program.ts" &&
+          error.message.includes(`catch binding identifier '${name}'`),
+        name
+      )
+    }
+  })
+
   it("preserves a private Ruby program error declaration as a private constant", () => {
     const program = parseProgram({
       entryModule: "main",

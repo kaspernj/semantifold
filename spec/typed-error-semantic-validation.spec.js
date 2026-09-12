@@ -2,7 +2,7 @@
 
 import assert from "node:assert/strict"
 import {describe, expect, it} from "@velocious/testing"
-import {SemantifoldDiagnostic} from "../index.js"
+import {parse, SemantifoldDiagnostic} from "../index.js"
 import {validateParsedModule} from "../src/semantic/validate.js"
 
 const location = {
@@ -124,6 +124,33 @@ describe("typed error semantic validation", () => {
     })
 
     rejects(moduleWith(block(arbitraryMember)), "TYPE_MISMATCH")
+  })
+
+  it("invalidates protected-body assignments before validating catch presence facts", () => {
+    assert.throws(
+      () => parse({
+        filename: "catch-presence.ts",
+        language: "typescript",
+        source: `class ValidationError extends Error {}
+function read(seed: string | null): string {
+  let value: string | null = seed
+  if (value !== null) {
+    try {
+      value = null
+      throw new ValidationError("bad")
+    } catch (error) {
+      if (!(error instanceof ValidationError)) { throw error }
+      return value
+    }
+  }
+  return "fallback"
+}
+console.log(read("ready"))
+`
+      }),
+      (error) => error instanceof SemantifoldDiagnostic && error.code == "UNCHECKED_OPTIONAL_UNWRAP" &&
+        error.language == "typescript" && error.location?.filename == "catch-presence.ts"
+    )
   })
 
   it("rejects a handler whose exact nominal error cannot escape its protected body", () => {

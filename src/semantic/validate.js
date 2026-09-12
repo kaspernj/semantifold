@@ -563,12 +563,18 @@ function validateBlock(block, scope, returnType, functions, records, errors, cal
       if (bindingType.declarationId != caughtType.declarationId) {
         fail("INVALID_ERROR_HANDLER", "Catch binding type must exactly match its handler type.", statement.catchBinding.location)
       }
-      const assignedOuterBindings = outerMutableBindingsAssignedBy(statement.body, scope)
+      const bodyAssignedOuterBindings = outerMutableBindingsAssignedBy(statement.body, scope)
+      const assignedOuterBindings = new Set(bodyAssignedOuterBindings)
 
       outerMutableBindingsAssignedBy(statement.catchBody, scope, assignedOuterBindings)
       const bodyScope = createScope(scope, statement.body.statements)
       const bodyFlow = validateBlock(statement.body, bodyScope, returnType, functions, records, errors, callEffects, fail, normalizeOperations, loopDepth)
       const catchScope = createScope(scope, statement.catchBody.statements)
+
+      for (const binding of bodyAssignedOuterBindings) {
+        binding.knownValue = undefined
+        catchScope.presenceProofs.delete(binding)
+      }
 
       declareBinding(statement.catchBinding.name, {
         knownValue: undefined,
