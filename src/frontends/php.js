@@ -7,7 +7,7 @@ import {locationFromOffsets, moduleLocation} from "../semantic/location.js"
 import {withAdaptedOperation} from "../semantic/operators.js"
 import {withParserRanges} from "../semantic/provenance.js"
 import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
-import {requireSourceReturnType, requireSourceScalarType} from "./scalars.js"
+import {requireSourceReturnType, requireSourceScalarType, sourceScalarType} from "./scalars.js"
 import {documentedValueType, instantiatedRecordFieldType, iterationBindingType, iterationOperandType, knownCallReturnType, optionalType, preservesGenericOptionalEvidence, recordType, sameValueType} from "./types.js"
 const parser = new PhpParser.Engine({
   ast: {withPositions: true},
@@ -1088,7 +1088,7 @@ function convertFunctionSignature(node, filename, source, recordNames, ownerId) 
       : convertType(parameter.type, `Parameter '${parameterName}'`, parameterLocation, filename, source, recordNames)
 
     if (nativeType == "array" && !documentedType) return missingType("php", `Parameter '${parameterName}'`, parameterLocation)
-    if (documentedType && !phpDocumentedNativeTypeMatches(nativeType, parameterType, recordNames)) {
+    if (documentedType && !phpDocumentedNativeTypeMatches(nativeType, parameter.nullable, parameterType, recordNames)) {
       return unsupportedSyntax("php", "documented parameter type incompatible with native type", documentedType.location)
     }
 
@@ -1120,7 +1120,7 @@ function convertFunctionSignature(node, filename, source, recordNames, ownerId) 
   if (documented.returnType) {
     returnType = documentedValueType({language: "php", location: documented.returnType.location, ownerLocation: location, source,
       records: recordNames, sourceType: documented.returnType.sourceType, subject: `Function '${name}' return`, typeParameters: typeParameterNames})
-    if (!phpDocumentedNativeTypeMatches(nativeReturnType, returnType, recordNames)) {
+    if (!phpDocumentedNativeTypeMatches(nativeReturnType, node.nullable, returnType, recordNames)) {
       return unsupportedSyntax("php", "documented return type incompatible with native type", documented.returnType.location)
     }
   } else {
@@ -1156,14 +1156,23 @@ function convertFunctionSignature(node, filename, source, recordNames, ownerId) 
 /**
  * Checks the exact runtime carrier permitted beside a precise PHPDoc type.
  * @param {string | undefined} nativeType - Native PHP type name.
+ * @param {boolean} nativeNullable - Whether the native carrier has PHP's nullable marker.
  * @param {import("../semantic/types.js").SemanticValueType} documentedType - Exact semantic document type.
  * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} records - Visible records by name.
  * @returns {boolean} Whether the native carrier agrees without changing meaning.
  */
-function phpDocumentedNativeTypeMatches(nativeType, documentedType, records) {
-  if (documentedType.kind == "TypeVariableReference") return nativeType === undefined
+function phpDocumentedNativeTypeMatches(nativeType, nativeNullable, documentedType, records) {
   if (documentedType.kind == "OptionalType") {
-    return phpDocumentedNativeTypeMatches(nativeType, documentedType.valueType, records)
+    if (documentedType.valueType.kind == "TypeVariableReference") {
+      return nativeType === undefined && !nativeNullable
+    }
+
+    return nativeNullable && phpDocumentedNativeTypeMatches(nativeType, false, documentedType.valueType, records)
+  }
+  if (nativeNullable) return false
+  if (documentedType.kind == "TypeVariableReference") return nativeType === undefined
+  if (documentedType.kind == "TypeReference") {
+    return nativeType !== undefined && sourceScalarType("php", nativeType)?.name == documentedType.name
   }
   if (documentedType.kind == "ListType" || documentedType.kind == "MapType") return nativeType == "array"
   if (documentedType.kind == "RecordType") {
@@ -1279,7 +1288,7 @@ function convertPhpRecord(node, declaration, recordNames, filename, source) {
         source, sourceType: documentedType.sourceType, subject: `Record field '${name}'`, typeParameters: typeParameterNames})
       : convertType(parameter.type, `Record field '${name}'`, fieldLocation, filename, source, recordNames)
 
-    if (documentedType && !phpDocumentedNativeTypeMatches(nativeType, type, recordNames)) {
+    if (documentedType && !phpDocumentedNativeTypeMatches(nativeType, parameter.nullable, type, recordNames)) {
       return unsupportedSyntax("php", "documented record field type incompatible with native type", documentedType.location)
     }
 
@@ -1348,7 +1357,8 @@ function validatePhpGenericRecordGetters(node, declaration, recordNames, filenam
       sourceType: documented.returnType.sourceType, subject: `Record getter '${name}'`, typeParameters})
     const nativeType = phpTypeName(getter.type)
 
-    if (!phpDocumentedNativeTypeMatches(nativeType, returnType, recordNames) || !sameValueType(returnType, field.type)) {
+    if (!phpDocumentedNativeTypeMatches(nativeType, getter.nullable, returnType, recordNames) ||
+      !sameValueType(returnType, field.type)) {
       return unsupportedSyntax("php", "generic record getter type mismatch", documented.returnType.location)
     }
   })

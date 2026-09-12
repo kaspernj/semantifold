@@ -177,4 +177,46 @@ console.log("ok")
       if (language == "php") expect(generated).toContain("array<string,?Box<T>>")
     }
   })
+
+  it("matches PHP documented generic-record fields to exact nullable native scalar carriers", () => {
+    const module = parse({
+      filename: "program.ts",
+      language: "typescript",
+      source: `class Holder<T> { constructor(readonly maybe: string | null, readonly label: string, readonly marker: T) {} }
+function keep(value: string): string { return value }
+const holder: Holder<string> = new Holder<string>("maybe", "label", "marker")
+const maybe: string | null = holder.maybe
+if (maybe !== null) { console.log(keep(maybe)) }
+`
+    })
+    const generated = generate({language: "php", module})
+
+    expect(generated).toContain("* @param ?string $maybe")
+    expect(generated).toContain("private ?string $maybe")
+    expect(generated).toContain("* @return ?string")
+    expect(generated).toContain("public function maybe(): ?string")
+    expect(generated).toContain("* @param T $marker")
+    expect(generated).toContain("private $marker")
+    expect(generated).toContain("public function marker()")
+    expect(semanticMeaning(parse({filename: "program.php", language: "php", source: generated})))
+      .toEqual(semanticMeaning(module))
+
+    const invalid = [
+      [generated.replace("private ?string $maybe", "private string $maybe"),
+        "documented record field type incompatible with native type"],
+      [generated.replace("public function label(): string", "public function label(): ?string"),
+        "generic record getter type mismatch"],
+      [generated.replace("private ?string $maybe", "private ?int $maybe"),
+        "documented record field type incompatible with native type"],
+      [generated.replace("* @return ?string", "* @return ?int"), "generic record getter type mismatch"]
+    ]
+
+    for (const [source, detail] of invalid) {
+      assert.throws(
+        () => parse({filename: "invalid.php", language: "php", source}),
+        (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_SYNTAX" &&
+          error.language == "php" && error.location?.filename == "invalid.php" && error.message.includes(detail)
+      )
+    }
+  })
 })
