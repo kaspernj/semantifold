@@ -486,7 +486,7 @@ function convertExpression(node, filename, source, context, expectedType) {
       }, {operator: nodeLocation(methodName, filename, source)})
     }
 
-    if (receiver && receiverText == "Main" && !context.bindings.has(receiverText)) {
+    if (receiver && receiverText == "Main" && context.currentClass && !context.bindings.has(receiverText)) {
       const localSignature = context.functions.get(method)
 
       if (localSignature) {

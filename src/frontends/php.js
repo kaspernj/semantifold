@@ -1934,7 +1934,9 @@ export function parsePhp({filename, source, program: programContext}) {
   const errors = errorNodes.map((node, index) => convertPhpError(node, errorDeclarations[index], filename, source))
   for (const declaration of recordDeclarations) recordNames.set(declaration.name, declaration)
   for (const declaration of classDeclarations) recordNames.set(declaration.name, declaration)
-  const recordsById = new Map(recordDeclarations.map((declaration) => [/** @type {string} */ (declaration.id), declaration]))
+  const recordsById = new Map([...recordNames.values()]
+    .filter((declaration) => declaration.kind == "RecordDeclaration")
+    .map((declaration) => [/** @type {string} */ (declaration.id), declaration]))
   const classesById = new Map(classDeclarations.map((declaration) => [/** @type {string} */ (declaration.id), declaration]))
   const records = recordNodes.map((node, index) => convertPhpRecord(node, recordDeclarations[index],
     /** @type {Map<string, import("../semantic/types.js").RecordDeclaration>} */ (/** @type {unknown} */ (recordNames)), filename, source))

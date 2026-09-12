@@ -381,7 +381,15 @@ function validateRecordTargets(records, functions, language, moduleLocation) {
  * @returns {void}
  */
 function validateReferenceClassTargets(classes, records, errors, functions, language, moduleLocation) {
-  const targetNames = new Set([...records, ...errors, ...functions].map(({name}) => language == "php" ? name.toLowerCase() : name))
+  const targetNames = new Set()
+
+  for (const declaration of [...records, ...errors, ...functions]) {
+    if (!declaration || typeof declaration != "object" || Array.isArray(declaration)) continue
+    const name = Reflect.get(declaration, "name")
+
+    if (typeof name != "string") continue
+    targetNames.add(language == "php" ? name.toLowerCase() : name)
+  }
 
   for (let classIndex = 0; classIndex < classes.length; classIndex += 1) {
     const declaration = classes[classIndex]
