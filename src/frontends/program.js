@@ -474,17 +474,33 @@ function rekeyDeclarations(module, moduleId) {
 
   for (const declaration of module.records ?? []) {
     replacements.set(declaration.id, `${moduleId}#${declaration.id}`)
+    for (const parameter of declaration.typeParameters ?? []) {
+      if (parameter.id) replacements.set(parameter.id, `${moduleId}#${parameter.id}`)
+    }
     for (const field of declaration.fields) replacements.set(field.id, `${moduleId}#${field.id}`)
   }
   for (const declaration of module.errors ?? []) replacements.set(declaration.id, `${moduleId}#${declaration.id}`)
-  for (const declaration of module.functions) replacements.set(declaration.id, `${moduleId}#${declaration.id}`)
+  for (const declaration of module.functions) {
+    replacements.set(declaration.id, `${moduleId}#${declaration.id}`)
+    for (const parameter of declaration.typeParameters ?? []) {
+      if (parameter.id) replacements.set(parameter.id, `${moduleId}#${parameter.id}`)
+    }
+  }
 
   for (const declaration of module.records ?? []) {
     declaration.id = replacements.get(declaration.id)
+    for (const parameter of declaration.typeParameters ?? []) {
+      parameter.id = /** @type {string} */ (replacements.get(/** @type {string} */ (parameter.id)))
+    }
     for (const field of declaration.fields) field.id = /** @type {string} */ (replacements.get(field.id))
   }
   for (const declaration of module.errors ?? []) declaration.id = replacements.get(declaration.id)
-  for (const declaration of module.functions) declaration.id = replacements.get(declaration.id)
+  for (const declaration of module.functions) {
+    declaration.id = replacements.get(declaration.id)
+    for (const parameter of declaration.typeParameters ?? []) {
+      parameter.id = /** @type {string} */ (replacements.get(/** @type {string} */ (parameter.id)))
+    }
+  }
 
   const seen = new WeakSet()
   /**
@@ -502,6 +518,9 @@ function rekeyDeclarations(module, moduleId) {
     }
     if (object.kind == "MemberRead" && typeof object.field == "string" && replacements.has(object.field)) {
       object.field = replacements.get(object.field)
+    }
+    if (object.kind == "TypeVariableReference" && typeof object.parameterId == "string" && replacements.has(object.parameterId)) {
+      object.parameterId = replacements.get(object.parameterId)
     }
     for (const child of Object.values(object)) if (typeof child == "object") visit(child)
   }

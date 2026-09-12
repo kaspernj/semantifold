@@ -17,7 +17,7 @@ describe("C# registry and toolchain", () => {
     expect(languageCapabilities.find(({id}) => id == "csharp")).toEqual({
       acceptance: {stages: ["parse", "generate", "restore", "compile", "execute"], toolchains: ["dotnet"]},
       artifactMultiplicity: "multiple",
-      features: {closedRecords: false, generalFunctionsAndCalls: false, immutableCollections: false, optionalValues: false, orderedListIteration: false, typedErrors: false},
+      features: {closedRecords: false, generalFunctionsAndCalls: false, immutableCollections: false, optionalValues: false, orderedListIteration: false, typeParametersAndGenerics: false, typedErrors: false},
       id: "csharp",
       mapping: {binaryRanges: false, richText: true, sourceMapV3: true},
       roles: {applicationBackend: false, binaryBackend: false, frontend: true, interoperability: false, textBackend: true},

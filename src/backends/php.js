@@ -30,6 +30,11 @@ export function generatePhp(module, writer) {
     const recordPath = `/records/${recordIndex}`
 
     if (recordIndex > 0) writer.synthetic("\n\n", "record declaration separator", [record], [recordPath])
+    emitTemplateDocumentation(writer, record.typeParameters ?? [], `${recordPath}/typeParameters`)
+    if ((record.typeParameters?.length ?? 0) > 0) {
+      emitDocumentedGenericRecord(writer, record, recordPath)
+      return
+    }
     writer.mapped("final readonly class", {mappingKind: "anchor", node: record, path: recordPath})
     writer.synthetic(" ", "record declaration spacing", [record], [recordPath])
     writer.mapped(record.name, {mappingKind: "exact", node: record, path: recordPath, role: "name"})
@@ -56,7 +61,7 @@ export function generatePhp(module, writer) {
 
       writer.synthetic("        public ", "PHP promoted field scaffolding", [field], [fieldPath])
       emitNativePhpType(writer, field.type, `${fieldPath}/type`)
-      writer.synthetic(" ", "PHP promoted field spacing", [field], [fieldPath])
+      if (hasNativePhpType(field.type)) writer.synthetic(" ", "PHP promoted field spacing", [field], [fieldPath])
       writer.mapped(`$${field.name}`, {mappingKind: "exact", node: field, path: fieldPath, role: "name"})
       writer.synthetic(fieldIndex + 1 == record.fields.length ? "\n" : ",\n", "PHP promoted field separator", [field], [fieldPath])
     })
@@ -71,8 +76,15 @@ export function generatePhp(module, writer) {
       .filter(([parameter]) => phpTypeNeedsDocumentation(/** @type {import("../semantic/types.js").Parameter} */ (parameter).type))
     const documentedReturn = phpTypeNeedsDocumentation(declaration.returnType)
 
-    if (documentedParameters.length > 0 || documentedReturn) {
+    if ((declaration.typeParameters?.length ?? 0) > 0 || documentedParameters.length > 0 || documentedReturn) {
       writer.synthetic("/**\n", "PHP collection type scaffolding", [declaration])
+      for (const [parameterIndex, parameter] of (declaration.typeParameters ?? []).entries()) {
+        writer.synthetic(" * @template ", "PHP type parameter scaffolding", [parameter], [`/functions/${functionIndex}/typeParameters/${parameterIndex}`])
+        writer.mapped(parameter.name, {
+          mappingKind: "exact", node: parameter, path: `/functions/${functionIndex}/typeParameters/${parameterIndex}`, role: "name"
+        })
+        writer.synthetic("\n", "line break", [parameter])
+      }
       for (const [candidate, index] of documentedParameters) {
         const parameter = /** @type {import("../semantic/types.js").Parameter} */ (candidate)
         const parameterIndex = /** @type {number} */ (index)
@@ -100,12 +112,14 @@ export function generatePhp(module, writer) {
 
       if (index > 0) writer.synthetic(", ", "parameter separator", [declaration])
       emitNativePhpType(writer, parameter.type, `${parameterPath}/type`)
-      writer.synthetic(" ", "parameter spacing", [parameter], [parameterPath])
+      if (hasNativePhpType(parameter.type)) writer.synthetic(" ", "parameter spacing", [parameter], [parameterPath])
       writer.mapped(`$${parameter.name}`, {mappingKind: "exact", node: parameter, path: parameterPath, role: "name"})
     })
     writer.mapped(")", {mappingKind: "anchor", node: declaration})
-    writer.synthetic(": ", "return type separator", [declaration])
-    emitNativePhpType(writer, declaration.returnType, `/functions/${functionIndex}/returnType`)
+    if (hasNativePhpType(declaration.returnType)) {
+      writer.synthetic(": ", "return type separator", [declaration])
+      emitNativePhpType(writer, declaration.returnType, `/functions/${functionIndex}/returnType`)
+    }
     writer.synthetic("\n", "line break", [declaration])
     writer.mapped("{", {mappingKind: "anchor", node: declaration})
     writer.synthetic("\n", "line break", [declaration])
@@ -118,6 +132,75 @@ export function generatePhp(module, writer) {
     writer.synthetic("\n\n", "entry-point separator", [module.entryPoint])
     emitBlock(writer, module.entryPoint.body, "", "/entryPoint/body")
   }
+}
+
+/**
+ * Emits PHP's exact documented generic-record profile. Private promoted storage
+ * plus public getters preserves record immutability when a type variable has no
+ * faithful native property type.
+ * @param {import("./writer.js").SourceWriter} writer - Source-aware writer.
+ * @param {import("../semantic/types.js").RecordDeclaration} record - Generic semantic record.
+ * @param {string} recordPath - Exact record path.
+ */
+function emitDocumentedGenericRecord(writer, record, recordPath) {
+  writer.mapped("final class", {mappingKind: "anchor", node: record, path: recordPath})
+  writer.synthetic(" ", "record declaration spacing", [record], [recordPath])
+  writer.mapped(record.name, {mappingKind: "exact", node: record, path: recordPath, role: "name"})
+  writer.synthetic(" {\n    /**\n", "PHP documented generic record scaffolding", [record], [recordPath])
+  record.fields.forEach((field, fieldIndex) => {
+    const fieldPath = `${recordPath}/fields/${fieldIndex}`
+
+    writer.synthetic("     * @param ", "PHP documented generic record scaffolding", [field], [fieldPath])
+    emitType(writer, field.type, `${fieldPath}/type`, "php")
+    writer.synthetic(" ", "PHP documented generic record scaffolding", [field], [fieldPath])
+    writer.mapped(`$${field.name}`, {mappingKind: "exact", node: field, path: fieldPath, role: "name"})
+    writer.synthetic("\n", "PHP documented generic record scaffolding", [field], [fieldPath])
+  })
+  writer.synthetic("     */\n    public function __construct(\n", "PHP documented generic record scaffolding", [record], [recordPath])
+  record.fields.forEach((field, fieldIndex) => {
+    const fieldPath = `${recordPath}/fields/${fieldIndex}`
+
+    writer.synthetic("        private ", "PHP private promoted field scaffolding", [field], [fieldPath])
+    emitNativePhpType(writer, field.type, `${fieldPath}/type`)
+    if (hasNativePhpType(field.type)) writer.synthetic(" ", "PHP promoted field spacing", [field], [fieldPath])
+    writer.mapped(`$${field.name}`, {mappingKind: "exact", node: field, path: fieldPath, role: "name"})
+    writer.synthetic(fieldIndex + 1 == record.fields.length ? "\n" : ",\n", "PHP promoted field separator", [field], [fieldPath])
+  })
+  writer.synthetic("    ) {}", "PHP documented generic record scaffolding", [record], [recordPath])
+  record.fields.forEach((field, fieldIndex) => {
+    const fieldPath = `${recordPath}/fields/${fieldIndex}`
+
+    writer.synthetic("\n\n    /**\n     * @return ", "PHP documented generic getter scaffolding", [field], [fieldPath])
+    emitType(writer, field.type, `${fieldPath}/type`, "php")
+    writer.synthetic("\n     */\n    public function ", "PHP documented generic getter scaffolding", [field], [fieldPath])
+    writer.mapped(field.name, {mappingKind: "exact", node: field, path: fieldPath, role: "name"})
+    writer.synthetic("()", "PHP documented generic getter scaffolding", [field], [fieldPath])
+    if (hasNativePhpType(field.type)) {
+      writer.synthetic(": ", "PHP getter return type spacing", [field], [fieldPath])
+      emitNativePhpType(writer, field.type, `${fieldPath}/type`)
+    }
+    writer.synthetic(" {\n        return $this->", "PHP documented generic getter scaffolding", [field], [fieldPath])
+    writer.mapped(field.name, {mappingKind: "exact", node: field, path: fieldPath, role: "name"})
+    writer.synthetic(";\n    }", "PHP documented generic getter scaffolding", [field], [fieldPath])
+  })
+  writer.synthetic("\n}", "PHP documented generic record scaffolding", [record], [recordPath])
+}
+
+/**
+ * Emits a standalone PHPDoc template block.
+ * @param {import("./writer.js").SourceWriter} writer - Source-aware writer.
+ * @param {import("../semantic/types.js").TypeParameter[]} parameters - Ordered type parameters.
+ * @param {string} path - Type-parameter collection path.
+ */
+function emitTemplateDocumentation(writer, parameters, path) {
+  if (parameters.length == 0) return
+  writer.synthetic("/**\n", "PHP type parameter scaffolding", parameters)
+  parameters.forEach((parameter, index) => {
+    writer.synthetic(" * @template ", "PHP type parameter scaffolding", [parameter], [`${path}/${index}`])
+    writer.mapped(parameter.name, {mappingKind: "exact", node: parameter, path: `${path}/${index}`, role: "name"})
+    writer.synthetic("\n", "line break", [parameter])
+  })
+  writer.synthetic(" */\n", "PHP type parameter scaffolding", parameters)
 }
 
 /**
@@ -163,7 +246,8 @@ function emitProgramHeader(module, writer) {
  * @returns {boolean} Whether the type contains a collection.
  */
 function phpTypeNeedsDocumentation(type) {
-  return type.kind == "ListType" || type.kind == "MapType" ||
+  return type.kind == "TypeVariableReference" || type.kind == "ListType" || type.kind == "MapType" ||
+    type.kind == "RecordType" && (type.arguments?.length ?? 0) > 0 ||
     type.kind == "OptionalType" && phpTypeNeedsDocumentation(type.valueType)
 }
 
@@ -175,18 +259,38 @@ function phpTypeNeedsDocumentation(type) {
  * @returns {void}
  */
 function emitNativePhpType(writer, type, path) {
-  if (type.kind == "TypeReference" || type.kind == "RecordType") {
+  if (type.kind == "TypeVariableReference") return
+  if (type.kind == "RecordType") {
+    const record = writer.recordForId(type.declarationId)
+
+    writer.mapped(writer.recordNameForId(type.declarationId), {
+      mappingKind: "exact", name: record.name, node: type, path, role: "type"
+    })
+    return
+  }
+  if (type.kind == "TypeReference") {
     emitType(writer, type, path, "php")
     return
   }
   if (type.kind == "OptionalType") {
     writer.mapped("?", {mappingKind: "exact", node: type, path, role: "type"})
-    if (type.valueType.kind == "TypeReference" || type.valueType.kind == "RecordType") emitType(writer, type.valueType, `${path}/valueType`, "php")
+    if (type.valueType.kind == "RecordType") emitNativePhpType(writer, type.valueType, `${path}/valueType`)
+    else if (type.valueType.kind == "TypeReference") emitType(writer, type.valueType, `${path}/valueType`, "php")
     else writer.mapped("array", {mappingKind: "anchor", node: type, path})
     return
   }
 
   writer.mapped("array", {mappingKind: "exact", node: type, path, role: "type"})
+}
+
+/**
+ * Returns whether PHP has a faithful native carrier for one exact semantic type.
+ * @param {import("../semantic/types.js").SemanticFunctionReturnType} type - Semantic type.
+ * @returns {boolean} Whether a native annotation can be emitted.
+ */
+function hasNativePhpType(type) {
+  return type.kind != "TypeVariableReference" &&
+    !(type.kind == "OptionalType" && type.valueType.kind == "TypeVariableReference")
 }
 
 /**

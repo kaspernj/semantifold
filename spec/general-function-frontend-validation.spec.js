@@ -130,7 +130,7 @@ puts("x") { ping() }
       tsProgram("function choose(value: number = 1): number { return value }"),
       tsProgram("function choose(...value: number[]): number { return 1 }"),
       tsProgram("function choose(value: number): number;\nfunction choose(value: number): number { return value }"),
-      tsProgram("function choose<T>(value: number): number { return value }"),
+      tsProgram("function choose<T extends string>(value: T): T { return value }", "console.log(choose(\"x\"))"),
       tsProgram("class Holder { choose(value: number): number { return value } }", ""),
       tsProgram("function choose(callback: (value: number) => number): number { return callback(1) }", "console.log(choose((value) => value))"),
       tsProgram("function choose(value: number) { return value }"),
@@ -164,7 +164,7 @@ puts("x") { ping() }
     for (const source of cases) expectDiagnostic("php", source, ["UNSUPPORTED_SYNTAX", "MISSING_TYPE", "PARSE_ERROR"])
   })
 
-  it("rejects every excluded Java overload, instance, receiver, qualification, varargs, generic, constructor, and throws form", () => {
+  it("rejects every excluded Java overload, instance, receiver, qualification, varargs, generic bound, constructor, and throws form", () => {
     const method = "  private static int choose(int value) { return value; }"
     const cases = [
       javaProgram(`${method}\n  private static int choose(String value) { return 1; }`),
@@ -173,7 +173,7 @@ puts("x") { ping() }
       javaProgram(method, "System.out.println(Main.choose(1));"),
       `import static java.lang.Math.abs;\n${javaProgram(method)}`,
       javaProgram("  private static int choose(int... value) { return 1; }"),
-      javaProgram("  private static <T> int choose(int value) { return value; }"),
+      javaProgram("  private static <T extends String> T choose(T value) { return value; }", "System.out.println(choose(\"x\"));"),
       javaProgram("  private Main() {}\n" + method),
       javaProgram("  private static int choose(int value) throws Exception { return value; }")
     ]

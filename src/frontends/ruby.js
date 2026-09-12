@@ -48,10 +48,10 @@ import {withAdaptedOperation} from "../semantic/operators.js"
 import {withParserRanges} from "../semantic/provenance.js"
 import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
 import {requireSourceReturnType} from "./scalars.js"
-import {documentedValueType, iterationBindingType, iterationOperandType, recordType} from "./types.js"
+import {documentedValueType, iterationBindingType, iterationOperandType, recordType, sameValueType} from "./types.js"
 const parsePrism = await loadPrism()
-/** @typedef {{name: string, nameLocation: import("../semantic/types.js").SourceLocation, parameters: import("../semantic/types.js").Parameter[], returnType: import("../semantic/types.js").SemanticFunctionReturnType, location: import("../semantic/types.js").SourceLocation}} RubyFunctionSignature */
-/** @typedef {{bindings: Map<string, import("../semantic/types.js").SemanticBindingType>, errorNames: Map<string, import("../semantic/types.js").ErrorDeclaration>, errors: Map<string, import("../semantic/types.js").ErrorDeclaration>, functions: Map<string, RubyFunctionSignature>, records: Map<string, import("../semantic/types.js").RecordDeclaration>, recordNames: Map<string, import("../semantic/types.js").RecordDeclaration>, loopDepth?: number, returnType?: import("../semantic/types.js").SemanticFunctionReturnType}} RubyConversionContext */
+/** @typedef {{name: string, nameLocation: import("../semantic/types.js").SourceLocation, parameters: import("../semantic/types.js").Parameter[], returnType: import("../semantic/types.js").SemanticFunctionReturnType, typeParameters?: import("../semantic/types.js").TypeParameter[], location: import("../semantic/types.js").SourceLocation}} RubyFunctionSignature */
+/** @typedef {{bindings: Map<string, import("../semantic/types.js").SemanticBindingType>, errorNames: Map<string, import("../semantic/types.js").ErrorDeclaration>, errors: Map<string, import("../semantic/types.js").ErrorDeclaration>, functions: Map<string, RubyFunctionSignature>, records: Map<string, import("../semantic/types.js").RecordDeclaration>, recordNames: Map<string, import("../semantic/types.js").RecordDeclaration>, loopDepth?: number, returnType?: import("../semantic/types.js").SemanticFunctionReturnType, typeParameters?: Map<string, import("../semantic/types.js").TypeParameter>}} RubyConversionContext */
 const rubyBinaryOperations = new Map([
   ["+", "Add"],
   ["-", "Subtract"],
@@ -263,7 +263,8 @@ function convertExpression(node, filename, source, context, expectedType, preser
         convertExpression(argument, filename, source, context, declaration.fields[index]?.type)),
       kind: /** @type {const} */ ("RecordConstruction"),
       location,
-      record: recordType(/** @type {string} */ (declaration.id), nodeLocation(node.receiver, filename, source))
+      record: recordType(/** @type {string} */ (declaration.id), nodeLocation(node.receiver, filename, source),
+        expectedType?.kind == "RecordType" && expectedType.declarationId == declaration.id ? expectedType.arguments : undefined)
     }, {record: nodeLocation(node.receiver, filename, source)})
   }
 
@@ -550,13 +551,16 @@ function convertReturn(node, filename, source, context) {
  * @param {{location: import("@ruby/prism").Location}} node - Comment owner.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
- * @returns {{parameters: Map<string, {location: import("../semantic/types.js").SourceLocation, sourceType: string}>, returnType: {location: import("../semantic/types.js").SourceLocation, sourceType: string} | undefined}} Declared types.
+ * @param {string} [ownerId] - Stable declaration identity.
+ * @returns {{parameters: Map<string, {location: import("../semantic/types.js").SourceLocation, sourceType: string}>, returnType: {location: import("../semantic/types.js").SourceLocation, sourceType: string} | undefined, typeParameters?: import("../semantic/types.js").TypeParameter[]}} Declared types.
  */
-function typeComments(comments, node, filename, source) {
+function typeComments(comments, node, filename, source, ownerId) {
   const preceding = associatedComments(comments, node, source)
   const parameterTypes = new Map()
   /** @type {{location: import("../semantic/types.js").SourceLocation, sourceType: string} | undefined} */
   let returnType
+  /** @type {import("../semantic/types.js").TypeParameter[]} */
+  const typeParameters = []
 
   for (const comment of preceding) {
     const words = commentTokens(comment, filename, source)
@@ -569,12 +573,22 @@ function typeComments(comments, node, filename, source) {
     } else if (words[0]?.text == "@return" && words.length >= 2) {
       if (returnType) return unsupportedSyntax("ruby", "duplicate return annotation", words[1].location)
       returnType = joinedCommentToken(words, 1, source)
+    } else if (words[0]?.text == "@template" && words.length == 2 && ownerId &&
+      /^[A-Za-z_][A-Za-z0-9_]*$/u.test(words[1].text)) {
+      typeParameters.push(withParserRanges({
+        id: `${ownerId}:type:${typeParameters.length}`,
+        kind: /** @type {const} */ ("TypeParameter"),
+        location: words[1].location,
+        name: words[1].text
+      }, {name: words[1].location}))
+    } else if (words[0]?.text?.startsWith("@template")) {
+      return unsupportedSyntax("ruby", "bounded, defaulted, variant, or malformed type parameter", words[1]?.location ?? nodeLocation(node, filename, source))
     } else if (words[0]?.text?.startsWith("@param") || words[0]?.text?.startsWith("@return")) {
       return unsupportedSyntax("ruby", "malformed function type annotation", nodeLocation(node, filename, source))
     }
   }
 
-  return {parameters: parameterTypes, returnType}
+  return {parameters: parameterTypes, returnType, ...(typeParameters.length > 0 ? {typeParameters} : {})}
 }
 
 /**
@@ -663,9 +677,10 @@ function associatedComments(comments, node, source) {
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
  * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} recordNames - Record declarations by source name.
+ * @param {Map<string, import("../semantic/types.js").TypeParameter>} [typeParameters] - Declaration-scoped parameters.
  * @returns {{immutable: boolean, type: import("../semantic/types.js").SemanticValueType} | undefined} Metadata when present.
  */
-function localMetadata(comments, node, filename, source, recordNames) {
+function localMetadata(comments, node, filename, source, recordNames, typeParameters = new Map()) {
   const associated = associatedComments(comments, node, source)
   const metadata = associated.map((comment) => commentTokens(comment, filename, source))
   const typeMetadata = metadata.filter(([token]) => token?.text == "@type")
@@ -688,7 +703,7 @@ function localMetadata(comments, node, filename, source, recordNames) {
 
   return {
     immutable: immutableMetadata.length == 1,
-    type: convertType(declaredType.sourceType, `Local '${node.name}'`, location, source, declaredType.location, recordNames)
+    type: convertType(declaredType.sourceType, `Local '${node.name}'`, location, source, declaredType.location, recordNames, typeParameters)
   }
 }
 
@@ -706,7 +721,7 @@ function convertLocalStatement(node, comments, context, filename, source) {
 
   if (!(node instanceof LocalVariableWriteNode)) return unsupportedSyntax("ruby", node.constructor.name, location)
 
-  const metadata = localMetadata(comments, node, filename, source, context.recordNames)
+  const metadata = localMetadata(comments, node, filename, source, context.recordNames, context.typeParameters)
 
   if (metadata) {
     const semantic = withParserRanges({
@@ -1002,10 +1017,11 @@ function isImmediateCommentGap(gap) {
  * @param {string} source - Complete parser input.
  * @param {import("../semantic/types.js").SourceLocation} [typeLocation] - Exact type comment token location.
  * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} [recordNames] - Record declarations by source name.
+ * @param {Map<string, import("../semantic/types.js").TypeParameter>} [typeParameters] - Declaration-scoped parameters.
  * @returns {import("../semantic/types.js").SemanticValueType} Semantic type.
  */
-function convertType(sourceType, subject, location, source, typeLocation = location, recordNames = new Map()) {
-  return documentedValueType({language: "ruby", location: typeLocation, ownerLocation: location, records: recordNames, source, sourceType, subject})
+function convertType(sourceType, subject, location, source, typeLocation = location, recordNames = new Map(), typeParameters = new Map()) {
+  return documentedValueType({language: "ruby", location: typeLocation, ownerLocation: location, records: recordNames, source, sourceType, subject, typeParameters})
 }
 
 /**
@@ -1015,9 +1031,10 @@ function convertType(sourceType, subject, location, source, typeLocation = locat
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
  * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} recordNames - Record declarations by source name.
+ * @param {string} ownerId - Stable function identity.
  * @returns {RubyFunctionSignature} Semantic signature.
  */
-function convertFunctionSignature(node, comments, filename, source, recordNames) {
+function convertFunctionSignature(node, comments, filename, source, recordNames, ownerId) {
   const location = nodeLocation(node, filename, source)
   const parameterList = node.parameters
 
@@ -1035,7 +1052,8 @@ function convertFunctionSignature(node, comments, filename, source, recordNames)
     return unsupportedSyntax("ruby", "parameters", nodeLocation(unsupportedParameter, filename, source))
   }
 
-  const declaredTypes = typeComments(comments, node, filename, source)
+  const declaredTypes = typeComments(comments, node, filename, source, ownerId)
+  const typeParameterNames = new Map((declaredTypes.typeParameters ?? []).map((parameter) => [parameter.name, parameter]))
   const requiredParameters = parameterList?.requireds ?? []
   const extraAnnotation = [...declaredTypes.parameters.keys()].find((name) =>
     !requiredParameters.some((parameter) => parameter instanceof RequiredParameterNode && parameter.name == name))
@@ -1052,7 +1070,8 @@ function convertFunctionSignature(node, comments, filename, source, recordNames)
       kind: /** @type {const} */ ("Parameter"),
       location: parameterLocation,
       name: parameter.name,
-      type: convertType(declaredType?.sourceType, `Parameter '${parameter.name}'`, parameterLocation, source, declaredType?.location, recordNames)
+      type: convertType(declaredType?.sourceType, `Parameter '${parameter.name}'`, parameterLocation, source,
+        declaredType?.location, recordNames, typeParameterNames)
     }, {name: parameterLocation})
   })
   return {
@@ -1062,7 +1081,9 @@ function convertFunctionSignature(node, comments, filename, source, recordNames)
     parameters,
     returnType: declaredTypes.returnType?.sourceType == "[void]"
       ? requireSourceReturnType("ruby", "[void]", `Function '${node.name}' return`, location, declaredTypes.returnType.location)
-      : convertType(declaredTypes.returnType?.sourceType, `Function '${node.name}' return`, location, source, declaredTypes.returnType?.location, recordNames)
+      : convertType(declaredTypes.returnType?.sourceType, `Function '${node.name}' return`, location, source,
+        declaredTypes.returnType?.location, recordNames, typeParameterNames),
+    ...(declaredTypes.typeParameters ? {typeParameters: declaredTypes.typeParameters} : {})
   }
 }
 
@@ -1088,7 +1109,8 @@ function convertFunction(node, signature, functions, recordNames, records, error
     functions,
     recordNames,
     records,
-    returnType: signature.returnType
+    returnType: signature.returnType,
+    typeParameters: new Map((signature.typeParameters ?? []).map((parameter) => [parameter.name, parameter]))
   }
   const body = convertBlock(
     node.body instanceof StatementsNode ? node.body : null,
@@ -1105,7 +1127,8 @@ function convertFunction(node, signature, functions, recordNames, records, error
     location: signature.location,
     name: signature.name,
     parameters: signature.parameters,
-    returnType: signature.returnType
+    returnType: signature.returnType,
+    ...(signature.typeParameters ? {typeParameters: signature.typeParameters} : {})
   }, {name: signature.nameLocation})
 }
 
@@ -1143,6 +1166,7 @@ function convertRubyError(node, declaration, filename, source) {
  */
 function convertRubyRecord(node, declaration, recordNames, comments, filename, source) {
   const location = nodeLocation(node, filename, source)
+  const typeParameterNames = new Map((declaration.typeParameters ?? []).map((parameter) => [parameter.name, parameter]))
 
   if (!(node.constantPath instanceof ConstantReadNode) || node.superclass || node.inheritanceOperatorLoc) {
     return unsupportedSyntax("ruby", "record inheritance or qualified name", location)
@@ -1171,7 +1195,8 @@ function convertRubyRecord(node, declaration, recordNames, comments, filename, s
       kind: /** @type {const} */ ("RecordField"),
       location: fieldLocation,
       name: symbol.unescaped.value,
-      type: convertType(declaredType.sourceType, `Record field '${symbol.unescaped.value}'`, fieldLocation, source, declaredType.location, recordNames)
+      type: convertType(declaredType.sourceType, `Record field '${symbol.unescaped.value}'`, fieldLocation, source,
+        declaredType.location, recordNames, typeParameterNames)
     }
 
     return withParserRanges(field, {name: symbol.valueLoc ? prismLocation(symbol.valueLoc, filename, source) : fieldLocation})
@@ -1204,9 +1229,9 @@ function convertRubyRecord(node, declaration, recordNames, comments, filename, s
       return unsupportedSyntax("ruby", "record field not initialized exactly once", nodeLocation(assignment ?? initializer, filename, source))
     }
     const parameterType = convertType(annotated.sourceType, `Record initializer parameter '${parameter.name}'`,
-      nodeLocation(parameter, filename, source), source, annotated.location, recordNames)
+      nodeLocation(parameter, filename, source), source, annotated.location, recordNames, typeParameterNames)
 
-    if (JSON.stringify(parameterType) != JSON.stringify(field.type)) {
+    if (!sameValueType(parameterType, field.type)) {
       return unsupportedSyntax("ruby", "record reader/initializer type mismatch", annotated.location)
     }
   }
@@ -1366,13 +1391,23 @@ export function parseRuby({filename, source, program}) {
     location: nodeLocation(node, filename, source),
     name: node.name
   }))
-  const recordDeclarations = recordNodes.map((node, index) => ({
-    fields: [],
-    id: `record:${index}`,
-    kind: /** @type {const} */ ("RecordDeclaration"),
-    location: nodeLocation(node, filename, source),
-    name: node.name
-  }))
+  const recordDeclarations = recordNodes.map((node, index) => {
+    const id = `record:${index}`
+    const documented = typeComments(result.comments, node, filename, source, id)
+
+    if (documented.parameters.size || documented.returnType) {
+      return unsupportedSyntax("ruby", "function type annotation on record declaration", nodeLocation(node, filename, source))
+    }
+
+    return {
+      fields: [],
+      id,
+      kind: /** @type {const} */ ("RecordDeclaration"),
+      location: nodeLocation(node, filename, source),
+      name: node.name,
+      ...(documented.typeParameters ? {typeParameters: documented.typeParameters} : {})
+    }
+  })
   const recordNames = new Map(program?.records ?? [])
   const errorNames = new Map(program?.errors ?? [])
   for (const declaration of errorDeclarations) errorNames.set(declaration.name, declaration)
@@ -1383,13 +1418,15 @@ export function parseRuby({filename, source, program}) {
   const records = recordNodes.map((node, index) =>
     convertRubyRecord(node, recordDeclarations[index], recordNames, result.comments, filename, source))
   const functionNodes = body.filter((node) => node instanceof DefNode)
-  const signatures = functionNodes.map((node) => convertFunctionSignature(node, result.comments, filename, source, recordNames))
+  const signatures = functionNodes.map((node, index) =>
+    convertFunctionSignature(node, result.comments, filename, source, recordNames, `function:${index}`))
   const functionSignatures = new Map([...(program?.functions ?? [])].map(([localName, declaration]) => [localName, {
     location: declaration.location,
     name: localName,
     nameLocation: declaration.location,
     parameters: declaration.parameters,
-    returnType: declaration.returnType
+    returnType: declaration.returnType,
+    ...(declaration.typeParameters ? {typeParameters: declaration.typeParameters} : {})
   }]))
   for (const signature of signatures) functionSignatures.set(signature.name, signature)
   const functions = functionNodes.map((node, index) =>

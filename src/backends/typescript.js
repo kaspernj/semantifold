@@ -35,6 +35,7 @@ export function generateTypeScript(module, writer) {
     writer.mapped("class", {mappingKind: "anchor", node: record, path: recordPath})
     writer.synthetic(" ", "record declaration spacing", [record], [recordPath])
     writer.mapped(record.name, {mappingKind: "exact", node: record, path: recordPath, role: "name"})
+    emitTypeParameters(writer, record.typeParameters ?? [], `${recordPath}/typeParameters`)
     writer.synthetic(" {\n  constructor(", "TypeScript record constructor scaffolding", [record], [recordPath])
     record.fields.forEach((field, fieldIndex) => {
       const fieldPath = `${recordPath}/fields/${fieldIndex}`
@@ -56,6 +57,7 @@ export function generateTypeScript(module, writer) {
     writer.mapped("function", {mappingKind: "anchor", node: declaration})
     writer.synthetic(" ", "function spacing", [declaration])
     writer.mapped(declaration.name, {mappingKind: "exact", node: declaration, role: "name"})
+    emitTypeParameters(writer, declaration.typeParameters ?? [], `/functions/${functionIndex}/typeParameters`)
     writer.mapped("(", {mappingKind: "anchor", node: declaration})
     declaration.parameters.forEach((parameter, index) => {
       const parameterPath = `/functions/${functionIndex}/parameters/${index}`
@@ -81,6 +83,22 @@ export function generateTypeScript(module, writer) {
     writer.synthetic("\n\n", "entry-point separator", [module.entryPoint])
     emitBlock(writer, module.entryPoint.body, "", "/entryPoint/body", canonicalizeZero)
   }
+}
+
+/**
+ * Emits native invariant TypeScript declaration parameters.
+ * @param {import("./writer.js").SourceWriter} writer - Source-aware writer.
+ * @param {import("../semantic/types.js").TypeParameter[]} parameters - Ordered type parameters.
+ * @param {string} path - Type-parameter collection path.
+ */
+function emitTypeParameters(writer, parameters, path) {
+  if (parameters.length == 0) return
+  writer.synthetic("<", "TypeScript type parameter open", parameters)
+  parameters.forEach((parameter, index) => {
+    if (index) writer.synthetic(", ", "TypeScript type parameter separator", parameters)
+    writer.mapped(parameter.name, {mappingKind: "exact", node: parameter, path: `${path}/${index}`, role: "name"})
+  })
+  writer.synthetic(">", "TypeScript type parameter close", parameters)
 }
 
 /**

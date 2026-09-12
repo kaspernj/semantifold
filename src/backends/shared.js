@@ -33,6 +33,7 @@ const task007Languages = new Set(["php", "ruby", "javascript", "typescript", "ja
 const task008Languages = new Set(["php", "ruby", "javascript", "typescript", "java"])
 const task009Languages = new Set(["php", "ruby", "javascript", "typescript", "java"])
 const task011Languages = new Set(["php", "ruby", "javascript", "typescript", "java"])
+const task012Languages = new Set(["php", "ruby", "javascript", "typescript", "java"])
 const javaObjectInstanceMethodSignatures = new Set([
   "clone()", "equals(Object)", "finalize()", "getClass()", "hashCode()", "notify()", "notifyAll()", "toString()",
   "wait()", "wait(long)", "wait(long,int)"
@@ -62,6 +63,9 @@ export function validateBackendModule(module, language, options = {}) {
   if (module.functions.length == 0 && (!options.program ||
     records.length == 0 && errors.length == 0 && module.entryPoint.body?.statements?.length == 0)) {
     unsupportedCapability(language, "module without declarations or executable entry", module.location)
+  }
+  if (!task012Languages.has(language) && moduleHasTypeParameters(module)) {
+    unsupportedCapability(language, "Task 012 type parameters and generic declarations", module.location)
   }
   if (records.length > 0 && !task009Languages.has(language)) {
     unsupportedCapability(language, "Task 009 closed records", records[0]?.location ?? module.location)
@@ -99,6 +103,7 @@ export function validateBackendModule(module, language, options = {}) {
       unsupportedCapability(language, "duplicate or invalid function declaration identity", functionDeclaration.location)
     }
     declarationIds.add(functionDeclaration.id)
+    validateTypeParameterTargets(functionDeclaration, language)
 
     if (!task005Languages.has(language) && functionDeclaration.parameters.length != 2) {
       unsupportedCapability(language, "function parameter count other than two", functionDeclaration.location)
@@ -248,7 +253,7 @@ function validateRecordTargets(records, functions, language, moduleLocation) {
       : ""
 
     if (!record || typeof record != "object" || Array.isArray(record) || record.kind != "RecordDeclaration" ||
-      recordKeys != "fields,id,kind,location,name" || !isDenseArray(record.fields)) {
+      !["fields,id,kind,location,name", "fields,id,kind,location,name,typeParameters"].includes(recordKeys) || !isDenseArray(record.fields)) {
       unsupportedCapability(language, "missing or invalid record declaration", location)
     }
     requireSemanticLocation(record.location, language, "record declaration location", moduleLocation)
@@ -258,6 +263,7 @@ function validateRecordTargets(records, functions, language, moduleLocation) {
       unsupportedCapability(language, "duplicate or invalid record declaration identity", record.location)
     }
     declarationIds.add(record.id)
+    validateTypeParameterTargets(record, language)
     const targetName = language == "php" ? record.name.toLowerCase() : record.name
 
     if (targetNames.has(targetName)) unsupportedCapability(language, `record declaration collision '${record.name}'`, record.location)
@@ -293,6 +299,59 @@ function validateRecordTargets(records, functions, language, moduleLocation) {
       fieldNames.add(normalized)
     }
   }
+}
+
+/**
+ * Validates one declaration's target-visible type-parameter names and identities.
+ * @param {import("../semantic/types.js").FunctionDeclaration | import("../semantic/types.js").RecordDeclaration} declaration - Owner.
+ * @param {import("../semantic/types.js").BackendLanguage} language - Target language.
+ * @returns {void}
+ */
+function validateTypeParameterTargets(declaration, language) {
+  if (declaration.typeParameters === undefined) return
+  if (!isDenseArray(declaration.typeParameters)) {
+    unsupportedCapability(language, "missing or invalid type parameter declarations", declaration.location)
+  }
+  const names = new Set()
+  /**
+   * Normalizes a type/value spelling for target collision checks.
+   * @param {string} name - Candidate target name.
+   * @returns {string} Target comparison key.
+   */
+  const targetKey = (name) => language == "php" ? name.toLowerCase() : name
+  const valueNames = new Set([
+    declaration.name,
+    ...(declaration.kind == "FunctionDeclaration" ? declaration.parameters : declaration.fields).map(({name}) => name)
+  ].map(targetKey))
+
+  for (let index = 0; index < declaration.typeParameters.length; index += 1) {
+    const parameter = declaration.typeParameters[index]
+    const keys = parameter && typeof parameter == "object" && !Array.isArray(parameter)
+      ? Object.keys(parameter).filter((key) => key != "sourceProvenance").sort().join(",") : ""
+
+    if (!parameter || parameter.kind != "TypeParameter" || keys != "id,kind,location,name" ||
+      parameter.id != `${declaration.id}:type:${index}`) {
+      unsupportedCapability(language, "missing or invalid type parameter declaration", parameter?.location ?? declaration.location)
+    }
+    requireSemanticLocation(parameter.location, language, "type parameter location", declaration.location)
+    validateTargetTypeIdentifier(language, parameter.name, parameter.location)
+    const normalized = targetKey(parameter.name)
+
+    if (names.has(normalized) || valueNames.has(normalized)) {
+      unsupportedCapability(language, `target type parameter collision '${parameter.name}'`, parameter.location)
+    }
+    names.add(normalized)
+  }
+}
+
+/**
+ * Detects Task 012 IR before a non-cohort backend reaches older feature checks.
+ * @param {import("../semantic/types.js").SemanticModule} module - Candidate module.
+ * @returns {boolean} Whether generic declarations are present.
+ */
+function moduleHasTypeParameters(module) {
+  return [...module.records ?? [], ...module.functions].some((declaration) =>
+    Array.isArray(declaration?.typeParameters) && declaration.typeParameters.length > 0)
 }
 
 /**
@@ -1329,12 +1388,27 @@ function knownIntegerValue(expression) {
  * @returns {void}
  */
 export function emitType(writer, type, path, language, javaBoxed = false) {
+  if (type.kind == "TypeVariableReference") {
+    const parameter = writer.typeParameterForId(type.parameterId)
+
+    writer.mapped(parameter.name, {mappingKind: "exact", name: parameter.name, node: type, path, role: "type"})
+    return
+  }
   if (type.kind == "RecordType") {
     const record = writer.recordForId(type.declarationId)
 
     writer.mapped(writer.recordNameForId(type.declarationId), {
       mappingKind: "exact", name: record.name, node: type, path, role: "type"
     })
+    if (type.arguments) {
+      writer.mapped(language == "ruby" ? "[" : "<", {mappingKind: "anchor", node: type, path})
+      type.arguments.forEach((argument, index) => {
+        if (index > 0) writer.synthetic(language == "php" || language == "ruby" || language == "java" ? "," : ", ",
+          "generic type argument separator", [type], [path])
+        emitType(writer, argument, `${path}/arguments/${index}`, language, language == "java")
+      })
+      writer.mapped(language == "ruby" ? "]" : ">", {mappingKind: "anchor", node: type, path})
+    }
     return
   }
   if (type.kind == "TypeReference") {
@@ -1516,9 +1590,19 @@ export function emitExpression(writer, expression, path, language, emitIdentifie
   if (expression.kind == "RecordConstruction") {
     const record = writer.recordForId(expression.record.declarationId)
     const targetName = writer.recordNameForId(expression.record.declarationId, true)
-    const prefix = language == "ruby" ? `${targetName}.new(` : `new ${targetName}(`
+    const prefix = language == "ruby" ? `${targetName}.new` : `new ${targetName}`
 
     writer.mapped(prefix, {mappingKind: "exact", name: record.name, node: expression, path, role: "record"})
+    if ((language == "typescript" || language == "java") && expression.record.arguments) {
+      writer.mapped("<", {mappingKind: "anchor", node: expression.record, path: `${path}/record`})
+      expression.record.arguments.forEach((argument, index) => {
+        if (index > 0) writer.synthetic(language == "java" ? "," : ", ", "generic construction argument separator",
+          [expression.record], [`${path}/record`])
+        emitType(writer, argument, `${path}/record/arguments/${index}`, language, language == "java")
+      })
+      writer.mapped(">", {mappingKind: "anchor", node: expression.record, path: `${path}/record`})
+    }
+    writer.mapped("(", {mappingKind: "anchor", node: expression, path})
     expression.arguments.forEach((argument, index) => {
       if (index > 0) writer.synthetic(", ", "record argument separator", [expression], [path])
       emitExpression(writer, argument, `${path}/arguments/${index}`, language, emitIdentifier)
@@ -1529,7 +1613,10 @@ export function emitExpression(writer, expression, path, language, emitIdentifie
   if (expression.kind == "MemberRead") {
     emitExpression(writer, expression.receiver, `${path}/receiver`, language, emitIdentifier)
     const field = writer.fieldForId(expression.field)
-    const spelling = language == "php" ? `->${field.name}` : language == "java" ? `.${field.name}()` : `.${field.name}`
+    const phpGenericRecord = language == "php" &&
+      (writer.recordForFieldId(expression.field).typeParameters?.length ?? 0) > 0
+    const spelling = language == "php" ? `->${field.name}${phpGenericRecord ? "()" : ""}` :
+      language == "java" ? `.${field.name}()` : `.${field.name}`
 
     writer.mapped(spelling, {mappingKind: "exact", node: expression, path, role: "member"})
     return

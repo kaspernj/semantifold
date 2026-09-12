@@ -1,0 +1,1 @@
+Add invariant unbounded type parameters and closed generic declarations/applications for PHP, Ruby, JavaScript/JSDoc, TypeScript, and Java. Calls now infer complete first-order substitutions from arguments, generic records substitute fields recursively, dynamic targets preserve exact reparsable type documentation, and unsupported targets reject generic IR transactionally.

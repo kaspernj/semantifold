@@ -58,6 +58,7 @@ export function generateJava(module, writer) {
       {mappingKind: "anchor", node: record, path: recordPath})
     writer.synthetic(" ", "record declaration spacing", [record], [recordPath])
     writer.mapped(record.name, {mappingKind: "exact", node: record, path: recordPath, role: "name"})
+    emitTypeParameters(writer, record.typeParameters ?? [], `${recordPath}/typeParameters`)
     writer.synthetic(" {\n", "Java record class scaffolding", [record], [recordPath])
     record.fields.forEach((field, fieldIndex) => {
       const fieldPath = `${recordPath}/fields/${fieldIndex}`
@@ -121,6 +122,8 @@ export function generateJava(module, writer) {
     writer.mapped(programModule && writer.isExported(declaration.id) ? "public static" : "private static",
       {mappingKind: "anchor", node: declaration})
     writer.synthetic(" ", "method spacing", [declaration])
+    emitTypeParameters(writer, declaration.typeParameters ?? [], `/functions/${functionIndex}/typeParameters`)
+    if ((declaration.typeParameters?.length ?? 0) > 0) writer.synthetic(" ", "generic method spacing", [declaration])
     emitType(writer, declaration.returnType, `/functions/${functionIndex}/returnType`, "java")
     writer.synthetic(" ", "method spacing", [declaration])
     writer.mapped(declaration.name, {mappingKind: "exact", node: declaration, role: "name"})
@@ -159,6 +162,22 @@ export function generateJava(module, writer) {
     writer.mapped("}", {mappingKind: "anchor", node: module.entryPoint})
   }
   writer.synthetic("\n}\n", "Java class scaffolding", [module])
+}
+
+/**
+ * Emits native invariant Java declaration parameters.
+ * @param {import("./writer.js").SourceWriter} writer - Source-aware writer.
+ * @param {import("../semantic/types.js").TypeParameter[]} parameters - Ordered type parameters.
+ * @param {string} path - Type-parameter collection path.
+ */
+function emitTypeParameters(writer, parameters, path) {
+  if (parameters.length == 0) return
+  writer.synthetic("<", "Java type parameter open", parameters)
+  parameters.forEach((parameter, index) => {
+    if (index) writer.synthetic(", ", "Java type parameter separator", parameters)
+    writer.mapped(parameter.name, {mappingKind: "exact", node: parameter, path: `${path}/${index}`, role: "name"})
+  })
+  writer.synthetic(">", "Java type parameter close", parameters)
 }
 
 /**
