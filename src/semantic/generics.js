@@ -36,16 +36,23 @@ export function substituteValueType(type, substitutions) {
 }
 
 /**
- * Checks whether a recursive type contains any declaration-scoped variable.
+ * Checks whether a recursive type contains any declaration-scoped variable
+ * outside an explicitly visible identity set.
  * @param {import("./types.js").SemanticValueType} type - Candidate open type.
- * @returns {boolean} Whether any type variable occurs.
+ * @param {Set<string>} [visibleParameterIds] - Exact variable identities permitted by the caller's lexical scope.
+ * @returns {boolean} Whether any non-visible type variable occurs.
  */
-export function typeContainsAnyVariable(type) {
-  if (type.kind == "TypeVariableReference") return true
-  if (type.kind == "RecordType") return type.arguments?.some(typeContainsAnyVariable) ?? false
-  if (type.kind == "ListType") return typeContainsAnyVariable(type.elementType)
-  if (type.kind == "MapType") return typeContainsAnyVariable(type.keyType) || typeContainsAnyVariable(type.valueType)
-  if (type.kind == "OptionalType") return typeContainsAnyVariable(type.valueType)
+export function typeContainsAnyVariable(type, visibleParameterIds = new Set()) {
+  if (type.kind == "TypeVariableReference") return !visibleParameterIds.has(type.parameterId)
+  if (type.kind == "RecordType") {
+    return type.arguments?.some((argument) => typeContainsAnyVariable(argument, visibleParameterIds)) ?? false
+  }
+  if (type.kind == "ListType") return typeContainsAnyVariable(type.elementType, visibleParameterIds)
+  if (type.kind == "MapType") {
+    return typeContainsAnyVariable(type.keyType, visibleParameterIds) ||
+      typeContainsAnyVariable(type.valueType, visibleParameterIds)
+  }
+  if (type.kind == "OptionalType") return typeContainsAnyVariable(type.valueType, visibleParameterIds)
 
   return false
 }

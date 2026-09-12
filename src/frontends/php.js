@@ -6,9 +6,10 @@ import {missingType, parseFailure, unsupportedSyntax} from "../diagnostic.js"
 import {locationFromOffsets, moduleLocation} from "../semantic/location.js"
 import {withAdaptedOperation} from "../semantic/operators.js"
 import {withParserRanges} from "../semantic/provenance.js"
-import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
+import {hasOnlyUnicodeScalars, scalarType} from "../semantic/scalars.js"
+import {typeContainsAnyVariable} from "../semantic/generics.js"
 import {requireSourceReturnType, requireSourceScalarType, sourceScalarType} from "./scalars.js"
-import {documentedValueType, instantiatedRecordFieldType, iterationBindingType, iterationOperandType, knownCallReturnType, optionalType, preservesGenericOptionalEvidence, recordType, sameValueType} from "./types.js"
+import {documentedValueType, instantiatedRecordFieldType, iterationBindingType, iterationOperandType, knownCallParameterTypes, knownCallReturnType, optionalType, preservesGenericOptionalEvidence, recordType, sameValueType} from "./types.js"
 const parser = new PhpParser.Engine({
   ast: {withPositions: true},
   parser: {extractDoc: true, suppressErrors: false}
@@ -274,8 +275,14 @@ function convertExpression(node, filename, source, context, expectedType, preser
     const declaration = context.recordNames.get(name.name)
 
     if (!declaration) return unsupportedSyntax("php", "construction of a non-record class", nodeLocation(construction.what, filename, source))
-    const typeArguments = expectedType?.kind == "RecordType" && expectedType.declarationId == declaration.id
+    const contextualTypeArguments = expectedType?.kind == "RecordType" && expectedType.declarationId == declaration.id
       ? expectedType.arguments
+      : undefined
+    const visibleTypeParameterIds = new Set([...context.typeParameters?.values() ?? []]
+      .map((parameter) => /** @type {string} */ (parameter.id)))
+    const typeArguments = contextualTypeArguments &&
+      !contextualTypeArguments.some((argument) => typeContainsAnyVariable(argument, visibleTypeParameterIds))
+      ? contextualTypeArguments
       : undefined
 
     return withParserRanges({
@@ -443,10 +450,13 @@ function convertExpression(node, filename, source, context, expectedType, preser
     const callee = calledName.name
 
     const signature = context.functions.get(callee)
+    const knownArguments = call.arguments.map((argument) => knownCallArgumentType(argument, context))
+    const parameterTypes = signature ? knownCallParameterTypes(signature, knownArguments) : undefined
 
     return withParserRanges({
       arguments: call.arguments.map((argument, index) =>
-        convertExpression(argument, filename, source, context, signature?.parameters[index]?.type,
+        convertExpression(argument, filename, source, context,
+          parameterTypes?.[index] ?? signature?.parameters[index]?.type,
           preservesGenericOptionalEvidence(signature, index))),
       callee,
       kind: "CallExpression",
@@ -512,6 +522,31 @@ function knownExpressionType(node, context) {
 
       return instantiatedRecordFieldType(declaration, receiver.arguments, index)
     }
+  }
+
+  return undefined
+}
+
+/**
+ * Resolves exact parser-known argument evidence without changing the established
+ * expression-result classifier used for optional conversion.
+ * @param {import("php-parser").Expression} node - Parser-owned call argument.
+ * @param {PhpConversionContext} context - Typed conversion context.
+ * @returns {import("../semantic/types.js").SemanticFunctionReturnType | import("../semantic/types.js").ErrorType | undefined} Known argument type.
+ */
+function knownCallArgumentType(node, context) {
+  const known = knownExpressionType(node, context)
+
+  if (known) return known
+  if (node.kind == "number" && Number.isSafeInteger(Number(/** @type {import("php-parser").Number} */ (node).value))) {
+    return scalarType("integer")
+  }
+  if (node.kind == "boolean" && typeof /** @type {import("php-parser").Boolean} */ (node).value == "boolean") {
+    return scalarType("boolean")
+  }
+  if (node.kind == "string" && typeof /** @type {import("php-parser").String} */ (node).value == "string" &&
+    hasOnlyUnicodeScalars(/** @type {import("php-parser").String} */ (node).value)) {
+    return scalarType("string")
   }
 
   return undefined
