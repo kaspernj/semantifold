@@ -490,10 +490,12 @@ export function semanticEntries(module) {
       }
       if (node.entryPoint) visit(node.entryPoint, "/entryPoint", location)
     } else if (node.kind == "RecordDeclaration") {
+      ;(node.typeParameters ?? []).forEach((child, index) => visit(child, `${path}/typeParameters/${index}`, location))
       node.fields.forEach((child, index) => visit(child, `${path}/fields/${index}`, location))
     } else if (node.kind == "RecordField") {
       visit(node.type, `${path}/type`, location)
     } else if (node.kind == "FunctionDeclaration") {
+      ;(node.typeParameters ?? []).forEach((child, index) => visit(child, `${path}/typeParameters/${index}`, location))
       node.parameters.forEach((child, index) => visit(child, `${path}/parameters/${index}`, location))
       visit(node.returnType, `${path}/returnType`, location)
       visit(node.body, `${path}/body`, location)
@@ -512,6 +514,8 @@ export function semanticEntries(module) {
       visit(node.valueType, `${path}/valueType`, location)
     } else if (node.kind == "OptionalType") {
       visit(node.valueType, `${path}/valueType`, location)
+    } else if (node.kind == "RecordType") {
+      ;(node.arguments ?? []).forEach((child, index) => visit(child, `${path}/arguments/${index}`, location))
     } else if (node.kind == "LocalDeclaration") {
       visit(node.type, `${path}/type`, location)
       visit(node.initializer, `${path}/initializer`, location)
@@ -596,12 +600,19 @@ function resolveSymbols(module, records) {
   const errorSymbols = new Map()
   /** @type {Map<string, string>} */
   const fieldSymbols = new Map()
+  /** @type {Map<string, string>} */
+  const typeParameterSymbols = new Map()
 
   for (const [index, declaration] of (module.records ?? []).entries()) {
     const declarationPath = `/records/${index}`
     const symbol = declare(declaration, declaration.name, "record", declarationPath)
 
     if (declaration.id) recordSymbols.set(declaration.id, symbol)
+    for (const [parameterIndex, parameter] of (declaration.typeParameters ?? []).entries()) {
+      const parameterSymbol = declare(parameter, parameter.name, "typeParameter", `${declarationPath}/typeParameters/${parameterIndex}`)
+
+      if (parameter.id) typeParameterSymbols.set(parameter.id, parameterSymbol)
+    }
     for (const [fieldIndex, field] of declaration.fields.entries()) {
       const fieldPath = `${declarationPath}/fields/${fieldIndex}`
       const fieldSymbol = declare(field, field.name, "field", fieldPath)
@@ -623,7 +634,14 @@ function resolveSymbols(module, records) {
   }
 
   for (const [index, declaration] of module.functions.entries()) {
-    functions.set(declaration.name, declare(declaration, declaration.name, "function", `/functions/${index}`))
+    const declarationPath = `/functions/${index}`
+
+    functions.set(declaration.name, declare(declaration, declaration.name, "function", declarationPath))
+    for (const [parameterIndex, parameter] of (declaration.typeParameters ?? []).entries()) {
+      const parameterSymbol = declare(parameter, parameter.name, "typeParameter", `${declarationPath}/typeParameters/${parameterIndex}`)
+
+      if (parameter.id) typeParameterSymbols.set(parameter.id, parameterSymbol)
+    }
   }
 
   for (const [index, declaration] of module.functions.entries()) {
@@ -644,7 +662,7 @@ function resolveSymbols(module, records) {
 
   /**
    * Declares one canonical symbol.
-   * @param {import("./types.js").RecordDeclaration | import("./types.js").ErrorDeclaration | import("./types.js").RecordField | import("./types.js").FunctionDeclaration | import("./types.js").Parameter | import("./types.js").LocalDeclaration | import("./types.js").ValueBinding | import("./types.js").CatchBinding} node - Declaration.
+   * @param {import("./types.js").RecordDeclaration | import("./types.js").ErrorDeclaration | import("./types.js").RecordField | import("./types.js").FunctionDeclaration | import("./types.js").TypeParameter | import("./types.js").Parameter | import("./types.js").LocalDeclaration | import("./types.js").ValueBinding | import("./types.js").CatchBinding} node - Declaration.
    * @param {string} name - Symbol name.
    * @param {import("./types.js").SemanticSymbolKind} kind - Symbol kind.
    * @param {string} path - Declaration occurrence path.
@@ -666,8 +684,8 @@ function resolveSymbols(module, records) {
       location,
       name,
       references: [],
-      ...(["record", "error", "field", "function"].includes(kind)
-        ? {semanticDeclarationId: /** @type {import("./types.js").RecordDeclaration | import("./types.js").ErrorDeclaration | import("./types.js").RecordField | import("./types.js").FunctionDeclaration} */ (node).id}
+      ...(["record", "error", "field", "function", "typeParameter"].includes(kind)
+        ? {semanticDeclarationId: /** @type {import("./types.js").RecordDeclaration | import("./types.js").ErrorDeclaration | import("./types.js").RecordField | import("./types.js").FunctionDeclaration | import("./types.js").TypeParameter} */ (node).id}
         : {})
     })
 
@@ -792,7 +810,11 @@ function resolveSymbols(module, records) {
    * @returns {void}
    */
   function visitType(type, path) {
-    if (type.kind == "RecordType") reference(type, recordSymbols.get(type.declarationId), "type", path)
+    if (type.kind == "TypeVariableReference") reference(type, typeParameterSymbols.get(type.parameterId), "type", path)
+    else if (type.kind == "RecordType") {
+      reference(type, recordSymbols.get(type.declarationId), "type", path)
+      for (const [index, argument] of (type.arguments ?? []).entries()) visitType(argument, `${path}/arguments/${index}`)
+    }
     else if (type.kind == "ErrorType") reference(type, errorSymbols.get(type.declarationId), "type", path)
     else if (type.kind == "ListType") visitType(type.elementType, `${path}/elementType`)
     else if (type.kind == "MapType") {
@@ -803,7 +825,7 @@ function resolveSymbols(module, records) {
 
   /**
    * Attaches one resolved symbol reference.
-   * @param {import("./types.js").IdentifierExpression | import("./types.js").CallExpression | import("./types.js").RecordType | import("./types.js").RecordConstruction | import("./types.js").MemberRead | import("./types.js").ErrorType | import("./types.js").ErrorConstruction} node - Reference node.
+   * @param {import("./types.js").IdentifierExpression | import("./types.js").CallExpression | import("./types.js").TypeVariableReference | import("./types.js").RecordType | import("./types.js").RecordConstruction | import("./types.js").MemberRead | import("./types.js").ErrorType | import("./types.js").ErrorConstruction} node - Reference node.
    * @param {string | undefined} symbolId - Resolved symbol.
    * @param {"type" | "construct" | "member" | "read" | "write" | "call"} role - Reference role.
    * @param {string} path - Reference occurrence path.

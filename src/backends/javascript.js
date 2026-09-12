@@ -31,6 +31,7 @@ export function generateJavaScript(module, writer) {
     const recordPath = `/records/${recordIndex}`
 
     if (recordIndex > 0) writer.synthetic("\n\n", "record declaration separator", [record], [recordPath])
+    emitTemplateDocumentation(writer, record.typeParameters ?? [], `${recordPath}/typeParameters`, "JavaScript")
     if (writer.isDirectlyExported(record.id)) writer.synthetic("export ", "ESM record export", [record], [recordPath])
     writer.mapped("class", {mappingKind: "anchor", node: record, path: recordPath})
     writer.synthetic(" ", "record declaration spacing", [record], [recordPath])
@@ -68,6 +69,13 @@ export function generateJavaScript(module, writer) {
     if (functionIndex > 0) writer.synthetic("\n\n", "declaration separator", [declaration])
 
     writer.synthetic("/**\n * Generated semantic function.\n", "JavaScript type scaffolding", [declaration])
+    for (const [parameterIndex, parameter] of (declaration.typeParameters ?? []).entries()) {
+      writer.synthetic(" * @template ", "JavaScript type parameter scaffolding", [parameter], [`/functions/${functionIndex}/typeParameters/${parameterIndex}`])
+      writer.mapped(parameter.name, {
+        mappingKind: "exact", node: parameter, path: `/functions/${functionIndex}/typeParameters/${parameterIndex}`, role: "name"
+      })
+      writer.synthetic("\n", "line break", [parameter])
+    }
     for (const [parameterIndex, parameter] of declaration.parameters.entries()) {
       const parameterPath = `/functions/${functionIndex}/parameters/${parameterIndex}`
 
@@ -108,6 +116,24 @@ export function generateJavaScript(module, writer) {
     writer.synthetic("\n\n", "entry-point separator", [module.entryPoint])
     emitBlock(writer, module.entryPoint.body, "", "/entryPoint/body", canonicalizeZero)
   }
+}
+
+/**
+ * Emits a standalone JSDoc template block.
+ * @param {import("./writer.js").SourceWriter} writer - Source-aware writer.
+ * @param {import("../semantic/types.js").TypeParameter[]} parameters - Ordered type parameters.
+ * @param {string} path - Type-parameter collection path.
+ * @param {string} target - Target label.
+ */
+function emitTemplateDocumentation(writer, parameters, path, target) {
+  if (parameters.length == 0) return
+  writer.synthetic("/**\n", `${target} type parameter scaffolding`, parameters)
+  parameters.forEach((parameter, index) => {
+    writer.synthetic(" * @template ", `${target} type parameter scaffolding`, [parameter], [`${path}/${index}`])
+    writer.mapped(parameter.name, {mappingKind: "exact", node: parameter, path: `${path}/${index}`, role: "name"})
+    writer.synthetic("\n", "line break", [parameter])
+  })
+  writer.synthetic(" */\n", `${target} type parameter scaffolding`, parameters)
 }
 
 /**

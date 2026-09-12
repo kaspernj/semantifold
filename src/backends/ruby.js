@@ -45,6 +45,7 @@ export function generateRuby(module, writer) {
     const recordPath = `/records/${recordIndex}`
 
     if (recordIndex > 0) writer.synthetic("\n\n", "record declaration separator", [record], [recordPath])
+    emitTemplateComments(writer, record.typeParameters ?? [], `${recordPath}/typeParameters`)
     writer.mapped("class", {mappingKind: "anchor", node: record, path: recordPath})
     writer.synthetic(" ", "record declaration spacing", [record], [recordPath])
     writer.mapped(record.name, {mappingKind: "exact", node: record, path: recordPath, role: "name"})
@@ -90,6 +91,7 @@ export function generateRuby(module, writer) {
   module.functions.forEach((declaration, functionIndex) => {
     if (functionIndex > 0) writer.synthetic("\n\n", "declaration separator", [declaration])
 
+    emitTemplateComments(writer, declaration.typeParameters ?? [], `/functions/${functionIndex}/typeParameters`)
     for (const [parameterIndex, parameter] of declaration.parameters.entries()) {
       const parameterPath = `/functions/${functionIndex}/parameters/${parameterIndex}`
 
@@ -141,6 +143,20 @@ export function generateRuby(module, writer) {
     emitBlock(writer, module.entryPoint.body, "", "/entryPoint/body")
   }
   if (writer.program) writer.synthetic("\nend\n", "Ruby semantic module close", [module])
+}
+
+/**
+ * Emits exact RDoc declaration parameters.
+ * @param {import("./writer.js").SourceWriter} writer - Source-aware writer.
+ * @param {import("../semantic/types.js").TypeParameter[]} parameters - Ordered type parameters.
+ * @param {string} path - Type-parameter collection path.
+ */
+function emitTemplateComments(writer, parameters, path) {
+  parameters.forEach((parameter, index) => {
+    writer.synthetic("# @template ", "Ruby type parameter scaffolding", [parameter], [`${path}/${index}`])
+    writer.mapped(parameter.name, {mappingKind: "exact", node: parameter, path: `${path}/${index}`, role: "name"})
+    writer.synthetic("\n", "line break", [parameter])
+  })
 }
 
 /**

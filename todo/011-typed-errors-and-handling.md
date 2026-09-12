@@ -1,6 +1,6 @@
 # 011 — Typed errors and handling
 
-- Status: `implemented locally; independent review / exact-head TensorBuzz CI / merge pending`
+- Status: `delivered via PR #38 at 4c5a0a9c70305fcc69077088e90a2971a05ad15d`
 - Phase/priority: Phase 2 / P2 (conditional)
 - Dependencies: [004-statement-sequencing-and-conditionals.md](004-statement-sequencing-and-conditionals.md), [007-optional-values-and-presence-narrowing.md](007-optional-values-and-presence-narrowing.md), [009-closed-records-and-member-access.md](009-closed-records-and-member-access.md)
 
@@ -82,4 +82,4 @@ The implementation adds parser-neutral nominal error declarations/types, exact s
 
 Focused specs cover semantic flow and malformed IR, parser acceptance/rejection, all five generation/reparse routes, public registry truthfulness, provenance/mapping identities, and a five-module project executed through real PHP, Ruby, Node, `tsc` plus Node, and `javac` plus Java. The runtime proof retains exported error identity while demonstrating normal return, transitive call effects, exact handling, and propagation from an inner handler to a different outer nominal handler. Kotlin, Python, C#, Go, C, C++, Rust, Swift, and browser Wasm remain explicit transactional `UNSUPPORTED_CAPABILITY` targets.
 
-No checked exception declarations, arbitrary values, multiple or broad handlers, `finally`/`ensure`, async rejection, result translation, standard-library facade/provider work, pairwise rewrites, package publication, versioning, releases, or deployment behavior is added. Independent review, exact-head TensorBuzz CI, merge, and any later publication remain coordinator-owned.
+No checked exception declarations, arbitrary values, multiple or broad handlers, `finally`/`ensure`, async rejection, result translation, standard-library facade/provider work, pairwise rewrites, package publication, versioning, releases, or deployment behavior is added. The implementation was delivered via PR #38 at merge `4c5a0a9c70305fcc69077088e90a2971a05ad15d`; any later publication remains separately coordinator-owned.

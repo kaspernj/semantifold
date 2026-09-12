@@ -8,7 +8,7 @@
 /** @typedef {SemanticTypeName | "void"} FunctionReturnTypeName */
 /** @typedef {"IntegerNegate" | "BooleanNot"} SemanticUnaryOperation */
 /** @typedef {"IntegerAdd" | "IntegerSubtract" | "IntegerMultiply" | "BooleanAnd" | "BooleanOr" | "IntegerEqual" | "IntegerNotEqual" | "BooleanEqual" | "BooleanNotEqual" | "StringEqual" | "StringNotEqual" | "IntegerLessThan" | "IntegerLessThanOrEqual" | "IntegerGreaterThan" | "IntegerGreaterThanOrEqual" | "StringConcat"} SemanticBinaryOperation */
-/** @typedef {"record" | "error" | "field" | "function" | "parameter" | "local" | "iteration" | "catch"} SemanticSymbolKind */
+/** @typedef {"record" | "error" | "field" | "function" | "typeParameter" | "parameter" | "local" | "iteration" | "catch"} SemanticSymbolKind */
 /** @typedef {"record" | "error" | "function"} SemanticDeclarationKind */
 /** @typedef {"declaration" | "type" | "construct" | "member" | "read" | "write" | "call"} SemanticSymbolRole */
 /** @typedef {"parse" | "generate" | "restore" | "compile" | "link" | "validate" | "instantiate" | "execute"} AcceptanceStage */
@@ -44,6 +44,7 @@
  * @property {boolean} orderedListIteration - Task 008 ordered immutable-list iteration and nearest-loop control.
  * @property {boolean} closedRecords - Task 009 nominal closed immutable records, construction, and member reads.
  * @property {boolean} typedErrors - Task 011 nominal unchecked errors, raises, and exact typed catches.
+ * @property {boolean} typeParametersAndGenerics - Task 012 invariant unbounded type parameters and closed generic applications.
  */
 
 /**
@@ -296,6 +297,23 @@
  */
 
 /**
+ * @typedef TypeParameter
+ * @property {"TypeParameter"} kind - Declaration-scoped invariant unbounded type parameter.
+ * @property {string} [id] - Stable declaration-scoped identity, required after validation.
+ * @property {string} name - Source-visible type parameter name.
+ * @property {SourceLocation} location - Parser-owned declaration location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned declaration-name range.
+ */
+
+/**
+ * @typedef TypeVariableReference
+ * @property {"TypeVariableReference"} kind - Reference to one declaration-scoped type parameter.
+ * @property {string} parameterId - Stable referenced type-parameter identity.
+ * @property {SourceLocation} location - Parser-owned reference location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned type-name range.
+ */
+
+/**
  * @typedef ListType
  * @property {"ListType"} kind - Recursive list-type discriminator.
  * @property {SemanticValueType} elementType - Homogeneous element type.
@@ -321,6 +339,7 @@
  * @typedef RecordType
  * @property {"RecordType"} kind - Nominal record-type discriminator.
  * @property {string} declarationId - Stable module-local record declaration identity.
+ * @property {SemanticValueType[]} [arguments] - Exact invariant type arguments; required for generic declarations and absent for non-generic declarations.
  * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned type-name range.
  */
 
@@ -331,7 +350,7 @@
  * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned type-name range.
  */
 
-/** @typedef {TypeReference | ListType | MapType | OptionalType | RecordType} SemanticValueType */
+/** @typedef {TypeReference | TypeVariableReference | ListType | MapType | OptionalType | RecordType} SemanticValueType */
 /** @typedef {SemanticValueType | ErrorType} SemanticBindingType */
 
 /**
@@ -343,7 +362,7 @@
 
 /** @typedef {SemanticValueType | FunctionReturnTypeReference} SemanticFunctionReturnType */
 
-/** @typedef {SemanticTypeName | {kind: "ListType", elementType: SemanticTypeIdentity} | {kind: "MapType", keyType: SemanticTypeIdentity, valueType: SemanticTypeIdentity} | {kind: "OptionalType", valueType: SemanticTypeIdentity} | {kind: "RecordType", declarationId: string}} SemanticTypeIdentity */
+/** @typedef {SemanticTypeName | {kind: "TypeVariableReference", parameterId: string} | {kind: "ListType", elementType: SemanticTypeIdentity} | {kind: "MapType", keyType: SemanticTypeIdentity, valueType: SemanticTypeIdentity} | {kind: "OptionalType", valueType: SemanticTypeIdentity} | {kind: "RecordType", declarationId: string, arguments?: SemanticTypeIdentity[]}} SemanticTypeIdentity */
 /** @typedef {SemanticTypeIdentity | "void"} FunctionReturnTypeIdentity */
 
 /**
@@ -352,6 +371,7 @@
  * @property {string} declarationId - Deterministic module-local declaration identity.
  * @property {SemanticTypeIdentity[]} parameterTypes - Exact required positional parameter types.
  * @property {FunctionReturnTypeIdentity} returnType - Exact resolved return type.
+ * @property {SemanticTypeIdentity[]} [typeArguments] - Inferred declaration-order type arguments for a generic call.
  */
 
 /**
@@ -673,6 +693,7 @@
  * @property {"FunctionDeclaration"} kind - Node discriminator.
  * @property {string} [id] - Deterministic module-local declaration identity, required after frontend validation.
  * @property {string} name - Function name.
+ * @property {TypeParameter[]} [typeParameters] - Ordered declaration-scoped invariant unbounded parameters.
  * @property {Parameter[]} parameters - Function parameters.
  * @property {SemanticFunctionReturnType} returnType - Return type.
  * @property {Block} body - Function body.
@@ -695,6 +716,7 @@
  * @property {"RecordDeclaration"} kind - Nominal closed immutable record declaration.
  * @property {string} [id] - Stable module-local declaration identity, required after frontend validation.
  * @property {string} name - Record name.
+ * @property {TypeParameter[]} [typeParameters] - Ordered declaration-scoped invariant unbounded parameters.
  * @property {RecordField[]} fields - Ordered unique visible fields.
  * @property {SourceLocation} location - Complete declaration source location.
  * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned declaration-name range.
@@ -784,7 +806,7 @@
  * @property {RegisteredSource[]} sources - Caller-order complete source registry.
  */
 
-/** @typedef {SemanticModule | SemanticProgramModule | SemanticImport | SemanticExport | RecordDeclaration | ErrorDeclaration | RecordField | FunctionDeclaration | Parameter | ValueBinding | CatchBinding | Block | Statement | EntryPoint | Expression | ErrorConstruction | ErrorType | MapEntry | SemanticValueType | FunctionReturnTypeReference} SemanticNode */
+/** @typedef {SemanticModule | SemanticProgramModule | SemanticImport | SemanticExport | RecordDeclaration | ErrorDeclaration | RecordField | FunctionDeclaration | TypeParameter | Parameter | ValueBinding | CatchBinding | Block | Statement | EntryPoint | Expression | ErrorConstruction | ErrorType | MapEntry | SemanticValueType | FunctionReturnTypeReference} SemanticNode */
 /** @typedef {SemanticNode} SemanticNodeWithoutLocations */
 
 export {}

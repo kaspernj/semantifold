@@ -131,6 +131,13 @@ export function generateArtifactSet(input) {
     })
   }
   const target = languageRegistry.record(language)
+  const genericDeclaration = [...module?.records ?? [], ...module?.functions ?? []]
+    .find((declaration) => (declaration?.typeParameters?.length ?? 0) > 0)
+
+  if (genericDeclaration && !target.features.typeParametersAndGenerics) {
+    unsupportedCapability(/** @type {import("./src/semantic/types.js").BackendLanguage} */ (language),
+      "Task 012 type parameters and generics", genericDeclaration.location ?? module.location)
+  }
 
   if (Array.isArray(module?.records) && module.records.length > 0 && !target.features.closedRecords) {
     unsupportedCapability(/** @type {import("./src/semantic/types.js").BackendLanguage} */ (language),

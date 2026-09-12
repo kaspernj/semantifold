@@ -38,6 +38,13 @@ export function generateArtifactSource({language, filename, mapDirective = "none
   if (record.artifactMultiplicity != "single") unsupportedRole(language, "single-text backend", module?.location)
   if (filename === undefined) filename = record.defaultFilename
   if (sourceMapFilename === undefined) sourceMapFilename = `${filename}.map`
+  const genericDeclaration = [...module?.records ?? [], ...module?.functions ?? []]
+    .find((declaration) => (declaration?.typeParameters?.length ?? 0) > 0)
+
+  if (genericDeclaration && !record.features.typeParametersAndGenerics) {
+    unsupportedCapability(/** @type {import("../semantic/types.js").BackendLanguage} */ (language),
+      "Task 012 type parameters and generics", genericDeclaration.location ?? module.location)
+  }
   if (Array.isArray(module?.records) && module.records.length > 0 && !record.features.closedRecords) {
     unsupportedCapability(/** @type {import("../semantic/types.js").BackendLanguage} */ (language),
       "Task 009 closed records", module.records[0].location ?? module.location)

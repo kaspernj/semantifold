@@ -1,6 +1,7 @@
 // @ts-check
 
 import {missingType, unsupportedSyntax} from "../diagnostic.js"
+import {recordTypeSubstitutions, substituteValueType, typeContainsAnyVariable} from "../semantic/generics.js"
 import {locationFromOffsets} from "../semantic/location.js"
 import {parserRangeFor, setParserRanges} from "../semantic/provenance.js"
 import {sourceScalarType} from "./scalars.js"
@@ -29,6 +30,7 @@ export function iterationBindingType(type, location) {
     setParserRanges(copied, {type: location})
     return copied
   }
+  if (type.kind == "TypeVariableReference") return typeVariable(type.parameterId, location)
   if (type.kind == "ListType") {
     return listType(iterationBindingType(type.elementType, location), location, location)
   }
@@ -44,7 +46,8 @@ export function iterationBindingType(type, location) {
     )
   }
 
-  if (type.kind == "RecordType") return recordType(type.declarationId, location)
+  if (type.kind == "RecordType") return recordType(type.declarationId, location,
+    type.arguments?.map((argument) => iterationBindingType(argument, location)))
 
   return optionalType(iterationBindingType(type.valueType, location), location, location)
 }
@@ -97,13 +100,153 @@ export function optionalType(valueType, location, valueLocation) {
  * Builds one nominal semantic record type with a parser-owned name range.
  * @param {string} declarationId - Stable declaration identity.
  * @param {import("../semantic/types.js").SourceLocation} location - Record type-name range.
+ * @param {import("../semantic/types.js").SemanticValueType[]} [arguments_] - Exact generic arguments.
  * @returns {import("../semantic/types.js").RecordType} Record type.
  */
-export function recordType(declarationId, location) {
-  const type = {declarationId, kind: /** @type {const} */ ("RecordType")}
+export function recordType(declarationId, location, arguments_) {
+  const type = {declarationId, kind: /** @type {const} */ ("RecordType"), ...(arguments_ ? {arguments: arguments_} : {})}
 
   setParserRanges(type, {type: location})
   return type
+}
+
+/**
+ * Builds one declaration-scoped type-variable reference.
+ * @param {string} parameterId - Stable type-parameter identity.
+ * @param {import("../semantic/types.js").SourceLocation} location - Exact reference range.
+ * @returns {import("../semantic/types.js").TypeVariableReference} Type-variable reference.
+ */
+export function typeVariable(parameterId, location) {
+  const type = {kind: /** @type {const} */ ("TypeVariableReference"), location, parameterId}
+
+  setParserRanges(type, {type: location})
+  return type
+}
+
+/**
+ * Compares semantic type expressions while ignoring parser-owned locations.
+ * @param {import("../semantic/types.js").SemanticValueType} left - Left type.
+ * @param {import("../semantic/types.js").SemanticValueType} right - Right type.
+ * @returns {boolean} Whether the semantic structures are identical.
+ */
+export function sameValueType(left, right) {
+  if (left.kind != right.kind) return false
+  if (left.kind == "TypeReference" && right.kind == "TypeReference") return left.name == right.name
+  if (left.kind == "TypeVariableReference" && right.kind == "TypeVariableReference") return left.parameterId == right.parameterId
+  if (left.kind == "ListType" && right.kind == "ListType") return sameValueType(left.elementType, right.elementType)
+  if (left.kind == "OptionalType" && right.kind == "OptionalType") return sameValueType(left.valueType, right.valueType)
+  if (left.kind == "MapType" && right.kind == "MapType") {
+    return sameValueType(left.keyType, right.keyType) && sameValueType(left.valueType, right.valueType)
+  }
+  if (left.kind == "RecordType" && right.kind == "RecordType") {
+    const leftArguments = left.arguments ?? []
+    const rightArguments = right.arguments ?? []
+
+    return left.declarationId == right.declarationId && leftArguments.length == rightArguments.length &&
+      leftArguments.every((argument, index) => sameValueType(argument, rightArguments[index]))
+  }
+
+  return false
+}
+
+/**
+ * Resolves one generic record field against a complete application for parser
+ * contextual conversion. Invalid/raw applications remain unchanged so the
+ * semantic validator owns their stable diagnostic.
+ * @param {import("../semantic/types.js").RecordDeclaration} declaration - Resolved record declaration.
+ * @param {import("../semantic/types.js").SemanticValueType[] | undefined} arguments_ - Parsed application arguments.
+ * @param {number} index - Constructor field index.
+ * @returns {import("../semantic/types.js").SemanticValueType | undefined} Closed field type when available.
+ */
+export function instantiatedRecordFieldType(declaration, arguments_, index) {
+  const field = declaration.fields[index]
+  const parameters = declaration.typeParameters ?? []
+
+  if (!field || parameters.length == 0 || !arguments_ || arguments_.length != parameters.length) return field?.type
+  const application = /** @type {import("../semantic/types.js").RecordType} */ ({
+    arguments: arguments_,
+    declarationId: /** @type {string} */ (declaration.id),
+    kind: "RecordType"
+  })
+
+  return substituteValueType(field.type, recordTypeSubstitutions(application, declaration))
+}
+
+/**
+ * Applies parser-known generic-call argument evidence to its declared return.
+ * An unresolved variable remains open: this is conservative context discovery
+ * only, while semantic validation still performs authoritative inference.
+ * @param {{parameters: import("../semantic/types.js").Parameter[], returnType: import("../semantic/types.js").SemanticFunctionReturnType}} signature - Declared signature.
+ * @param {(import("../semantic/types.js").SemanticFunctionReturnType | import("../semantic/types.js").ErrorType | undefined)[]} arguments_ - Parser-known argument types.
+ * @returns {import("../semantic/types.js").SemanticFunctionReturnType | undefined} Known result with available substitutions.
+ */
+export function knownCallReturnType(signature, arguments_) {
+  if (signature.returnType.kind == "TypeReference" && signature.returnType.name == "void") return signature.returnType
+  /** @type {Map<string, import("../semantic/types.js").SemanticValueType>} */
+  const substitutions = new Map()
+
+  for (let index = 0; index < signature.parameters.length; index += 1) {
+    const actual = arguments_[index]
+
+    if (actual && actual.kind != "ErrorType" && !(actual.kind == "TypeReference" && actual.name == "void") &&
+      !collectKnownSubstitutions(signature.parameters[index].type,
+        /** @type {import("../semantic/types.js").SemanticValueType} */ (actual), substitutions)) {
+      return undefined
+    }
+  }
+  return substituteValueType(signature.returnType, substitutions)
+}
+
+/**
+ * Preserves an optional binding when a generic formal needs its wrapped type as
+ * argument-only inference evidence. The semantic validator remains the sole
+ * authority for unification and presence-proof checks.
+ * @param {{parameters: import("../semantic/types.js").Parameter[], typeParameters?: import("../semantic/types.js").TypeParameter[]} | undefined} signature - Known direct-call signature.
+ * @param {number} index - Argument index.
+ * @returns {boolean} Whether frontend conversion must retain optionality.
+ */
+export function preservesGenericOptionalEvidence(signature, index) {
+  const formal = signature?.parameters[index]?.type
+
+  return Boolean(signature?.typeParameters?.length && formal && typeContainsAnyVariable(formal))
+}
+
+/**
+ * Conservatively collects structurally matching parser-known substitutions.
+ * @param {import("../semantic/types.js").SemanticValueType} formal - Open formal type.
+ * @param {import("../semantic/types.js").SemanticValueType} actual - Known argument type.
+ * @param {Map<string, import("../semantic/types.js").SemanticValueType>} substitutions - Collected substitutions.
+ * @returns {boolean} Whether the known structures remain compatible.
+ */
+function collectKnownSubstitutions(formal, actual, substitutions) {
+  if (formal.kind == "TypeVariableReference") {
+    const prior = substitutions.get(formal.parameterId)
+
+    if (prior) return sameValueType(prior, actual)
+    substitutions.set(formal.parameterId, actual)
+    return true
+  }
+  if (formal.kind != actual.kind) return false
+  if (formal.kind == "TypeReference") return sameValueType(formal, actual)
+  if (formal.kind == "RecordType" && actual.kind == "RecordType") {
+    if (formal.declarationId != actual.declarationId || (formal.arguments?.length ?? 0) != (actual.arguments?.length ?? 0)) return false
+
+    return (formal.arguments ?? []).every((argument, index) => collectKnownSubstitutions(
+      argument, /** @type {import("../semantic/types.js").SemanticValueType} */ (actual.arguments?.[index]), substitutions
+    ))
+  }
+  if (formal.kind == "ListType" && actual.kind == "ListType") {
+    return collectKnownSubstitutions(formal.elementType, actual.elementType, substitutions)
+  }
+  if (formal.kind == "OptionalType" && actual.kind == "OptionalType") {
+    return collectKnownSubstitutions(formal.valueType, actual.valueType, substitutions)
+  }
+  if (formal.kind == "MapType" && actual.kind == "MapType") {
+    return collectKnownSubstitutions(formal.keyType, actual.keyType, substitutions) &&
+      collectKnownSubstitutions(formal.valueType, actual.valueType, substitutions)
+  }
+
+  return false
 }
 
 /**
@@ -115,12 +258,13 @@ export function recordType(declarationId, location) {
  * @param {import("../semantic/types.js").SourceLocation} input.location - Exact type token range.
  * @param {import("../semantic/types.js").SourceLocation} input.ownerLocation - Owning declaration range.
  * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} [input.records] - Available nominal records by source name.
+ * @param {Map<string, import("../semantic/types.js").TypeParameter>} [input.typeParameters] - Declaration-scoped parameters by name.
  * @param {string} input.source - Complete parser input for exact subranges.
  * @param {string | undefined} input.sourceType - Exact comment-parser/Prism-owned type token.
  * @param {string} input.subject - Diagnostic subject.
  * @returns {import("../semantic/types.js").SemanticValueType} Semantic value type.
  */
-export function documentedValueType({language, location, ownerLocation, records = new Map(), source, sourceType, subject}) {
+export function documentedValueType({language, location, ownerLocation, records = new Map(), source, sourceType, subject, typeParameters = new Map()}) {
   if (!sourceType) return missingType(language, subject, ownerLocation)
 
   if (language == "php" && sourceType.startsWith("?")) {
@@ -133,7 +277,7 @@ export function documentedValueType({language, location, ownerLocation, records 
     )
 
     return optionalType(
-      documentedValueType({language, location: valueLocation, ownerLocation, records, source, sourceType: valueText, subject}),
+      documentedValueType({language, location: valueLocation, ownerLocation, records, source, sourceType: valueText, subject, typeParameters}),
       location,
       valueLocation
     )
@@ -151,13 +295,14 @@ export function documentedValueType({language, location, ownerLocation, records 
     )
 
     return optionalType(
-      documentedValueType({language, location: valueLocation, ownerLocation, records, source, sourceType: valueText, subject}),
+      documentedValueType({language, location: valueLocation, ownerLocation, records, source, sourceType: valueText, subject, typeParameters}),
       location,
       valueLocation
     )
   }
   if (language == "javascript" && sourceType.includes("|") &&
-    !sourceType.startsWith("ReadonlyArray") && !sourceType.startsWith("ReadonlyMap")) {
+    !sourceType.startsWith("ReadonlyArray") && !sourceType.startsWith("ReadonlyMap") &&
+    !records.has(sourceType.slice(0, sourceType.indexOf("<") < 0 ? sourceType.length : sourceType.indexOf("<")))) {
     return unsupportedSyntax(language, "arbitrary union type", location)
   }
 
@@ -170,16 +315,22 @@ export function documentedValueType({language, location, ownerLocation, records 
   const directRecord = records.get(unwrappedName)
 
   if (directRecord?.id) return recordType(directRecord.id, location)
+  const directTypeParameter = typeParameters.get(unwrappedName)
+
+  if (directTypeParameter?.id) return typeVariable(directTypeParameter.id, location)
   const collectionPrefixes = language == "ruby" ? ["[Array", "[Hash", "[Integer?", "[bool?", "[String?"] :
     language == "php" ? ["list", "array"] : ["ReadonlyArray", "ReadonlyMap"]
   const optionalRecord = language == "ruby" && sourceType.startsWith("[") && sourceType.endsWith("?]") &&
     records.has(sourceType.slice(1, -2))
 
-  if (!optionalRecord && !collectionPrefixes.some((prefix) => sourceType.startsWith(prefix))) {
+  const possibleName = unwrappedName.slice(0, unwrappedName.search(/[<[?]/u) < 0 ? unwrappedName.length : unwrappedName.search(/[<[?]/u))
+
+  if (!optionalRecord && !collectionPrefixes.some((prefix) => sourceType.startsWith(prefix)) &&
+    !records.has(possibleName) && !typeParameters.has(possibleName)) {
     return missingType(language, subject, ownerLocation)
   }
 
-  const parser = new DocumentedTypeParser(language, sourceType, location, source, records)
+  const parser = new DocumentedTypeParser(language, sourceType, location, source, records, typeParameters)
   const type = parser.parse()
 
   if (!parser.atEnd()) return unsupportedSyntax(language, "unsupported collection type", parser.remainingLocation())
@@ -195,13 +346,15 @@ class DocumentedTypeParser {
    * @param {import("../semantic/types.js").SourceLocation} location - Whole token location.
    * @param {string} source - Complete source.
    * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} records - Available nominal records.
+   * @param {Map<string, import("../semantic/types.js").TypeParameter>} typeParameters - Declaration-scoped parameters.
    */
-  constructor(language, text, location, source, records) {
+  constructor(language, text, location, source, records, typeParameters) {
     this.language = language
     this.text = text
     this.location = location
     this.source = source
     this.records = records
+    this.typeParameters = typeParameters
     this.offset = 0
   }
 
@@ -246,7 +399,11 @@ class DocumentedTypeParser {
       )
     }
 
-    while (isTypeIdentifierCharacter(this.text[this.offset])) this.offset++
+    while (isTypeIdentifierCharacter(this.text[this.offset]) || this.language == "ruby" &&
+      this.text[this.offset] == ":" && this.text[this.offset + 1] == ":" &&
+      isTypeIdentifierCharacter(this.text[this.offset + 2])) {
+      this.offset += this.text[this.offset] == ":" ? 2 : 1
+    }
     const nameEnd = this.offset
     const name = this.text.slice(start, nameEnd)
 
@@ -266,6 +423,20 @@ class DocumentedTypeParser {
       return scalar
     }
     const record = this.records.get(name)
+    const typeParameter = this.typeParameters.get(name)
+
+    if (typeParameter?.id && this.text[this.offset] != "<" && this.text[this.offset] != "[") {
+      const type = typeVariable(typeParameter.id, this.range(start, nameEnd))
+
+      if (this.language == "ruby" && this.consume("?")) {
+        return optionalType(type, this.range(start, this.offset), this.typeRange(type, start, nameEnd))
+      }
+      if (this.language == "javascript" && this.consume("|null")) {
+        return optionalType(type, this.range(start, this.offset), this.typeRange(type, start, nameEnd))
+      }
+
+      return type
+    }
 
     if (record?.id && this.text[this.offset] != "<" && this.text[this.offset] != "[") {
       const type = recordType(record.id, this.range(start, nameEnd))
@@ -285,11 +456,29 @@ class DocumentedTypeParser {
     const opening = this.language == "ruby" ? "[" : "<"
     const closing = this.language == "ruby" ? "]" : ">"
 
-    if (name != listName && name != mapName || !this.consume(opening)) return this.failure()
+    if (name != listName && name != mapName && !record || !this.consume(opening)) return this.failure()
     const first = this.parseNamedType()
     const firstEnd = this.offset
 
     this.skipWhitespace()
+    if (record?.id) {
+      const arguments_ = [first]
+
+      while (this.consume(",")) arguments_.push(this.parseNamedType())
+      if (!this.consume(closing)) return this.failure()
+
+      const applicationEnd = this.offset
+      const type = recordType(record.id, this.range(start, nameEnd), arguments_)
+
+      if (this.language == "ruby" && this.consume("?")) {
+        return optionalType(type, this.range(start, this.offset), this.range(start, applicationEnd))
+      }
+      if (this.language == "javascript" && this.consume("|null")) {
+        return optionalType(type, this.range(start, this.offset), this.range(start, applicationEnd))
+      }
+
+      return type
+    }
     if (name == listName) {
       if (!this.consume(closing)) return this.failure()
       const type = listType(first, this.range(start, this.offset), this.typeRange(first, start, firstEnd))

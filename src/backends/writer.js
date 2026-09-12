@@ -63,10 +63,14 @@ export class SourceWriter {
     this.index = index
     const programRecords = program?.modules.flatMap((programModule) => programModule.records ?? []) ?? module.records ?? []
     const programErrors = program?.modules.flatMap((programModule) => programModule.errors ?? []) ?? module.errors ?? []
+    const programFunctions = program?.modules.flatMap((programModule) => programModule.functions) ?? module.functions
 
     this.records = new Map(programRecords.map((record) => [record.id, record]))
     this.errors = new Map(programErrors.map((error) => [error.id, error]))
     this.fields = new Map(programRecords.flatMap((record) => record.fields.map((field) => [field.id, field])))
+    this.fieldRecords = new Map(programRecords.flatMap((record) => record.fields.map((field) => [field.id, record])))
+    this.typeParameters = new Map([...programRecords, ...programFunctions].flatMap((declaration) =>
+      (declaration.typeParameters ?? []).map((parameter) => [parameter.id, parameter])))
     /** @type {Map<string, import("../semantic/types.js").SemanticProgramModule>} */
     this.declarationModules = new Map(program?.modules.flatMap((programModule) => [
       ...(programModule.records ?? []).map((declaration) => /** @type {const} */ ([/** @type {string} */ (declaration.id), programModule])),
@@ -132,6 +136,19 @@ export class SourceWriter {
     }
 
     return record.name
+  }
+
+  /**
+   * Resolves one validated declaration-scoped type parameter.
+   * @param {string} parameterId - Stable type-parameter identity.
+   * @returns {import("../semantic/types.js").TypeParameter} Type parameter.
+   */
+  typeParameterForId(parameterId) {
+    const parameter = this.typeParameters.get(parameterId)
+
+    if (!parameter) throw new RangeError(`Unknown validated type parameter identity '${parameterId}'.`)
+
+    return parameter
   }
 
   /**
@@ -290,6 +307,19 @@ export class SourceWriter {
     if (!field) throw new RangeError(`Unknown validated field identity '${fieldId}'.`)
 
     return field
+  }
+
+  /**
+   * Resolves the record declaration that owns a validated field identity.
+   * @param {string} fieldId - Semantic field identity.
+   * @returns {import("../semantic/types.js").RecordDeclaration} Owning record.
+   */
+  recordForFieldId(fieldId) {
+    const record = this.fieldRecords.get(fieldId)
+
+    if (!record) throw new RangeError(`Unknown validated field identity '${fieldId}'.`)
+
+    return record
   }
 
   /**

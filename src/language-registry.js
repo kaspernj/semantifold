@@ -108,17 +108,19 @@ export function createLanguageRegistry(candidateRecords) {
       immutableCollections: false,
       optionalValues: false,
       orderedListIteration: false,
-      typedErrors: false
+      typedErrors: false,
+      typeParametersAndGenerics: false
     }
 
     if (!isPlainObject(featuresCandidate) ||
-      Object.keys(featuresCandidate).sort().join(",") != "closedRecords,generalFunctionsAndCalls,immutableCollections,optionalValues,orderedListIteration,typedErrors" ||
+      Object.keys(featuresCandidate).sort().join(",") != "closedRecords,generalFunctionsAndCalls,immutableCollections,optionalValues,orderedListIteration,typeParametersAndGenerics,typedErrors" ||
       typeof featuresCandidate.closedRecords != "boolean" ||
       typeof featuresCandidate.generalFunctionsAndCalls != "boolean" ||
       typeof featuresCandidate.immutableCollections != "boolean" ||
       typeof featuresCandidate.optionalValues != "boolean" ||
       typeof featuresCandidate.orderedListIteration != "boolean" ||
-      typeof featuresCandidate.typedErrors != "boolean") {
+      typeof featuresCandidate.typedErrors != "boolean" ||
+      typeof featuresCandidate.typeParametersAndGenerics != "boolean") {
       invalidRegistry(`Registry record '${id}' has an invalid feature declaration.`, id)
     }
     const features = deepFreeze(/** @type {import("./semantic/types.js").LanguageFeatureCapabilities} */ ({
@@ -127,7 +129,8 @@ export function createLanguageRegistry(candidateRecords) {
       immutableCollections: featuresCandidate.immutableCollections,
       optionalValues: featuresCandidate.optionalValues,
       orderedListIteration: featuresCandidate.orderedListIteration,
-      typedErrors: featuresCandidate.typedErrors
+      typedErrors: featuresCandidate.typedErrors,
+      typeParametersAndGenerics: featuresCandidate.typeParametersAndGenerics
     }))
     const mappingCandidate = candidate.mapping
 
@@ -428,7 +431,7 @@ const records = [
     artifactMultiplicity: "multiple",
     binaryBackend: generateBrowserWasm,
     defaultFilename: "program.wasm",
-    features: {closedRecords: false, generalFunctionsAndCalls: false, immutableCollections: false, optionalValues: false, orderedListIteration: false, typedErrors: false},
+    features: {closedRecords: false, generalFunctionsAndCalls: false, immutableCollections: false, optionalValues: false, orderedListIteration: false, typedErrors: false, typeParametersAndGenerics: false},
     id: "wasm",
     mapping: {binaryRanges: true, richText: true, sourceMapV3: true},
     mediaType: "application/wasm",
@@ -457,7 +460,8 @@ function language(values) {
       immutableCollections: ["php", "ruby", "javascript", "typescript", "java"].includes(String(values.id)),
       optionalValues: ["php", "ruby", "javascript", "typescript", "java"].includes(String(values.id)),
       orderedListIteration: ["php", "ruby", "javascript", "typescript", "java"].includes(String(values.id)),
-      typedErrors: ["php", "ruby", "javascript", "typescript", "java"].includes(String(values.id))
+      typedErrors: ["php", "ruby", "javascript", "typescript", "java"].includes(String(values.id)),
+      typeParametersAndGenerics: ["php", "ruby", "javascript", "typescript", "java"].includes(String(values.id))
     },
     mapping: {binaryRanges: false, richText: true, sourceMapV3: true},
     roundTrip: true,

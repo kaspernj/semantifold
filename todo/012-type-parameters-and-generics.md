@@ -1,6 +1,6 @@
 # 012 — Type parameters and generic declarations
 
-- Status: `todo`
+- Status: `implemented locally; final coordinator acceptance correction complete; exact-head TensorBuzz CI / merge pending`
 - Phase/priority: Phase 3 / P3 (conditional)
 - Dependencies: [005-general-function-signatures-and-calls.md](005-general-function-signatures-and-calls.md), [006-immutable-lists-and-maps.md](006-immutable-lists-and-maps.md), [009-closed-records-and-member-access.md](009-closed-records-and-member-access.md)
 
@@ -74,3 +74,11 @@ Bounds/constraints/defaults, variance/wildcards/capture, higher-kinded types, as
 - First-order inference is deterministic, complete for the accepted profile, and fails loudly on ambiguity/conflict.
 - Every dynamic target preserves the full contract in reparsable documentation; PHP is not marked supported until that proof passes.
 - Focused generic/inference diagnostics and real registered-runtime round trips pass with docs/changelog updates.
+
+## Implementation delivery record — 2026-09-12
+
+The local implementation adds invariant unbounded declaration-scoped parameters, scoped type-variable references, closed generic record applications, exact arity and recursive validation, deterministic first-order argument-only inference, complete substitutions in resolved calls/returns/record fields, module-qualified identities, and full provenance/mapping symbols. TypeScript and Java use native generics; JavaScript/JSDoc, Ruby, and PHP use exact parser-associated documentation that regenerates and reparses without semantic loss. Every other registered target advertises the capability as false and rejects generic modules transactionally.
+
+Focused semantic, frontend, backend, project, provenance/mapping, and real-runtime specs cover nested `List<T>`, independent and repeated parameters, string/integer instantiations, present and whole-optional argument evidence, order-independent contextual validation after empty and recursively evidence-free list/map arguments, closed optional record construction/member substitution, recursively documented optional type variables and applied records, exact direct and presence-proven PHP getter receivers, carrier-free PHP `Optional<T>` getters, exact fixed nullable PHP scalar carriers and their mismatch diagnostics, parser-known instantiated call results, explicit TypeScript/Java construction applications, native application syntax, missing/free/duplicate/raw/wrong-arity types, forbidden arguments on non-generic records, sparse outer/nested inferred type-argument identities, inference conflict/failure/recursion, bounds/defaults/variance/wildcards, casts/reflection/operators, malformed external IR, and imported generic declarations. The bounded independent review, terminal re-review correction, final coordinator acceptance correction, and bounded automatic-review correction are complete locally; exact-head TensorBuzz CI and merge remain pending. No standard-library facade/provider behavior, pairwise rewrite, fallback type, wrapper, specialization, release, publication, deployment, review automation, or external-system mutation is included.
+
+The package version remains `0.3.0`. Exact-head TensorBuzz CI, merge, and any later publication remain pending and coordinator-owned.
