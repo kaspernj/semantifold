@@ -7,13 +7,15 @@ import {locationFromOffsets, moduleLocation} from "../semantic/location.js"
 import {withAdaptedOperation} from "../semantic/operators.js"
 import {withParserRanges} from "../semantic/provenance.js"
 import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
+import {isTask034ResourceProbe} from "../semantic/capabilities.js"
+import {hasExactEffectSupport} from "../backends/effects.js"
 import {requireSourceReturnType, requireSourceScalarType} from "./scalars.js"
-import {documentedValueType, instantiatedRecordFieldType, iterationBindingType, iterationOperandType, knownCallReturnType, listType, mapType, optionalType, orderedMapTypeFromMap, preservesGenericOptionalEvidence, recordType, referenceType, typeVariable} from "./types.js"
+import {documentedValueType, instantiatedRecordFieldType, iterationBindingType, iterationOperandType, knownCallReturnType, listType, mapType, optionalType, orderedMapTypeFromMap, ownedReferenceType, ownedResourceType, preservesGenericOptionalEvidence, recordType, referenceType, typeVariable} from "./types.js"
 
 /** @typedef {NonNullable<import("@babel/parser").ParseResult<import("@babel/types").File>["tokens"]>[number]} BabelToken */
 /** @typedef {{byStart: Map<number, BabelToken>, tokens: BabelToken[]}} BabelTokenIndex */
 /** @typedef {{name: string, nameLocation: import("../semantic/types.js").SourceLocation, parameters: import("../semantic/types.js").Parameter[], returnType: import("../semantic/types.js").SemanticFunctionReturnType, typeParameters?: import("../semantic/types.js").TypeParameter[], location: import("../semantic/types.js").SourceLocation}} JavaScriptFunctionSignature */
-/** @typedef {{bindings: Map<string, import("../semantic/types.js").SemanticBindingType>, classes: Map<string, import("../semantic/types.js").ClassDeclaration>, currentClass?: import("../semantic/types.js").ClassDeclaration, errors: Map<string, import("../semantic/types.js").ErrorDeclaration>, errorNames: Map<string, import("../semantic/types.js").ErrorDeclaration>, functions: Map<string, JavaScriptFunctionSignature>, lexicalValueNames?: Set<string>, orderedMapDeclarations?: Set<object>, recordNames: Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>, records: Map<string, import("../semantic/types.js").RecordDeclaration>, returnType?: import("../semantic/types.js").SemanticFunctionReturnType, typeParameters?: Map<string, import("../semantic/types.js").TypeParameter>, valueRecordNames: Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>}} JavaScriptConversionContext */
+/** @typedef {{bindings: Map<string, import("../semantic/types.js").SemanticBindingType>, classes: Map<string, import("../semantic/types.js").ClassDeclaration>, currentClass?: import("../semantic/types.js").ClassDeclaration, errors: Map<string, import("../semantic/types.js").ErrorDeclaration>, errorNames: Map<string, import("../semantic/types.js").ErrorDeclaration>, functions: Map<string, JavaScriptFunctionSignature>, lexicalValueNames?: Set<string>, orderedMapDeclarations?: Set<object>, recordNames: Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").EffectResourceDeclaration>, records: Map<string, import("../semantic/types.js").RecordDeclaration>, returnType?: import("../semantic/types.js").SemanticFunctionReturnType, typeParameters?: Map<string, import("../semantic/types.js").TypeParameter>, valueRecordNames: Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>}} JavaScriptConversionContext */
 
 /** @type {WeakMap<object, BabelTokenIndex>} */
 const nodeTokens = new WeakMap()
@@ -327,7 +329,9 @@ function convertExpression(node, language, filename, source, context = {bindings
       const classLocation = identifierLocation(node.callee, filename, source)
 
       return withParserRanges({arguments: arguments_, kind: /** @type {const} */ ("ReferenceConstruction"), location,
-        reference: referenceType(/** @type {string} */ (declaration.id), classLocation)}, {class: classLocation})
+        reference: declaration.ownership?.kind == "ownedResource"
+          ? ownedReferenceType(/** @type {string} */ (declaration.id), classLocation)
+          : referenceType(/** @type {string} */ (declaration.id), classLocation)}, {class: classLocation})
     }
     const sourceArguments = node.typeArguments?.params ?? node.typeParameters?.params
     const typeArguments = sourceArguments?.map((/** @type {import("@babel/types").TSType} */ argument) => convertTypeScriptValueTypeNode(
@@ -520,7 +524,7 @@ function convertExpression(node, language, filename, source, context = {bindings
     node.callee.object.type != "Super" && node.callee.property.type == "Identifier") {
     const receiverType = knownValueExpressionType(node.callee.object, context, language, filename, source)
 
-    if (receiverType?.kind == "ReferenceType") {
+    if (receiverType?.kind == "ReferenceType" || receiverType?.kind == "OwnedReferenceType") {
       const declaration = context.classes.get(receiverType.declarationId)
       const methodName = node.callee.property.name
       const method = declaration?.methods.find((candidate) => candidate.name == methodName)
@@ -533,7 +537,7 @@ function convertExpression(node, language, filename, source, context = {bindings
       })
 
       return withParserRanges({arguments: arguments_, kind: /** @type {const} */ ("MethodCallExpression"), location,
-        method: method?.name ?? node.callee.property.name,
+        method: method?.id ?? node.callee.property.name,
         receiver: convertExpression(node.callee.object, language, filename, source, context)},
       {member: identifierLocation(node.callee.property, filename, source)})
     }
@@ -587,7 +591,8 @@ function knownExpressionType(node, context, language, filename, source) {
     const declaration = context.valueRecordNames.get(node.callee.name)
 
     if (declaration?.id) {
-      if (declaration.kind == "ClassDeclaration") return {declarationId: declaration.id, kind: "ReferenceType"}
+      if (declaration.kind == "ClassDeclaration") return {declarationId: declaration.id,
+        kind: declaration.ownership?.kind == "ownedResource" ? "OwnedReferenceType" : "ReferenceType"}
       const sourceArguments = node.typeArguments?.params ?? node.typeParameters?.params
       const typeArguments = sourceArguments?.map((/** @type {import("@babel/types").TSType} */ argument) =>
         convertTypeScriptValueTypeNode(
@@ -822,7 +827,7 @@ function convertLocalStatement(node, language, filename, source, context) {
  * @param {string} name - Local name.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} recordNames - Nominal declarations by source name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").EffectResourceDeclaration>} recordNames - Nominal declarations by source name.
  * @param {Map<string, import("../semantic/types.js").TypeParameter>} [typeParameters] - Declaration-scoped parameters.
  * @returns {import("../semantic/types.js").SemanticValueType} Semantic type.
  */
@@ -889,7 +894,8 @@ function convertStatement(node, language, filename, source, canonicalZeroRequire
     if (node.expression.type == "CallExpression" && (node.expression.callee.type == "Identifier" ||
       node.expression.callee.type == "MemberExpression" && !node.expression.callee.computed &&
       node.expression.callee.object.type != "Super" &&
-      knownValueExpressionType(node.expression.callee.object, context, language, filename, source)?.kind == "ReferenceType")) {
+      ["ReferenceType", "OwnedReferenceType"].includes(String(
+        knownValueExpressionType(node.expression.callee.object, context, language, filename, source)?.kind)))) {
       return {
         expression: /** @type {import("../semantic/types.js").CallExpression | import("../semantic/types.js").MethodCallExpression} */ (
           convertExpression(node.expression, language, filename, source, context)
@@ -1247,7 +1253,7 @@ function classJsdocTypeParameters(node, ownerId, filename, source) {
  * @param {import("../semantic/types.js").SourceLocation} location - Source location.
  * @param {string} source - Complete parser input.
  * @param {import("../semantic/types.js").SourceLocation} [typeLocation] - Exact type token location.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} [recordNames] - Nominal declarations by source name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").EffectResourceDeclaration>} [recordNames] - Nominal declarations by source name.
  * @param {Map<string, import("../semantic/types.js").TypeParameter>} [typeParameters] - Declaration-scoped parameters.
  * @returns {import("../semantic/types.js").SemanticValueType} Semantic type.
  */
@@ -1265,7 +1271,7 @@ function convertType(sourceType, language, subject, location, source, typeLocati
  * @param {import("../semantic/types.js").SourceLocation} location - Function location.
  * @param {string} source - Complete parser input.
  * @param {import("../semantic/types.js").SourceLocation} [typeLocation] - Exact annotation location.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} [recordNames] - Nominal declarations by source name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").EffectResourceDeclaration>} [recordNames] - Nominal declarations by source name.
  * @param {Map<string, import("../semantic/types.js").TypeParameter>} [typeParameters] - Declaration-scoped parameters.
  * @returns {import("../semantic/types.js").SemanticFunctionReturnType} Semantic return type.
  */
@@ -1282,7 +1288,7 @@ function convertReturnType(sourceType, language, subject, location, source, type
  * @param {import("../semantic/types.js").SourceLocation} ownerLocation - Owning declaration location.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} [recordNames] - Nominal declarations by source name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").EffectResourceDeclaration>} [recordNames] - Nominal declarations by source name.
  * @param {Map<string, import("../semantic/types.js").TypeParameter>} [typeParameters] - Declaration-scoped parameters.
  * @returns {import("../semantic/types.js").SemanticValueType} Semantic type.
  */
@@ -1302,7 +1308,7 @@ function convertTypeScriptType(annotation, subject, ownerLocation, filename, sou
  * @param {import("../semantic/types.js").SourceLocation} ownerLocation - Owning declaration.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} [recordNames] - Nominal declarations by source name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").EffectResourceDeclaration>} [recordNames] - Nominal declarations by source name.
  * @param {Map<string, import("../semantic/types.js").TypeParameter>} [typeParameters] - Declaration-scoped parameters.
  * @returns {import("../semantic/types.js").SemanticValueType} Semantic value type.
  */
@@ -1321,11 +1327,18 @@ function convertTypeScriptValueTypeNode(typeNode, subject, ownerLocation, filena
   }
   if (typeNode.type == "TSTypeReference" && typeNode.typeName.type == "Identifier" &&
     recordNames.has(typeNode.typeName.name)) {
-    const declaration = /** @type {import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration} */ (recordNames.get(typeNode.typeName.name))
+    const declaration = /** @type {import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").EffectResourceDeclaration} */ (recordNames.get(typeNode.typeName.name))
 
+    if (declaration.kind == "EffectResourceDeclaration") {
+      if (typeNode.typeParameters) return unsupportedSyntax("typescript", "generic owned resource type", nodeLocation(typeNode, filename, source))
+      return ownedResourceType(declaration.id, nodeLocation(typeNode.typeName, filename, source))
+    }
     if (declaration.kind == "ClassDeclaration") {
       if (typeNode.typeParameters) return unsupportedSyntax("typescript", "generic reference class type", nodeLocation(typeNode, filename, source))
-      return referenceType(/** @type {string} */ (declaration.id), nodeLocation(typeNode.typeName, filename, source))
+      const location = nodeLocation(typeNode.typeName, filename, source)
+      return declaration.ownership?.kind == "ownedResource"
+        ? ownedReferenceType(/** @type {string} */ (declaration.id), location)
+        : referenceType(/** @type {string} */ (declaration.id), location)
     }
     const arguments_ = typeNode.typeParameters?.params.map((parameter) =>
       convertTypeScriptValueTypeNode(parameter, subject, ownerLocation, filename, source, recordNames, typeParameters))
@@ -1396,7 +1409,7 @@ function convertTypeScriptValueTypeNode(typeNode, subject, ownerLocation, filena
  * @param {import("../semantic/types.js").SourceLocation} ownerLocation - Function location.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} [recordNames] - Nominal declarations by source name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").EffectResourceDeclaration>} [recordNames] - Nominal declarations by source name.
  * @param {Map<string, import("../semantic/types.js").TypeParameter>} [typeParameters] - Declaration-scoped parameters.
  * @returns {import("../semantic/types.js").SemanticFunctionReturnType} Semantic return type.
  */
@@ -1443,7 +1456,7 @@ function typeScriptTypeParameters(declaration, ownerId, filename, source) {
  * @param {"javascript" | "typescript"} language - Frontend language.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} recordNames - Nominal declarations by source name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").EffectResourceDeclaration>} recordNames - Nominal declarations by source name.
  * @param {string} ownerId - Stable function identity.
  * @returns {JavaScriptFunctionSignature} Semantic function signature.
  */
@@ -1500,7 +1513,7 @@ function convertFunctionSignature(node, language, filename, source, recordNames,
  * @param {import("@babel/types").FunctionDeclaration} node - Babel function.
  * @param {JavaScriptFunctionSignature} signature - Converted signature.
  * @param {Map<string, JavaScriptFunctionSignature>} functions - Module signatures.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} recordNames - Nominal declarations by name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").EffectResourceDeclaration>} recordNames - Nominal declarations by name.
  * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} valueRecordNames - Nominal declarations available in value positions.
  * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} records - Record declarations by identity.
  * @param {Map<string, import("../semantic/types.js").ClassDeclaration>} classes - Reference classes by identity.
@@ -1630,7 +1643,7 @@ function convertJavaScriptError(node, declaration, language, filename, source) {
  * Predeclares the bounded native private-field reference-class profile and all callable signatures.
  * @param {import("@babel/types").ClassDeclaration} node - Parser class.
  * @param {import("../semantic/types.js").ClassDeclaration} declaration - Predeclared class identity.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} nominalNames - Nominal types by name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").EffectResourceDeclaration>} nominalNames - Nominal types by name.
  * @param {"javascript" | "typescript"} language - Source language.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
@@ -1691,6 +1704,12 @@ function predeclareReferenceClass(node, declaration, nominalNames, language, fil
     return withParserRanges({id: `${declaration.id}:field:${index}`, kind: /** @type {const} */ ("PrivateField"),
       location: fieldLocation, name, type}, {name: nameLocation})
   })
+  const ownedFields = declaration.fields.filter(({type}) => type.kind == "OwnedResourceType")
+  const ownedField = /** @type {import("../semantic/types.js").PrivateField & {type: import("../semantic/types.js").OwnedResourceType}} */ (ownedFields[0])
+
+  declaration.ownership = ownedFields.length == 1
+    ? {fieldId: /** @type {string} */ (ownedField.id), kind: "ownedResource", resourceId: ownedField.type.resourceId}
+    : {kind: "ordinary"}
 
   const constructorNode = /** @type {import("@babel/types").ClassMethod} */ (constructorNodes[0])
   const constructorSignature = convertClassCallableSignature(constructorNode, declaration, nominalNames, language,
@@ -1714,7 +1733,7 @@ function predeclareReferenceClass(node, declaration, nominalNames, language, fil
  * Converts one reference class body after every class signature is complete.
  * @param {import("@babel/types").ClassDeclaration} node - Parser class.
  * @param {import("../semantic/types.js").ClassDeclaration} declaration - Complete predeclared class signature.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} nominalNames - Nominal types by name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").EffectResourceDeclaration>} nominalNames - Nominal types by name.
  * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} valueNames - Nominal constructors by name.
  * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} records - Records by identity.
  * @param {Map<string, import("../semantic/types.js").ClassDeclaration>} classes - Classes by identity.
@@ -1756,7 +1775,7 @@ function convertReferenceClassBodies(node, declaration, nominalNames, valueNames
  * Reads one constructor or method signature without admitting overloads or modifiers.
  * @param {import("@babel/types").ClassMethod} node - Parser method.
  * @param {import("../semantic/types.js").ClassDeclaration} declaration - Declaring class.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} nominalNames - Nominal types.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").EffectResourceDeclaration>} nominalNames - Nominal types.
  * @param {"javascript" | "typescript"} language - Source language.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
@@ -1812,7 +1831,7 @@ function convertClassCallableSignature(node, declaration, nominalNames, language
  * Converts one exact TypeScript readonly constructor-parameter record profile.
  * @param {import("@babel/types").ClassDeclaration} node - Class declaration.
  * @param {import("../semantic/types.js").RecordDeclaration} declaration - Predeclared nominal identity.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} recordNames - All nominal declarations by name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").EffectResourceDeclaration>} recordNames - All nominal declarations by name.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
  * @returns {import("../semantic/types.js").RecordDeclaration} Semantic record declaration.
@@ -1867,7 +1886,7 @@ function convertTypeScriptRecord(node, declaration, recordNames, filename, sourc
  * Converts one exact JSDoc constructor/readonly-assignment/freeze record profile.
  * @param {import("@babel/types").ClassDeclaration} node - Class declaration.
  * @param {import("../semantic/types.js").RecordDeclaration} declaration - Predeclared nominal identity.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} recordNames - Nominal declarations by name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").EffectResourceDeclaration>} recordNames - Nominal declarations by name.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
  * @returns {import("../semantic/types.js").RecordDeclaration} Semantic record declaration.
@@ -2117,10 +2136,11 @@ function convertPrint(node, language, filename, source, canonicalZeroRequired, c
  * @param {string} input.filename - Source filename.
  * @param {"javascript" | "typescript"} input.language - Frontend language.
  * @param {string} input.source - Source text.
+ * @param {readonly import("../semantic/types.js").EffectCapabilityDeclaration[]} [input.capabilities] - Compiler-authorized declarations.
  * @param {{isEntry: boolean, functions: Map<string, import("../semantic/types.js").FunctionDeclaration>, records: Map<string, import("../semantic/types.js").RecordDeclaration>, errors?: Map<string, import("../semantic/types.js").ErrorDeclaration>, valueRecords?: Map<string, import("../semantic/types.js").RecordDeclaration>}} [input.program] - Resolved program imports and entry role.
  * @returns {import("../semantic/types.js").SemanticModule} Semantic module.
  */
-export function parseJavaScriptTypeScript({filename, language, source, program}) {
+export function parseJavaScriptTypeScript({capabilities = [], filename, language, source, program}) {
   const file = parseBabelSource({filename, language, source, sourceType: program ? "module" : "script"})
   const tokens = file.tokens ?? []
   const tokenIndex = {byStart: new Map(tokens.map((token) => [token.start, token])), tokens}
@@ -2143,7 +2163,7 @@ export function parseJavaScriptTypeScript({filename, language, source, program})
     return unsupportedSyntax(language, "top-level directive", nodeLocation(file.program.directives[0], filename, source))
   }
   /** @type {import("@babel/types").Statement[]} */
-  const semanticNodes = []
+  let semanticNodes = []
 
   for (const node of file.program.body) {
     if (node.type == "ImportDeclaration") {
@@ -2166,6 +2186,7 @@ export function parseJavaScriptTypeScript({filename, language, source, program})
     }
     semanticNodes.push(node)
   }
+  semanticNodes = task034JavaScriptNodes(semanticNodes, capabilities, language, filename, source)
   const classNodes = semanticNodes.filter((node) => node.type == "ClassDeclaration")
   const errorNodes = classNodes.filter((node) => node.superClass?.type == "Identifier" && node.superClass.name == "Error")
   const referenceClassNodes = classNodes.filter((node) => !errorNodes.includes(node) &&
@@ -2197,11 +2218,15 @@ export function parseJavaScriptTypeScript({filename, language, source, program})
     fields: [], id: `class:${index}`, kind: /** @type {const} */ ("ClassDeclaration"),
     location: nodeLocation(node, filename, source), methods: [], name: node.id?.name ?? ""
   }))
-  const recordNames = /** @type {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} */ (
+  const recordNames = /** @type {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").EffectResourceDeclaration>} */ (
     new Map(program?.records ?? []))
+  for (const resource of capabilities.flatMap(({resources}) => resources)) recordNames.set(resource.name, resource)
   const valueRecordNames = /** @type {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} */ (
     new Map(program?.valueRecords ?? program?.records ?? []))
   const errorNames = new Map(program?.errors ?? [])
+  for (const failure of capabilities.flatMap(({failures}) => failures)) {
+    errorNames.set(failure.name, /** @type {import("../semantic/types.js").ErrorDeclaration} */ (/** @type {unknown} */ (failure)))
+  }
   for (const declaration of errorDeclarations) errorNames.set(declaration.name, declaration)
   const errorsById = new Map([...errorNames.values()].map((declaration) => [/** @type {string} */ (declaration.id), declaration]))
   const errors = errorNodes.map((node, index) => convertJavaScriptError(node, errorDeclarations[index], language, filename, source))
@@ -2225,6 +2250,15 @@ export function parseJavaScriptTypeScript({filename, language, source, program})
     returnType: declaration.returnType,
     ...(declaration.typeParameters ? {typeParameters: declaration.typeParameters} : {})
   }]))
+  for (const operation of capabilities.flatMap(({operations}) => operations)) {
+    if (!functionSignatures.has(operation.name)) functionSignatures.set(operation.name, {
+      location: moduleLocation(filename, source),
+      name: operation.name,
+      nameLocation: moduleLocation(filename, source),
+      parameters: operation.parameters.map((parameter) => ({...parameter, kind: /** @type {const} */ ("Parameter"), location: moduleLocation(filename, source)})),
+      returnType: operation.returnType
+    })
+  }
   for (const signature of signatures) functionSignatures.set(signature.name, signature)
   const records = recordNodes.map((node, index) => language == "typescript"
     ? convertTypeScriptRecord(node, recordDeclarations[index], recordNames, filename, source)
@@ -2274,6 +2308,57 @@ export function parseJavaScriptTypeScript({filename, language, source, program})
     ...(classes.length > 0 ? {classes} : {}),
     ...(records.length > 0 ? {records} : {})
   }
+}
+
+/**
+ * Removes exact protected Node probe support before portable conversion.
+ * @param {import("@babel/types").Statement[]} nodes - Parsed top-level statements.
+ * @param {readonly import("../semantic/types.js").EffectCapabilityDeclaration[]} capabilities - Authorized declarations.
+ * @param {"javascript" | "typescript"} language - Source language.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @returns {import("@babel/types").Statement[]} Portable statements.
+ */
+function task034JavaScriptNodes(nodes, capabilities, language, filename, source) {
+  if (!isTask034ResourceProbe(capabilities)) return nodes
+  const first = nodes[0]
+  const marker = first?.leadingComments?.some((comment) => comment.type == "CommentBlock" &&
+    comment.value.trim() == "semantifold-task034-support")
+
+  if (!marker) return nodes
+  if (!hasExactEffectSupport(source, language)) {
+    return unsupportedSyntax(language, "malformed protected Task 034 support", nodeLocation(first, filename, source))
+  }
+  const expected = [
+    ["VariableDeclaration", "__semantifoldTask034Fs"], ["ClassDeclaration", "ProbeOperationFailure"],
+    ["ClassDeclaration", "ProbeAcquireFailure"], ["ClassDeclaration", "ProbeReadFailure"],
+    ["ClassDeclaration", "ProbeCloseFailure"], ["ClassDeclaration", "ProbeResourceClosed"],
+    ["ClassDeclaration", "ProbeResource"], ["VariableDeclaration", "__semantifoldTask034Trace"],
+    ["FunctionDeclaration", "probeEffect"], ["FunctionDeclaration", "probeAcquire"],
+    ["FunctionDeclaration", "probeRead"], ["FunctionDeclaration", "probeClose"], ["FunctionDeclaration", "probeTrace"]
+  ]
+  /**
+   * Reads the declaration name used to verify one protected support statement.
+   * @param {import("@babel/types").Statement | undefined} node - Candidate statement.
+   * @returns {string | undefined} Declared name.
+   */
+  const nodeName = (node) => {
+    if (!node) return undefined
+    if (node.type == "VariableDeclaration" && node.declarations.length == 1 && node.declarations[0].id.type == "Identifier") {
+      return node.declarations[0].id.name
+    }
+    const id = Reflect.get(node, "id")
+    return id && typeof id == "object" && typeof Reflect.get(id, "name") == "string" ? Reflect.get(id, "name") : undefined
+  }
+  const matches = expected.every(([type, name], index) => nodes[index]?.type == type && nodeName(nodes[index]) == name)
+  const next = nodes[expected.length]
+  const ended = next?.leadingComments?.some((comment) => comment.type == "CommentBlock" &&
+    comment.value.trim() == "semantifold-task034-support-end")
+
+  if (!matches || next && !ended) {
+    return unsupportedSyntax(language, "malformed protected Task 034 support", nodeLocation(first, filename, source))
+  }
+  return nodes.slice(expected.length)
 }
 
 /**

@@ -1,6 +1,7 @@
 // @ts-check
 
 import {emitExpression, emitType} from "./shared.js"
+import {emitEffectPrefixes, emitEffectSupport} from "./effects.js"
 
 /**
  * Emits an independently executable Ruby program through the source-aware writer.
@@ -31,6 +32,7 @@ export function generateRuby(module, writer) {
     if (module.functions.length > 0) writer.synthetic("module_function\n\n", "Ruby module-function profile", [module])
   }
 
+  emitEffectSupport(writer, module, "ruby")
   errors.forEach((error, index) => {
     const path = `/errors/${index}`
 
@@ -277,6 +279,8 @@ function emitBlock(writer, block, indent, path) {
  * @returns {void}
  */
 function emitStatement(writer, statement, indent, path) {
+  emitEffectPrefixes(writer, statement, indent, path, "ruby",
+    (expression, expressionPath) => emitExpression(writer, expression, expressionPath, "ruby", identity))
   if (statement.kind == "LocalDeclaration" || statement.kind == "AssignmentStatement") return emitLocal(writer, statement, indent, path)
   writer.synthetic(indent, "indentation", [statement], [path])
   if (statement.kind == "PrivateFieldWriteStatement") {

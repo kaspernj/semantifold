@@ -260,6 +260,9 @@ function validateProgram(candidate, language) {
       unsupportedCapability(language, "Task 033 reference classes are not supported by semantic program generation",
         Reflect.get(module, "classes")?.[0]?.location ?? module.location)
     }
+    if (Reflect.get(module, "capabilities") !== undefined) {
+      unsupportedCapability(language, "Task 034 capabilities are not supported by semantic program generation", module.location)
+    }
     if (typeof module.sourceFilename != "string" || !sourceFilenames.has(module.sourceFilename)) {
       unsupportedCapability(language, "semantic program module source identity", module.location)
     }

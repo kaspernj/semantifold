@@ -2,7 +2,7 @@
 
 import {isDenseArray} from "../array.js"
 import {isSafeArtifactPath} from "../artifact-path.js"
-import {SemantifoldDiagnostic, semanticFailure, unsupportedRole} from "../diagnostic.js"
+import {SemantifoldDiagnostic, semanticFailure, unsupportedCapability, unsupportedRole} from "../diagnostic.js"
 import {languageRegistry} from "../language-registry.js"
 import {moduleLocation} from "../semantic/location.js"
 import {annotateParsedModule} from "../semantic/provenance.js"
@@ -32,6 +32,10 @@ export function parseProgramSource(input) {
     typeof input.entryModule != "string") invalidProgram("Program parsing requires a non-empty ordered source set and entry module.")
 
   const sources = input.sources.map((source, index) => validateSource(source, index))
+  if (Object.hasOwn(input, "capabilityAuthority")) {
+    unsupportedCapability(sources[0].language, "Task 034 capabilities are single-module only",
+      moduleLocation(sources[0].filename, sources[0].source))
+  }
   const registeredSources = sources.map((source, index) => ({
     content: source.source,
     filename: source.filename,

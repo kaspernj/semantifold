@@ -31,6 +31,7 @@ describe("language role registry", () => {
         expect(descriptor.features).toEqual({
           closedRecords: false,
           conditionControlledLoops: false,
+          effectfulCapabilitiesAndResources: false,
           generalFunctionsAndCalls: false,
           immutableCollections: false,
           optionalValues: false,
@@ -62,6 +63,7 @@ describe("language role registry", () => {
       expect(descriptor.features).toEqual({
         closedRecords: originalFive.includes(descriptor.id),
         conditionControlledLoops: originalFive.includes(descriptor.id),
+        effectfulCapabilitiesAndResources: originalFive.includes(descriptor.id),
         generalFunctionsAndCalls: originalFive.includes(descriptor.id),
         immutableCollections: originalFive.includes(descriptor.id),
         optionalValues: originalFive.includes(descriptor.id),
@@ -120,7 +122,7 @@ console.log(choose(true, "no"))
       [{...record, id: ""}],
       [{...record, artifactMultiplicity: "many"}],
       [{...record, surprise: true}],
-      [{...record, features: {closedRecords: false, conditionControlledLoops: false, generalFunctionsAndCalls: "yes", immutableCollections: false, optionalValues: false, orderedListIteration: false, orderedMapIteration: false, typeParametersAndGenerics: false, typedErrors: false}}],
+      [{...record, features: {closedRecords: false, conditionControlledLoops: false, effectfulCapabilitiesAndResources: false, generalFunctionsAndCalls: "yes", immutableCollections: false, optionalValues: false, orderedListIteration: false, orderedMapIteration: false, referenceClasses: false, typeParametersAndGenerics: false, typedErrors: false}}],
       [{...record, features: {closedRecords: false, generalFunctionsAndCalls: false, immutableCollections: false}}],
       [{...record, acceptance: {stages: ["execute", "parse"], toolchains: []}}],
       [{...record, acceptance: {stages: ["parse", "parse"], toolchains: []}}],

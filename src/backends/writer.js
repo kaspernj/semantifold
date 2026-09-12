@@ -3,6 +3,28 @@
 import {createGenerationIndex} from "../semantic/provenance.js"
 
 /**
+ * Collects every caller-controlled binding spelling before synthetic names are chosen.
+ * @param {unknown} root - Semantic graph.
+ * @returns {Set<string>} Used source names.
+ */
+function collectBindingNames(root) {
+  const names = new Set()
+  const pending = [root]
+  const seen = new Set()
+
+  while (pending.length > 0) {
+    const value = pending.pop()
+    if (!value || typeof value != "object" || seen.has(value)) continue
+    seen.add(value)
+    if (!Array.isArray(value) && typeof Reflect.get(value, "name") == "string") names.add(Reflect.get(value, "name"))
+    for (const child of Array.isArray(value) ? value : Object.values(value)) {
+      if (child && typeof child == "object") pending.push(child)
+    }
+  }
+  return names
+}
+
+/**
  * Converts a logical module identity to its canonical target type segment.
  * @param {string} id - Logical module identity.
  * @returns {string} Portable target class/module name.
@@ -63,12 +85,15 @@ export class SourceWriter {
     this.index = index
     const programRecords = program?.modules.flatMap((programModule) => programModule.records ?? []) ?? module.records ?? []
     const programClasses = program ? [] : module.classes ?? []
-    const programErrors = program?.modules.flatMap((programModule) => programModule.errors ?? []) ?? module.errors ?? []
+    const capabilityFailures = module.capabilities?.flatMap(({failures}) => failures) ?? []
+    const programErrors = program?.modules.flatMap((programModule) => programModule.errors ?? []) ?? [...module.errors ?? [], ...capabilityFailures]
     const programFunctions = program?.modules.flatMap((programModule) => programModule.functions) ?? module.functions
 
     this.records = new Map(programRecords.map((record) => [record.id, record]))
     this.classes = new Map(programClasses.map((declaration) => [declaration.id, declaration]))
     this.errors = new Map(programErrors.map((error) => [error.id, error]))
+    this.resources = new Map((module.capabilities?.flatMap(({resources}) => resources) ?? []).map((resource) => [resource.id, resource]))
+    this.effectOperations = new Map((module.capabilities?.flatMap(({operations}) => operations) ?? []).map((operation) => [operation.id, operation]))
     this.fields = new Map(programRecords.flatMap((record) => record.fields.map((field) => [field.id, field])))
     this.fieldRecords = new Map(programRecords.flatMap((record) => record.fields.map((field) => [field.id, record])))
     this.privateFields = new Map(programClasses.flatMap((declaration) => declaration.fields.map((field) => [field.id, field])))
@@ -89,6 +114,65 @@ export class SourceWriter {
     this.offset = 0
     this.line = 1
     this.column = 1
+    /** @type {Map<import("../semantic/types.js").Expression, string>} */
+    this.effectTemporaryNames = new Map()
+    /** @type {Map<import("../semantic/types.js").Expression, string>} */
+    this.effectReplacementNames = new Map()
+    /** @type {import("../semantic/types.js").Expression | undefined} */
+    this.effectDefinition = undefined
+    this.usedBindingNames = collectBindingNames(module)
+  }
+
+  /**
+   * Installs the effect expressions lowered immediately before the current statement.
+   * @param {import("../semantic/types.js").Expression[]} expressions - Ordered expressions.
+   * @returns {void}
+   */
+  planEffectReplacements(expressions) {
+    this.effectReplacementNames = new Map(expressions.map((expression) => [expression, this.effectTemporaryName(expression)]))
+  }
+
+  /**
+   * Allocates a collision-safe name for one deterministic effect site.
+   * @param {import("../semantic/types.js").Expression} expression - Effectful expression.
+   * @returns {string} Stable temporary name.
+   */
+  effectTemporaryName(expression) {
+    const known = this.effectTemporaryNames.get(expression)
+    if (known) return known
+    const site = typeof Reflect.get(expression, "effectSiteId") == "string"
+      ? Reflect.get(expression, "effectSiteId").slice("effect:".length) : String(this.effectTemporaryNames.size)
+    let name = `__semantifold_effect_${site}`
+
+    while (this.usedBindingNames.has(name)) name = `${name}_`
+    this.usedBindingNames.add(name)
+    this.effectTemporaryNames.set(expression, name)
+    return name
+  }
+
+  /**
+   * Returns the planned temporary replacement outside its own definition.
+   * @param {import("../semantic/types.js").Expression} expression - Candidate expression.
+   * @returns {string | undefined} Temporary name.
+   */
+  effectReplacementName(expression) {
+    return this.effectDefinition === expression ? undefined : this.effectReplacementNames.get(expression)
+  }
+
+  /**
+   * Emits one effect definition without recursively replacing itself.
+   * @param {import("../semantic/types.js").Expression} expression - Defined expression.
+   * @param {() => void} emit - Target expression emitter.
+   * @returns {void}
+   */
+  emitEffectDefinition(expression, emit) {
+    const previous = this.effectDefinition
+    this.effectDefinition = expression
+    try {
+      emit()
+    } finally {
+      this.effectDefinition = previous
+    }
   }
 
   /**
@@ -166,6 +250,28 @@ export class SourceWriter {
   }
 
   /**
+   * Resolves one validated owned-resource declaration.
+   * @param {string} resourceId - Stable resource identity.
+   * @returns {import("../semantic/types.js").EffectResourceDeclaration} Resource declaration.
+   */
+  resourceForId(resourceId) {
+    const resource = this.resources.get(resourceId)
+    if (!resource) throw new RangeError(`Unknown validated resource identity '${resourceId}'.`)
+    return resource
+  }
+
+  /**
+   * Resolves one validated capability operation declaration.
+   * @param {string} operationId - Stable operation identity.
+   * @returns {import("../semantic/types.js").EffectOperationDeclaration} Operation declaration.
+   */
+  effectOperationForId(operationId) {
+    const operation = this.effectOperations.get(operationId)
+    if (!operation) throw new RangeError(`Unknown validated effect operation identity '${operationId}'.`)
+    return operation
+  }
+
+  /**
    * Resolves one validated private field.
    * @param {string} fieldId - Stable private-field identity.
    * @returns {import("../semantic/types.js").PrivateField} Field declaration.
@@ -207,7 +313,7 @@ export class SourceWriter {
   /**
    * Returns the validated nominal error declaration for an identity.
    * @param {string} declarationId - Stable error identity.
-   * @returns {import("../semantic/types.js").ErrorDeclaration} Error declaration.
+   * @returns {import("../semantic/types.js").ErrorDeclaration | import("../semantic/types.js").EffectFailureDeclaration} Error declaration.
    */
   errorForId(declarationId) {
     const error = this.errors.get(declarationId)
