@@ -97,6 +97,25 @@ npx velocious-test spec/public-api.spec.js
 
 This capability remains original-five-only. It does not assign iteration order to Task 006 `MapType`, widen Task 008, add sorting or arbitrary iterators, or introduce a standard-library contract, compatibility facade, host provider, pairwise adapter, publication, or deployment behavior.
 
+## Task 032 condition-controlled loops and break
+
+Task 032 uses six focused specs. Frontend coverage parses each original-five ordinary block-form `while` and rejects post-condition, modifier, alternate-syntax, unbraced, labeled, leveled, and valued variants. Semantic coverage locks exact Boolean conditions, precondition fallthrough, conservative repeated-condition facts, body scope, unreachable code, nested nearest-loop identity, and function-boundary legality. Backend coverage proves native generation/reparse for all five targets, mixed nested-loop control, exact caller-IR identity validation, and transactional rejection from every non-cohort target. Registry coverage locks the independent public capability flag.
+
+The runtime spec generates, reparses, and executes PHP, Ruby, JavaScript with Node, TypeScript through local `tsc` plus Node, and Java through `javac` plus `java`. Its exact output proves zero iterations, repeated condition effects, `continue` returning to the next condition evaluation, nearest nested `break`, and return from inside a condition-controlled loop. Missing commands fail.
+
+Run every file individually and sequentially; locale normalization is mandatory for the real-toolchain proof:
+
+```sh
+npx velocious-test spec/condition-controlled-loop-frontends.spec.js
+npx velocious-test spec/condition-controlled-loop-validation.spec.js
+npx velocious-test spec/condition-controlled-loop-backend-validation.spec.js
+npx velocious-test spec/condition-controlled-loop-backends.spec.js
+npx velocious-test spec/condition-controlled-loop-language-registry.spec.js
+LANG=C.UTF-8 LC_ALL=C.UTF-8 npx velocious-test spec/condition-controlled-loop-runtime-execution.spec.js
+```
+
+This capability remains original-five-only. It adds no post-condition, infinite-shorthand, basic, range, iterator, or async loop; no labels, numeric levels, valued control, or loop `else`; and no stdlib-specific recognition, compatibility facade, canonical capability, provider, pairwise adapter, publication, or deployment behavior.
+
 ## Task 025 core expanded-language acceptance
 
 Task 025 uses two data-driven focused specs instead of duplicating the eight owning language suites. `spec/core-language-baseline-acceptance.spec.js` normalizes all five Tasks 001–004 profiles for Python, C#, C, C++, Rust, Swift, Kotlin/JVM, and Go; generates, reparses, and really executes one operator round trip per language; runs the eleven-path spanning matrix documented in [language support](language-support.md#task-025-core-expanded-language-acceptance); checks deterministic artifact bytes/mappings/provenance; and asserts the public registry contract. Its ordered program checks eager left-before-right calls and both short-circuit sides. C and C++ run the exact ordered-region source at O0/O2 with and without sanitizers, Rust runs debug/release, and Swift runs debug/`-O`.

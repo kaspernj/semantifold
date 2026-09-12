@@ -201,6 +201,19 @@ function emitStatement(writer, statement, indent, path, canonicalizeZero) {
     writer.synthetic("\n", "line break", [statement], [path])
     return
   }
+  if (statement.kind == "WhileStatement") {
+    writer.mapped("while", {mappingKind: "exact", node: statement, path})
+    writer.synthetic(" (", "condition-controlled loop spacing", [statement], [path])
+    emitExpression(writer, statement.condition, `${path}/condition`, "typescript", identity)
+    writer.synthetic(") ", "condition-controlled loop spacing", [statement], [path])
+    writer.mapped("{", {mappingKind: "anchor", node: statement.body, path: `${path}/body`})
+    writer.synthetic("\n", "line break", [statement], [path])
+    emitBlock(writer, statement.body, `${indent}  `, `${path}/body`, canonicalizeZero)
+    writer.synthetic(indent, "indentation", [statement], [path])
+    writer.mapped("}", {mappingKind: "anchor", node: statement.body, path: `${path}/body`})
+    writer.synthetic("\n", "line break", [statement], [path])
+    return
+  }
   if (statement.kind == "ForEachStatement") {
     writer.mapped("for", {mappingKind: "anchor", node: statement, path})
     writer.synthetic(" (const ", "loop scaffolding", [statement], [path])

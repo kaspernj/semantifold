@@ -43,6 +43,7 @@
  * @property {boolean} optionalValues - Task 007 explicit optional values, presence tests, and guarded unwrap.
  * @property {boolean} orderedListIteration - Task 008 ordered immutable-list iteration and nearest-loop control.
  * @property {boolean} orderedMapIteration - Task 014 insertion-ordered immutable-map pair iteration.
+ * @property {boolean} conditionControlledLoops - Task 032 strict-Boolean pre-condition loops and resolved control.
  * @property {boolean} closedRecords - Task 009 nominal closed immutable records, construction, and member reads.
  * @property {boolean} typedErrors - Task 011 nominal unchecked errors, raises, and exact typed catches.
  * @property {boolean} typeParametersAndGenerics - Task 012 invariant unbounded type parameters and closed generic applications.
@@ -636,6 +637,7 @@
 /**
  * @typedef ForEachStatement
  * @property {"ForEachStatement"} kind - Ordered list-iteration discriminator.
+ * @property {string} [id] - Deterministic module-local loop identity, required after frontend validation.
  * @property {Expression} list - List expression evaluated exactly once before traversal.
  * @property {ValueBinding} valueBinding - Immutable binding scoped to the body.
  * @property {Block} body - Loop body.
@@ -646,6 +648,7 @@
 /**
  * @typedef ForEachMapStatement
  * @property {"ForEachMapStatement"} kind - Insertion-ordered map pair-iteration discriminator.
+ * @property {string} [id] - Deterministic module-local loop identity, required after frontend validation.
  * @property {Expression} map - Ordered-map expression evaluated exactly once before traversal.
  * @property {ValueBinding} keyBinding - Immutable string-key binding scoped to the body.
  * @property {ValueBinding} valueBinding - Immutable homogeneous value binding scoped to the body.
@@ -655,8 +658,19 @@
  */
 
 /**
+ * @typedef WhileStatement
+ * @property {"WhileStatement"} kind - Strict-Boolean pre-condition loop discriminator.
+ * @property {string} [id] - Deterministic module-local loop identity, required after frontend validation.
+ * @property {Expression} condition - Boolean expression evaluated before every iteration.
+ * @property {Block} body - Ordered loop body.
+ * @property {SourceLocation} location - Complete loop source location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
+ */
+
+/**
  * @typedef BreakStatement
  * @property {"BreakStatement"} kind - Nearest-loop break discriminator.
+ * @property {string} [targetLoopId] - Resolved nearest-loop identity, required after frontend validation in loop context.
  * @property {SourceLocation} location - Keyword source location.
  * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
  */
@@ -664,6 +678,7 @@
 /**
  * @typedef ContinueStatement
  * @property {"ContinueStatement"} kind - Nearest-loop continue discriminator.
+ * @property {string} [targetLoopId] - Resolved nearest-loop identity, required after frontend validation in loop context.
  * @property {SourceLocation} location - Keyword source location.
  * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
  */
@@ -707,7 +722,7 @@
  */
 
 /** @typedef {LocalDeclaration | AssignmentStatement} LocalStatement */
-/** @typedef {LocalStatement | ExpressionStatement | IfStatement | ForEachStatement | ForEachMapStatement | BreakStatement | ContinueStatement | ReturnStatement | PrintStatement | RaiseStatement | TryStatement} Statement */
+/** @typedef {LocalStatement | ExpressionStatement | IfStatement | ForEachStatement | ForEachMapStatement | WhileStatement | BreakStatement | ContinueStatement | ReturnStatement | PrintStatement | RaiseStatement | TryStatement} Statement */
 
 /**
  * @typedef Block

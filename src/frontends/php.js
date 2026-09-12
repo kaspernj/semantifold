@@ -770,6 +770,7 @@ function convertStatement(node, filename, source, context) {
   if (node.kind == "if") return convertIf(/** @type {import("php-parser").If} */ (node), filename, source, context)
   if (node.kind == "throw") return convertPhpRaise(node, filename, source, context)
   if (node.kind == "try") return convertPhpTry(node, filename, source, context)
+  if (node.kind == "while") return convertWhile(/** @type {import("php-parser").While} */ (node), filename, source, context)
   if (node.kind == "foreach") return convertForEach(/** @type {import("php-parser").Foreach} */ (node), filename, source, context)
   if (node.kind == "break" || node.kind == "continue") {
     const control = /** @type {import("php-parser").Break | import("php-parser").Continue} */ (node)
@@ -1569,6 +1570,31 @@ function convertIf(node, filename, source, context) {
     kind: "IfStatement",
     location
   }
+}
+
+/**
+ * Converts exact braced PHP `while ($condition) { ... }` syntax.
+ * @param {import("php-parser").While} node - PHP while node.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @param {PhpConversionContext} context - Typed conversion context.
+ * @returns {import("../semantic/types.js").WhileStatement} Semantic loop.
+ */
+function convertWhile(node, filename, source, context) {
+  const location = nodeLocation(node, filename, source)
+
+  if (node.shortForm) return unsupportedSyntax("php", "alternative while syntax", location)
+  if (!node.body || node.body.kind != "block") {
+    return unsupportedSyntax("php", "while without block body", node.body ? nodeLocation(node.body, filename, source) : location)
+  }
+  const bodyContext = {...context, bindings: new Map(context.bindings)}
+
+  return withParserRanges({
+    body: convertBlock(/** @type {import("php-parser").Block} */ (node.body), filename, source, bodyContext),
+    condition: convertExpression(node.test, filename, source, context, undefined, true),
+    kind: /** @type {const} */ ("WhileStatement"),
+    location
+  }, {keyword: tokenLocation("while", node.loc?.start.offset ?? 0, node.test.loc?.start.offset ?? source.length, filename, source)})
 }
 
 /**

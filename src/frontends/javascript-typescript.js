@@ -757,6 +757,7 @@ function convertStatement(node, language, filename, source, canonicalZeroRequire
   if (node.type == "IfStatement") return convertIf(node, language, filename, source, canonicalZeroRequired, context)
   if (node.type == "ThrowStatement") return convertTypedThrow(node, language, filename, source, context)
   if (node.type == "TryStatement") return convertTypedTry(node, language, filename, source, canonicalZeroRequired, context)
+  if (node.type == "WhileStatement") return convertWhile(node, language, filename, source, canonicalZeroRequired, context)
   if (node.type == "ForOfStatement") return convertForEach(node, language, filename, source, canonicalZeroRequired, context)
   if (node.type == "BreakStatement" || node.type == "ContinueStatement") {
     if (node.label) return unsupportedSyntax(language, `labeled ${node.type == "BreakStatement" ? "break" : "continue"}`,
@@ -1689,6 +1690,32 @@ function convertIf(node, language, filename, source, canonicalZeroRequired, cont
     kind: "IfStatement",
     location
   }
+}
+
+/**
+ * Converts one exact block-bodied pre-condition loop.
+ * @param {import("@babel/types").WhileStatement} node - Babel while statement.
+ * @param {"javascript" | "typescript"} language - Frontend language.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @param {boolean} canonicalZeroRequired - Whether generated scalar output may contain signed zero.
+ * @param {JavaScriptConversionContext} context - Typed lexical conversion context.
+ * @returns {import("../semantic/types.js").WhileStatement} Semantic loop.
+ */
+function convertWhile(node, language, filename, source, canonicalZeroRequired, context) {
+  const location = nodeLocation(node, filename, source)
+
+  if (node.body.type != "BlockStatement") {
+    return unsupportedSyntax(language, "while without block body", nodeLocation(node.body, filename, source))
+  }
+  const bodyContext = {...context, bindings: new Map(context.bindings)}
+
+  return withParserRanges({
+    body: convertBlock(node.body, language, filename, source, canonicalZeroRequired, bodyContext),
+    condition: convertExpression(node.test, language, filename, source, context, undefined, true),
+    kind: /** @type {const} */ ("WhileStatement"),
+    location
+  }, {keyword: tokenLocation(node, "while", node.start ?? 0, node.test.start ?? node.end ?? source.length, filename, source)})
 }
 
 /**

@@ -51,6 +51,8 @@ describe("public API", () => {
       .toEqual(["php", "ruby", "javascript", "typescript", "java"])
     expect(languageCapabilities.filter(({features}) => features.orderedMapIteration).map(({id}) => id))
       .toEqual(["php", "ruby", "javascript", "typescript", "java"])
+    expect(languageCapabilities.filter(({features}) => features.conditionControlledLoops).map(({id}) => id))
+      .toEqual(["php", "ruby", "javascript", "typescript", "java"])
     expect(typeof canonicalToolchains).toEqual("object")
     expect(typeof SemantifoldDiagnostic).toEqual("function")
     for (const api of [

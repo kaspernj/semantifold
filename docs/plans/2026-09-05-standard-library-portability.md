@@ -2,7 +2,7 @@
 
 Date: 2026-09-05
 
-Status: dependency-ordered future plan; no implementation is claimed.
+Status: dependency-ordered plan; Task 032 is implemented and validated on its delivery branch, while Tasks 033–037 remain planned.
 
 ## Goal and architecture reference
 
@@ -10,13 +10,13 @@ Deliver the first bounded proof of the [standard-library portability architectur
 
 ## Why semantic prerequisites come first
 
-The current `semantifold@0.2.0` IR cannot express imports, general signatures, receiver calls, classes, loops, optional EOF, typed failures, resource identities, ownership, or close effects. Encoding a socket facade before those meanings exist would push language behavior into parser adapters, emitters, or handwritten source-to-target bridges. That would make evaluation order, EOF, failure, and lifetime accidental and prevent other facades/providers from sharing the work.
+The published `semantifold@0.3.0` package cannot express the full set of imports, receiver calls, reference classes, condition-controlled loops, optional EOF, typed failures, resource identities, ownership, and close effects required by this plan. The current source tree has since delivered several prerequisites, and Task 032's delivery branch supplies the general loop/control foundation, but the remaining class, capability, resource, facade, and provider layers are still absent. Encoding a socket facade before those meanings exist would push language behavior into parser adapters, emitters, or handwritten source-to-target bridges. That would make evaluation order, EOF, failure, and lifetime accidental and prevent other facades/providers from sharing the work.
 
 The sequence therefore establishes general language semantics first, then defines capability/provider infrastructure, and only then adds a facade and concrete network slice. Numerical task order records this dependency flow; it is not a promise that the work is complete or immediately scheduled.
 
 ## Dependency-ordered sequence
 
-1. Complete existing prerequisites [Task 004](../../todo/004-statement-sequencing-and-conditionals.md) and [Task 005](../../todo/005-general-function-signatures-and-calls.md), then add [Task 032 — condition-controlled loops and break/continue](../../todo/032-condition-controlled-loops-and-break.md). This supplies a general strict-Boolean loop model without recognizing stdlib-specific read-loop idioms.
+1. [Task 004](../../todo/004-statement-sequencing-and-conditionals.md) and [Task 005](../../todo/005-general-function-signatures-and-calls.md) are delivered. [Task 032 — condition-controlled loops and break/continue](../../todo/032-condition-controlled-loops-and-break.md) is implemented and locally validated on its delivery branch. It supplies a general strict-Boolean loop model without recognizing stdlib-specific read-loop idioms.
 2. Complete [Task 009](../../todo/009-closed-records-and-member-access.md), then add [Task 033 — reference classes, methods, and constructors](../../todo/033-reference-classes-methods-and-constructors.md). Executable facades need bounded nominal reference identity, private state, construction, and receiver calls; immutable records alone are insufficient.
 3. Build on optionals, typed failures, and reference classes with [Task 034 — effectful capabilities and resource lifetime](../../todo/034-effectful-capabilities-and-resource-lifetime.md). It defines explicit host effects, resource ownership, deterministic close, and typed failure boundaries without claiming async, concurrency, `finally`, or RAII.
 4. Build project/module and effect foundations into [Task 035 — versioned standard-library contracts and provider linking](../../todo/035-versioned-standard-library-contracts-and-provider-linking.md). This owns canonical capability modules, provider registry/negotiation, protected native bindings, transactional linking, and tree-shaking.
@@ -43,4 +43,4 @@ Negative acceptance covers unresolved or shadowed `TCPSocket` or `puts`, monkey-
 
 Each behavior task must add focused specs, exact public contracts, documentation, and a changelog fragment. Runtime-generation coverage must invoke the real required tools and a real local socket; source snapshots are insufficient. Implementations must validate and return deterministic complete artifact sets, retain semantic/synthetic provenance, and fail if a required tool is unavailable.
 
-This planning change itself adds no compiler/runtime behavior, dependency, generated output, spec, or changelog fragment. It does not trigger release, CI topology, external task mutation, or implementation of the listed tasks.
+The plan itself adds no compiler/runtime behavior or implementation authority. Task 032 is a separate delivery candidate; Tasks 033–037 remain unimplemented here. Neither this plan nor Task 032 triggers release, CI-topology changes, external task mutation, or expansion into those later tasks.

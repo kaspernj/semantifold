@@ -811,6 +811,7 @@ function convertStatement(statement, filename, source, context) {
   if (statement.name == "IfStatement") return convertIf(statement, filename, source, context)
   if (statement.name == "ThrowStatement") return convertJavaRaise(statement, filename, source, context)
   if (statement.name == "TryStatement") return convertJavaTry(statement, filename, source, context)
+  if (statement.name == "WhileStatement") return convertWhile(statement, filename, source, context)
   if (statement.name == "EnhancedForStatement") return convertForEach(statement, filename, source, context)
   if (statement.name == "BreakStatement" || statement.name == "ContinueStatement") {
     const label = statement.getChild("Label")
@@ -1910,6 +1911,39 @@ function convertIf(node, filename, source, context) {
     kind: "IfStatement",
     location
   }
+}
+
+/**
+ * Converts one exact block-bodied Java pre-condition loop.
+ * @param {import("@lezer/common").SyntaxNode} node - Java WhileStatement.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @param {JavaConversionContext} context - Typed lexical conversion context.
+ * @returns {import("../semantic/types.js").WhileStatement} Semantic loop.
+ */
+function convertWhile(node, filename, source, context) {
+  const location = nodeLocation(node, filename, source)
+  const direct = directChildren(node)
+  const conditionContainer = node.getChild("ParenthesizedExpression")
+  const body = node.getChild("Block")
+  const conditionNodes = conditionContainer ? structuralChildren(conditionContainer) : []
+
+  if (direct.length != 3 || direct[0].name != "while" || direct[1].name != "ParenthesizedExpression" ||
+    direct[2].name != "Block" || !conditionContainer || !body || conditionNodes.length != 1) {
+    return unsupportedSyntax("java", "while without exact condition and block body", location)
+  }
+  const bodyContext = {
+    ...context,
+    bindings: new Map(context.bindings),
+    erasedBindingNames: new Set(context.erasedBindingNames)
+  }
+
+  return withParserRanges({
+    body: convertBlock(body, filename, source, bodyContext),
+    condition: convertExpression(conditionNodes[0], filename, source, context),
+    kind: /** @type {const} */ ("WhileStatement"),
+    location
+  }, {keyword: nodeLocation(direct[0], filename, source)})
 }
 
 /**
