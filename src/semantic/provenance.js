@@ -539,6 +539,9 @@ export function semanticEntries(module) {
       visit(node.keyBinding, `${path}/keyBinding`, location)
       visit(node.valueBinding, `${path}/valueBinding`, location)
       visit(node.body, `${path}/body`, location)
+    } else if (node.kind == "WhileStatement") {
+      visit(node.condition, `${path}/condition`, location)
+      visit(node.body, `${path}/body`, location)
     } else if (node.kind == "RaiseStatement") {
       visit(node.error, `${path}/error`, location)
     } else if (node.kind == "TryStatement") {
@@ -751,6 +754,9 @@ function resolveSymbols(module, records) {
           statement.valueBinding, statement.valueBinding.name, "iteration", `${statementPath}/valueBinding`
         ))
         visitBlock(statement.body, bodyScope, `${statementPath}/body`)
+      } else if (statement.kind == "WhileStatement") {
+        visitExpression(statement.condition, scope, `${statementPath}/condition`)
+        visitBlock(statement.body, scope, `${statementPath}/body`)
       } else if (statement.kind == "RaiseStatement") {
         visitType(statement.error.error, `${statementPath}/error/error`)
         reference(statement.error, errorSymbols.get(statement.error.error.declarationId), "construct", `${statementPath}/error`)

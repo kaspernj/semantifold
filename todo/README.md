@@ -2,9 +2,9 @@
 
 ## Purpose and current baseline
 
-This folder is Semantifold's durable, dependency-ordered implementation backlog and delivered design record. The released baseline is `semantifold@0.3.0` / `v0.3.0` at commit `80e221d`; the current merged `master` baseline includes Task 013 plus its packed-consumer lifecycle correction through PRs 32/33 at `a78e513aa9929d8baaf1761079d5f486575bc8f0`, Task 009 through PRs 34/35 at `f828063f052a0be518cc320f280f4b68e399a88b`, Task 010 through PR #37 at `ba386ee85bdadd3772819215903d44dff4ad0c23`, Task 011 through PR #38 at `4c5a0a9c70305fcc69077088e90a2971a05ad15d`, Task 012 through PR #39 at `18e67d0de048259d3570c60e141c16a1d26719e2`, and its PHP recursive-generic documentation correction through PR #40 at `b12ec507d9e04dd57fbb4305129b21625d191a74`. Repository and external evidence is recorded in [SOURCES.md](SOURCES.md).
+This folder is Semantifold's durable, dependency-ordered implementation backlog and delivered design record. The released baseline is `semantifold@0.3.0` / `v0.3.0` at commit `80e221d`; the current merged `master` baseline includes Task 013 plus its packed-consumer lifecycle correction through PRs 32/33 at `a78e513aa9929d8baaf1761079d5f486575bc8f0`, Task 009 through PRs 34/35 at `f828063f052a0be518cc320f280f4b68e399a88b`, Task 010 through PR #37 at `ba386ee85bdadd3772819215903d44dff4ad0c23`, Task 011 through PR #38 at `4c5a0a9c70305fcc69077088e90a2971a05ad15d`, Task 012 through PR #39 at `18e67d0de048259d3570c60e141c16a1d26719e2`, its PHP recursive-generic documentation correction through PR #40 at `b12ec507d9e04dd57fbb4305129b21625d191a74`, and Task 014 through PR #41 at corrected head `e54047a2988b776fa5ea9ae8ab8bdabc0b56642f` and merge commit `9f3a05a5ab8e25879f2323d032c8aa9f5ec4a702`. Task 014 exact-head checks were green, monitoring is retired, and post-merge acceptance completed. Repository and external evidence is recorded in [SOURCES.md](SOURCES.md).
 
-Tasks 001–013 and 015–025 are delivered. The merged language expansion includes C++ at `8d672f3`, Rust at `eca13c0`, browser Wasm at `754d76d`, Swift at `80019a9`, Kotlin/JVM at `f468eb9`, and the Task 025 aggregate gate in PR 27 at `78ff710081a6385ffc887a14c66f45b918998ff8`. Task 005 delivered general required calls and void functions for PHP, Ruby, JavaScript/JSDoc, TypeScript, and Java in PR 28 at `26982754e15b7e647662d2b094171e5f649b23b1`; Task 006 delivered recursive immutable collections for the same cohort in PR 29 at `7199418bd05d6234ae7a022ee26d93bb1ec935b3`; Task 007 delivered explicit optional presence/absence plus conservative branch-local narrowing in PR 30 at `5f0b500ba4899873d75821e07dd9b9e3e197fbc5`; Task 008 delivered ordered list iteration in PR 31 at `275711332157bbe8d2af6f4189e7849f344bf31f`; Task 013 delivered the terminal Tasks 001–008 original-five acceptance gate through PR 32 with its packed-consumer lifecycle correction in PR 33. Task 009 delivered closed records and member access through PRs 34/35 at `f828063f052a0be518cc320f280f4b68e399a88b`; Task 010 delivered explicit multi-file semantic programs through PR #37 at `ba386ee85bdadd3772819215903d44dff4ad0c23`; Task 011 delivered exact nominal typed unchecked errors through PR #38 at `4c5a0a9c70305fcc69077088e90a2971a05ad15d`; Task 012 delivered invariant unbounded generics through PR #39 at `18e67d0de048259d3570c60e141c16a1d26719e2`, followed by its PHP recursive-generic documentation correction in PR #40 at `b12ec507d9e04dd57fbb4305129b21625d191a74`. Task 014 ordered-map iteration is implemented and validated locally with coordinator-owned CI and merge pending. The other eight source languages retain the delivered Tasks 001–004 exact-two/scalar-return profile, and browser Wasm remains target-only. Tasks 026–037 remain roadmap work.
+Tasks 001–025 are delivered. The merged language expansion includes C++ at `8d672f3`, Rust at `eca13c0`, browser Wasm at `754d76d`, Swift at `80019a9`, Kotlin/JVM at `f468eb9`, and the Task 025 aggregate gate in PR 27 at `78ff710081a6385ffc887a14c66f45b918998ff8`. Task 005 delivered general required calls and void functions for PHP, Ruby, JavaScript/JSDoc, TypeScript, and Java in PR 28 at `26982754e15b7e647662d2b094171e5f649b23b1`; Task 006 delivered recursive immutable collections for the same cohort in PR 29 at `7199418bd05d6234ae7a022ee26d93bb1ec935b3`; Task 007 delivered explicit optional presence/absence plus conservative branch-local narrowing in PR 30 at `5f0b500ba4899873d75821e07dd9b9e3e197fbc5`; Task 008 delivered ordered list iteration in PR 31 at `275711332157bbe8d2af6f4189e7849f344bf31f`; Task 013 delivered the terminal Tasks 001–008 original-five acceptance gate through PR 32 with its packed-consumer lifecycle correction in PR 33. Task 009 delivered closed records and member access through PRs 34/35 at `f828063f052a0be518cc320f280f4b68e399a88b`; Task 010 delivered explicit multi-file semantic programs through PR #37 at `ba386ee85bdadd3772819215903d44dff4ad0c23`; Task 011 delivered exact nominal typed unchecked errors through PR #38 at `4c5a0a9c70305fcc69077088e90a2971a05ad15d`; Task 012 delivered invariant unbounded generics through PR #39 at `18e67d0de048259d3570c60e141c16a1d26719e2`, followed by its PHP recursive-generic documentation correction in PR #40 at `b12ec507d9e04dd57fbb4305129b21625d191a74`; Task 014 delivered ordered-map iteration through PR #41 and merge commit `9f3a05a5ab8e25879f2323d032c8aa9f5ec4a702`. Task 032 condition-controlled loops are implemented and validated locally with coordinator-owned review, CI, and merge pending. The other eight source languages retain the delivered Tasks 001–004 exact-two/scalar-return profile, and browser Wasm remains target-only. Tasks 026–031 and 033–037 remain roadmap work.
 
 The delivered language-baseline expansion keeps its small Tasks 001–004 IR contract. Tasks 005–008 are bounded original-five semantic layers; none makes every platform, legacy bridge, or later language block semantic progress.
 
@@ -97,7 +97,7 @@ Tasks 005 and 007 depend on Task 025; their descendants inherit that gate. New-l
 - [009 — Closed records and member access](009-closed-records-and-member-access.md) — delivered through PRs 34/35; PR 35 merged as `f828063f052a0be518cc320f280f4b68e399a88b`
 - [010 — Multi-file modules and names](010-multifile-modules-and-names.md) — delivered in PR #37 at `ba386ee85bdadd3772819215903d44dff4ad0c23`
 - [011 — Typed errors and handling](011-typed-errors-and-handling.md) — delivered via PR #38 at `4c5a0a9c70305fcc69077088e90a2971a05ad15d`
-- [014 — Ordered map iteration](014-ordered-map-iteration.md)
+- [014 — Ordered map iteration](014-ordered-map-iteration.md) — delivered in PR #41 at `e54047a2988b776fa5ea9ae8ab8bdabc0b56642f`, merged as `9f3a05a5ab8e25879f2323d032c8aa9f5ec4a702`
 
 Task 010 owns the shared semantic project model: multiple caller-supplied source modules, resolved identities, and ordered target artifacts. Project/helper files for one semantic module from Task 015 are not Task 010 modules. Application lanes below depend on Task 010 when they consume a source project rather than one module.
 
@@ -109,14 +109,14 @@ Generic declarations follow concrete collection and record types. No frontend/ba
 
 ### Phase S — standard-library portability (P1, dependency-gated and non-blocking)
 
-- [032 — Condition-controlled loops and break/continue](032-condition-controlled-loops-and-break.md)
+- [032 — Condition-controlled loops and break/continue](032-condition-controlled-loops-and-break.md) — implemented and validated locally; coordinator review / CI / merge pending
 - [033 — Reference classes, methods, and constructors](033-reference-classes-methods-and-constructors.md)
 - [034 — Effectful capabilities and resource lifetime](034-effectful-capabilities-and-resource-lifetime.md)
 - [035 — Versioned standard-library contracts and provider linking](035-versioned-standard-library-contracts-and-provider-linking.md)
 - [036 — Language compatibility stdlib/facades](036-language-compatibility-stdlib-facades.md)
 - [037 — Blocking TCP client stdlib vertical slice](037-blocking-tcp-client-stdlib-vertical-slice.md)
 
-Phase S is planned to implement the [standard-library portability design](../docs/standard-library-portability.md) in dependency order. It remains non-blocking until its semantic prerequisites are delivered: Task 032 follows Tasks 004/005; Task 033 follows Tasks 005/009; Task 034 joins Tasks 005/007/011/033; Task 035 joins Tasks 010/034; Task 036 adds facades after Task 035; and Task 037 joins Tasks 032/036 for one Ruby `TCPSocket` to PHP provider proof. No task in this phase claims current implementation or all-language stdlib support. See the [implementation plan](../docs/plans/2026-09-05-standard-library-portability.md).
+Phase S is planned to implement the [standard-library portability design](../docs/standard-library-portability.md) in dependency order. It remains non-blocking until its semantic prerequisites are delivered: Task 032 follows Tasks 004/005; Task 033 follows Tasks 005/009; Task 034 joins Tasks 005/007/011/033; Task 035 joins Tasks 010/034; Task 036 adds facades after Task 035; and Task 037 joins Tasks 032/036 for one Ruby `TCPSocket` to PHP provider proof. Task 032 is implemented and validated on its delivery branch; no later Phase S task claims current implementation or all-language stdlib support. See the [implementation plan](../docs/plans/2026-09-05-standard-library-portability.md).
 
 ### Phase P — non-blocking deployment and later-language lanes
 
@@ -136,11 +136,11 @@ Legend: **implemented** describes the baseline, **core** gates Task 025, **later
 
 | Language/platform | Source frontend | Target role | Artifact profile | Parser/tool route | Initial scope |
 | --- | --- | --- | --- | --- | --- |
-| Ruby | implemented | implemented text | `.rb` | Prism | Tasks 001–012 |
-| JavaScript + JSDoc | implemented | implemented text | `.js` | Babel + comment parser | Tasks 001–012 |
-| TypeScript | implemented | implemented text | `.ts` | Babel | Tasks 001–012 |
-| PHP | implemented | implemented text | `.php` | `php-parser` | Tasks 001–012; recursive-doc follow-up local |
-| Java | implemented | implemented text | `Main.java` | Lezer Java | Tasks 001–012 |
+| Ruby | implemented | implemented text | `.rb` | Prism | Tasks 001–012, 014, and 032 |
+| JavaScript + JSDoc | implemented | implemented text | `.js` | Babel + comment parser | Tasks 001–012, 014, and 032 |
+| TypeScript | implemented | implemented text | `.ts` | Babel | Tasks 001–012, 014, and 032 |
+| PHP | implemented | implemented text | `.php` | `php-parser` | Tasks 001–012, 014, and 032 |
+| Java | implemented | implemented text | `Main.java` | Lezer Java | Tasks 001–012, 014, and 032 |
 | Python | implemented 016 | implemented text 016 | `program.py` | `tree-sitter@0.25.1` + official `tree-sitter-python@0.25.0` | Tasks 001–004 |
 | C# | implemented 017 | implemented managed project 017 | `Program.cs`, `Semantifold.csproj` | `tree-sitter@0.25.1` + official `tree-sitter-c-sharp@0.23.5`; .NET 10 | Tasks 001–004 |
 | Go | implemented 024 | implemented native module 024 | `go.mod`, `main.go` | `tree-sitter@0.25.1` + official `tree-sitter-go@0.25.0`; Go 1.26 | Tasks 001–004 |
@@ -169,6 +169,7 @@ An application target consumes semantic projects; it does not make Ruby, Python,
 | General calls/void | Task 025 then Task 005 | adopted per language capability | every platform lane must block 005 |
 | Optional values/narrowing | Task 025 then Task 007 | adopted per language capability | nullable syntax or arbitrary unions |
 | Ordered list iteration | Tasks 004 and 006 then Task 008 | adopted per language capability | map order, arbitrary loops, or iterator protocols |
+| Condition-controlled loops | Tasks 004 and 005 then Task 032 | adopted by the original five only | truthiness, post-condition/basic/iterator loops, or termination proof |
 | Semantic source projects | Task 010 | iOS 026, Android 028, Flutter 030 | package-manager resolution |
 | Apple application delivery | none | Swift 022 then iOS 026 | embedded Ruby runtime or App Store delivery |
 | Objective-C compatibility | none | iOS 026 then bridge 027 | Objective-C frontend/backend or Objective-C++ |
@@ -241,7 +242,7 @@ Dependencies in task files are authoritative. Existing IDs remain stable; numeri
 | [011](011-typed-errors-and-handling.md) | delivered | P2 | Typed errors; delivered via PR #38 at `4c5a0a9c70305fcc69077088e90a2971a05ad15d` | 004, 007, 009 |
 | [012](012-type-parameters-and-generics.md) | delivered | P3 | Generics; delivered through PR #39 at `18e67d0de048259d3570c60e141c16a1d26719e2`; PHP recursive-doc correction delivered through PR #40 at `b12ec507d9e04dd57fbb4305129b21625d191a74` | 005, 006, 009 |
 | [013](013-five-language-compatibility-acceptance.md) | delivered | P1 legacy | Original-five compatibility; delivered through PRs 32/33 at `a78e513aa9929d8baaf1761079d5f486575bc8f0` | 001–008 |
-| [014](014-ordered-map-iteration.md) | implemented and validated locally | P2 | Ordered maps; coordinator review / CI / merge pending | 006, 008 |
+| [014](014-ordered-map-iteration.md) | delivered | P2 | Ordered maps; PR #41 head `e54047a2988b776fa5ea9ae8ab8bdabc0b56642f`, merge `9f3a05a5ab8e25879f2323d032c8aa9f5ec4a702` | 006, 008 |
 | [021](021-browser-webassembly-target.md) | delivered (P) | — | Browser Wasm binary target | 015 |
 | [026](026-apple-ios-application-target.md) | P | P1 | Swift/Xcode iOS application artifacts | 010, 022 |
 | [027](027-objective-c-interoperability.md) | P | P2 | Objective-C legacy-host bridge | 005, 026 |
@@ -249,7 +250,7 @@ Dependencies in task files are authoritative. Existing IDs remain stable; numeri
 | [029](029-dart-source-and-target.md) | P | P1 | Dart frontend/backend/package | 005, 015 |
 | [030](030-flutter-application-target.md) | P | P2 | Flutter application artifacts | 010, 028, 029 |
 | [031](031-zig-source-and-target.md) | P | P2 | Zig frontend/backend/project | 005, 015, 018, 020 |
-| [032](032-condition-controlled-loops-and-break.md) | S | P1 | Strict-Boolean loops and break/continue | 004, 005 |
+| [032](032-condition-controlled-loops-and-break.md) | implemented locally (S) | P1 | Strict-Boolean loops and resolved break/continue; coordinator review / CI / merge pending | 004, 005 |
 | [033](033-reference-classes-methods-and-constructors.md) | S | P1 | Reference classes, methods, constructors | 005, 009 |
 | [034](034-effectful-capabilities-and-resource-lifetime.md) | S | P1 | Effects, resource ownership/lifetime | 005, 007, 011, 033 |
 | [035](035-versioned-standard-library-contracts-and-provider-linking.md) | S | P1 | Canonical stdlib contracts/provider linking | 010, 034 |

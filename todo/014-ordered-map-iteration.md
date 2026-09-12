@@ -1,6 +1,6 @@
 # 014 — Ordered map iteration
 
-- Status: `implemented and validated locally; coordinator review / CI / merge pending`
+- Status: `delivered in PR #41 at e54047a2988b776fa5ea9ae8ab8bdabc0b56642f; merged as 9f3a05a5ab8e25879f2323d032c8aa9f5ec4a702`
 - Phase/priority: Phase 2 / P2 (deferred, conditional)
 - Dependencies: [006-immutable-lists-and-maps.md](006-immutable-lists-and-maps.md), [008-collection-iteration.md](008-collection-iteration.md)
 
@@ -75,6 +75,8 @@ Adding map iteration to Task 008 or Task 013; assigning order to Task 006 `MapTy
 - All five backends validate and emit a genuinely ordered representation; Java uses a non-escaping insertion-ordered backing behind an unmodifiable sequenced view and never depends on `Map.of`-family iteration order.
 - Focused negative/equivalence specs and real registered-runtime generated execution prove non-lexical insertion order, control flow, and semantic round-trip, with documentation and changelog updated.
 
-## Local implementation record
+## Implementation delivery record — 2026-09-12
 
-The candidate adds the distinct `OrderedMapType`, `OrderedMapLiteral`, and `ForEachMapStatement` capability without changing Task 006 `MapType`. All five source adapters require their parser-proven immutable native profiles, and all five text backends preserve insertion order through native ordered carriers. Java recognizes and emits only the bounded non-escaping `LinkedHashMap` construction followed by an unmodifiable `SequencedMap` boundary; collision-safe generated temporaries never become semantic bindings. Every other registered target rejects Task 014 IR transactionally. Focused semantic, frontend, backend, runtime, provenance, registry, public API, and package tests own the candidate; publication remains coordinator-owned.
+The delivered implementation adds the distinct `OrderedMapType`, `OrderedMapLiteral`, and `ForEachMapStatement` capability without changing Task 006 `MapType`. All five source adapters require their parser-proven immutable native profiles, and all five text backends preserve insertion order through native ordered carriers. Java recognizes and emits only the bounded non-escaping `LinkedHashMap` construction followed by an unmodifiable `SequencedMap` boundary; collision-safe generated temporaries never become semantic bindings. Every other registered target rejects Task 014 IR transactionally. Focused semantic, frontend, backend, runtime, provenance, registry, public API, and package tests own the delivered behavior.
+
+PR #41 completed with corrected exact head `e54047a2988b776fa5ea9ae8ab8bdabc0b56642f` and merge commit `9f3a05a5ab8e25879f2323d032c8aa9f5ec4a702`. Exact-head checks were green, monitoring was retired after the terminal result, and post-merge acceptance completed. No Task 014 review, CI, monitoring, or acceptance work remains open.

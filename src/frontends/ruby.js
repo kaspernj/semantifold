@@ -40,6 +40,7 @@ import {
   SymbolNode,
   TrueNode,
   UnlessNode,
+  WhileNode,
   loadPrism
 } from "@ruby/prism"
 import {missingType, SemantifoldDiagnostic, unsupportedSyntax} from "../diagnostic.js"
@@ -807,6 +808,7 @@ function convertStatement(node, comments, context, filename, source) {
     return convertReturn(node, filename, source, context)
   }
   if (node instanceof IfNode || node instanceof UnlessNode) return convertIf(node, comments, context, filename, source)
+  if (node instanceof WhileNode) return convertWhile(node, comments, context, filename, source)
   if (node instanceof BeginNode) return convertRubyTry(node, comments, context, filename, source)
   if (node instanceof LocalVariableWriteNode) return convertLocalStatement(node, comments, context, filename, source)
   if (node instanceof BreakNode || node instanceof NextNode) {
@@ -1445,6 +1447,32 @@ function convertIf(node, comments, context, filename, source) {
     kind: "IfStatement",
     location
   }
+}
+
+/**
+ * Converts one ordinary block-form Ruby pre-condition loop.
+ * @param {WhileNode} node - Prism while node.
+ * @param {import("@ruby/prism/src/deserialize.js").Comment[]} comments - Prism comments.
+ * @param {RubyConversionContext} context - Typed lexical conversion context.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @returns {import("../semantic/types.js").WhileStatement} Semantic loop.
+ */
+function convertWhile(node, comments, context, filename, source) {
+  const location = nodeLocation(node, filename, source)
+  const keywordLocation = prismLocation(node.keywordLoc, filename, source)
+
+  if (node.isBeginModifier() || !node.closingLoc || node.keywordLoc.startOffset != node.location.startOffset) {
+    return unsupportedSyntax("ruby", "modifier while", keywordLocation)
+  }
+  const bodyContext = {...context, bindings: new Map(context.bindings)}
+
+  return withParserRanges({
+    body: convertBlock(node.statements, comments, bodyContext, filename, source, location),
+    condition: convertExpression(node.predicate, filename, source, context, undefined, true),
+    kind: /** @type {const} */ ("WhileStatement"),
+    location
+  }, {keyword: keywordLocation})
 }
 
 /**

@@ -29,6 +29,13 @@ const task005Languages = new Set(["php", "ruby", "javascript", "typescript", "ja
  */
 
 /**
+ * @typedef LoopFlowContext
+ * @property {import("./types.js").ForEachStatement | import("./types.js").ForEachMapStatement | import("./types.js").WhileStatement} [nearest] - Nearest active loop.
+ * @property {object} owner - Enclosing function or entry-point identity.
+ * @property {Map<string, object>} owners - Loop owner by module-local loop identity.
+ */
+
+/**
  * @typedef SemanticFail
  * @type {(code: string, detail: string, location: import("./types.js").SourceLocation) => never}
  */
@@ -90,15 +97,15 @@ function validateBlockShape(block, detail, fail) {
   }
 
   for (const statement of block.statements) {
-    if (!["AssignmentStatement", "BreakStatement", "ContinueStatement", "ExpressionStatement", "ForEachMapStatement", "ForEachStatement", "IfStatement", "LocalDeclaration", "PrintStatement", "RaiseStatement", "ReturnStatement", "TryStatement"].includes(statement.kind)) {
+    if (!["AssignmentStatement", "BreakStatement", "ContinueStatement", "ExpressionStatement", "ForEachMapStatement", "ForEachStatement", "IfStatement", "LocalDeclaration", "PrintStatement", "RaiseStatement", "ReturnStatement", "TryStatement", "WhileStatement"].includes(statement.kind)) {
       fail(`${detail} statement ${statement.kind}`, statement.location)
     }
     if (statement.kind == "IfStatement") {
       validateBlockShape(statement.consequent, "if consequent", fail)
       if (statement.alternate) validateBlockShape(statement.alternate, "if alternate", fail)
     }
-    if (statement.kind == "ForEachStatement" || statement.kind == "ForEachMapStatement") {
-      validateBlockShape(statement.body, "for-each body", fail)
+    if (statement.kind == "ForEachStatement" || statement.kind == "ForEachMapStatement" || statement.kind == "WhileStatement") {
+      validateBlockShape(statement.body, "loop body", fail)
     }
     if (statement.kind == "TryStatement") {
       validateBlockShape(statement.body, "try body", fail)
@@ -136,6 +143,8 @@ function validateModuleTypes(module, fail, normalizeOperations, visible = {}) {
     functions.set(functionDeclaration.name, functionDeclaration)
   }
 
+  const loopOwners = prepareLoopIdentities(module, normalizeOperations, fail)
+
   const reservedValueNames = new Set([
     ...functions.keys(),
     ...[...records.values()].map((declaration) => declaration.name),
@@ -154,12 +163,62 @@ function validateModuleTypes(module, fail, normalizeOperations, visible = {}) {
   const callEffects = inferCallEffects(functions, visible.callEffects, localFunctionNames)
 
   for (const functionDeclaration of module.functions) {
-    validateFunction(functionDeclaration, functions, records, errors, callEffects, reservedValueNames, fail, normalizeOperations)
+    validateFunction(functionDeclaration, functions, records, errors, callEffects, reservedValueNames, fail, normalizeOperations, loopOwners)
   }
 
   const entryScope = createScope(undefined, module.entryPoint.body.statements, reservedValueNames)
 
-  validateBlock(module.entryPoint.body, entryScope, undefined, functions, records, errors, callEffects, fail, normalizeOperations)
+  validateBlock(module.entryPoint.body, entryScope, undefined, functions, records, errors, callEffects, fail,
+    normalizeOperations, {owner: module.entryPoint, owners: loopOwners})
+}
+
+/**
+ * Assigns parser-authored loop/control identities and validates caller-owned identities without crossing a function boundary.
+ * @param {import("./types.js").SemanticModule} module - Semantic module.
+ * @param {boolean} normalizeOperations - Whether parser-authored identities are assigned.
+ * @param {SemanticFail} fail - Diagnostic callback.
+ * @returns {Map<string, object>} Loop owner by identity.
+ */
+function prepareLoopIdentities(module, normalizeOperations, fail) {
+  const owners = new Map()
+  let nextLoop = 0
+
+  for (const owner of [...module.functions, module.entryPoint]) visit(owner.body, owner, [])
+
+  return owners
+
+  /**
+   * Visits one block in lexical semantic order.
+   * @param {import("./types.js").Block} block - Candidate block.
+   * @param {object} owner - Enclosing function or entry point.
+   * @param {(import("./types.js").ForEachStatement | import("./types.js").ForEachMapStatement | import("./types.js").WhileStatement)[]} active - Active loops.
+   * @returns {void}
+   */
+  function visit(block, owner, active) {
+    if (!block || !Array.isArray(block.statements)) return
+    for (const statement of block.statements) {
+      if (!statement || typeof statement != "object") continue
+      if (["ForEachStatement", "ForEachMapStatement", "WhileStatement"].includes(statement.kind)) {
+        const loop = /** @type {import("./types.js").ForEachStatement | import("./types.js").ForEachMapStatement | import("./types.js").WhileStatement} */ (statement)
+
+        if (normalizeOperations) loop.id = `loop:${nextLoop}`
+        nextLoop += 1
+        if (typeof loop.id != "string" || !/^loop:[0-9]+$/u.test(loop.id) || owners.has(loop.id)) {
+          fail("INVALID_LOOP_TARGET", "Duplicate or invalid loop identity.", loop.location)
+        }
+        owners.set(loop.id, owner)
+        visit(loop.body, owner, [...active, loop])
+      } else if (statement.kind == "BreakStatement" || statement.kind == "ContinueStatement") {
+        if (normalizeOperations && active.length > 0) statement.targetLoopId = /** @type {string} */ (active.at(-1)?.id)
+      } else if (statement.kind == "IfStatement") {
+        visit(statement.consequent, owner, active)
+        if (statement.alternate) visit(statement.alternate, owner, active)
+      } else if (statement.kind == "TryStatement") {
+        visit(statement.body, owner, active)
+        visit(statement.catchBody, owner, active)
+      }
+    }
+  }
 }
 
 /**
@@ -358,9 +417,10 @@ function validateDirectRecordRecursion(declarations, records, fail) {
  * @param {Set<string>} reservedValueNames - Module functions and nominal constructors unavailable to lexical bindings.
  * @param {SemanticFail} fail - Diagnostic callback.
  * @param {boolean} normalizeOperations - Whether to replace transient frontend operation intent.
+ * @param {Map<string, object>} loopOwners - Loop owner by module-local identity.
  * @returns {void}
  */
-function validateFunction(declaration, functions, records, errors, callEffects, reservedValueNames, fail, normalizeOperations) {
+function validateFunction(declaration, functions, records, errors, callEffects, reservedValueNames, fail, normalizeOperations, loopOwners) {
   const typeParameters = declarationTypeParameterIds(declaration)
   const scope = createScope(undefined, declaration.body.statements, reservedValueNames, typeParameters)
 
@@ -371,7 +431,8 @@ function validateFunction(declaration, functions, records, errors, callEffects, 
   }
 
   const returnType = validateReturnTypeReference(declaration.returnType, declaration.location, fail, records, typeParameters)
-  const returns = validateBlock(declaration.body, scope, returnType, functions, records, errors, callEffects, fail, normalizeOperations)
+  const returns = validateBlock(declaration.body, scope, returnType, functions, records, errors, callEffects, fail,
+    normalizeOperations, {owner: declaration, owners: loopOwners})
 
   if (!isVoidType(returnType) && returns.normal) {
     fail("MISSING_RETURN", `Function '${declaration.name}' does not return on every reachable path.`, declaration.location)
@@ -389,10 +450,10 @@ function validateFunction(declaration, functions, records, errors, callEffects, 
  * @param {Map<string, Set<string>>} callEffects - Internally inferred unchecked-error effects.
  * @param {SemanticFail} fail - Diagnostic callback.
  * @param {boolean} normalizeOperations - Whether to replace transient frontend operation intent.
- * @param {number} [loopDepth] - Number of active semantic loops.
+ * @param {LoopFlowContext} loopContext - Active loop and owner identities.
  * @returns {{normal: boolean, raises: Set<string>}} Reachable normal continuation and escaping error identities.
  */
-function validateBlock(block, scope, returnType, functions, records, errors, callEffects, fail, normalizeOperations, loopDepth = 0) {
+function validateBlock(block, scope, returnType, functions, records, errors, callEffects, fail, normalizeOperations, loopContext) {
   let normal = true
   const raises = new Set()
 
@@ -460,10 +521,23 @@ function validateBlock(block, scope, returnType, functions, records, errors, cal
       continue
     }
     if (statement.kind == "BreakStatement" || statement.kind == "ContinueStatement") {
-      if (loopDepth == 0) {
-        const control = statement.kind == "BreakStatement" ? "break" : "continue"
+      const control = statement.kind == "BreakStatement" ? "break" : "continue"
 
+      if (!loopContext.nearest) {
+        if (typeof statement.targetLoopId == "string" && loopContext.owners.has(statement.targetLoopId) &&
+          loopContext.owners.get(statement.targetLoopId) !== loopContext.owner) {
+          fail("CROSS_FUNCTION_LOOP_TARGET", `${control[0].toUpperCase()}${control.slice(1)} target crosses a function boundary.`, statement.location)
+        }
         fail(`ILLEGAL_${control.toUpperCase()}_CONTEXT`, `${control[0].toUpperCase()}${control.slice(1)} statement outside a loop.`, statement.location)
+      }
+      if (typeof statement.targetLoopId != "string" || !loopContext.owners.has(statement.targetLoopId)) {
+        fail("INVALID_LOOP_TARGET", `${control[0].toUpperCase()}${control.slice(1)} has an invalid loop target identity.`, statement.location)
+      }
+      if (loopContext.owners.get(statement.targetLoopId) !== loopContext.owner) {
+        fail("CROSS_FUNCTION_LOOP_TARGET", `${control[0].toUpperCase()}${control.slice(1)} target crosses a function boundary.`, statement.location)
+      }
+      if (statement.targetLoopId != loopContext.nearest.id) {
+        fail("INVALID_LOOP_TARGET", `${control[0].toUpperCase()}${control.slice(1)} must target the nearest enclosing loop.`, statement.location)
       }
       normal = false
       continue
@@ -509,7 +583,7 @@ function validateBlock(block, scope, returnType, functions, records, errors, cal
       const alternateScope = createScope(scope, statement.alternate?.statements ?? [])
       applyPresenceNarrowing(statement.condition, scope, consequentScope, true)
       applyPresenceNarrowing(statement.condition, scope, alternateScope, false)
-      const consequentReturns = validateBlock(statement.consequent, consequentScope, returnType, functions, records, errors, callEffects, fail, normalizeOperations, loopDepth)
+      const consequentReturns = validateBlock(statement.consequent, consequentScope, returnType, functions, records, errors, callEffects, fail, normalizeOperations, loopContext)
       const consequentKnownValues = visibleBindings.map((binding) => binding.knownValue)
 
       visibleBindings.forEach((binding, index) => {
@@ -518,7 +592,7 @@ function validateBlock(block, scope, returnType, functions, records, errors, cal
       let alternateReturns = {normal: true, raises: new Set()}
 
       if (statement.alternate) {
-        alternateReturns = validateBlock(statement.alternate, alternateScope, returnType, functions, records, errors, callEffects, fail, normalizeOperations, loopDepth)
+        alternateReturns = validateBlock(statement.alternate, alternateScope, returnType, functions, records, errors, callEffects, fail, normalizeOperations, loopContext)
       }
       const alternateKnownValues = visibleBindings.map((binding) => binding.knownValue)
 
@@ -546,6 +620,34 @@ function validateBlock(block, scope, returnType, functions, records, errors, cal
       addAll(raises, consequentReturns.raises)
       addAll(raises, alternateReturns.raises)
       normal = consequentReturns.normal || alternateReturns.normal
+      continue
+    }
+    if (statement.kind == "WhileStatement") {
+      const assignedOuterBindings = outerMutableBindingsAssignedBy(statement.body, scope)
+
+      for (const binding of assignedOuterBindings) {
+        binding.knownValue = undefined
+        scope.presenceProofs.delete(binding)
+      }
+      const conditionType = inferValueExpressionType(
+        statement.condition, scope, functions, records, fail, normalizeOperations, "a condition-controlled loop condition"
+      )
+
+      if (!isScalarType(conditionType, "boolean")) {
+        fail("NON_BOOLEAN_CONDITION", `While condition type ${typeDescription(conditionType)}; expected boolean.`, statement.condition.location)
+      }
+      const loopScope = createScope(scope, statement.body.statements)
+
+      applyPresenceNarrowing(statement.condition, scope, loopScope, true)
+      const bodyFlow = validateBlock(statement.body, loopScope, returnType, functions, records, errors, callEffects, fail,
+        normalizeOperations, {nearest: statement, owner: loopContext.owner, owners: loopContext.owners})
+
+      addExpressionEffects(raises, statement.condition, callEffects)
+      addAll(raises, bodyFlow.raises)
+      for (const binding of assignedOuterBindings) {
+        binding.knownValue = undefined
+        scope.presenceProofs.delete(binding)
+      }
       continue
     }
     if (statement.kind == "ForEachStatement") {
@@ -579,7 +681,8 @@ function validateBlock(block, scope, returnType, functions, records, errors, cal
         mutable: false,
         type: bindingType
       }, roleLocation(statement.valueBinding, "name"), loopScope, fail)
-      const bodyFlow = validateBlock(statement.body, loopScope, returnType, functions, records, errors, callEffects, fail, normalizeOperations, loopDepth + 1)
+      const bodyFlow = validateBlock(statement.body, loopScope, returnType, functions, records, errors, callEffects, fail,
+        normalizeOperations, {nearest: statement, owner: loopContext.owner, owners: loopContext.owners})
       addExpressionEffects(raises, statement.list, callEffects)
       addAll(raises, bodyFlow.raises)
       for (const binding of assignedOuterBindings) {
@@ -629,7 +732,7 @@ function validateBlock(block, scope, returnType, functions, records, errors, cal
       declareBinding(statement.valueBinding.name, {knownValue: undefined, mutable: false, type: valueType},
         roleLocation(statement.valueBinding, "name"), loopScope, fail)
       const bodyFlow = validateBlock(statement.body, loopScope, returnType, functions, records, errors, callEffects,
-        fail, normalizeOperations, loopDepth + 1)
+        fail, normalizeOperations, {nearest: statement, owner: loopContext.owner, owners: loopContext.owners})
 
       addExpressionEffects(raises, statement.map, callEffects)
       addAll(raises, bodyFlow.raises)
@@ -672,7 +775,7 @@ function validateBlock(block, scope, returnType, functions, records, errors, cal
 
       outerMutableBindingsAssignedBy(statement.catchBody, scope, assignedOuterBindings)
       const bodyScope = createScope(scope, statement.body.statements)
-      const bodyFlow = validateBlock(statement.body, bodyScope, returnType, functions, records, errors, callEffects, fail, normalizeOperations, loopDepth)
+      const bodyFlow = validateBlock(statement.body, bodyScope, returnType, functions, records, errors, callEffects, fail, normalizeOperations, loopContext)
       const catchScope = createScope(scope, statement.catchBody.statements)
 
       for (const binding of bodyAssignedOuterBindings) {
@@ -685,7 +788,7 @@ function validateBlock(block, scope, returnType, functions, records, errors, cal
         mutable: false,
         type: bindingType
       }, roleLocation(statement.catchBinding, "name"), catchScope, fail)
-      const catchFlow = validateBlock(statement.catchBody, catchScope, returnType, functions, records, errors, callEffects, fail, normalizeOperations, loopDepth)
+      const catchFlow = validateBlock(statement.catchBody, catchScope, returnType, functions, records, errors, callEffects, fail, normalizeOperations, loopContext)
 
       if (!bodyFlow.raises.has(caughtType.declarationId)) {
         fail("UNREACHABLE_HANDLER", `Handler for '${errors.get(caughtType.declarationId)?.name}' cannot be reached.`, typeLocation(statement.catchType, statement.location))
@@ -843,6 +946,11 @@ function syntacticBlockEffects(block, callEffects) {
     }
     if (kind == "ForEachStatement" || kind == "ForEachMapStatement") {
       addExpressionEffects(result, Reflect.get(statement, kind == "ForEachStatement" ? "list" : "map"), callEffects)
+      addAll(result, syntacticBlockEffects(Reflect.get(statement, "body"), callEffects))
+      continue
+    }
+    if (kind == "WhileStatement") {
+      addExpressionEffects(result, Reflect.get(statement, "condition"), callEffects)
       addAll(result, syntacticBlockEffects(Reflect.get(statement, "body"), callEffects))
       continue
     }
@@ -2065,7 +2173,7 @@ function outerMutableBindingsAssignedBy(block, outerScope, assigned = new Set())
     } else if (statement.kind == "IfStatement") {
       outerMutableBindingsAssignedBy(statement.consequent, outerScope, assigned)
       if (statement.alternate) outerMutableBindingsAssignedBy(statement.alternate, outerScope, assigned)
-    } else if (statement.kind == "ForEachStatement" || statement.kind == "ForEachMapStatement") {
+    } else if (statement.kind == "ForEachStatement" || statement.kind == "ForEachMapStatement" || statement.kind == "WhileStatement") {
       outerMutableBindingsAssignedBy(statement.body, outerScope, assigned)
     } else if (statement.kind == "TryStatement") {
       outerMutableBindingsAssignedBy(statement.body, outerScope, assigned)

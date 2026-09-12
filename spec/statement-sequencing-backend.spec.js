@@ -48,8 +48,8 @@ describe("sequenced block backend validation and generation", () => {
     const invalidStatement = structuredClone(parse({filename: "program.ts", language: "typescript", source}))
     const statementLocation = invalidStatement.functions[0].body.statements[0].location
 
-    invalidStatement.functions[0].body.statements[0] = /** @type {never} */ ({kind: "WhileStatement", location: statementLocation})
-    expectAllBackendsReject(invalidStatement, "statement WhileStatement")
+    invalidStatement.functions[0].body.statements[0] = /** @type {never} */ ({kind: "UnsupportedStatement", location: statementLocation})
+    expectAllBackendsReject(invalidStatement, "statement UnsupportedStatement")
 
     const incomplete = structuredClone(parse({filename: "program.ts", language: "typescript", source}))
 

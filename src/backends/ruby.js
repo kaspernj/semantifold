@@ -187,6 +187,17 @@ function emitStatement(writer, statement, indent, path) {
     writer.synthetic("\n", "line break", [statement], [path])
     return
   }
+  if (statement.kind == "WhileStatement") {
+    writer.mapped("while", {mappingKind: "exact", node: statement, path})
+    writer.synthetic(" ", "condition-controlled loop spacing", [statement], [path])
+    emitExpression(writer, statement.condition, `${path}/condition`, "ruby", identity)
+    writer.synthetic("\n", "line break", [statement], [path])
+    emitBlock(writer, statement.body, `${indent}  `, `${path}/body`)
+    writer.synthetic(indent, "indentation", [statement], [path])
+    writer.mapped("end", {mappingKind: "anchor", node: statement.body, path: `${path}/body`})
+    writer.synthetic("\n", "line break", [statement], [path])
+    return
+  }
   if (statement.kind == "ForEachStatement") {
     emitExpression(writer, statement.list, `${path}/list`, "ruby", identity)
     writer.mapped(".each", {mappingKind: "anchor", node: statement, path})

@@ -35,6 +35,7 @@ const task009Languages = new Set(["php", "ruby", "javascript", "typescript", "ja
 const task011Languages = new Set(["php", "ruby", "javascript", "typescript", "java"])
 const task012Languages = new Set(["php", "ruby", "javascript", "typescript", "java"])
 const task014Languages = new Set(["php", "ruby", "javascript", "typescript", "java"])
+const task032Languages = new Set(["php", "ruby", "javascript", "typescript", "java"])
 const javaObjectInstanceMethodSignatures = new Set([
   "clone()", "equals(Object)", "finalize()", "getClass()", "hashCode()", "notify()", "notifyAll()", "toString()",
   "wait()", "wait(long)", "wait(long,int)"
@@ -72,12 +73,16 @@ export function validateBackendModule(module, language, options = {}) {
     unsupportedCapability(language, "Task 009 closed records", records[0]?.location ?? module.location)
   }
   if (!task011Languages.has(language)) rejectTypedErrors(module, language)
+  if (!task032Languages.has(language)) rejectConditionControlledLoops(module, language)
   if (!task014Languages.has(language)) rejectOrderedMapCapability(module, language)
   validateRecordTargets(records, module.functions, language, module.location)
   if (!task008Languages.has(language)) rejectIterationStatements(module, language)
   if (!task007Languages.has(language)) rejectOptionalTypes(module, language)
   if (!task006Languages.has(language)) rejectCollectionTypes(module, language)
-  validateBlock(module.entryPoint.body, language, module.entryPoint.location, 0, new Set(), options.externalDeclarationIds)
+  const loopOwners = collectLoopOwners(module, language)
+
+  validateBlock(module.entryPoint.body, language, module.entryPoint.location,
+    {active: [], owner: module.entryPoint, owners: loopOwners}, new Set(), options.externalDeclarationIds)
   const declarationIds = new Set()
   const declarationNames = new Set()
   const targetDeclarationNames = new Set()
@@ -114,7 +119,8 @@ export function validateBackendModule(module, language, options = {}) {
       functionDeclaration.returnType.name == "void") {
       unsupportedCapability(language, "Task 005 void function return", functionDeclaration.location)
     }
-    validateBlock(functionDeclaration.body, language, functionDeclaration.location, 0, new Set(), options.externalDeclarationIds)
+    validateBlock(functionDeclaration.body, language, functionDeclaration.location,
+      {active: [], owner: functionDeclaration, owners: loopOwners}, new Set(), options.externalDeclarationIds)
 
     for (const parameter of functionDeclaration.parameters) {
       if (!parameter || typeof parameter != "object" || Array.isArray(parameter) || parameter.kind != "Parameter") {
@@ -207,7 +213,7 @@ function rejectTypedErrorBlock(/** @type {unknown} */ block,
     if (Reflect.get(statement, "kind") == "IfStatement") {
       rejectTypedErrorBlock(Reflect.get(statement, "consequent"), language, seen)
       rejectTypedErrorBlock(Reflect.get(statement, "alternate"), language, seen)
-    } else if (["ForEachStatement", "ForEachMapStatement"].includes(String(Reflect.get(statement, "kind")))) {
+    } else if (["ForEachStatement", "ForEachMapStatement", "WhileStatement"].includes(String(Reflect.get(statement, "kind")))) {
       rejectTypedErrorBlock(Reflect.get(statement, "body"), language, seen)
     }
   }
@@ -407,6 +413,52 @@ function rejectIterationStatements(module, language) {
 }
 
 /**
+ * Rejects Task 032 IR before a non-cohort backend allocates output.
+ * @param {import("../semantic/types.js").SemanticModule} module - Candidate module.
+ * @param {import("../semantic/types.js").BackendLanguage} language - Target identity.
+ * @returns {void}
+ */
+function rejectConditionControlledLoops(module, language) {
+  for (const declaration of module.functions) {
+    rejectBlockConditionLoop(declaration && typeof declaration == "object" && !Array.isArray(declaration)
+      ? Reflect.get(declaration, "body")
+      : undefined, language)
+  }
+  rejectBlockConditionLoop(module.entryPoint.body, language)
+}
+
+/**
+ * Finds a condition-controlled loop without descending through malformed or cyclic containers.
+ * @param {unknown} block - Candidate block.
+ * @param {import("../semantic/types.js").BackendLanguage} language - Target identity.
+ * @param {Set<object>} [seen] - Visited containers.
+ * @returns {void}
+ */
+function rejectBlockConditionLoop(block, language, seen = new Set()) {
+  if (!block || typeof block != "object" || Array.isArray(block) || seen.has(block)) return
+  seen.add(block)
+  const statements = Reflect.get(block, "statements")
+
+  if (!Array.isArray(statements)) return
+  for (const statement of statements) {
+    if (!statement || typeof statement != "object" || Array.isArray(statement)) continue
+    const kind = Reflect.get(statement, "kind")
+    const location = diagnosticLocation(Reflect.get(statement, "location"), Reflect.get(block, "location"))
+
+    if (kind == "WhileStatement") unsupportedCapability(language, "Task 032 condition-controlled loop", location)
+    if (kind == "IfStatement") {
+      rejectBlockConditionLoop(Reflect.get(statement, "consequent"), language, seen)
+      rejectBlockConditionLoop(Reflect.get(statement, "alternate"), language, seen)
+    } else if (["ForEachStatement", "ForEachMapStatement", "WhileStatement"].includes(String(kind))) {
+      rejectBlockConditionLoop(Reflect.get(statement, "body"), language, seen)
+    } else if (kind == "TryStatement") {
+      rejectBlockConditionLoop(Reflect.get(statement, "body"), language, seen)
+      rejectBlockConditionLoop(Reflect.get(statement, "catchBody"), language, seen)
+    }
+  }
+}
+
+/**
  * Finds a Task 008 node without descending through malformed or cyclic containers.
  * @param {unknown} block - Candidate block.
  * @param {import("../semantic/types.js").BackendLanguage} language - Target identity.
@@ -484,6 +536,7 @@ function rejectBlockOptionalTypes(block, language) {
       }
       rejectBlockOptionalTypes(statement.body, language)
     }
+    if (statement.kind == "WhileStatement") rejectBlockOptionalTypes(statement.body, language)
     if (statement.kind == "TryStatement") {
       rejectBlockOptionalTypes(statement.body, language)
       rejectBlockOptionalTypes(statement.catchBody, language)
@@ -558,6 +611,7 @@ function rejectBlockCollectionTypes(block, language) {
       }
       rejectBlockCollectionTypes(statement.body, language)
     }
+    if (statement.kind == "WhileStatement") rejectBlockCollectionTypes(statement.body, language)
     if (statement.kind == "TryStatement") {
       rejectBlockCollectionTypes(statement.body, language)
       rejectBlockCollectionTypes(statement.catchBody, language)
@@ -752,6 +806,7 @@ function validateJavaUtilFactoryNames(module) {
         }
       }
       const expression = statement.kind == "IfStatement" ? statement.condition :
+        statement.kind == "WhileStatement" ? statement.condition :
         statement.kind == "ForEachStatement" ? statement.list :
           statement.kind == "ForEachMapStatement" ? statement.map :
         statement.kind == "LocalDeclaration" ? statement.initializer :
@@ -770,6 +825,7 @@ function validateJavaUtilFactoryNames(module) {
         validateBlockNames(statement.consequent, capture, owner)
         if (statement.alternate) validateBlockNames(statement.alternate, capture, owner)
       }
+      if (statement.kind == "WhileStatement") validateBlockNames(statement.body, capture, owner)
       if (statement.kind == "ForEachStatement") {
         const loopCapture = statement.valueBinding.name == "java" ? {
           detail: `${owner} iteration binding 'java' captures java.util factory syntax`,
@@ -821,6 +877,7 @@ function moduleContainsExpressionKind(module, kind) {
   return [module.entryPoint.body, ...module.functions.map((declaration) => declaration.body)].some((block) =>
     allStatements(block).some((statement) => {
       const expression = statement.kind == "IfStatement" ? statement.condition :
+        statement.kind == "WhileStatement" ? statement.condition :
         statement.kind == "ForEachStatement" ? statement.list :
           statement.kind == "ForEachMapStatement" ? statement.map :
         statement.kind == "LocalDeclaration" ? statement.initializer :
@@ -923,6 +980,7 @@ function allStatements(block) {
     if (statement.kind == "ForEachStatement" || statement.kind == "ForEachMapStatement") {
       return [statement, ...allStatements(statement.body)]
     }
+    if (statement.kind == "WhileStatement") return [statement, ...allStatements(statement.body)]
     if (statement.kind == "TryStatement") return [statement, ...allStatements(statement.body), ...allStatements(statement.catchBody)]
 
     return [statement]
@@ -930,16 +988,69 @@ function allStatements(block) {
 }
 
 /**
+ * Indexes exact loop identities before recursive target validation so cross-function targets fail deterministically.
+ * @param {import("../semantic/types.js").SemanticModule} module - Candidate semantic module.
+ * @param {import("../semantic/types.js").BackendLanguage} language - Target language.
+ * @returns {Map<string, object>} Loop owner by module-local identity.
+ */
+function collectLoopOwners(module, language) {
+  const owners = new Map()
+
+  for (const owner of [...module.functions, module.entryPoint]) {
+    if (owner && typeof owner == "object" && !Array.isArray(owner)) visit(Reflect.get(owner, "body"), owner)
+  }
+
+  return owners
+
+  /**
+   * Visits loop containers while bounding malformed cycles.
+   * @param {unknown} block - Candidate block.
+   * @param {object} owner - Enclosing function or entry point.
+   * @param {Set<object>} [active] - Blocks on the active recursive path.
+   * @returns {void}
+   */
+  function visit(block, owner, active = new Set()) {
+    if (!block || typeof block != "object" || Array.isArray(block) || active.has(block)) return
+    const statements = Reflect.get(block, "statements")
+
+    if (!Array.isArray(statements)) return
+    const path = new Set(active)
+
+    path.add(block)
+    for (const statement of statements) {
+      if (!statement || typeof statement != "object" || Array.isArray(statement)) continue
+      const kind = String(Reflect.get(statement, "kind"))
+
+      if (["ForEachStatement", "ForEachMapStatement", "WhileStatement"].includes(kind)) {
+        const id = Reflect.get(statement, "id")
+        const location = diagnosticLocation(Reflect.get(statement, "location"), Reflect.get(block, "location"))
+
+        if (typeof id != "string" || !/^loop:[0-9]+$/u.test(id)) continue
+        if (owners.has(id)) unsupportedCapability(language, "duplicate or invalid loop identity", location)
+        owners.set(id, owner)
+        visit(Reflect.get(statement, "body"), owner, path)
+      } else if (kind == "IfStatement") {
+        visit(Reflect.get(statement, "consequent"), owner, path)
+        visit(Reflect.get(statement, "alternate"), owner, path)
+      } else if (kind == "TryStatement") {
+        visit(Reflect.get(statement, "body"), owner, path)
+        visit(Reflect.get(statement, "catchBody"), owner, path)
+      }
+    }
+  }
+}
+
+/**
  * Validates one complete semantic block before emission.
  * @param {unknown} block - Candidate block.
  * @param {import("../semantic/types.js").BackendLanguage} language - Backend language or binary target.
  * @param {import("../semantic/types.js").SourceLocation | undefined} ownerLocation - Enclosing location.
- * @param {number} [loopDepth] - Number of enclosing list loops.
+ * @param {{active: (import("../semantic/types.js").ForEachStatement | import("../semantic/types.js").ForEachMapStatement | import("../semantic/types.js").WhileStatement)[], owner: object, owners: Map<string, object>}} loopContext - Active loops and their lexical owner.
  * @param {Set<object>} [activePath] - Blocks on the active recursive path.
  * @param {Set<string>} [externalDeclarationIds] - Resolved declarations whose source spelling is target-independent.
  * @returns {void}
  */
-function validateBlock(block, language, ownerLocation, loopDepth = 0, activePath = new Set(), externalDeclarationIds = new Set()) {
+function validateBlock(block, language, ownerLocation, loopContext, activePath = new Set(), externalDeclarationIds = new Set()) {
   if (!block || typeof block != "object" || Array.isArray(block)) {
     return unsupportedCapability(language, "missing or invalid block", ownerLocation)
   }
@@ -954,7 +1065,7 @@ function validateBlock(block, language, ownerLocation, loopDepth = 0, activePath
 
   blockPath.add(candidate)
   for (const statement of candidate.statements) {
-    validateStatement(statement, language, location, loopDepth, blockPath, externalDeclarationIds)
+    validateStatement(statement, language, location, loopContext, blockPath, externalDeclarationIds)
   }
 }
 
@@ -963,12 +1074,12 @@ function validateBlock(block, language, ownerLocation, loopDepth = 0, activePath
  * @param {unknown} statement - Candidate statement.
  * @param {import("../semantic/types.js").BackendLanguage} language - Backend language or binary target.
  * @param {import("../semantic/types.js").SourceLocation | undefined} ownerLocation - Enclosing body location.
- * @param {number} [loopDepth] - Active loop nesting.
+ * @param {{active: (import("../semantic/types.js").ForEachStatement | import("../semantic/types.js").ForEachMapStatement | import("../semantic/types.js").WhileStatement)[], owner: object, owners: Map<string, object>}} loopContext - Active loops and their lexical owner.
  * @param {Set<object>} [activePath] - Active block containers.
  * @param {Set<string>} [externalDeclarationIds] - Resolved declarations whose source spelling is target-independent.
  * @returns {void}
  */
-function validateStatement(statement, language, ownerLocation, loopDepth = 0, activePath = new Set(), externalDeclarationIds = new Set()) {
+function validateStatement(statement, language, ownerLocation, loopContext, activePath = new Set(), externalDeclarationIds = new Set()) {
   if (!statement || typeof statement != "object" || Array.isArray(statement)) {
     return unsupportedCapability(language, "missing or invalid statement", ownerLocation)
   }
@@ -1007,7 +1118,7 @@ function validateStatement(statement, language, ownerLocation, loopDepth = 0, ac
     const expression = Reflect.get(statement, "expression")
 
     if (expression !== undefined) validateExpression(expression, language, location, false, new Set(), externalDeclarationIds)
-    if (language == "ruby" && loopDepth > 0) {
+    if (language == "ruby" && loopContext.active.some(({kind}) => kind == "ForEachStatement" || kind == "ForEachMapStatement")) {
       unsupportedCapability(language, "return from an iteration body", location)
     }
     return
@@ -1032,9 +1143,9 @@ function validateStatement(statement, language, ownerLocation, loopDepth = 0, ac
     const branch = /** @type {import("../semantic/types.js").IfStatement} */ (statement)
 
     validateExpression(branch.condition, language, location, false, new Set(), externalDeclarationIds)
-    validateBlock(branch.consequent, language, location, loopDepth, activePath, externalDeclarationIds)
+    validateBlock(branch.consequent, language, location, loopContext, activePath, externalDeclarationIds)
     if (Object.hasOwn(branch, "alternate")) {
-      validateBlock(branch.alternate, language, location, loopDepth, activePath, externalDeclarationIds)
+      validateBlock(branch.alternate, language, location, loopContext, activePath, externalDeclarationIds)
     }
     return
   }
@@ -1043,8 +1154,42 @@ function validateStatement(statement, language, ownerLocation, loopDepth = 0, ac
     requireSemanticLocation(ownLocation, language, `${kind} location`, ownerLocation)
     const fields = Object.keys(/** @type {object} */ (statement)).filter((key) => key != "sourceProvenance").sort().join(",")
 
-    if (fields != "kind,location") unsupportedCapability(language, `malformed ${kind}`, location)
-    if (loopDepth == 0) unsupportedCapability(language, `${kind == "BreakStatement" ? "break" : "continue"} outside a loop`, location)
+    if (fields != "kind,location,targetLoopId") unsupportedCapability(language, `malformed ${kind}`, location)
+    const targetLoopId = Reflect.get(statement, "targetLoopId")
+    const nearest = loopContext.active.at(-1)
+
+    if (!nearest) unsupportedCapability(language, `${kind == "BreakStatement" ? "break" : "continue"} outside a loop`, location)
+    if (typeof targetLoopId != "string" || !loopContext.owners.has(targetLoopId)) {
+      unsupportedCapability(language, "invalid loop control target identity", location)
+    }
+    if (loopContext.owners.get(targetLoopId) !== loopContext.owner) {
+      unsupportedCapability(language, "loop control target crosses a function boundary", location)
+    }
+    if (targetLoopId != nearest.id) unsupportedCapability(language, "loop control must target the nearest enclosing loop", location)
+    return
+  }
+  if (kind == "WhileStatement") {
+    if (!task032Languages.has(language)) unsupportedCapability(language, "Task 032 condition-controlled loop", location)
+    const loopLocation = requireSemanticLocation(ownLocation, language, "WhileStatement location", ownerLocation)
+    const loop = /** @type {import("../semantic/types.js").WhileStatement} */ (statement)
+    const fields = Object.keys(loop).filter((key) => key != "sourceProvenance").sort().join(",")
+
+    if (fields != "body,condition,id,kind,location") unsupportedCapability(language, "malformed WhileStatement", loopLocation)
+    if (typeof loop.id != "string" || !/^loop:[0-9]+$/u.test(loop.id) || loopContext.owners.get(loop.id) !== loopContext.owner) {
+      unsupportedCapability(language, "duplicate or invalid loop identity", loopLocation)
+    }
+    if (!loop.condition || typeof loop.condition != "object" || Array.isArray(loop.condition)) {
+      unsupportedCapability(language, "missing or invalid condition-controlled loop condition", loopLocation)
+    }
+    requireSemanticLocation(Reflect.get(loop.condition, "location"), language, "condition-controlled loop condition location", loopLocation)
+    validateExpression(loop.condition, language, loopLocation, false, new Set(), externalDeclarationIds)
+    if (!loop.body || typeof loop.body != "object" || Array.isArray(loop.body)) {
+      unsupportedCapability(language, "missing or invalid condition-controlled loop body", loopLocation)
+    }
+    requireSemanticLocation(Reflect.get(loop.body, "location"), language, "condition-controlled loop body location", loopLocation)
+    validateBlock(loop.body, language, loopLocation,
+      {active: [...loopContext.active, loop], owner: loopContext.owner, owners: loopContext.owners}, activePath,
+      externalDeclarationIds)
     return
   }
   if (kind == "ForEachStatement") {
@@ -1053,7 +1198,10 @@ function validateStatement(statement, language, ownerLocation, loopDepth = 0, ac
     const loop = /** @type {import("../semantic/types.js").ForEachStatement} */ (statement)
     const fields = Object.keys(loop).filter((key) => key != "sourceProvenance").sort().join(",")
 
-    if (fields != "body,kind,list,location,valueBinding") unsupportedCapability(language, "malformed ForEachStatement", loopLocation)
+    if (fields != "body,id,kind,list,location,valueBinding") unsupportedCapability(language, "malformed ForEachStatement", loopLocation)
+    if (typeof loop.id != "string" || !/^loop:[0-9]+$/u.test(loop.id) || loopContext.owners.get(loop.id) !== loopContext.owner) {
+      unsupportedCapability(language, "duplicate or invalid loop identity", loopLocation)
+    }
     if (!loop.list || typeof loop.list != "object" || Array.isArray(loop.list)) {
       unsupportedCapability(language, "missing or invalid iteration collection", loopLocation)
     }
@@ -1075,7 +1223,9 @@ function validateStatement(statement, language, ownerLocation, loopDepth = 0, ac
       unsupportedCapability(language, "missing or invalid iteration body", loopLocation)
     }
     requireSemanticLocation(Reflect.get(loop.body, "location"), language, "iteration body location", loopLocation)
-    validateBlock(loop.body, language, loopLocation, loopDepth + 1, activePath, externalDeclarationIds)
+    validateBlock(loop.body, language, loopLocation,
+      {active: [...loopContext.active, loop], owner: loopContext.owner, owners: loopContext.owners}, activePath,
+      externalDeclarationIds)
     return
   }
   if (kind == "ForEachMapStatement") {
@@ -1084,8 +1234,11 @@ function validateStatement(statement, language, ownerLocation, loopDepth = 0, ac
     const loop = /** @type {import("../semantic/types.js").ForEachMapStatement} */ (statement)
     const fields = Object.keys(loop).filter((key) => key != "sourceProvenance").sort().join(",")
 
-    if (fields != "body,keyBinding,kind,location,map,valueBinding") {
+    if (fields != "body,id,keyBinding,kind,location,map,valueBinding") {
       unsupportedCapability(language, "malformed ForEachMapStatement", loopLocation)
+    }
+    if (typeof loop.id != "string" || !/^loop:[0-9]+$/u.test(loop.id) || loopContext.owners.get(loop.id) !== loopContext.owner) {
+      unsupportedCapability(language, "duplicate or invalid loop identity", loopLocation)
     }
     if (!loop.map || typeof loop.map != "object" || Array.isArray(loop.map)) {
       unsupportedCapability(language, "missing or invalid ordered-map iteration collection", loopLocation)
@@ -1109,7 +1262,9 @@ function validateStatement(statement, language, ownerLocation, loopDepth = 0, ac
       unsupportedCapability(language, "missing or invalid map iteration body", loopLocation)
     }
     requireSemanticLocation(Reflect.get(loop.body, "location"), language, "map iteration body location", loopLocation)
-    validateBlock(loop.body, language, loopLocation, loopDepth + 1, activePath, externalDeclarationIds)
+    validateBlock(loop.body, language, loopLocation,
+      {active: [...loopContext.active, loop], owner: loopContext.owner, owners: loopContext.owners}, activePath,
+      externalDeclarationIds)
     return
   }
   if (kind == "RaiseStatement") {
@@ -1150,8 +1305,8 @@ function validateStatement(statement, language, ownerLocation, loopDepth = 0, ac
     if (binding.type.declarationId != handler.catchType.declarationId) {
       unsupportedCapability(language, "catch binding type mismatch", bindingLocation)
     }
-    validateBlock(handler.body, language, tryLocation, loopDepth, activePath, externalDeclarationIds)
-    validateBlock(handler.catchBody, language, tryLocation, loopDepth, activePath, externalDeclarationIds)
+    validateBlock(handler.body, language, tryLocation, loopContext, activePath, externalDeclarationIds)
+    validateBlock(handler.catchBody, language, tryLocation, loopContext, activePath, externalDeclarationIds)
     return
   }
 
@@ -1901,6 +2056,9 @@ function blockContainsSignProducingOperation(block) {
     }
     if (statement.kind == "ForEachMapStatement") {
       return expressionContainsSignProducingOperation(statement.map) || blockContainsSignProducingOperation(statement.body)
+    }
+    if (statement.kind == "WhileStatement") {
+      return expressionContainsSignProducingOperation(statement.condition) || blockContainsSignProducingOperation(statement.body)
     }
     if (statement.kind == "TryStatement") {
       return blockContainsSignProducingOperation(statement.body) || blockContainsSignProducingOperation(statement.catchBody)
