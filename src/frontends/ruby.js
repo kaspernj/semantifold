@@ -48,7 +48,7 @@ import {withAdaptedOperation} from "../semantic/operators.js"
 import {withParserRanges} from "../semantic/provenance.js"
 import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
 import {requireSourceReturnType} from "./scalars.js"
-import {documentedValueType, iterationBindingType, iterationOperandType, recordType, sameValueType} from "./types.js"
+import {documentedValueType, instantiatedRecordFieldType, iterationBindingType, iterationOperandType, recordType, sameValueType} from "./types.js"
 const parsePrism = await loadPrism()
 /** @typedef {{name: string, nameLocation: import("../semantic/types.js").SourceLocation, parameters: import("../semantic/types.js").Parameter[], returnType: import("../semantic/types.js").SemanticFunctionReturnType, typeParameters?: import("../semantic/types.js").TypeParameter[], location: import("../semantic/types.js").SourceLocation}} RubyFunctionSignature */
 /** @typedef {{bindings: Map<string, import("../semantic/types.js").SemanticBindingType>, errorNames: Map<string, import("../semantic/types.js").ErrorDeclaration>, errors: Map<string, import("../semantic/types.js").ErrorDeclaration>, functions: Map<string, RubyFunctionSignature>, records: Map<string, import("../semantic/types.js").RecordDeclaration>, recordNames: Map<string, import("../semantic/types.js").RecordDeclaration>, loopDepth?: number, returnType?: import("../semantic/types.js").SemanticFunctionReturnType, typeParameters?: Map<string, import("../semantic/types.js").TypeParameter>}} RubyConversionContext */
@@ -258,13 +258,18 @@ function convertExpression(node, filename, source, context, expectedType, preser
     const declaration = context.recordNames.get(recordName)
 
     if (!declaration) return unsupportedSyntax("ruby", "construction of a non-record class", nodeLocation(node.receiver, filename, source))
+    const typeArguments = expectedType?.kind == "RecordType" && expectedType.declarationId == declaration.id
+      ? expectedType.arguments
+      : undefined
+
     return withParserRanges({
       arguments: (node.arguments_?.arguments_ ?? []).map((argument, index) =>
-        convertExpression(argument, filename, source, context, declaration.fields[index]?.type)),
+        convertExpression(argument, filename, source, context,
+          instantiatedRecordFieldType(declaration, typeArguments, index))),
       kind: /** @type {const} */ ("RecordConstruction"),
       location,
       record: recordType(/** @type {string} */ (declaration.id), nodeLocation(node.receiver, filename, source),
-        expectedType?.kind == "RecordType" && expectedType.declarationId == declaration.id ? expectedType.arguments : undefined)
+        typeArguments)
     }, {record: nodeLocation(node.receiver, filename, source)})
   }
 
@@ -476,9 +481,12 @@ function knownExpressionType(node, context) {
   }
   if (node instanceof CallNode && node.receiver && node.callOperatorLoc && !node.arguments_) {
     const receiver = knownValueExpressionType(node.receiver, context)
-    const declaration = receiver?.kind == "RecordType" ? context.records.get(receiver.declarationId) : undefined
 
-    return declaration?.fields.find((field) => field.name == node.name)?.type
+    if (receiver?.kind != "RecordType") return undefined
+    const declaration = context.records.get(receiver.declarationId)
+    const index = declaration?.fields.findIndex((field) => field.name == node.name) ?? -1
+
+    return declaration ? instantiatedRecordFieldType(declaration, receiver.arguments, index) : undefined
   }
 
   return undefined

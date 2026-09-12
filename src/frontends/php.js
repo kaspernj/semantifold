@@ -8,7 +8,7 @@ import {withAdaptedOperation} from "../semantic/operators.js"
 import {withParserRanges} from "../semantic/provenance.js"
 import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
 import {requireSourceReturnType, requireSourceScalarType} from "./scalars.js"
-import {documentedValueType, iterationBindingType, iterationOperandType, optionalType, recordType, sameValueType} from "./types.js"
+import {documentedValueType, instantiatedRecordFieldType, iterationBindingType, iterationOperandType, knownCallReturnType, optionalType, recordType, sameValueType} from "./types.js"
 const parser = new PhpParser.Engine({
   ast: {withPositions: true},
   parser: {extractDoc: true, suppressErrors: false}
@@ -274,13 +274,18 @@ function convertExpression(node, filename, source, context, expectedType, preser
     const declaration = context.recordNames.get(name.name)
 
     if (!declaration) return unsupportedSyntax("php", "construction of a non-record class", nodeLocation(construction.what, filename, source))
+    const typeArguments = expectedType?.kind == "RecordType" && expectedType.declarationId == declaration.id
+      ? expectedType.arguments
+      : undefined
+
     return withParserRanges({
       arguments: construction.arguments.map((argument, index) =>
-        convertExpression(argument, filename, source, context, declaration.fields[index]?.type)),
+        convertExpression(argument, filename, source, context,
+          instantiatedRecordFieldType(declaration, typeArguments, index))),
       kind: /** @type {const} */ ("RecordConstruction"),
       location,
       record: recordType(/** @type {string} */ (declaration.id), nodeLocation(construction.what, filename, source),
-        expectedType?.kind == "RecordType" && expectedType.declarationId == declaration.id ? expectedType.arguments : undefined)
+        typeArguments)
     }, {record: nodeLocation(construction.what, filename, source)})
   }
 
@@ -290,6 +295,12 @@ function convertExpression(node, filename, source, context, expectedType, preser
 
     if (!offset || typeof offset.name != "string") {
       return unsupportedSyntax("php", "dynamic or computed member access", nodeLocation(read.offset, filename, source))
+    }
+    const receiverType = knownExpressionType(read.what, context)
+    const declaration = receiverType?.kind == "RecordType" ? context.records.get(receiverType.declarationId) : undefined
+
+    if ((declaration?.typeParameters?.length ?? 0) > 0) {
+      return unsupportedSyntax("php", "generic record property access", nodeLocation(read.offset, filename, source))
     }
     return withParserRanges({
       field: offset.name,
@@ -392,8 +403,7 @@ function convertExpression(node, filename, source, context, expectedType, preser
           })
         }, {member: nodeLocation(member, filename, source)})
       }
-      if (member && typeof member.name == "string" && [...context.records.values()].some((record) =>
-        (record.typeParameters?.length ?? 0) > 0 && record.fields.some((field) => field.name == member.name))) {
+      if (member && typeof member.name == "string" && knownGenericRecordAccessorType(lookup, context)) {
         return withParserRanges({
           field: member.name,
           kind: /** @type {const} */ ("MemberRead"),
@@ -461,7 +471,15 @@ function knownExpressionType(node, context) {
     const call = /** @type {import("php-parser").Call} */ (node)
     const name = call.what.kind == "name" && typeof call.what.name == "string" ? call.what.name : undefined
 
-    if (name) return context.functions.get(name)?.returnType
+    if (name) {
+      const signature = context.functions.get(name)
+
+      if (signature) return knownCallReturnType(signature, call.arguments.map((argument) => knownExpressionType(argument, context)))
+    }
+    if (call.what.kind == "propertylookup" && call.arguments.length == 0) {
+      return knownGenericRecordAccessorType(
+        /** @type {import("php-parser").PropertyLookup} */ (/** @type {unknown} */ (call.what)), context)
+    }
   }
   if (node.kind == "offsetlookup") {
     const lookup = /** @type {import("php-parser").OffsetLookup} */ (node)
@@ -480,15 +498,43 @@ function knownExpressionType(node, context) {
   if (node.kind == "propertylookup") {
     const read = /** @type {import("php-parser").PropertyLookup} */ (node)
     const receiver = knownExpressionType(read.what, context)
-    const declaration = receiver?.kind == "RecordType" ? context.records.get(receiver.declarationId) : undefined
+
+    if (receiver?.kind != "RecordType") return undefined
+    const declaration = context.records.get(receiver.declarationId)
     const offset = read.offset.kind == "identifier" ? /** @type {import("php-parser").Identifier} */ (read.offset) : undefined
 
     const memberName = offset && typeof offset.name == "string" ? offset.name : undefined
 
-    if (memberName) return declaration?.fields.find((field) => field.name == memberName)?.type
+    if (memberName && declaration) {
+      const index = declaration.fields.findIndex((field) => field.name == memberName)
+
+      return instantiatedRecordFieldType(declaration, receiver.arguments, index)
+    }
   }
 
   return undefined
+}
+
+/**
+ * Resolves PHP's exact zero-argument accessor carrier against its receiver's
+ * generic record declaration.
+ * @param {import("php-parser").PropertyLookup} lookup - Parser-owned method lookup.
+ * @param {PhpConversionContext} context - Typed conversion context.
+ * @returns {import("../semantic/types.js").SemanticValueType | undefined} Instantiated field type.
+ */
+function knownGenericRecordAccessorType(lookup, context) {
+  const receiver = knownExpressionType(lookup.what, context)
+
+  if (receiver?.kind != "RecordType") return undefined
+  const declaration = context.records.get(receiver.declarationId)
+  const member = lookup.offset.kind == "identifier" ? /** @type {import("php-parser").Identifier} */ (lookup.offset) : undefined
+  const index = member && typeof member.name == "string"
+    ? declaration?.fields.findIndex((field) => field.name == member.name) ?? -1
+    : -1
+
+  if (!declaration || (declaration.typeParameters?.length ?? 0) == 0 || index < 0) return undefined
+
+  return instantiatedRecordFieldType(declaration, receiver.arguments, index)
 }
 
 /**
@@ -1046,7 +1092,8 @@ function convertFunctionSignature(node, filename, source, recordNames, ownerId) 
     if (parameter.nullable && parameterType.kind != "OptionalType") {
       if (!parameter.type) return missingType("php", `Parameter '${parameterName}'`, parameterLocation)
       parameterType = nullableType(parameterType, parameter.type, parameter.loc?.start.offset ?? 0, filename, source)
-    } else if (!parameter.nullable && parameterType.kind == "OptionalType") {
+    } else if (!parameter.nullable && parameterType.kind == "OptionalType" &&
+      parameterType.valueType.kind != "TypeVariableReference") {
       return unsupportedSyntax("php", "optional annotation without nullable native type", documentedType?.location ?? parameterLocation)
     }
     const semanticParameter = {
@@ -1088,7 +1135,8 @@ function convertFunctionSignature(node, filename, source, recordNames, ownerId) 
       filename,
       source
     )
-  } else if (!node.nullable && returnType.kind == "OptionalType") {
+  } else if (!node.nullable && returnType.kind == "OptionalType" &&
+    returnType.valueType.kind != "TypeVariableReference") {
     return unsupportedSyntax("php", "optional annotation without nullable native return type", documented.returnType?.location ?? location)
   }
 
@@ -1235,7 +1283,7 @@ function convertPhpRecord(node, declaration, recordNames, filename, source) {
     if (parameter.nullable && type.kind != "OptionalType") {
       if (!parameter.type) return missingType("php", `Record field '${name}'`, fieldLocation)
       type = nullableType(type, parameter.type, parameter.loc?.start.offset ?? 0, filename, source)
-    } else if (!parameter.nullable && type.kind == "OptionalType") {
+    } else if (!parameter.nullable && type.kind == "OptionalType" && type.valueType.kind != "TypeVariableReference") {
       return unsupportedSyntax("php", "optional annotation without nullable native record field", documentedType?.location ?? fieldLocation)
     }
     const field = {kind: /** @type {const} */ ("RecordField"), location: fieldLocation, name, type}

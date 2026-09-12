@@ -73,5 +73,159 @@ describe("type parameter frontends", () => {
       (error) => error instanceof SemantifoldDiagnostic && error.code == "RAW_GENERIC_APPLICATION" &&
         error.language == "java" && error.location?.filename == "Main.java"
     )
+    const contextualRawJava = "final class Box<T> { private final T value; Box(T value) { this.value = value; } T value() { return this.value; } } public final class Main { private static String keep(String value) { return value; } public static void main(String[] args) { final Box<String> box = new Box(\"x\"); System.out.println(keep(box.value())); } }\n"
+
+    assert.throws(
+      () => parse({filename: "Main.java", language: "java", source: contextualRawJava}),
+      (error) => error instanceof SemantifoldDiagnostic && error.code == "RAW_GENERIC_APPLICATION" &&
+        error.language == "java" && error.location?.filename == "Main.java"
+    )
+  })
+
+  it("substitutes closed generic record fields before converting constructor arguments in every original-five frontend", () => {
+    const profiles = [
+      ["php", "program.php", `<?php
+declare(strict_types=1);
+/** @template T */
+final class Box {
+    /** @param T $value */
+    public function __construct(private $value) {}
+    /** @return T */
+    public function value() { return $this->value; }
+}
+function keep(string $value): string { return $value; }
+/** @var Box<?string> $box
+ * @semantifold-immutable
+ */
+$box = new Box(null);
+echo keep("ok"), PHP_EOL;
+`],
+      ["ruby", "program.rb", `# @template T
+class Box
+  # @type [T]
+  attr_reader :value
+  # @param value [T]
+  def initialize(value)
+    @value = value
+    freeze
+  end
+end
+# @param value [String]
+# @return [String]
+def keep(value)
+  return value
+end
+# @type [Box[String?]]
+# @semantifold-immutable
+box = Box.new(nil)
+puts keep("ok")
+`],
+      ["javascript", "program.js", `/** @template T */
+class Box {
+  /** @param {T} value */
+  constructor(value) {
+    /** @readonly */ this.value = value
+    Object.freeze(this)
+  }
+}
+/**
+ * @param {string} value
+ * @returns {string}
+ */
+function keep(value) { return value }
+/** @type {Box<string|null>} */ const box = new Box(null)
+console.log(keep("ok"))
+`],
+      ["typescript", "program.ts", `class Box<T> { constructor(readonly value: T) {} }
+function keep(value: string): string { return value }
+const box: Box<string | null> = new Box<string | null>(null)
+console.log(keep("ok"))
+`],
+      ["java", "Main.java", `final class Box<T> {
+  private final T value;
+  Box(T value) { this.value = value; }
+  T value() { return this.value; }
+}
+public final class Main {
+  private static String keep(String value) { return value; }
+  public static void main(String[] args) {
+    final Box<java.util.Optional<String>> box = new Box<java.util.Optional<String>>(java.util.Optional.empty());
+    System.out.println(keep("ok"));
+  }
+}
+`]
+    ]
+    const meanings = profiles.map(([language, filename, source]) => semanticMeaning(parse({filename, language, source})))
+
+    for (const meaning of meanings.slice(1)) expect(meaning).toEqual(meanings[0])
+  })
+
+  it("parses emitted optional type-variable documentation directly and inside lists", () => {
+    const javascript = parse({
+      filename: "program.js",
+      language: "javascript",
+      source: `/**
+ * @template T
+ * @param {T|null} value
+ * @param {ReadonlyArray<T|null>} values
+ * @returns {T|null}
+ */
+function preserve(value, values) { return value }
+console.log("ok")
+`
+    })
+    const ruby = parse({
+      filename: "program.rb",
+      language: "ruby",
+      source: `# @template T
+# @param value [T?]
+# @param values [Array[T?]]
+# @return [T?]
+def preserve(value, values)
+  return value
+end
+puts "ok"
+`
+    })
+
+    for (const module of [javascript, ruby]) {
+      expect(module.functions[0].parameters[0].type.kind).toEqual("OptionalType")
+      expect(module.functions[0].parameters[1].type).toMatchObject({
+        elementType: {kind: "OptionalType", valueType: {kind: "TypeVariableReference"}},
+        kind: "ListType"
+      })
+      expect(module.functions[0].returnType.kind).toEqual("OptionalType")
+    }
+  })
+
+  it("admits PHP generic accessors only for their exact generic record receiver and spelling", () => {
+    const declarations = `<?php
+declare(strict_types=1);
+/** @template T */
+final class Box {
+    /** @param T $value */
+    public function __construct(private $value) {}
+    /** @return T */
+    public function value() { return $this->value; }
+}
+final readonly class Plain {
+    public function __construct(public string $value) {}
+}
+function keep(string $value): string { return $value; }
+/** @var Box<string> $box
+ * @semantifold-immutable
+ */
+$box = new Box("boxed");
+/** @var Plain $plain
+ * @semantifold-immutable
+ */
+$plain = new Plain("plain");
+`
+
+    expect(parse({filename: "valid.php", language: "php", source: `${declarations}echo keep($box->value()), PHP_EOL;\n`})
+      .entryPoint.body.statements.at(-1).kind).toEqual("PrintStatement")
+    rejected("php", "wrong-receiver.php", `${declarations}echo keep($plain->value()), PHP_EOL;\n`)
+    rejected("php", "wrong-spelling.php", `${declarations}echo keep($box->missing()), PHP_EOL;\n`)
+    rejected("php", "property.php", `${declarations}echo keep($box->value), PHP_EOL;\n`)
   })
 })

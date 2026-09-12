@@ -110,4 +110,47 @@ console.log(passMap(new Map([["x", 1]])).size)
     expect(calls.map(({resolution}) => resolution.typeArguments)).toEqual([["string"], ["integer"]])
     rejects("function keep(value: string): string { return value }\nconsole.log([\"x\"].length)\n", "MISSING_TYPE")
   })
+
+  it("infers through present optionals and contextually validates evidence-free arguments after order-independent inference", () => {
+    const source = `function optionalIdentity<T>(value: T | null): T | null { return value }
+function leadingEvidence<T>(value: T, values: ReadonlyArray<T>): T { return value }
+function trailingEvidence<T>(values: ReadonlyArray<T>, value: T): T { return value }
+const present: string | null = optionalIdentity("present")
+if (present !== null) { console.log(present) }
+console.log(leadingEvidence("leading", []))
+console.log(trailingEvidence([], "trailing"))
+`
+    const module = parse({filename: "inference.ts", language: "typescript", source})
+    const statements = module.entryPoint.body.statements
+    const optionalCall = /** @type {import("../src/semantic/types.js").LocalDeclaration} */ (statements[0]).initializer
+    const leadingCall = /** @type {import("../src/semantic/types.js").PrintStatement} */ (statements[2]).expression
+    const trailingCall = /** @type {import("../src/semantic/types.js").PrintStatement} */ (statements[3]).expression
+
+    expect([optionalCall, leadingCall, trailingCall].map((expression) =>
+      /** @type {import("../src/semantic/types.js").CallExpression} */ (expression).resolution.typeArguments)).toEqual([
+      ["string"],
+      ["string"],
+      ["string"]
+    ])
+    rejects("function empty<T>(values: ReadonlyArray<T>): ReadonlyArray<T> { return values }\nconsole.log(empty([]).length)\n",
+      "GENERIC_INFERENCE_FAILURE")
+  })
+
+  it("rejects explicit argument arrays on non-generic record references in external semantic IR", () => {
+    const source = `class Plain { constructor(readonly value: string) {} }
+function keep(value: string): string { return value }
+const plain: Plain = new Plain("value")
+console.log(keep(plain.value))
+`
+    const module = parse({filename: "plain.ts", language: "typescript", source})
+    const local = /** @type {import("../src/semantic/types.js").LocalDeclaration} */ (module.entryPoint.body.statements[0])
+    const recordType = /** @type {import("../src/semantic/types.js").RecordType} */ (local.type)
+
+    recordType.arguments = []
+    assert.throws(
+      () => validateParsedModule(module, "typescript"),
+      (error) => error instanceof SemantifoldDiagnostic && error.code == "GENERIC_ARITY_MISMATCH" &&
+        error.location?.filename == "plain.ts"
+    )
+  })
 })

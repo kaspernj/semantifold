@@ -8,7 +8,7 @@ import {withAdaptedOperation} from "../semantic/operators.js"
 import {withParserRanges} from "../semantic/provenance.js"
 import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
 import {requireSourceReturnType, requireSourceScalarType} from "./scalars.js"
-import {documentedValueType, iterationBindingType, iterationOperandType, listType, mapType, optionalType, recordType, typeVariable} from "./types.js"
+import {documentedValueType, instantiatedRecordFieldType, iterationBindingType, iterationOperandType, listType, mapType, optionalType, recordType, typeVariable} from "./types.js"
 
 /** @typedef {NonNullable<import("@babel/parser").ParseResult<import("@babel/types").File>["tokens"]>[number]} BabelToken */
 /** @typedef {{byStart: Map<number, BabelToken>, tokens: BabelToken[]}} BabelTokenIndex */
@@ -288,7 +288,8 @@ function convertExpression(node, language, filename, source, context = {bindings
         return unsupportedSyntax(language, argument.type, nodeLocation(argument, filename, source))
       }
 
-      return convertExpression(argument, language, filename, source, context, declaration.fields[index]?.type)
+      return convertExpression(argument, language, filename, source, context,
+        instantiatedRecordFieldType(declaration, typeArguments, index))
     })
 
     return withParserRanges({
@@ -488,10 +489,13 @@ function knownExpressionType(node, context) {
   }
   if (node.type == "MemberExpression" && !node.computed && node.object.type != "Super" && node.property.type == "Identifier") {
     const receiver = knownValueExpressionType(node.object, context)
-    const declaration = receiver?.kind == "RecordType" ? context.records.get(receiver.declarationId) : undefined
-    const memberName = node.property.name
 
-    return declaration?.fields.find((field) => field.name == memberName)?.type
+    if (receiver?.kind != "RecordType") return undefined
+    const declaration = context.records.get(receiver.declarationId)
+    const memberName = node.property.name
+    const index = declaration?.fields.findIndex((field) => field.name == memberName) ?? -1
+
+    return declaration ? instantiatedRecordFieldType(declaration, receiver.arguments, index) : undefined
   }
   if (node.type == "MemberExpression" && node.computed && node.object.type != "Super") {
     const collectionType = knownValueExpressionType(node.object, context)

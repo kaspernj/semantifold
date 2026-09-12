@@ -59,4 +59,29 @@ describe("type parameter runtime execution", () => {
       expect(await execute(language, generated)).toEqual("ready\n2\nleft\n2\n")
     }
   })
+
+  it("reparses, compiles, and executes substituted optional constructors plus order-independent generic calls", async () => {
+    const source = `class Box<T> { constructor(readonly value: T) {} }
+function optionalIdentity<T>(value: T | null): T | null { return value }
+function leadingEvidence<T>(value: T, values: ReadonlyArray<T>): T { return value }
+function trailingEvidence<T>(values: ReadonlyArray<T>, value: T): T { return value }
+const box: Box<string | null> = new Box<string | null>(null)
+const present: string | null = optionalIdentity("present")
+if (present !== null) { console.log(present) }
+console.log(leadingEvidence("leading", []))
+console.log(trailingEvidence([], "trailing"))
+const boxed: string | null = box.value
+if (boxed !== null) { console.log(boxed) }
+`
+    const module = parse({filename: "program.ts", language: "typescript", source})
+
+    for (const language of ["php", "ruby", "javascript", "typescript", "java"]) {
+      const generated = generate({language, module})
+      const filename = language == "java" ? "Main.java" : language == "ruby" ? "program.rb" :
+        language == "javascript" ? "program.js" : language == "typescript" ? "program.ts" : "program.php"
+
+      expect(parse({filename, language, source: generated}).functions).toHaveLength(3)
+      expect(await execute(language, generated)).toEqual("present\nleading\ntrailing\n")
+    }
+  })
 })

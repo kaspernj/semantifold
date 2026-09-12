@@ -80,4 +80,49 @@ describe("type parameter backends", () => {
       assert.throws(() => generate({language: "typescript", module}), rejected("typescript"))
     }
   })
+
+  it("emits valid faithful optional type-variable documentation that reparses recursively", () => {
+    const source = `function preserve<T>(value: T | null, values: ReadonlyArray<T | null>): T | null { return value }
+console.log("ok")
+`
+    const module = parse({filename: "program.ts", language: "typescript", source})
+    const expected = semanticMeaning(module)
+
+    for (const language of ["php", "ruby", "javascript"]) {
+      const generated = generate({language, module})
+      const filename = language == "php" ? "program.php" : language == "ruby" ? "program.rb" : "program.js"
+
+      expect(semanticMeaning(parse({filename, language, source: generated}))).toEqual(expected)
+      if (language == "php") {
+        expect(generated).toContain("@param ?T $value")
+        expect(generated).toContain("function preserve($value, array $values)")
+        assert.doesNotMatch(generated, /\?array\$value/u)
+      }
+      if (language == "ruby") expect(generated).toContain("# @param values [Array[T?]]")
+      if (language == "javascript") expect(generated).toContain("@param {ReadonlyArray<T|null>} values")
+    }
+  })
+
+  it("rejects explicit empty generic arguments on non-generic records before any backend emits them", () => {
+    const module = parse({
+      filename: "plain.ts",
+      language: "typescript",
+      source: `class Plain { constructor(readonly value: string) {} }
+function keep(value: string): string { return value }
+const plain: Plain = new Plain("value")
+console.log(keep(plain.value))
+`
+    })
+    const local = /** @type {import("../src/semantic/types.js").LocalDeclaration} */ (module.entryPoint.body.statements[0])
+    const recordType = /** @type {import("../src/semantic/types.js").RecordType} */ (local.type)
+
+    recordType.arguments = []
+    for (const language of cohort) {
+      assert.throws(
+        () => generate({language, module}),
+        (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
+          error.language == language && error.location?.filename == "plain.ts"
+      )
+    }
+  })
 })

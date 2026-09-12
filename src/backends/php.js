@@ -259,7 +259,7 @@ function phpTypeNeedsDocumentation(type) {
  * @returns {void}
  */
 function emitNativePhpType(writer, type, path) {
-  if (type.kind == "TypeVariableReference") return
+  if (type.kind == "TypeVariableReference" || type.kind == "OptionalType" && type.valueType.kind == "TypeVariableReference") return
   if (type.kind == "RecordType") {
     const record = writer.recordForId(type.declarationId)
 

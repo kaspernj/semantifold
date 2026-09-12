@@ -7,7 +7,7 @@ import {withAdaptedOperation} from "../semantic/operators.js"
 import {withParserRanges} from "../semantic/provenance.js"
 import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
 import {requireSourceReturnType, sourceScalarType} from "./scalars.js"
-import {iterationBindingType, iterationOperandType, listType, mapType, optionalType, recordType, sameValueType, typeVariable} from "./types.js"
+import {instantiatedRecordFieldType, iterationBindingType, iterationOperandType, listType, mapType, optionalType, recordType, sameValueType, typeVariable} from "./types.js"
 
 /** @type {Readonly<Record<string, string>>} */
 const simpleStringEscapes = Object.freeze({
@@ -225,12 +225,13 @@ function convertExpression(node, filename, source, context, expectedType) {
     const typeArguments = typeArgumentsNode
       ? structuralChildren(typeArgumentsNode).map((argument) => convertJavaTypeArgument(
         argument, `Record '${declaration.name}' application`, location, filename, source, context.recordNames, context.typeParameters))
-      : expectedType?.kind == "RecordType" && expectedType.declarationId == declaration.id ? expectedType.arguments : undefined
+      : undefined
     const argumentNodes = structuralChildren(argumentList)
 
     return withParserRanges({
       arguments: argumentNodes.map((argument, index) =>
-        convertExpression(argument, filename, source, context, declaration.fields[index]?.type)),
+        convertExpression(argument, filename, source, context,
+          instantiatedRecordFieldType(declaration, typeArguments, index))),
       kind: /** @type {const} */ ("RecordConstruction"),
       location,
       record: recordType(/** @type {string} */ (declaration.id), nodeLocation(nameNode, filename, source), typeArguments)
@@ -1030,9 +1031,12 @@ function knownExpressionType(node, context, source) {
     }
     if (methodName && receiver && argumentList && structuralChildren(argumentList).length == 0) {
       const receiverType = knownExpressionType(receiver, context, source)
-      const declaration = receiverType?.kind == "RecordType" ? context.records.get(receiverType.declarationId) : undefined
 
-      return declaration?.fields.find((field) => field.name == nodeText(methodName, source))?.type
+      if (receiverType?.kind != "RecordType") return undefined
+      const declaration = context.records.get(receiverType.declarationId)
+      const index = declaration?.fields.findIndex((field) => field.name == nodeText(methodName, source)) ?? -1
+
+      return declaration ? instantiatedRecordFieldType(declaration, receiverType.arguments, index) : undefined
     }
   }
   if (node.name == "ObjectCreationExpression") {
