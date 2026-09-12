@@ -8,7 +8,7 @@ import {withAdaptedOperation} from "../semantic/operators.js"
 import {withParserRanges} from "../semantic/provenance.js"
 import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
 import {requireSourceReturnType, requireSourceScalarType} from "./scalars.js"
-import {documentedValueType, instantiatedRecordFieldType, iterationBindingType, iterationOperandType, listType, mapType, optionalType, recordType, typeVariable} from "./types.js"
+import {documentedValueType, instantiatedRecordFieldType, iterationBindingType, iterationOperandType, knownCallReturnType, listType, mapType, optionalType, preservesGenericOptionalEvidence, recordType, typeVariable} from "./types.js"
 
 /** @typedef {NonNullable<import("@babel/parser").ParseResult<import("@babel/types").File>["tokens"]>[number]} BabelToken */
 /** @typedef {{byStart: Map<number, BabelToken>, tokens: BabelToken[]}} BabelTokenIndex */
@@ -159,7 +159,7 @@ function convertExpression(node, language, filename, source, context = {bindings
     if (node.type == "NullLiteral") {
       return withParserRanges({kind: /** @type {const} */ ("OptionalNone"), location}, {absence: location})
     }
-    if (knownExpressionType(node, context)?.kind == "OptionalType") {
+    if (knownExpressionType(node, context, language, filename, source)?.kind == "OptionalType") {
       return convertExpression(node, language, filename, source, context, undefined, true)
     }
     return withParserRanges({
@@ -314,7 +314,7 @@ function convertExpression(node, language, filename, source, context = {bindings
       }, {member: identifierLocation(node.property, filename, source)})
     }
     if (node.computed) {
-      if (knownValueExpressionType(node.object, context)?.kind == "RecordType") {
+      if (knownValueExpressionType(node.object, context, language, filename, source)?.kind == "RecordType") {
         return unsupportedSyntax(language, "computed record member access", nodeLocation(node.property, filename, source))
       }
       if (node.property.type == "PrivateName") return unsupportedSyntax(language, node.property.type, location)
@@ -330,7 +330,7 @@ function convertExpression(node, language, filename, source, context = {bindings
       })
     }
     if (node.property.type == "Identifier" && ["length", "size"].includes(node.property.name)) {
-      const receiverType = knownValueExpressionType(node.object, context)
+      const receiverType = knownValueExpressionType(node.object, context, language, filename, source)
 
       if (receiverType?.kind == "RecordType") {
         return withParserRanges({
@@ -438,7 +438,8 @@ function convertExpression(node, language, filename, source, context = {bindings
         return unsupportedSyntax(language, argument.type, nodeLocation(argument, filename, source))
       }
 
-      return convertExpression(argument, language, filename, source, context, signature?.parameters[index]?.type)
+      return convertExpression(argument, language, filename, source, context, signature?.parameters[index]?.type,
+        preservesGenericOptionalEvidence(signature, index))
     })
 
     return withParserRanges({arguments: arguments_, callee: node.callee.name, kind: /** @type {const} */ ("CallExpression"), location}, {
@@ -474,21 +475,43 @@ function convertExpression(node, language, filename, source, context = {bindings
  * signatures and collection bindings.
  * @param {import("@babel/types").Expression} node - Parser-owned expression.
  * @param {JavaScriptConversionContext} context - Typed lexical context.
+ * @param {"javascript" | "typescript"} language - Frontend language.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
  * @returns {import("../semantic/types.js").SemanticFunctionReturnType | import("../semantic/types.js").ErrorType | undefined} Known result type.
  */
-function knownExpressionType(node, context) {
-  if (node.type == "TSNonNullExpression") return knownExpressionType(node.expression, context)
+function knownExpressionType(node, context, language, filename, source) {
+  if (node.type == "TSNonNullExpression") return knownExpressionType(node.expression, context, language, filename, source)
   if (node.type == "Identifier") return context.bindings.get(node.name)
   if (node.type == "CallExpression" && node.callee.type == "Identifier") {
-    return context.functions.get(node.callee.name)?.returnType
+    const signature = context.functions.get(node.callee.name)
+
+    if (signature) return knownCallReturnType(signature, node.arguments.map((argument) =>
+      argument.type == "SpreadElement" || argument.type == "ArgumentPlaceholder"
+        ? undefined
+        : knownExpressionType(argument, context, language, filename, source)))
   }
   if (node.type == "NewExpression" && node.callee.type == "Identifier") {
     const declaration = context.valueRecordNames.get(node.callee.name)
 
-    if (declaration?.id) return {declarationId: declaration.id, kind: "RecordType"}
+    if (declaration?.id) {
+      const sourceArguments = node.typeArguments?.params ?? node.typeParameters?.params
+      const typeArguments = sourceArguments?.map((/** @type {import("@babel/types").TSType} */ argument) =>
+        convertTypeScriptValueTypeNode(
+          argument,
+          `Record '${declaration.name}' application`,
+          nodeLocation(node, filename, source),
+          filename,
+          source,
+          context.recordNames,
+          context.typeParameters
+        ))
+
+      return {declarationId: declaration.id, kind: "RecordType", ...(typeArguments ? {arguments: typeArguments} : {})}
+    }
   }
   if (node.type == "MemberExpression" && !node.computed && node.object.type != "Super" && node.property.type == "Identifier") {
-    const receiver = knownValueExpressionType(node.object, context)
+    const receiver = knownValueExpressionType(node.object, context, language, filename, source)
 
     if (receiver?.kind != "RecordType") return undefined
     const declaration = context.records.get(receiver.declarationId)
@@ -498,14 +521,14 @@ function knownExpressionType(node, context) {
     return declaration ? instantiatedRecordFieldType(declaration, receiver.arguments, index) : undefined
   }
   if (node.type == "MemberExpression" && node.computed && node.object.type != "Super") {
-    const collectionType = knownValueExpressionType(node.object, context)
+    const collectionType = knownValueExpressionType(node.object, context, language, filename, source)
 
     if (collectionType?.kind == "ListType") return collectionType.elementType
   }
   if (node.type == "CallExpression" && node.callee.type == "MemberExpression" &&
     !node.callee.computed && node.callee.object.type != "Super" &&
     node.callee.property.type == "Identifier" && node.callee.property.name == "get") {
-    const collectionType = knownValueExpressionType(node.callee.object, context)
+    const collectionType = knownValueExpressionType(node.callee.object, context, language, filename, source)
 
     if (collectionType?.kind == "MapType") return collectionType.valueType
   }
@@ -518,10 +541,13 @@ function knownExpressionType(node, context) {
  * Semantic validation separately proves that the unwrap occurs only on a present path.
  * @param {import("@babel/types").Expression} node - Parser-owned expression.
  * @param {JavaScriptConversionContext} context - Typed lexical context.
+ * @param {"javascript" | "typescript"} language - Frontend language.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
  * @returns {import("../semantic/types.js").SemanticFunctionReturnType | import("../semantic/types.js").ErrorType | undefined} Converted value type.
  */
-function knownValueExpressionType(node, context) {
-  const type = knownExpressionType(node, context)
+function knownValueExpressionType(node, context, language, filename, source) {
+  const type = knownExpressionType(node, context, language, filename, source)
 
   return node.type == "Identifier" && type?.kind == "OptionalType" ? type.valueType : type
 }
@@ -855,7 +881,7 @@ function convertForEach(node, language, filename, source, canonicalZeroRequired,
   if (declarator.id.type != "Identifier") return unsupportedSyntax(language, declarator.id.type, nodeLocation(declarator.id, filename, source))
   if (declarator.init) return unsupportedSyntax(language, "initialized iteration binding", nodeLocation(declarator, filename, source))
   if (node.body.type != "BlockStatement") return unsupportedSyntax(language, "for-of without block body", nodeLocation(node.body, filename, source))
-  const collectionType = iterationOperandType(knownExpressionType(node.right, context))
+  const collectionType = iterationOperandType(knownExpressionType(node.right, context, language, filename, source))
 
   if (!collectionType || collectionType.kind != "ListType" && collectionType.kind != "MapType") {
     return missingType(language, "Iteration collection", nodeLocation(node.right, filename, source))

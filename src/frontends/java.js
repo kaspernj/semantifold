@@ -7,7 +7,7 @@ import {withAdaptedOperation} from "../semantic/operators.js"
 import {withParserRanges} from "../semantic/provenance.js"
 import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
 import {requireSourceReturnType, sourceScalarType} from "./scalars.js"
-import {instantiatedRecordFieldType, iterationBindingType, iterationOperandType, listType, mapType, optionalType, recordType, sameValueType, typeVariable} from "./types.js"
+import {instantiatedRecordFieldType, iterationBindingType, iterationOperandType, knownCallReturnType, listType, mapType, optionalType, recordType, sameValueType, typeVariable} from "./types.js"
 
 /** @type {Readonly<Record<string, string>>} */
 const simpleStringEscapes = Object.freeze({
@@ -249,7 +249,7 @@ function convertExpression(node, filename, source, context, expectedType) {
     }
 
     if (operator == "!" && operand.name == "MethodInvocation" && isEqualsInvocation(operand, source) &&
-      !isZeroArgumentRecordMemberInvocation(operand, source, context)) {
+      !isZeroArgumentRecordMemberInvocation(operand, filename, source, context)) {
       return convertStringEquality(operand, true, location, nodeLocation(operatorNode, filename, source), filename, source, context)
     }
 
@@ -288,7 +288,7 @@ function convertExpression(node, filename, source, context, expectedType) {
   }
 
   if (node.name == "MethodInvocation") {
-    if (isEqualsInvocation(node, source) && !isZeroArgumentRecordMemberInvocation(node, source, context)) {
+    if (isEqualsInvocation(node, source) && !isZeroArgumentRecordMemberInvocation(node, filename, source, context)) {
       const methodName = requiredChild(node, "MethodName", filename, source)
 
       return convertStringEquality(node, false, location, nodeLocation(methodName, filename, source), filename, source, context)
@@ -416,7 +416,7 @@ function convertExpression(node, filename, source, context, expectedType) {
       }, {operator: nodeLocation(methodName, filename, source)})
     }
     if (receiver && method == "size" && argumentNodes.length == 0) {
-      const receiverType = knownExpressionType(receiver, context, source)
+      const receiverType = knownExpressionType(receiver, filename, source, context)
 
       if (receiverType?.kind == "RecordType") {
         return withParserRanges({
@@ -494,16 +494,17 @@ function isEqualsInvocation(node, source) {
 /**
  * Distinguishes a zero-argument nominal field accessor from Java string equality syntax.
  * @param {import("@lezer/common").SyntaxNode} node - Method invocation node.
+ * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
  * @param {JavaConversionContext} context - Typed lexical conversion context.
  * @returns {boolean} Whether this is a known record receiver with no arguments.
  */
-function isZeroArgumentRecordMemberInvocation(node, source, context) {
+function isZeroArgumentRecordMemberInvocation(node, filename, source, context) {
   const argumentList = node.getChild("ArgumentList")
   const receiver = structuralChildren(node).find((child) => child.name != "MethodName" && child.name != "ArgumentList")
 
   return argumentList != null && structuralChildren(argumentList).length == 0 && receiver != null &&
-    knownExpressionType(receiver, context, source)?.kind == "RecordType"
+    knownExpressionType(receiver, filename, source, context)?.kind == "RecordType"
 }
 
 /**
@@ -969,7 +970,7 @@ function convertForEach(node, filename, source, context) {
   const bindingLocation = nodeLocation(bindingNode, filename, source)
   const declaredType = convertJavaTypeArgument(typeNode, `Iteration binding '${nodeText(bindingNode, source)}'`, bindingLocation,
     filename, source, context.recordNames, context.typeParameters)
-  const collectionType = iterationOperandType(knownExpressionType(collectionNode, context, source))
+  const collectionType = iterationOperandType(knownExpressionType(collectionNode, filename, source, context))
 
   if (!collectionType || collectionType.kind != "ListType" && collectionType.kind != "MapType") {
     return missingType("java", "Iteration collection", nodeLocation(collectionNode, filename, source))
@@ -996,15 +997,16 @@ function convertForEach(node, filename, source, context) {
 /**
  * Resolves expression types established by Java declarations and function signatures.
  * @param {import("@lezer/common").SyntaxNode} node - Parser expression.
- * @param {JavaConversionContext} context - Typed context.
+ * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
+ * @param {JavaConversionContext} context - Typed context.
  * @returns {import("../semantic/types.js").SemanticFunctionReturnType | import("../semantic/types.js").ErrorType | undefined} Known type.
  */
-function knownExpressionType(node, context, source) {
+function knownExpressionType(node, filename, source, context) {
   if (node.name == "ParenthesizedExpression") {
     const children = structuralChildren(node)
 
-    return children.length == 1 ? knownExpressionType(children[0], context, source) : undefined
+    return children.length == 1 ? knownExpressionType(children[0], filename, source, context) : undefined
   }
   if (node.name == "Identifier") return context.bindings.get(nodeText(node, source))
   if (node.name == "MethodInvocation") {
@@ -1012,16 +1014,25 @@ function knownExpressionType(node, context, source) {
     const argumentList = node.getChild("ArgumentList")
     const receiver = structuralChildren(node).find((child) => child.name != "MethodName" && child.name != "ArgumentList")
 
-    if (methodName && !receiver) return context.functions.get(nodeText(methodName, source))?.returnType
+    if (methodName && !receiver) {
+      const signature = context.functions.get(nodeText(methodName, source))
+      const arguments_ = argumentList ? structuralChildren(argumentList) : []
+
+      if (signature) return knownCallReturnType(signature, arguments_.map((argument) =>
+        knownExpressionType(argument, filename, source, context)))
+    }
     if (methodName && receiver) {
       const qualified = `${nodeText(receiver, source)}.${nodeText(methodName, source)}`
-      const returnType = context.functions.get(qualified)?.returnType
+      const signature = context.functions.get(qualified)
+      const arguments_ = argumentList ? structuralChildren(argumentList) : []
+      const returnType = signature ? knownCallReturnType(signature, arguments_.map((argument) =>
+        knownExpressionType(argument, filename, source, context))) : undefined
 
       if (returnType) return returnType
     }
     if (methodName && receiver && argumentList && nodeText(methodName, source) == "get") {
       const arguments_ = structuralChildren(argumentList)
-      const receiverType = knownExpressionType(receiver, context, source)
+      const receiverType = knownExpressionType(receiver, filename, source, context)
 
       if (arguments_.length == 0 && receiver.name == "Identifier" && receiverType?.kind == "OptionalType") {
         return receiverType.valueType
@@ -1030,7 +1041,7 @@ function knownExpressionType(node, context, source) {
       if (arguments_.length == 1 && receiverType?.kind == "MapType") return receiverType.valueType
     }
     if (methodName && receiver && argumentList && structuralChildren(argumentList).length == 0) {
-      const receiverType = knownExpressionType(receiver, context, source)
+      const receiverType = knownExpressionType(receiver, filename, source, context)
 
       if (receiverType?.kind != "RecordType") return undefined
       const declaration = context.records.get(receiverType.declarationId)
@@ -1044,7 +1055,22 @@ function knownExpressionType(node, context, source) {
     const nameNode = typeNode?.name == "GenericType" ? structuralChildren(typeNode)[0] : typeNode
     const declaration = nameNode ? context.recordNames.get(nodeText(nameNode, source)) : undefined
 
-    if (declaration?.id) return {declarationId: declaration.id, kind: "RecordType"}
+    if (declaration?.id && typeNode) {
+      const typeArgumentsNode = typeNode?.getChild("TypeArguments")
+      const typeArguments = typeArgumentsNode
+        ? structuralChildren(typeArgumentsNode).map((argument) => convertJavaTypeArgument(
+          argument,
+          `Record '${declaration.name}' application`,
+          nodeLocation(typeNode, filename, source),
+          filename,
+          source,
+          context.recordNames,
+          context.typeParameters
+        ))
+        : undefined
+
+      return {declarationId: declaration.id, kind: "RecordType", ...(typeArguments ? {arguments: typeArguments} : {})}
+    }
   }
 
   return undefined

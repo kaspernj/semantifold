@@ -228,4 +228,217 @@ $plain = new Plain("plain");
     rejected("php", "wrong-spelling.php", `${declarations}echo keep($box->missing()), PHP_EOL;\n`)
     rejected("php", "property.php", `${declarations}echo keep($box->value), PHP_EOL;\n`)
   })
+
+  it("admits only the PHP generic getter on a presence-proven optional record receiver", () => {
+    const declarations = `<?php
+declare(strict_types=1);
+/** @template T */
+final class Box {
+    /** @param T $value */
+    public function __construct(private $value) {}
+    /** @return T */
+    public function value() { return $this->value; }
+}
+function keep(string $value): string { return $value; }
+/** @var ?Box<string> $box
+ * @semantifold-immutable
+ */
+$box = new Box("present");
+`
+    const module = parse({
+      filename: "valid.php",
+      language: "php",
+      source: `${declarations}if ($box !== null) { echo keep($box->value()), PHP_EOL; }\n`
+    })
+    const branch = /** @type {import("../src/semantic/types.js").IfStatement} */ (module.entryPoint.body.statements.at(-1))
+    const print = /** @type {import("../src/semantic/types.js").PrintStatement} */ (branch.consequent.statements[0])
+    const call = /** @type {import("../src/semantic/types.js").CallExpression} */ (print.expression)
+    const member = /** @type {import("../src/semantic/types.js").MemberRead} */ (call.arguments[0])
+
+    expect(member).toMatchObject({field: "record:0:field:0", kind: "MemberRead", receiver: {kind: "OptionalUnwrap"}})
+    rejected("php", "property.php", `${declarations}if ($box !== null) { echo keep($box->value), PHP_EOL; }\n`)
+  })
+
+  it("parses optional applied-record documentation directly and recursively with exact source ranges", () => {
+    const profiles = [
+      ["javascript", "program.js", `/** @template T */
+class Box {
+  /** @param {T} value */
+  constructor(value) {
+    /** @readonly */ this.value = value
+    Object.freeze(this)
+  }
+}
+/**
+ * @template T
+ * @param {Box<T>|null} value
+ * @param {ReadonlyArray<Box<T>|null>} values
+ * @param {ReadonlyMap<string,Box<T>|null>} by_name
+ * @returns {Box<T>|null}
+ */
+function preserve(value, values, by_name) { return value }
+console.log("ok")
+`, "Box<T>|null"],
+      ["ruby", "program.rb", `# @template T
+class Box
+  # @type [T]
+  attr_reader :value
+  # @param value [T]
+  def initialize(value)
+    @value = value
+    freeze
+  end
+end
+# @template T
+# @param value [Box[T]?]
+# @param values [Array[Box[T]?]]
+# @param by_name [Hash[String,Box[T]?]]
+# @return [Box[T]?]
+def preserve(value, values, by_name)
+  return value
+end
+puts "ok"
+`, "Box[T]?"]
+    ]
+    const meanings = []
+
+    for (const [language, filename, source, directSpelling] of profiles) {
+      const module = parse({filename, language, source})
+      const parameters = module.functions[0].parameters
+      const direct = parameters[0].type
+      const range = direct.sourceProvenance?.ranges.type
+
+      expect(direct).toMatchObject({kind: "OptionalType", valueType: {kind: "RecordType"}})
+      expect(parameters[1].type).toMatchObject({
+        elementType: {kind: "OptionalType", valueType: {kind: "RecordType"}},
+        kind: "ListType"
+      })
+      expect(parameters[2].type).toMatchObject({
+        kind: "MapType",
+        valueType: {kind: "OptionalType", valueType: {kind: "RecordType"}}
+      })
+      expect(range && source.slice(range.start.offset, range.end.offset)).toEqual(directSpelling)
+      meanings.push(semanticMeaning(module))
+    }
+
+    expect(meanings[1]).toEqual(meanings[0])
+  })
+
+  it("preserves an optional binding as direct generic-call evidence", () => {
+    const module = parse({
+      filename: "optional-identity.ts",
+      language: "typescript",
+      source: `function identity<T>(value: T): T { return value }
+const optional: string | null = "value"
+const result: string | null = identity(optional)
+if (result !== null) { console.log(result) }
+`
+    })
+    const result = /** @type {import("../src/semantic/types.js").LocalDeclaration} */ (
+      module.entryPoint.body.statements[1])
+    const call = /** @type {import("../src/semantic/types.js").CallExpression} */ (result.initializer)
+
+    expect(call.arguments[0].kind).toEqual("IdentifierExpression")
+    expect(call.resolution.typeArguments).toEqual([{kind: "OptionalType", valueType: "string"}])
+    expect(call.resolution.returnType).toEqual({kind: "OptionalType", valueType: "string"})
+  })
+
+  it("classifies instantiated generic call results and explicit construction members in original-five syntax", () => {
+    const profiles = [
+      ["javascript", "program.js", `/** @template T */
+class Box {
+  /** @param {T} size */
+  constructor(size) { /** @readonly */ this.size = size; Object.freeze(this) }
+}
+/** @template T
+ * @param {T} value
+ * @returns {T}
+ */
+function identity(value) { return value }
+/** @type {Box<string>} */ const box = new Box("sized")
+console.log(identity(box).size)
+`],
+      ["typescript", "program.ts", `class Box<T> { constructor(readonly size: T) {} }
+function identity<T>(value: T): T { return value }
+const box: Box<string> = new Box<string>("sized")
+console.log(identity(box).size)
+const direct: string | null = new Box<string | null>(null).size
+if (direct !== null) { console.log(direct) }
+`],
+      ["ruby", "program.rb", `# @template T
+class Box
+  # @type [T]
+  attr_reader :size
+  # @param size [T]
+  def initialize(size)
+    @size = size
+    freeze
+  end
+end
+# @template T
+# @param value [T]
+# @return [T]
+def identity(value)
+  return value
+end
+# @type [Box[String]]
+# @semantifold-immutable
+box = Box.new("sized")
+puts identity(box).size
+`],
+      ["php", "program.php", `<?php
+declare(strict_types=1);
+/** @template T */
+final class Box {
+    /** @param T $size */
+    public function __construct(private $size) {}
+    /** @return T */
+    public function size() { return $this->size; }
+}
+/** @template T
+ * @param T $value
+ * @return T
+ */
+function identity($value) { return $value; }
+/** @var Box<string> $box
+ * @semantifold-immutable
+ */
+$box = new Box("sized");
+echo identity($box)->size(), PHP_EOL;
+`],
+      ["java", "Main.java", `final class Box<T> {
+  private final T size;
+  Box(T size) { this.size = size; }
+  T size() { return this.size; }
+}
+public final class Main {
+  private static <T> T identity(T value) { return value; }
+  public static void main(String[] args) {
+    final Box<String> box = new Box<String>("sized");
+    System.out.println(identity(box).size());
+    final java.util.Optional<String> direct = new Box<java.util.Optional<String>>(java.util.Optional.empty()).size();
+    if (direct.isPresent()) { System.out.println(direct.get()); }
+  }
+}
+`]
+    ]
+
+    for (const [language, filename, source] of profiles) {
+      const module = parse({filename, language, source})
+      const print = /** @type {import("../src/semantic/types.js").PrintStatement} */ (
+        module.entryPoint.body.statements[1])
+
+      expect(print.expression).toMatchObject({
+        field: "record:0:field:0",
+        kind: "MemberRead",
+        receiver: {kind: "CallExpression", resolution: {returnType: {arguments: ["string"], kind: "RecordType"}}}
+      })
+      if (language == "typescript" || language == "java") {
+        const direct = /** @type {import("../src/semantic/types.js").LocalDeclaration} */ (
+          module.entryPoint.body.statements[2])
+
+        expect(direct.initializer.kind).toEqual("MemberRead")
+      }
+    }
+  })
 })

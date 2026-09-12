@@ -1,7 +1,7 @@
 // @ts-check
 
 import {missingType, unsupportedSyntax} from "../diagnostic.js"
-import {recordTypeSubstitutions, substituteValueType} from "../semantic/generics.js"
+import {recordTypeSubstitutions, substituteValueType, typeContainsAnyVariable} from "../semantic/generics.js"
 import {locationFromOffsets} from "../semantic/location.js"
 import {parserRangeFor, setParserRanges} from "../semantic/provenance.js"
 import {sourceScalarType} from "./scalars.js"
@@ -195,6 +195,20 @@ export function knownCallReturnType(signature, arguments_) {
     }
   }
   return substituteValueType(signature.returnType, substitutions)
+}
+
+/**
+ * Preserves an optional binding when a generic formal needs its wrapped type as
+ * argument-only inference evidence. The semantic validator remains the sole
+ * authority for unification and presence-proof checks.
+ * @param {{parameters: import("../semantic/types.js").Parameter[], typeParameters?: import("../semantic/types.js").TypeParameter[]} | undefined} signature - Known direct-call signature.
+ * @param {number} index - Argument index.
+ * @returns {boolean} Whether frontend conversion must retain optionality.
+ */
+export function preservesGenericOptionalEvidence(signature, index) {
+  const formal = signature?.parameters[index]?.type
+
+  return Boolean(signature?.typeParameters?.length && formal && typeContainsAnyVariable(formal))
 }
 
 /**
@@ -453,7 +467,17 @@ class DocumentedTypeParser {
       while (this.consume(",")) arguments_.push(this.parseNamedType())
       if (!this.consume(closing)) return this.failure()
 
-      return recordType(record.id, this.range(start, nameEnd), arguments_)
+      const applicationEnd = this.offset
+      const type = recordType(record.id, this.range(start, nameEnd), arguments_)
+
+      if (this.language == "ruby" && this.consume("?")) {
+        return optionalType(type, this.range(start, this.offset), this.range(start, applicationEnd))
+      }
+      if (this.language == "javascript" && this.consume("|null")) {
+        return optionalType(type, this.range(start, this.offset), this.range(start, applicationEnd))
+      }
+
+      return type
     }
     if (name == listName) {
       if (!this.consume(closing)) return this.failure()

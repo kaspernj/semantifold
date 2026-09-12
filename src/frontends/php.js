@@ -8,7 +8,7 @@ import {withAdaptedOperation} from "../semantic/operators.js"
 import {withParserRanges} from "../semantic/provenance.js"
 import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
 import {requireSourceReturnType, requireSourceScalarType} from "./scalars.js"
-import {documentedValueType, instantiatedRecordFieldType, iterationBindingType, iterationOperandType, knownCallReturnType, optionalType, recordType, sameValueType} from "./types.js"
+import {documentedValueType, instantiatedRecordFieldType, iterationBindingType, iterationOperandType, knownCallReturnType, optionalType, preservesGenericOptionalEvidence, recordType, sameValueType} from "./types.js"
 const parser = new PhpParser.Engine({
   ast: {withPositions: true},
   parser: {extractDoc: true, suppressErrors: false}
@@ -297,7 +297,8 @@ function convertExpression(node, filename, source, context, expectedType, preser
       return unsupportedSyntax("php", "dynamic or computed member access", nodeLocation(read.offset, filename, source))
     }
     const receiverType = knownExpressionType(read.what, context)
-    const declaration = receiverType?.kind == "RecordType" ? context.records.get(receiverType.declarationId) : undefined
+    const receiverRecord = receiverType?.kind == "OptionalType" ? receiverType.valueType : receiverType
+    const declaration = receiverRecord?.kind == "RecordType" ? context.records.get(receiverRecord.declarationId) : undefined
 
     if ((declaration?.typeParameters?.length ?? 0) > 0) {
       return unsupportedSyntax("php", "generic record property access", nodeLocation(read.offset, filename, source))
@@ -445,7 +446,8 @@ function convertExpression(node, filename, source, context, expectedType, preser
 
     return withParserRanges({
       arguments: call.arguments.map((argument, index) =>
-        convertExpression(argument, filename, source, context, signature?.parameters[index]?.type)),
+        convertExpression(argument, filename, source, context, signature?.parameters[index]?.type,
+          preservesGenericOptionalEvidence(signature, index))),
       callee,
       kind: "CallExpression",
       location
@@ -524,9 +526,10 @@ function knownExpressionType(node, context) {
  */
 function knownGenericRecordAccessorType(lookup, context) {
   const receiver = knownExpressionType(lookup.what, context)
+  const receiverRecord = receiver?.kind == "OptionalType" ? receiver.valueType : receiver
 
-  if (receiver?.kind != "RecordType") return undefined
-  const declaration = context.records.get(receiver.declarationId)
+  if (receiverRecord?.kind != "RecordType") return undefined
+  const declaration = context.records.get(receiverRecord.declarationId)
   const member = lookup.offset.kind == "identifier" ? /** @type {import("php-parser").Identifier} */ (lookup.offset) : undefined
   const index = member && typeof member.name == "string"
     ? declaration?.fields.findIndex((field) => field.name == member.name) ?? -1
@@ -534,7 +537,7 @@ function knownGenericRecordAccessorType(lookup, context) {
 
   if (!declaration || (declaration.typeParameters?.length ?? 0) == 0 || index < 0) return undefined
 
-  return instantiatedRecordFieldType(declaration, receiver.arguments, index)
+  return instantiatedRecordFieldType(declaration, receiverRecord.arguments, index)
 }
 
 /**
@@ -1345,8 +1348,7 @@ function validatePhpGenericRecordGetters(node, declaration, recordNames, filenam
       sourceType: documented.returnType.sourceType, subject: `Record getter '${name}'`, typeParameters})
     const nativeType = phpTypeName(getter.type)
 
-    if (!phpDocumentedNativeTypeMatches(nativeType, returnType, recordNames) ||
-      getter.nullable != (returnType.kind == "OptionalType") || !sameValueType(returnType, field.type)) {
+    if (!phpDocumentedNativeTypeMatches(nativeType, returnType, recordNames) || !sameValueType(returnType, field.type)) {
       return unsupportedSyntax("php", "generic record getter type mismatch", documented.returnType.location)
     }
   })

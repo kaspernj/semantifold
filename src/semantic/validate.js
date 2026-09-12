@@ -1,7 +1,7 @@
 // @ts-check
 
 import {semanticFailure, unsupportedCapability, unsupportedSyntax} from "../diagnostic.js"
-import {recordTypeSubstitutions, substituteValueType} from "./generics.js"
+import {recordTypeSubstitutions, substituteValueType, typeContainsAnyVariable} from "./generics.js"
 import {hasOnlyUnicodeScalars, isScalarTypeName, scalarType} from "./scalars.js"
 import {adaptedOperationFor} from "./operators.js"
 import {parserRangeFor} from "./provenance.js"
@@ -1555,21 +1555,6 @@ function typeContainsVariable(type, parameterId) {
   if (type.kind == "ListType") return typeContainsVariable(type.elementType, parameterId)
   if (type.kind == "MapType") return typeContainsVariable(type.keyType, parameterId) || typeContainsVariable(type.valueType, parameterId)
   if (type.kind == "OptionalType") return typeContainsVariable(type.valueType, parameterId)
-
-  return false
-}
-
-/**
- * Checks whether contextual typing would hide information needed by generic inference.
- * @param {import("./types.js").SemanticValueType} type - Candidate open type.
- * @returns {boolean} Whether any declaration variable occurs recursively.
- */
-function typeContainsAnyVariable(type) {
-  if (type.kind == "TypeVariableReference") return true
-  if (type.kind == "RecordType") return type.arguments?.some(typeContainsAnyVariable) ?? false
-  if (type.kind == "ListType") return typeContainsAnyVariable(type.elementType)
-  if (type.kind == "MapType") return typeContainsAnyVariable(type.keyType) || typeContainsAnyVariable(type.valueType)
-  if (type.kind == "OptionalType") return typeContainsAnyVariable(type.valueType)
 
   return false
 }

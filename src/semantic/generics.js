@@ -34,3 +34,18 @@ export function substituteValueType(type, substitutions) {
 
   return type
 }
+
+/**
+ * Checks whether a recursive type contains any declaration-scoped variable.
+ * @param {import("./types.js").SemanticValueType} type - Candidate open type.
+ * @returns {boolean} Whether any type variable occurs.
+ */
+export function typeContainsAnyVariable(type) {
+  if (type.kind == "TypeVariableReference") return true
+  if (type.kind == "RecordType") return type.arguments?.some(typeContainsAnyVariable) ?? false
+  if (type.kind == "ListType") return typeContainsAnyVariable(type.elementType)
+  if (type.kind == "MapType") return typeContainsAnyVariable(type.keyType) || typeContainsAnyVariable(type.valueType)
+  if (type.kind == "OptionalType") return typeContainsAnyVariable(type.valueType)
+
+  return false
+}

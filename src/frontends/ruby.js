@@ -48,7 +48,7 @@ import {withAdaptedOperation} from "../semantic/operators.js"
 import {withParserRanges} from "../semantic/provenance.js"
 import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
 import {requireSourceReturnType} from "./scalars.js"
-import {documentedValueType, instantiatedRecordFieldType, iterationBindingType, iterationOperandType, recordType, sameValueType} from "./types.js"
+import {documentedValueType, instantiatedRecordFieldType, iterationBindingType, iterationOperandType, knownCallReturnType, preservesGenericOptionalEvidence, recordType, sameValueType} from "./types.js"
 const parsePrism = await loadPrism()
 /** @typedef {{name: string, nameLocation: import("../semantic/types.js").SourceLocation, parameters: import("../semantic/types.js").Parameter[], returnType: import("../semantic/types.js").SemanticFunctionReturnType, typeParameters?: import("../semantic/types.js").TypeParameter[], location: import("../semantic/types.js").SourceLocation}} RubyFunctionSignature */
 /** @typedef {{bindings: Map<string, import("../semantic/types.js").SemanticBindingType>, errorNames: Map<string, import("../semantic/types.js").ErrorDeclaration>, errors: Map<string, import("../semantic/types.js").ErrorDeclaration>, functions: Map<string, RubyFunctionSignature>, records: Map<string, import("../semantic/types.js").RecordDeclaration>, recordNames: Map<string, import("../semantic/types.js").RecordDeclaration>, loopDepth?: number, returnType?: import("../semantic/types.js").SemanticFunctionReturnType, typeParameters?: Map<string, import("../semantic/types.js").TypeParameter>}} RubyConversionContext */
@@ -376,7 +376,8 @@ function convertExpression(node, filename, source, context, expectedType, preser
     if (signature) {
       return withParserRanges({
         arguments: (node.arguments_?.arguments_ ?? []).map((argument, index) =>
-          convertExpression(argument, filename, source, context, signature.parameters[index]?.type)),
+          convertExpression(argument, filename, source, context, signature.parameters[index]?.type,
+            preservesGenericOptionalEvidence(signature, index))),
         callee,
         kind: /** @type {const} */ ("CallExpression"),
         location
@@ -432,7 +433,8 @@ function convertExpression(node, filename, source, context, expectedType, preser
 
     return withParserRanges({
       arguments: (node.arguments_?.arguments_ ?? []).map((argument, index) =>
-        convertExpression(argument, filename, source, context, signature?.parameters[index]?.type)),
+        convertExpression(argument, filename, source, context, signature?.parameters[index]?.type,
+          preservesGenericOptionalEvidence(signature, index))),
       callee: node.name,
       kind: "CallExpression",
       location
@@ -460,9 +462,17 @@ function knownExpressionType(node, context) {
     return knownExpressionType(node.body.body[0], context)
   }
   if (node instanceof LocalVariableReadNode) return context.bindings.get(node.name)
-  if (node instanceof CallNode && !node.receiver) return context.functions.get(node.name)?.returnType
+  if (node instanceof CallNode && !node.receiver) {
+    const signature = context.functions.get(node.name)
+
+    if (signature) return knownCallReturnType(signature, (node.arguments_?.arguments_ ?? []).map((argument) =>
+      knownExpressionType(argument, context)))
+  }
   if (node instanceof CallNode && node.receiver instanceof ConstantReadNode) {
-    return context.functions.get(`${node.receiver.name}.${node.name}`)?.returnType
+    const signature = context.functions.get(`${node.receiver.name}.${node.name}`)
+
+    if (signature) return knownCallReturnType(signature, (node.arguments_?.arguments_ ?? []).map((argument) =>
+      knownExpressionType(argument, context)))
   }
   if (node instanceof CallNode && node.receiver && node.name == "[]") {
     const collectionType = knownValueExpressionType(node.receiver, context)

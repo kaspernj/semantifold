@@ -84,4 +84,33 @@ if (boxed !== null) { console.log(boxed) }
       expect(await execute(language, generated)).toEqual("present\nleading\ntrailing\n")
     }
   })
+
+  it("reparses and executes optional generic records plus instantiated call results in every required toolchain", async () => {
+    const source = `class Box<T> { constructor(readonly size: T) {} }
+class MaybeBox<T> { constructor(readonly value: T | null) {} }
+function identity<T>(value: T): T { return value }
+const box: Box<string> = new Box<string>("sized")
+console.log(identity(box).size)
+const maybe: MaybeBox<string> = new MaybeBox<string>("maybe")
+const maybeValue: string | null = maybe.value
+if (maybeValue !== null) { console.log(maybeValue) }
+const optionalBox: Box<string> | null = new Box<string>("present")
+if (optionalBox !== null) { console.log(optionalBox.size) }
+const optionalText: string | null = "optional"
+const result: string | null = identity(optionalText)
+if (result !== null) { console.log(result) }
+const boxes: ReadonlyArray<Box<string> | null> = [box, null]
+console.log(boxes.length)
+`
+    const module = parse({filename: "program.ts", language: "typescript", source})
+
+    for (const language of ["php", "ruby", "javascript", "typescript", "java"]) {
+      const generated = generate({language, module})
+      const filename = language == "java" ? "Main.java" : language == "ruby" ? "program.rb" :
+        language == "javascript" ? "program.js" : language == "typescript" ? "program.ts" : "program.php"
+
+      expect(parse({filename, language, source: generated}).functions).toHaveLength(1)
+      expect(await execute(language, generated)).toEqual("sized\nmaybe\npresent\noptional\n2\n")
+    }
+  })
 })

@@ -125,4 +125,56 @@ console.log(keep(plain.value))
       )
     }
   })
+
+  it("reparses PHP generic getters whose documented optional wraps a type variable", () => {
+    const module = parse({
+      filename: "program.ts",
+      language: "typescript",
+      source: `class MaybeBox<T> { constructor(readonly value: T | null) {} }
+function keep(value: string): string { return value }
+const box: MaybeBox<string> = new MaybeBox<string>("ok")
+const value: string | null = box.value
+if (value !== null) { console.log(keep(value)) }
+`
+    })
+    const generated = generate({language: "php", module})
+
+    expect(generated).toContain("* @return ?T")
+    expect(generated).toContain("public function value()")
+    assert.doesNotMatch(generated, /public function value\(\):/u)
+    expect(semanticMeaning(parse({filename: "program.php", language: "php", source: generated})))
+      .toEqual(semanticMeaning(module))
+    for (const invalid of [
+      generated.replace("* @return ?T", "* @return T"),
+      generated.replace("public function value()", "public function value(): ?string")
+    ]) {
+      assert.throws(
+        () => parse({filename: "invalid.php", language: "php", source: invalid}),
+        (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_SYNTAX" &&
+          error.language == "php" && error.location?.filename == "invalid.php"
+      )
+    }
+  })
+
+  it("emits optional generic-record applications as exact recursively reparsable dynamic documentation", () => {
+    const module = parse({
+      filename: "program.ts",
+      language: "typescript",
+      source: `class Box<T> { constructor(readonly value: T) {} }
+function preserve<T>(value: Box<T> | null, values: ReadonlyArray<Box<T> | null>, by_name: ReadonlyMap<string, Box<T> | null>): Box<T> | null { return value }
+console.log("ok")
+`
+    })
+    const expected = semanticMeaning(module)
+
+    for (const language of ["javascript", "ruby", "php"]) {
+      const generated = generate({language, module})
+      const filename = language == "javascript" ? "program.js" : language == "ruby" ? "program.rb" : "program.php"
+
+      expect(semanticMeaning(parse({filename, language, source: generated}))).toEqual(expected)
+      if (language == "javascript") expect(generated).toContain("ReadonlyMap<string, Box<T>|null>")
+      if (language == "ruby") expect(generated).toContain("Hash[String,Box[T]?]")
+      if (language == "php") expect(generated).toContain("array<string,?Box<T>>")
+    }
+  })
 })
