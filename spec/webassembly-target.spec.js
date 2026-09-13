@@ -24,6 +24,7 @@ describe("browser-oriented WebAssembly target", () => {
       binaryBackend: true,
       frontend: false,
       interoperability: false,
+      provider: false,
       textBackend: false
     })
     expect(descriptor.artifactMultiplicity).toEqual("multiple")

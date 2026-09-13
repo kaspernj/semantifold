@@ -45,6 +45,7 @@ import {
   loadPrism
 } from "@ruby/prism"
 import {missingType, SemantifoldDiagnostic, unsupportedSyntax} from "../diagnostic.js"
+import {blockReferencesProtectedEntry} from "../semantic/effects.js"
 import {locationFromOffsets, moduleLocation, utf8ByteOffsetToUtf16Offset} from "../semantic/location.js"
 import {withAdaptedOperation} from "../semantic/operators.js"
 import {withParserRanges} from "../semantic/provenance.js"
@@ -1767,7 +1768,6 @@ export function parseRuby({capabilities = [], filename, source, program}) {
   const entryNodes = body.filter((node) => !(node instanceof DefNode) && !(node instanceof ClassNode))
   const location = moduleLocation(filename, source)
 
-  if (!program && functions.length == 0) return unsupportedSyntax("ruby", "module without a function", location)
   if (program && !program.isEntry && entryNodes.length > 0) {
     return unsupportedSyntax("ruby", "top-level side effect outside the selected entry module", nodeLocation(entryNodes[0], filename, source))
   }
@@ -1789,6 +1789,9 @@ export function parseRuby({capabilities = [], filename, source, program}) {
     statements: entryNodes.map((statement) => convertStatement(statement, result.comments, entryContext, filename, source))
   }
 
+  if (!program && functions.length == 0 && capabilities.length == 0 && !blockReferencesProtectedEntry(entryBlock)) {
+    return unsupportedSyntax("ruby", "module without a function", location)
+  }
   return {
     entryPoint: {
       body: entryBlock,

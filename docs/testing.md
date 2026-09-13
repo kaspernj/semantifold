@@ -155,6 +155,25 @@ npx velocious-test spec/language-registry.spec.js
 
 For the Task 034 local handoff, do not run `npm test`, a whole spec directory, or another aggregate. TensorBuzz owns clean aggregate discovery. Task 034 remains an unversioned single-module foundation with one fixed protected conformance binding; Task 035 owns canonical contract versions, facades, provider registries, negotiation, linking, and protected native provider artifacts.
 
+## Task 035 versioned standard-library contracts and provider linking
+
+Task 035 uses six dedicated focused specs plus the changed public API, language-registry, and registry toolchain contracts. They cover versioned canonical contract records, exact `X.Y.Z` versions with half-open reference ranges, unknown/malformed/incompatible contract failures, the target host provider registry and its derived protected native entries, transitive capability negotiation with stable order-independent selection, canonical call parsing under authority, protected-binding rejection, module path collisions, tree-shaken provider linking artifacts, byte-stable repeated generation, and real-toolchain execution of linked programs.
+
+Run every file individually and sequentially. The runtime spec discovers and invokes real `php`, `ruby`, `node`, local `tsc`, `javac`, and `java`; a missing tool fails. Its fixture executes the linked program artifact set through the provider boundary and proves identical deterministic probe output on every target, including effect order, typed failures, clean EOF presence, and every-path close.
+
+```sh
+npx velocious-test spec/stdlib-contract-registry.spec.js
+npx velocious-test spec/stdlib-capability-negotiation.spec.js
+npx velocious-test spec/stdlib-provider-registry.spec.js
+npx velocious-test spec/stdlib-canonical-calls.spec.js
+npx velocious-test spec/stdlib-linking-artifacts.spec.js
+LANG=C.UTF-8 LC_ALL=C.UTF-8 npx velocious-test spec/stdlib-provider-runtime-execution.spec.js
+npx velocious-test spec/public-api.spec.js
+npx velocious-test spec/language-registry.spec.js
+```
+
+Task 035 remains the provider foundation: compatibility facades and the concrete TCP slice belong to Tasks 036–037. Provider artifacts are compiler-owned synthetic provenance, and the protected native binding is invisible to source and ordinary portable module resolution.
+
 ## Task 025 core expanded-language acceptance
 
 Task 025 uses two data-driven focused specs instead of duplicating the eight owning language suites. `spec/core-language-baseline-acceptance.spec.js` normalizes all five Tasks 001–004 profiles for Python, C#, C, C++, Rust, Swift, Kotlin/JVM, and Go; generates, reparses, and really executes one operator round trip per language; runs the eleven-path spanning matrix documented in [language support](language-support.md#task-025-core-expanded-language-acceptance); checks deterministic artifact bytes/mappings/provenance; and asserts the public registry contract. Its ordered program checks eager left-before-right calls and both short-circuit sides. C and C++ run the exact ordered-region source at O0/O2 with and without sanitizers, Rust runs debug/release, and Swift runs debug/`-O`.

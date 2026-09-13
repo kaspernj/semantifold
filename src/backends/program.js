@@ -8,8 +8,13 @@ import {languageRegistry} from "../language-registry.js"
 import {finalizeMapping, toSourceMapV3} from "../mapping.js"
 import {createCoordinateIndex, indexedPointAt, moduleLocation} from "../semantic/location.js"
 import {semanticEntries} from "../semantic/provenance.js"
+import {listStdlibModules, parseStdlibVersionRange} from "../semantic/stdlib.js"
 import {moduleUncheckedErrorEffects} from "../semantic/validate.js"
+import {negotiateStdlibProviders} from "../stdlib-negotiation.js"
+import {stdlibProviderRegistry} from "../stdlib-providers.js"
+import {preflightEffectCapabilities} from "./effects.js"
 import {validateTargetBindingIdentifier, validateTargetIdentifier, validateTargetTypeIdentifier} from "./identifiers.js"
+import {generateStdlibProviderContent} from "./stdlib-support.js"
 import {validateBackendModule} from "./shared.js"
 import {programImportName, SourceWriter} from "./writer.js"
 
@@ -27,9 +32,10 @@ export function generateProgramArtifacts(input) {
   languageRegistry.record(input.language)
   if (!programTargets.has(input.language)) unsupportedRole(input.language, "multi-file text backend")
   const program = validateProgram(input.program, input.language)
-  const emissionModules = prepareEmissionModules(program, input.language)
+  const linking = planStdlibLinking(program, input.language)
+  const emissionModules = prepareEmissionModules(program, input.language, linking)
   validateProgramSourceOwnership(program, input.language)
-  const paths = planModulePaths(program, input.language)
+  const paths = planModulePaths(program, input.language, linking)
   const sources = program.sources.map((source) => {
     if (source.content === null) invalidProgramGeneration(`Program source '${source.filename}' has no retained content.`)
 
@@ -53,6 +59,23 @@ export function generateProgramArtifacts(input) {
     role: "manifest"
   }] : []
 
+  if (linking) {
+    artifacts.push({
+      content: generateStdlibProviderContent(/** @type {"php" | "ruby" | "javascript" | "typescript"} */ (input.language),
+        [.../** @type {string[]} */ (linking.negotiation.providers[0].operations)]),
+      contentKind: /** @type {const} */ ("text"),
+      mediaType: linking.record.artifact.mediaType,
+      ownership: /** @type {const} */ ("generated"),
+      path: linking.record.artifact.path,
+      provenance: {
+        kind: /** @type {const} */ ("synthetic"),
+        reason: `semantifold-stdlib-provider:${linking.record.identity}`,
+        relatedOrigins: []
+      },
+      role: /** @type {const} */ ("support")
+    })
+  }
+
   for (const emissionModule of emissionModules) {
     const moduleId = /** @type {string} */ (Reflect.get(emissionModule, "id"))
     const filename = /** @type {string} */ (paths.get(moduleId))
@@ -62,7 +85,16 @@ export function generateProgramArtifacts(input) {
       module: emissionModule,
       program,
       programPaths: paths,
-      sources
+      sources,
+      ...(linking && emissionModule.capabilities !== undefined ? {
+        stdlibProviderEntries: Object.fromEntries((linking.usedOperationsByModule.get(moduleId) ?? []).map((name) => [
+          name,
+          /** @type {string} */ (linking.record.nativeEntries[name])
+        ])),
+        stdlibProviderImports: input.language == "javascript" || input.language == "typescript" ?
+          linking.providerImportsByModule.get(moduleId) : undefined,
+        stdlibProviderPath: linking.record.artifact.path
+      } : {})
     })
 
     backend(emissionModule, writer)
@@ -84,7 +116,234 @@ export function generateProgramArtifacts(input) {
     })
   }
 
-  return createGeneratedArtifactSet({artifacts, target: input.language})
+  return createGeneratedArtifactSet({
+    artifacts,
+    ...(linking ? {metadata: stdlibLinkMetadata(linking)} : {}),
+    target: input.language
+  })
+}
+
+/**
+ * @typedef StdlibProgramLinking
+ * @property {import("../stdlib-negotiation.js").StdlibNegotiationResult} negotiation - Negotiated provider closure.
+ * @property {import("../stdlib-providers.js").StdlibProviderRecord} record - Single materialized provider record.
+ * @property {string[]} usedOperations - Program-wide used canonical operations in stable order.
+ * @property {Map<string, string[]>} usedOperationsByModule - Used canonical operations by module identity.
+ * @property {Map<string, string[]>} providerImportsByModule - Ordered provider import names by module identity.
+ */
+
+/**
+ * Plans the linked stdlib provider for one program, or reports that no operation is used.
+ * Java inlines its support per module file and never materializes a provider artifact.
+ * @param {import("../semantic/types.js").SemanticProgram} program - Validated semantic program.
+ * @param {import("../semantic/types.js").SemanticLanguage} language - Target language.
+ * @returns {StdlibProgramLinking | null} Linking plan, or null when nothing is used.
+ */
+function planStdlibLinking(program, language) {
+  if (language == "java") return null
+  const {programWide, usedOperationsByModule} = collectUsedEffectOperations(program)
+
+  if (programWide.length == 0) return null
+  const contract = /** @type {{identity: string, contractVersion?: string}} */ (program.stdlibContract)
+  const negotiation = negotiateStdlibProviders({
+    requirements: [{
+      module: contract.identity,
+      operations: [...programWide],
+      ...(contract.contractVersion !== undefined ? {range: contract.contractVersion} : {})
+    }],
+    target: language
+  })
+  const records = stdlibProviderRegistry.providersFor(language, contract.identity, negotiation.modules[0].version)
+
+  if (records.length != 1) {
+    throw new SemantifoldDiagnostic({
+      code: "STDLIB_LINK_FAILURE",
+      language,
+      message: `Expected exactly one registered stdlib provider for '${contract.identity}' on '${language}'.`
+    })
+  }
+
+  return {
+    negotiation,
+    providerImportsByModule: collectProviderImports(program, negotiation, usedOperationsByModule),
+    record: /** @type {import("../stdlib-providers.js").StdlibProviderRecord} */ (records[0]),
+    usedOperations: [...programWide],
+    usedOperationsByModule
+  }
+}
+
+/**
+ * Collects the canonical operations invoked by each program module in stable order.
+ * @param {import("../semantic/types.js").SemanticProgram} program - Validated semantic program.
+ * @returns {{programWide: string[], usedOperationsByModule: Map<string, string[]>}} Used operations.
+ */
+function collectUsedEffectOperations(program) {
+  /** @type {Map<string, string[]>} */
+  const usedOperationsByModule = new Map()
+  const programWide = new Set()
+
+  for (const module of program.modules) {
+    /** @type {Map<string, string>} */
+    const operationNames = new Map()
+
+    for (const capability of module.capabilities ?? []) {
+      for (const operation of capability.operations) operationNames.set(operation.id, operation.name)
+    }
+    const used = new Set()
+    const seen = new Set()
+
+    /**
+     * Visits one semantic value.
+     * @param {unknown} value - Candidate semantic subtree.
+     * @returns {void}
+     */
+    const visit = (value) => {
+      if (!value || typeof value != "object" || seen.has(value)) return
+      seen.add(value)
+
+      if (!Array.isArray(value)) {
+        if (Reflect.get(value, "kind") == "EffectCallExpression") {
+          const operation = Reflect.get(value, "operation")
+
+          if (typeof operation == "string") {
+            const name = operationNames.get(operation)
+
+            if (name !== undefined) used.add(name)
+          }
+        }
+        for (const [key, child] of Object.entries(value)) {
+          if (key == "capabilities" || key == "location" || key == "sourceProvenance") continue
+          visit(child)
+        }
+      } else for (const child of value) visit(child)
+    }
+
+    visit(module)
+    const operations = [...used].sort()
+
+    usedOperationsByModule.set(module.id, operations)
+    for (const name of used) programWide.add(name)
+  }
+  return {programWide: [...programWide].sort(), usedOperationsByModule}
+}
+
+/**
+ * Collects the ordered provider import names each module must pull from the linked provider.
+ * @param {import("../semantic/types.js").SemanticProgram} program - Validated semantic program.
+ * @param {import("../stdlib-negotiation.js").StdlibNegotiationResult} negotiation - Negotiated closure.
+ * @param {Map<string, string[]>} usedOperationsByModule - Used canonical operations by module identity.
+ * @returns {Map<string, string[]>} Ordered provider import names by module identity.
+ */
+function collectProviderImports(program, negotiation, usedOperationsByModule) {
+  const contractOperations = /** @type {string[]} */ (negotiation.providers[0].operations)
+  /** @type {Map<string, string[]>} */
+  const providerImportsByModule = new Map()
+
+  for (const module of program.modules) {
+    if (module.capabilities === undefined) continue
+    const used = new Set(usedOperationsByModule.get(module.id) ?? [])
+    /** @type {Set<string>} */
+    const surface = new Set()
+    /** @type {Map<string, string>} */
+    const resourceNameById = new Map()
+
+    /** @type {Map<string, string>} */
+    const declarationNames = new Map((module.records ?? []).map((declaration) => [/** @type {string} */ (declaration.id), declaration.name]))
+
+    for (const declaration of module.errors ?? []) {
+      declarationNames.set(/** @type {string} */ (declaration.id), declaration.name)
+    }
+
+    for (const capability of module.capabilities) {
+      for (const resource of capability.resources) {
+        surface.add(resource.name)
+        resourceNameById.set(resource.id, resource.name)
+      }
+      for (const failure of capability.failures) {
+        surface.add(failure.name)
+        declarationNames.set(failure.id, failure.name)
+      }
+    }
+    const referenced = new Set()
+    const seen = new Set()
+
+    /**
+     * Visits one semantic value.
+     * @param {unknown} value - Candidate semantic subtree.
+     * @returns {void}
+     */
+    const visit = (value) => {
+      if (!value || typeof value != "object" || seen.has(value)) return
+      seen.add(value)
+
+      if (!Array.isArray(value)) {
+        const kind = Reflect.get(value, "kind")
+
+        if (kind == "OwnedResourceType") {
+          const resourceId = Reflect.get(value, "resourceId")
+
+          if (typeof resourceId == "string") {
+            const name = resourceNameById.get(resourceId)
+
+            if (name !== undefined) referenced.add(name)
+          }
+        } else if (kind == "ReferenceType" || kind == "OwnedReferenceType" || kind == "ErrorType") {
+          const declarationId = Reflect.get(value, "declarationId")
+
+          if (typeof declarationId == "string") {
+            const name = declarationNames.get(declarationId)
+
+            if (name !== undefined && surface.has(name)) referenced.add(name)
+          }
+        }
+        for (const [key, child] of Object.entries(value)) {
+          if (key == "capabilities" || key == "location" || key == "sourceProvenance") continue
+          visit(child)
+        }
+      } else for (const child of value) visit(child)
+    }
+
+    visit(module)
+    const names = []
+
+    for (const capability of module.capabilities) {
+      for (const resource of capability.resources) if (referenced.has(resource.name)) names.push(resource.name)
+      for (const failure of capability.failures) if (referenced.has(failure.name)) names.push(failure.name)
+    }
+    for (const operation of contractOperations) if (used.has(operation)) names.push(/** @type {string} */ (negotiation.providers[0].nativeEntries[operation]))
+
+    providerImportsByModule.set(module.id, names)
+  }
+  return providerImportsByModule
+}
+
+/**
+ * Builds the truthful generated stdlib link metadata for one negotiated closure.
+ * @param {StdlibProgramLinking} linking - Linking plan.
+ * @returns {Record<string, unknown>} Plain JSON metadata.
+ */
+function stdlibLinkMetadata(linking) {
+  const {negotiation, record} = linking
+
+  return {
+    modules: negotiation.modules.map((item) => ({
+      identity: item.identity,
+      operations: [...item.operations],
+      version: item.version
+    })),
+    providers: negotiation.providers.map((item) => ({
+      artifact: {mediaType: record.artifact.mediaType, path: record.artifact.path},
+      dependencies: record.dependencies.map((dependency) => ({module: dependency.module, range: dependency.range})),
+      identity: item.identity,
+      module: item.module,
+      nativeEntries: {...item.nativeEntries},
+      operations: [...item.operations],
+      target: item.target,
+      version: item.version
+    })),
+    schema: "SemantifoldStdlibLink",
+    version: 1
+  }
 }
 
 /**
@@ -157,9 +416,10 @@ function samePoint(candidate, expected) {
  * Creates and validates every backend-shaped module before any writer is allocated.
  * @param {import("../semantic/types.js").SemanticProgram} program - Validated semantic program.
  * @param {import("../semantic/types.js").SemanticLanguage} language - Target language.
+ * @param {StdlibProgramLinking | null} [linking] - Planned stdlib provider link.
  * @returns {import("../semantic/types.js").SemanticModule[]} Emission views in dependency order.
  */
-function prepareEmissionModules(program, language) {
+function prepareEmissionModules(program, language, linking = null) {
   /** @type {Map<string, import("../semantic/types.js").FunctionDeclaration | import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ErrorDeclaration>} */
   const declarations = new Map()
 
@@ -201,6 +461,7 @@ function prepareEmissionModules(program, language) {
         visibleErrors.set(imported.declarationId, /** @type {import("../semantic/types.js").ErrorDeclaration} */ (declaration))
       }
     }
+    preflightEffectCapabilities(module, language, linking ? {usedOperations: linking.usedOperations} : {})
     validateBackendModule(module, language, {
       externalDeclarationIds,
       program: true,
@@ -234,6 +495,8 @@ function validateProgram(candidate, language) {
   const modules = new Map()
   /** @type {Map<string, {declaration: import("../semantic/types.js").FunctionDeclaration | import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ErrorDeclaration, module: import("../semantic/types.js").SemanticProgramModule}>} */
   const declarations = new Map()
+  /** @type {import("../semantic/types.js").SemanticProgramModule[]} */
+  const capabilityModules = []
   let entryCount = 0
   const sourceIds = new Set()
   const sourceFilenames = new Set()
@@ -261,7 +524,10 @@ function validateProgram(candidate, language) {
         Reflect.get(module, "classes")?.[0]?.location ?? module.location)
     }
     if (Reflect.get(module, "capabilities") !== undefined) {
-      unsupportedCapability(language, "Task 034 capabilities are not supported by semantic program generation", module.location)
+      if (!isDenseArray(module.capabilities) || module.capabilities.length == 0) {
+        unsupportedCapability(language, "malformed or empty Task 034 capability graph", module.location)
+      }
+      capabilityModules.push(module)
     }
     if (typeof module.sourceFilename != "string" || !sourceFilenames.has(module.sourceFilename)) {
       unsupportedCapability(language, "semantic program module source identity", module.location)
@@ -404,7 +670,70 @@ function validateProgram(candidate, language) {
     earlier.add(module.id)
   }
 
+  validateProgramStdlibContract(program, language, capabilityModules)
+
   return program
+}
+
+/**
+ * Validates the program stdlib link descriptor against its capability modules.
+ * @param {import("../semantic/types.js").SemanticProgram} program - Candidate program.
+ * @param {import("../semantic/types.js").SemanticLanguage} language - Target language.
+ * @param {import("../semantic/types.js").SemanticProgramModule[]} capabilityModules - Modules carrying capabilities.
+ * @returns {void}
+ */
+function validateProgramStdlibContract(program, language, capabilityModules) {
+  const contract = Reflect.get(program, "stdlibContract")
+
+  if (capabilityModules.length == 0) {
+    if (contract !== undefined) {
+      throw new SemantifoldDiagnostic({
+        code: "STDLIB_LINK_FAILURE",
+        language,
+        message: "A declared standard-library contract requires capability modules."
+      })
+    }
+    return
+  }
+  if (contract === undefined) {
+    unsupportedCapability(language, "program modules with capabilities require a declared standard-library contract",
+      capabilityModules[0].location)
+  }
+  if (!isPlainObject(contract) || Object.keys(contract).some((key) => key != "identity" && key != "contractVersion")) {
+    throw new SemantifoldDiagnostic({
+      code: "STDLIB_LINK_FAILURE",
+      language,
+      message: "The declared standard-library contract descriptor is malformed."
+    })
+  }
+  const identity = contract.identity
+
+  if (typeof identity != "string" || identity.length == 0 ||
+    !listStdlibModules().some(({identity: registered}) => registered == identity)) {
+    throw new SemantifoldDiagnostic({
+      code: "STDLIB_LINK_FAILURE",
+      language,
+      message: `Declared standard-library contract '${String(identity)}' is not a registered canonical module.`
+    })
+  }
+  if (contract.contractVersion !== undefined && parseStdlibVersionRange(contract.contractVersion) === null) {
+    throw new SemantifoldDiagnostic({
+      code: "STDLIB_LINK_FAILURE",
+      language,
+      message: `Declared standard-library contract version '${String(contract.contractVersion)}' is not canonical.`
+    })
+  }
+  for (const module of capabilityModules) {
+    for (const capability of module.capabilities ?? []) {
+      if (!isPlainObject(capability) || typeof capability.authorityId != "string" || capability.authorityId != identity) {
+        throw new SemantifoldDiagnostic({
+          code: "STDLIB_LINK_FAILURE",
+          language,
+          message: `Capability authority '${String(Reflect.get(capability, "authorityId"))}' does not match the declared standard-library contract '${identity}'.`
+        })
+      }
+    }
+  }
 }
 
 /**
@@ -447,17 +776,27 @@ function findTypeOnlyValueConstruction(module, typeOnlyDeclarationIds) {
  * Plans all paths before emission and rejects exact/case/file-directory collisions.
  * @param {import("../semantic/types.js").SemanticProgram} program - Validated program.
  * @param {import("../semantic/types.js").SemanticLanguage} language - Target language.
+ * @param {StdlibProgramLinking | null} [linking] - Planned stdlib provider link.
  * @returns {Map<string, string>} Path by module identity.
  */
-function planModulePaths(program, language) {
+function planModulePaths(program, language, linking = null) {
   const extension = language == "javascript" ? ".js" : language == "typescript" ? ".ts" : language == "ruby" ? ".rb" :
     language == "php" ? ".php" : ".java"
   const paths = new Map()
   const folded = new Set()
   const targetModuleNames = new Set()
+  const providerPath = linking ? linking.record.artifact.path : undefined
+  const foldedProvider = providerPath ? providerPath.toLocaleLowerCase("en-US").replaceAll(".", "/") : undefined
 
   for (const module of program.modules) {
     let path = `${module.id.replaceAll(".", "/")}${extension}`
+    if (foldedProvider !== undefined && path.toLocaleLowerCase("en-US").replaceAll(".", "/") == foldedProvider) {
+      throw new SemantifoldDiagnostic({
+        code: "STDLIB_NAME_COLLISION",
+        language,
+        message: `Module path '${path}' collides with the stdlib provider artifact '${providerPath}'.`
+      })
+    }
     const targetModuleName = moduleClassName(module.id)
 
     if (language == "php" || language == "ruby") {

@@ -16,6 +16,9 @@ export {SemantifoldDiagnostic}
 export {createCapabilityAuthority} from "./src/semantic/capabilities.js"
 export {languageCapabilities, supportedLanguages} from "./src/language-registry.js"
 export {createGeneratedArtifactSet} from "./src/artifacts.js"
+export {createStdlibContractRegistry, listStdlibModules, resolveStdlibModule} from "./src/semantic/stdlib.js"
+export {createStdlibProviderRegistry, listStdlibProviders} from "./src/stdlib-providers.js"
+export {negotiateStdlibProviders} from "./src/stdlib-negotiation.js"
 export {createByteMapping, parseByteMapping, stringifyByteMapping} from "./src/binary-mapping.js"
 export {canonicalToolchains, discoverCanonicalToolchain, discoverToolchain} from "./src/toolchains.js"
 export {runAcceptanceStages} from "./src/acceptance.js"
@@ -54,6 +57,7 @@ export function parse(input) {
  * @param {object} input - Program parse request.
  * @param {string} input.entryModule - Stable identity of the sole entry module.
  * @param {{filename: string, id: string, language: import("./src/semantic/types.js").SemanticLanguage, source: string}[]} input.sources - Complete caller-supplied source set.
+ * @param {Readonly<import("./src/semantic/types.js").CapabilityAuthority> | import("./src/semantic/types.js").CapabilityAuthorityInput} [input.capabilityAuthority] - Explicit compiler authority shared by every program module.
  * @returns {import("./src/semantic/types.js").SemanticProgram} Semantic program.
  */
 export function parseProgram(input) {

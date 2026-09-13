@@ -16,9 +16,12 @@ const protectedSupportNames = new Set([
  * Validates Task 034 target support before a SourceWriter is allocated.
  * @param {import("../semantic/types.js").SemanticModule} module - Candidate module.
  * @param {import("../semantic/types.js").BackendLanguage} language - Requested target.
+ * @param {{usedOperations?: readonly string[]}} [options] - Program-wide used canonical
+ *   operations for a linked stdlib provider; restricts the reserved support surface to the
+ *   operations actually materialized in the provider artifact.
  * @returns {void}
  */
-export function preflightEffectCapabilities(module, language) {
+export function preflightEffectCapabilities(module, language, options = {}) {
   const capabilities = module?.capabilities
 
   if (capabilities === undefined) {
@@ -44,7 +47,7 @@ export function preflightEffectCapabilities(module, language) {
     [module.records, module.classes, module.errors].some((declarations) => declarations !== undefined && !Array.isArray(declarations))) {
     unsupportedCapability(language, "malformed Task 034 semantic module", module.location)
   }
-  const collision = moduleNeedsEffectSupport(module) ? findSupportCollision(module, language) : undefined
+  const collision = moduleNeedsEffectSupport(module) ? findSupportCollision(module, language, options.usedOperations) : undefined
 
   if (collision) unsupportedCapability(language, `protected Task 034 support name '${collision.name}'`, collision.location)
   const excluded = findExcludedEffectContext(module)
@@ -75,17 +78,40 @@ function findTask034Node(value, seen = new Set()) {
 }
 
 /**
- * Finds one user declaration that would collide with fixed protected support.
+ * Finds one user declaration that would collide with the protected support surface.
  * @param {import("../semantic/types.js").SemanticModule} module - Validated semantic graph.
  * @param {import("../semantic/types.js").BackendLanguage} language - Target language.
+ * @param {readonly string[]} [usedOperations] - Linked provider operations; omitted for the full inlined surface.
  * @returns {{name: string, location: import("../semantic/types.js").SourceLocation} | undefined} First collision.
  */
-function findSupportCollision(module, language) {
-  const reserved = new Set([...protectedSupportNames].map((name) => supportNameKey(name, language)))
-  if (language == "javascript" || language == "typescript") {
-    reserved.add("__semantifoldTask034Fs")
-    reserved.add("__semantifoldTask034Trace")
-  } else if (language == "php") reserved.add("__semantifold_task034_trace")
+function findSupportCollision(module, language, usedOperations) {
+  const reserved = new Set()
+
+  if (usedOperations === undefined) {
+    for (const name of protectedSupportNames) reserved.add(supportNameKey(name, language))
+    if (language == "javascript" || language == "typescript") {
+      reserved.add("__semantifoldTask034Fs")
+      reserved.add("__semantifoldTask034Trace")
+    } else if (language == "php") reserved.add("__semantifold_task034_trace")
+  } else {
+    const used = new Set(usedOperations)
+
+    for (const name of used) reserved.add(supportNameKey(name, language))
+    if (used.has("probeEffect")) reserved.add(supportNameKey("ProbeOperationFailure", language))
+    if (used.has("probeAcquire")) reserved.add(supportNameKey("ProbeAcquireFailure", language))
+    if (used.has("probeRead")) reserved.add(supportNameKey("ProbeReadFailure", language))
+    if (used.has("probeClose")) reserved.add(supportNameKey("ProbeCloseFailure", language))
+    if (used.has("probeRead") || used.has("probeClose")) reserved.add(supportNameKey("ProbeResourceClosed", language))
+    if (used.has("probeAcquire") || used.has("probeRead") || used.has("probeClose")) {
+      reserved.add(supportNameKey("ProbeResource", language))
+    }
+    if (used.size > 0) {
+      if (language == "javascript" || language == "typescript") {
+        reserved.add("__semantifoldTask034Trace")
+        if (used.has("probeAcquire")) reserved.add("__semantifoldTask034Fs")
+      } else if (language == "php") reserved.add("__semantifold_task034_trace")
+    }
+  }
   const declarations = [...module.records ?? [], ...module.classes ?? [], ...module.errors ?? [], ...module.functions]
 
   for (const declaration of declarations) {
@@ -122,6 +148,7 @@ function supportNameKey(name, language) {
  * @returns {void}
  */
 export function emitEffectSupport(writer, module, language, placement = "top") {
+  if (writer.stdlibProviderEntries) return
   if (!module.capabilities || !moduleNeedsEffectSupport(module)) return
   const content = language == "php" ? phpSupport : language == "ruby" ? rubySupport : language == "javascript" ? javascriptSupport :
     language == "typescript" ? typescriptSupport : placement == "top" ? javaTopSupport : javaMemberSupport

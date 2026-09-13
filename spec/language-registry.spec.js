@@ -46,6 +46,7 @@ describe("language role registry", () => {
           binaryBackend: true,
           frontend: false,
           interoperability: false,
+          provider: false,
           textBackend: false
         })
         expect(descriptor.artifactMultiplicity).toEqual("multiple")
@@ -58,6 +59,7 @@ describe("language role registry", () => {
         binaryBackend: false,
         frontend: true,
         interoperability: false,
+        provider: originalFive.includes(descriptor.id),
         textBackend: true
       })
       expect(descriptor.features).toEqual({

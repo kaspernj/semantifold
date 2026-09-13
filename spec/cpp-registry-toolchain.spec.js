@@ -10,7 +10,7 @@ describe("C++ registration and Clang toolchain", () => {
     expect(languageCapabilities.find(({id}) => id == "cpp")).toMatchObject({
       id: "cpp", artifactMultiplicity: "single", roundTrip: true,
       acceptance: {stages: ["parse", "generate", "compile", "link", "execute"], toolchains: ["clangpp"]},
-      roles: {frontend: true, textBackend: true, binaryBackend: false, applicationBackend: false, interoperability: false},
+      roles: {frontend: true, textBackend: true, binaryBackend: false, applicationBackend: false, interoperability: false, provider: false},
       mapping: {richText: true, sourceMapV3: true, binaryRanges: false}
     })
     expect(canonicalToolchains.clangpp).toMatchObject({canonicalCommand: "clang++", overrideEnvironmentVariable: "SEMANTIFOLD_CLANGPP"})

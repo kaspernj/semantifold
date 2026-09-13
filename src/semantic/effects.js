@@ -1,6 +1,7 @@
 // @ts-check
 
 import {authorizedOperation, isTask034OperationName} from "./capabilities.js"
+import {parseProtectedEntryName} from "./stdlib.js"
 
 /** @typedef {{failureIds: Set<string>, host: boolean}} EffectSummary */
 /** @typedef {(expression: import("./types.js").Expression) => void} ExpressionVisitor */
@@ -9,12 +10,13 @@ import {authorizedOperation, isTask034OperationName} from "./capabilities.js"
  * Resolves compiler-authorized calls before ordinary semantic type validation.
  * Source functions always win; authority is never inferred from spelling alone.
  * @param {import("./types.js").SemanticModule} module - Parser-authored module.
+ * @param {string} language - Source language identity for protected entry targets.
  * @param {Map<string, import("./types.js").FunctionDeclaration>} functions - Visible ordinary functions.
  * @param {(code: string, detail: string, location: import("./types.js").SourceLocation) => never} fail - Located failure.
  * @param {boolean} normalize - Whether parser-authored operation intent may be normalized.
  * @returns {void}
  */
-export function validateEffectGraph(module, functions, fail, normalize) {
+export function validateEffectGraph(module, language, functions, fail, normalize) {
   const capabilities = module.capabilities ?? []
   const operationIds = new Set()
   const resourceIds = new Set()
@@ -50,6 +52,18 @@ export function validateEffectGraph(module, functions, fail, normalize) {
     }
   }
 
+  for (const declaration of [
+    ...module.functions,
+    ...(module.records ?? []),
+    ...(module.classes ?? []),
+    ...(module.errors ?? [])
+  ]) {
+    if (parseProtectedEntryName(declaration.name) !== null) {
+      fail("STDLIB_PROTECTED_BINDING_ACCESS",
+        `Source declaration '${declaration.name}' captures a reserved protected provider binding.`, declaration.location)
+    }
+  }
+
   forEachExpression(module, (expression) => {
     if (expression.kind == "EffectCallExpression") {
       const capability = capabilities.find(({id}) => id == expression.resolution?.capabilityId)
@@ -67,13 +81,37 @@ export function validateEffectGraph(module, functions, fail, normalize) {
       }
       return
     }
+    if (expression.kind == "IdentifierExpression" && parseProtectedEntryName(expression.name) !== null) {
+      fail("STDLIB_PROTECTED_BINDING_ACCESS",
+        `Reference to protected provider entry '${expression.name}' is not portable code.`, expression.location)
+    }
     if (expression.kind != "CallExpression") return
     if (functions.has(expression.callee)) return
-    const match = authorizedOperation(capabilities, expression.callee)
+    let operationName = expression.callee
+    const protectedEntry = parseProtectedEntryName(expression.callee)
+
+    if (protectedEntry !== null) {
+      if (capabilities.length == 0) {
+        fail("STDLIB_PROTECTED_BINDING_ACCESS",
+          `Protected provider entry '${expression.callee}' requires an explicit capability authority.`, expression.location)
+      }
+      if (protectedEntry.target != language) {
+        fail("STDLIB_PROTECTED_BINDING_ACCESS",
+          `Protected provider entry target '${protectedEntry.target}' does not match source language '${language}'.`,
+          expression.location)
+      }
+      operationName = protectedEntry.operation
+    }
+    const match = authorizedOperation(capabilities, operationName)
 
     if (!match) {
-      if (isTask034OperationName(expression.callee)) {
-        fail("MISSING_CAPABILITY_AUTHORITY", `Operation '${expression.callee}' requires explicit compiler authority.`, expression.location)
+      if (protectedEntry !== null) {
+        fail("STDLIB_PROTECTED_BINDING_ACCESS",
+          `Protected provider entry for undeclared operation '${operationName}' has no authorized capability operation.`,
+          expression.location)
+      }
+      if (isTask034OperationName(operationName)) {
+        fail("MISSING_CAPABILITY_AUTHORITY", `Operation '${operationName}' requires explicit compiler authority.`, expression.location)
       }
       return
     }
@@ -510,6 +548,62 @@ function forEachBlockExpression(block, visitor, postorder) {
     for (const child of expressionChildren(expression)) visit(child)
     if (postorder) visitor(expression)
   }
+}
+
+/**
+ * Reports whether one semantic block references a reserved protected provider entry.
+ * @param {import("./types.js").Block} block - Semantic block.
+ * @returns {boolean} Whether a protected entry name is referenced.
+ */
+export function blockReferencesProtectedEntry(block) {
+  return block.statements.some(statementReferencesProtectedEntry)
+}
+
+/**
+ * Reports whether one semantic statement references a reserved protected provider entry.
+ * @param {import("./types.js").Statement} statement - Semantic statement.
+ * @returns {boolean} Whether a protected entry name is referenced.
+ */
+function statementReferencesProtectedEntry(statement) {
+  switch (statement.kind) {
+    case "LocalDeclaration":
+      return expressionReferencesProtectedEntry(statement.initializer)
+    case "AssignmentStatement":
+    case "PrivateFieldWriteStatement":
+      return expressionReferencesProtectedEntry(statement.expression)
+    case "ReturnStatement":
+      return statement.expression ? expressionReferencesProtectedEntry(statement.expression) : false
+    case "ExpressionStatement":
+    case "PrintStatement":
+      return expressionReferencesProtectedEntry(statement.expression)
+    case "IfStatement":
+      return expressionReferencesProtectedEntry(statement.condition) ||
+        blockReferencesProtectedEntry(statement.consequent) ||
+        (statement.alternate ? blockReferencesProtectedEntry(statement.alternate) : false)
+    case "ForEachStatement":
+      return expressionReferencesProtectedEntry(statement.list) || blockReferencesProtectedEntry(statement.body)
+    case "ForEachMapStatement":
+      return expressionReferencesProtectedEntry(statement.map) || blockReferencesProtectedEntry(statement.body)
+    case "WhileStatement":
+      return expressionReferencesProtectedEntry(statement.condition) || blockReferencesProtectedEntry(statement.body)
+    case "RaiseStatement":
+      return expressionReferencesProtectedEntry(statement.error.message)
+    case "TryStatement":
+      return blockReferencesProtectedEntry(statement.body) || blockReferencesProtectedEntry(statement.catchBody)
+    default:
+      return false
+  }
+}
+
+/**
+ * Reports whether one semantic expression references a reserved protected provider entry.
+ * @param {import("./types.js").Expression} expression - Semantic expression.
+ * @returns {boolean} Whether a protected entry name is referenced.
+ */
+function expressionReferencesProtectedEntry(expression) {
+  if (expression.kind == "IdentifierExpression" && parseProtectedEntryName(expression.name) !== null) return true
+  if (expression.kind == "CallExpression" && parseProtectedEntryName(expression.callee) !== null) return true
+  return expressionChildren(expression).some(expressionReferencesProtectedEntry)
 }
 
 /**

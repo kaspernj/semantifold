@@ -28,6 +28,14 @@ export function generateRuby(module, writer) {
       writer.synthetic("\n", "Ruby require-relative terminator", [imported], [importPath])
     }
     if (programModule.imports.length > 0) writer.synthetic("\n", "Ruby require/module separator", [module])
+    if (writer.stdlibProviderEntries) {
+      const relative = writer.stdlibProviderSpecifier().replace(/\.rb$/u, "").replace(/^\.\//u, "")
+
+      writer.synthetic("require_relative ", "Ruby stdlib provider require-relative edge", [module])
+      writer.synthetic(JSON.stringify(relative), "Ruby stdlib provider require-relative path", [module])
+      writer.synthetic("\n", "Ruby stdlib provider require-relative terminator", [module])
+      writer.synthetic("\n", "Ruby stdlib provider require separator", [module])
+    }
     writer.synthetic(`module ${writer.programModuleName(programModule.id)}\n`, "Ruby semantic module wrapper", [module])
     if (module.functions.length > 0) writer.synthetic("module_function\n\n", "Ruby module-function profile", [module])
   }

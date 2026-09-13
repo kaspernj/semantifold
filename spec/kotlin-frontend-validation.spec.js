@@ -34,7 +34,7 @@ describe("Kotlin strict source profile", () => {
       acceptance: {stages: ["parse", "generate", "compile", "execute"], toolchains: ["kotlinc", "java25"]},
       artifactMultiplicity: "single",
       mapping: {binaryRanges: false, richText: true, sourceMapV3: true},
-      roles: {applicationBackend: false, binaryBackend: false, frontend: true, interoperability: false, textBackend: true},
+      roles: {applicationBackend: false, binaryBackend: false, frontend: true, interoperability: false, provider: false, textBackend: true},
       roundTrip: true
     })
     expect(typeof generate({language: "kotlin", module})).toEqual("string")

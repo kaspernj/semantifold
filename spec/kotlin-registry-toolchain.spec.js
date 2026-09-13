@@ -13,7 +13,7 @@ describe("Kotlin registration and exact compiler identity", () => {
     expect(languageCapabilities.find(({id}) => id == "kotlin")).toMatchObject({
       id: "kotlin", artifactMultiplicity: "single", roundTrip: true,
       acceptance: {stages: ["parse", "generate", "compile", "execute"], toolchains: ["kotlinc", "java25"]},
-      roles: {frontend: true, textBackend: true, binaryBackend: false, applicationBackend: false, interoperability: false},
+      roles: {frontend: true, textBackend: true, binaryBackend: false, applicationBackend: false, interoperability: false, provider: false},
       mapping: {richText: true, sourceMapV3: true, binaryRanges: false}
     })
     expect(canonicalToolchains.kotlinc).toMatchObject({canonicalCommand: "kotlinc", overrideEnvironmentVariable: "SEMANTIFOLD_KOTLINC",

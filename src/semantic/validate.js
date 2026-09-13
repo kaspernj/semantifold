@@ -64,7 +64,7 @@ export function validateParsedModule(module, language, visible = {}) {
    */
   const fail = (code, detail, location) => semanticFailure(language, code, detail, location)
 
-  validateModuleTypes(module, fail, true, visible)
+  validateModuleTypes(module, language, fail, true, visible)
   validateResourceLifetimes(module, inferEscapingErrorEffects(module, visible.callEffects), fail)
 
   return module
@@ -118,7 +118,7 @@ export function validateBackendTypes(module, language, visible = {}) {
    */
   const fail = (_code, detail, location) => unsupportedCapability(language, detail, location)
 
-  validateModuleTypes(module, fail, false, visible)
+  validateModuleTypes(module, language, fail, false, visible)
   validateResourceLifetimes(module, inferEscapingErrorEffects(module, visible.callEffects), fail)
 }
 
@@ -178,12 +178,13 @@ function validateBlockShape(block, detail, fail) {
 /**
  * Validates declarations and expression types within lexical scopes.
  * @param {import("./types.js").SemanticModule} module - Semantic module.
+ * @param {string} language - Source or backend language identity.
  * @param {SemanticFail} fail - Diagnostic callback.
  * @param {boolean} normalizeOperations - Whether to replace transient frontend operation intent.
  * @param {{functions?: Map<string, import("./types.js").FunctionDeclaration>, records?: Map<string, import("./types.js").RecordDeclaration>, errors?: Map<string, import("./types.js").ErrorDeclaration>, callEffects?: Map<string, Set<string>>}} [visible] - Program imports visible during validation.
  * @returns {void}
  */
-function validateModuleTypes(module, fail, normalizeOperations, visible = {}) {
+function validateModuleTypes(module, language, fail, normalizeOperations, visible = {}) {
   const classes = registerClassDeclarations(module.classes ?? [], fail, normalizeOperations)
   const records = validateRecordDeclarations(module.records ?? [], fail, normalizeOperations, visible.records, classes)
   const errors = validateErrorDeclarations(module.errors ?? [], fail, normalizeOperations, visible.errors)
@@ -205,7 +206,7 @@ function validateModuleTypes(module, fail, normalizeOperations, visible = {}) {
     functions.set(functionDeclaration.name, functionDeclaration)
   }
 
-  validateEffectGraph(module, functions, fail, normalizeOperations)
+  validateEffectGraph(module, language, functions, fail, normalizeOperations)
   const capabilityResources = (module.capabilities ?? []).flatMap(({resources}) => resources)
   const capabilityFailures = (module.capabilities ?? []).flatMap(({failures}) => failures)
 
@@ -259,7 +260,7 @@ function validateModuleTypes(module, fail, normalizeOperations, visible = {}) {
 
   validateBlock(module.entryPoint.body, entryScope, undefined, functions, records, errors, callEffects, fail,
     normalizeOperations, {owner: module.entryPoint, owners: loopOwners})
-  if (normalizeOperations) validateEffectGraph(module, functions, fail, true)
+  if (normalizeOperations) validateEffectGraph(module, language, functions, fail, true)
 }
 
 /**
