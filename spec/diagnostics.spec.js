@@ -8,10 +8,24 @@ import {generate, parse, SemantifoldDiagnostic} from "../index.js"
 describe("semantic diagnostics", () => {
   it("reports unsupported frontend syntax with a stable code and source location", () => {
     assert.throws(
-      () => parse({filename: "unsupported.js", language: "javascript", source: "const value = () => 1\nconsole.log(value())\n"}),
+      () => parse({filename: "unsupported.js", language: "javascript", source: "/** @type {number} */\nconst value = 1\n"}),
       (error) => {
         assert.ok(error instanceof SemantifoldDiagnostic)
         assert.equal(error.code, "UNSUPPORTED_SYNTAX")
+        assert.equal(error.location?.filename, "unsupported.js")
+        assert.equal(error.location?.start.line, 1)
+
+        return true
+      }
+    )
+  })
+
+  it("surfaces the first statement defect before module-structure rejection in function-less modules", () => {
+    assert.throws(
+      () => parse({filename: "unsupported.js", language: "javascript", source: "const value = () => 1\nconsole.log(value())\n"}),
+      (error) => {
+        assert.ok(error instanceof SemantifoldDiagnostic)
+        assert.equal(error.code, "MISSING_TYPE")
         assert.equal(error.location?.filename, "unsupported.js")
         assert.equal(error.location?.start.line, 1)
 
