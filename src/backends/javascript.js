@@ -269,6 +269,28 @@ function emitProgramImports(module, writer) {
     writer.synthetic("\n", "ESM import terminator", selected)
   }
   if (moduleIds.length > 0) writer.synthetic("\n", "ESM import separator", [module])
+  emitStdlibProviderImports(module, writer)
+}
+
+/**
+ * Emits the grouped named ESM import for one linked stdlib provider.
+ * @param {import("../semantic/types.js").SemanticModule} module - Current module.
+ * @param {import("./writer.js").SourceWriter} writer - Source-aware writer.
+ */
+export function emitStdlibProviderImports(module, writer) {
+  const names = writer.stdlibProviderImports
+
+  if (!writer.program || !names || names.length == 0) return
+
+  writer.synthetic("import {", "ESM stdlib provider import declaration", [module])
+  names.forEach((name, index) => {
+    if (index) writer.synthetic(", ", "ESM stdlib provider import separator", [module])
+    writer.synthetic(name, "ESM stdlib provider import name", [module])
+  })
+  writer.synthetic("} from ", "ESM stdlib provider import source", [module])
+  writer.synthetic(JSON.stringify(writer.stdlibProviderSpecifier(".js")), "ESM stdlib provider import path", [module])
+  writer.synthetic("\n", "ESM stdlib provider import terminator", [module])
+  writer.synthetic("\n", "ESM stdlib provider import separator", [module])
 }
 
 /**

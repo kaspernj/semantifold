@@ -3,6 +3,7 @@
 import PhpParser from "php-parser"
 import {parse as parseComment} from "comment-parser"
 import {missingType, parseFailure, unsupportedSyntax} from "../diagnostic.js"
+import {blockReferencesProtectedEntry} from "../semantic/effects.js"
 import {locationFromOffsets, moduleLocation} from "../semantic/location.js"
 import {withAdaptedOperation} from "../semantic/operators.js"
 import {withParserRanges} from "../semantic/provenance.js"
@@ -813,7 +814,8 @@ function convertLocalStatement(node, filename, source, context) {
 
   const inferredType = knownExpressionType(assignment.right, context)
 
-  if (inferredType?.kind == "RecordType" || inferredType?.kind == "ReferenceType") {
+  if (inferredType?.kind == "RecordType" || inferredType?.kind == "ReferenceType" ||
+    inferredType?.kind == "OwnedResourceType") {
     const initializer = convertExpression(assignment.right, filename, source, context, inferredType)
 
     context.bindings.set(variable.name, inferredType)
@@ -1974,7 +1976,6 @@ export function parsePhp({capabilities = [], filename, source, program: programC
   const executableNodes = body.filter((node) => !["class", "function", "declare", "noop"].includes(node.kind))
   const location = moduleLocation(filename, source)
 
-  if (!programContext && functions.length == 0) return unsupportedSyntax("php", "module without a function", location)
   if (programContext && !programContext.isEntry && executableNodes.length > 0) {
     return unsupportedSyntax("php", "top-level side effect outside the selected entry module", nodeLocation(executableNodes[0], filename, source))
   }
@@ -2000,6 +2001,9 @@ export function parsePhp({capabilities = [], filename, source, program: programC
     statements: executableNodes.map((node) => convertStatement(node, filename, source, entryContext))
   }
 
+  if (!programContext && functions.length == 0 && capabilities.length == 0 && !blockReferencesProtectedEntry(entryBlock)) {
+    return unsupportedSyntax("php", "module without a function", location)
+  }
   return {
     entryPoint: {
       body: entryBlock,

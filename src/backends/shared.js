@@ -2022,7 +2022,7 @@ export function emitType(writer, type, path, language, javaBoxed = false) {
   }
   if (type.kind == "OwnedResourceType") {
     const resource = writer.resourceForId(type.resourceId)
-    writer.mapped(resource.name, {mappingKind: "exact", name: resource.name, node: type, path, role: "type"})
+    writer.mapped(writer.capabilityNominalName(resource.name), {mappingKind: "exact", name: resource.name, node: type, path, role: "type"})
     return
   }
   if (type.kind == "OwnedReferenceType") {
@@ -2241,7 +2241,9 @@ export function emitExpression(writer, expression, path, language, emitIdentifie
     if (language == "java" && writer.referenceClassEmissionDepth > 0) {
       writer.synthetic("Main.", "protected Task 034 host support owner", [expression], [path])
     }
-    writer.mapped(operation.name, {mappingKind: "exact", name: operation.name, node: expression, path, role: "callee"})
+    writer.mapped(writer.stdlibProviderEntryFor(operation.name) ?? operation.name, {
+      mappingKind: "exact", name: operation.name, node: expression, path, role: "callee"
+    })
     writer.mapped("(", {mappingKind: "anchor", node: expression, path})
     expression.arguments.forEach((argument, index) => {
       if (index > 0) writer.synthetic(", ", "effect argument separator", [expression], [path])

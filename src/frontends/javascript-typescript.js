@@ -3,6 +3,7 @@
 import {parse as parseBabel} from "@babel/parser"
 import {parse as parseComment} from "comment-parser"
 import {missingType, parseFailure, unsupportedSyntax} from "../diagnostic.js"
+import {blockReferencesProtectedEntry} from "../semantic/effects.js"
 import {locationFromOffsets, moduleLocation} from "../semantic/location.js"
 import {withAdaptedOperation} from "../semantic/operators.js"
 import {withParserRanges} from "../semantic/provenance.js"
@@ -2275,7 +2276,6 @@ export function parseJavaScriptTypeScript({capabilities = [], filename, language
   const entryNodes = semanticNodes.filter((node) => node.type != "FunctionDeclaration" && node.type != "ClassDeclaration")
   const location = moduleLocation(filename, source)
 
-  if (!program && functions.length == 0) return unsupportedSyntax(language, "module without a function", location)
   if (program && !program.isEntry && entryNodes.length > 0) {
     return unsupportedSyntax(language, "top-level side effect outside the selected entry module", nodeLocation(entryNodes[0], filename, source))
   }
@@ -2296,6 +2296,9 @@ export function parseJavaScriptTypeScript({capabilities = [], filename, language
     entryLocation
   )
 
+  if (!program && functions.length == 0 && capabilities.length == 0 && !blockReferencesProtectedEntry(entryBlock)) {
+    return unsupportedSyntax(language, "module without a function", location)
+  }
   return {
     entryPoint: {
       body: entryBlock,

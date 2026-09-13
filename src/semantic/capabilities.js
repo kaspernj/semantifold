@@ -1,6 +1,7 @@
 // @ts-check
 
 import {SemantifoldDiagnostic} from "../diagnostic.js"
+import {parseStdlibVersionRange} from "./stdlib.js"
 
 const authoritySchema = "SemantifoldCapabilityAuthority"
 const authorityIdPattern = /^[a-z][a-z0-9.-]*$/u
@@ -34,8 +35,18 @@ export function createCapabilityAuthority(input) {
     if (createdAuthorities.has(/** @type {object} */ (input))) return /** @type {Readonly<import("./types.js").CapabilityAuthority>} */ (input)
     requirePlain(input, "authority")
     const authorityInput = /** @type {import("./types.js").CapabilityAuthorityInput} */ (input)
+    const hasContractVersion = Object.hasOwn(authorityInput, "contractVersion")
 
-    requireKeys(authorityInput, ["capabilities", "id", "schema", "schemaVersion"], "authority")
+    requireKeys(authorityInput, hasContractVersion
+      ? ["capabilities", "contractVersion", "id", "schema", "schemaVersion"]
+      : ["capabilities", "id", "schema", "schemaVersion"], "authority")
+    if (hasContractVersion && parseStdlibVersionRange(authorityInput.contractVersion) === null) {
+      throw new SemantifoldDiagnostic({
+        code: "STDLIB_VERSION_MALFORMED",
+        language: "capability",
+        message: "Capability authority contractVersion is not a canonical stdlib version range."
+      })
+    }
     if (authorityInput.schema != authoritySchema || authorityInput.schemaVersion != 1 || typeof authorityInput.id != "string" ||
       !authorityIdPattern.test(authorityInput.id) || !dense(authorityInput.capabilities)) invalid("Authority schema, version, identity, or capability list is invalid.")
 
@@ -119,7 +130,8 @@ export function createCapabilityAuthority(input) {
       capabilities,
       id: authorityInput.id,
       schema: authoritySchema,
-      schemaVersion: 1
+      schemaVersion: 1,
+      ...(hasContractVersion ? {contractVersion: /** @type {string} */ (authorityInput.contractVersion)} : {})
     })
 
     deepFreeze(result)

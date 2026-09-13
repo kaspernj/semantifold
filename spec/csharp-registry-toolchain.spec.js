@@ -20,7 +20,7 @@ describe("C# registry and toolchain", () => {
       features: {closedRecords: false, conditionControlledLoops: false, effectfulCapabilitiesAndResources: false, generalFunctionsAndCalls: false, immutableCollections: false, optionalValues: false, orderedListIteration: false, orderedMapIteration: false, referenceClasses: false, typeParametersAndGenerics: false, typedErrors: false},
       id: "csharp",
       mapping: {binaryRanges: false, richText: true, sourceMapV3: true},
-      roles: {applicationBackend: false, binaryBackend: false, frontend: true, interoperability: false, textBackend: true},
+      roles: {applicationBackend: false, binaryBackend: false, frontend: true, interoperability: false, provider: false, textBackend: true},
       roundTrip: true
     })
   })

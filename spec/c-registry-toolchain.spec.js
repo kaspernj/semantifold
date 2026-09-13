@@ -10,7 +10,7 @@ describe("C registry and canonical Clang toolchain", () => {
     expect(languageCapabilities.find(({id}) => id == "c")).toMatchObject({
       acceptance: {stages: ["parse", "generate", "compile", "link", "execute"], toolchains: ["clang"]},
       artifactMultiplicity: "multiple", id: "c", mapping: {binaryRanges: false, richText: true, sourceMapV3: true},
-      roles: {applicationBackend: false, binaryBackend: false, frontend: true, interoperability: false, textBackend: true}, roundTrip: true
+      roles: {applicationBackend: false, binaryBackend: false, frontend: true, interoperability: false, provider: false, textBackend: true}, roundTrip: true
     })
     expect(canonicalToolchains.clang.canonicalCommand).toEqual("clang")
     expect(canonicalToolchains.clang.overrideEnvironmentVariable).toEqual("SEMANTIFOLD_CLANG")

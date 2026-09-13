@@ -35,7 +35,7 @@ describe("Swift strict source profile", () => {
       acceptance: {stages: ["parse", "generate", "compile", "execute"], toolchains: ["swiftc"]},
       artifactMultiplicity: "single",
       mapping: {binaryRanges: false, richText: true, sourceMapV3: true},
-      roles: {applicationBackend: false, binaryBackend: false, frontend: true, interoperability: false, textBackend: true},
+      roles: {applicationBackend: false, binaryBackend: false, frontend: true, interoperability: false, provider: false, textBackend: true},
       roundTrip: true
     })
     expect(typeof generate({language: "swift", module})).toEqual("string")

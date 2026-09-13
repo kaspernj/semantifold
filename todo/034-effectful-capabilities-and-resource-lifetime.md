@@ -1,6 +1,6 @@
 # 034 — Effectful capabilities and resource lifetime
 
-- Status: `implemented locally; independent review, TensorBuzz CI, and merge remain coordinator-owned`
+- Status: `delivered — PR #44 merged as c15e0874c054b6c462304eb29538d72ed43829d6`
 - Phase/priority: Phase S / P1
 - Dependencies: [005-general-function-signatures-and-calls.md](005-general-function-signatures-and-calls.md), [007-optional-values-and-presence-narrowing.md](007-optional-values-and-presence-narrowing.md), [011-typed-errors-and-handling.md](011-typed-errors-and-handling.md), [033-reference-classes-methods-and-constructors.md](033-reference-classes-methods-and-constructors.md)
 
@@ -72,3 +72,7 @@ The local implementation adds the frozen `SemantifoldCapabilityAuthority` v1 inp
 The bounded conformance authority `semantifold.task034.resource-probe` is adopted only by PHP, Ruby, JavaScript/JSDoc, TypeScript, and Java. Each target has one hard-coded compiler-owned probe binding around a real local file primitive. It is not a public file API or provider registry. Backend preflight validates the complete graph, lifetime state, effect-site order, target support, and excluded short-circuit/repeated-condition contexts before writer allocation. Nested eager effects are materialized into collision-safe statement-local temporaries in receiver/argument left-to-right order, exactly once. Native failures are caught and normalized to nominal probe failures; clean EOF alone is optional absence; close failure is terminal; repeated use detects `ProbeResourceClosed` before another native operation.
 
 Focused contract, lifetime, frontend, backend, provenance/mapping, public API, registry, and real-toolchain specs pass individually. The real-runtime proof generates deterministically, reparses under the same authority, compiles, and executes with real `php`, `ruby`, `node`, `tsc`, `javac`, and `java`. Async/concurrency/cancellation, `finally`/`ensure`/`defer`, RAII/destructors/finalizers/GC cleanup, retry, general effect polymorphism, unsafe native handles, shared mutable resources, distributed transactions, sockets/files as public APIs, standard-library facades, provider linking, release, and deployment remain excluded.
+
+## Delivery record — 2026-09-13
+
+Task 034 is delivered through PR #44, merged to `master` as `c15e0874c054b6c462304eb29538d72ed43829d6` (merge of `codex/task-034-effectful-capabilities`, including the lifetime error-propagation correction `b852c30`). Verified post-merge facts: 19 focused spec files passed with 76 passed / 0 failed, the credential-free packed-consumer cold-install lane passed 2 / 0 with 17 underlying commands, and the exact post-merge checkout was clean. This delivery intentionally leaves versioned canonical contracts, the target provider registry, capability negotiation, protected provider linking, tree-shaking, and provider artifacts to Task 035.

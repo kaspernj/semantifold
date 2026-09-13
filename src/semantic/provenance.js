@@ -496,9 +496,7 @@ export function semanticEntries(module) {
         ;(node.classes ?? []).forEach((child, index) => visit(child, `/classes/${index}`, location))
       }
       ;(node.errors ?? []).forEach((child, index) => visit(child, `/errors/${index}`, location))
-      if (!("sourceFilename" in node)) {
-        ;(node.capabilities ?? []).forEach((child, index) => visit(child, `/capabilities/${index}`, location))
-      }
+      ;(node.capabilities ?? []).forEach((child, index) => visit(child, `/capabilities/${index}`, location))
       node.functions.forEach((child, index) => visit(child, `/functions/${index}`, location))
       if ("exports" in node) {
         node.exports.forEach((child, index) => visit(child, `/exports/${index}`, location))

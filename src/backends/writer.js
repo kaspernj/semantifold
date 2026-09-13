@@ -73,8 +73,13 @@ export class SourceWriter {
    * @param {import("../semantic/types.js").SemanticProgram} [options.program] - Owning multi-file program.
    * @param {Map<string, string>} [options.programPaths] - Planned artifact path by module identity.
    * @param {{filename: string, content: string, language?: import("../semantic/types.js").SemanticLanguage}[]} [options.sources] - Caller-provided sources.
+   * @param {Record<string, string>} [options.stdlibProviderEntries] - Used operation to protected native entry for a linked stdlib provider.
+   * @param {string} [options.stdlibProviderPath] - Planned stdlib provider artifact path.
+   * @param {string[]} [options.stdlibProviderImports] - Ordered provider names this module must import.
+   * @param {string} [options.stdlibProviderOwnerModule] - Java owner module identity hosting the shared support block and shims.
+   * @param {string[]} [options.stdlibProviderShims] - Java owner program-wide used operations exposed as public static shims.
    */
-  constructor({filename, language, module, program, programPaths, sources}) {
+  constructor({filename, language, module, program, programPaths, sources, stdlibProviderEntries, stdlibProviderPath, stdlibProviderImports, stdlibProviderOwnerModule, stdlibProviderShims}) {
     const index = createGenerationIndex(module, sources)
 
     this.filename = filename
@@ -83,10 +88,18 @@ export class SourceWriter {
     this.program = program
     this.programPaths = programPaths
     this.index = index
+    this.stdlibProviderEntries = stdlibProviderEntries
+    this.stdlibProviderPath = stdlibProviderPath
+    this.stdlibProviderImports = stdlibProviderImports
+    this.stdlibProviderOwnerModule = stdlibProviderOwnerModule
+    this.stdlibProviderShims = stdlibProviderShims
     const programRecords = program?.modules.flatMap((programModule) => programModule.records ?? []) ?? module.records ?? []
     const programClasses = program ? [] : module.classes ?? []
     const capabilityFailures = module.capabilities?.flatMap(({failures}) => failures) ?? []
-    const programErrors = program?.modules.flatMap((programModule) => programModule.errors ?? []) ?? [...module.errors ?? [], ...capabilityFailures]
+    const programErrors = program?.modules.flatMap((programModule) => [
+      ...(programModule.errors ?? []),
+      ...(programModule.capabilities?.flatMap(({failures}) => failures) ?? [])
+    ]) ?? [...module.errors ?? [], ...capabilityFailures]
     const programFunctions = program?.modules.flatMap((programModule) => programModule.functions) ?? module.functions
 
     this.records = new Map(programRecords.map((record) => [record.id, record]))
@@ -340,7 +353,18 @@ export class SourceWriter {
       return this.importNameFor(imported)
     }
 
-    return error.name
+    return owner ? error.name : this.capabilityNominalName(error.name)
+  }
+
+  /**
+   * Returns the target spelling for a nominal name owned by a compiler-authorized capability.
+   * PHP program entries live in a generated namespace while stdlib provider classes remain
+   * global, so PHP program mode fully qualifies capability names.
+   * @param {string} name - Declared nominal name.
+   * @returns {string} Target spelling.
+   */
+  capabilityNominalName(name) {
+    return this.program && this.language == "php" ? `\\${name}` : name
   }
 
   /**
@@ -456,6 +480,35 @@ export class SourceWriter {
     const targetPath = this.programPaths?.get(moduleId)
 
     if (!targetPath) throw new RangeError(`Unknown planned module path '${moduleId}'.`)
+    const adjustedTarget = extension ? targetPath.replace(/\.[^./]+$/u, extension) : targetPath
+    const from = this.filename.split("/").slice(0, -1)
+    const to = adjustedTarget.split("/")
+    let common = 0
+
+    while (common < from.length && common < to.length && from[common] == to[common]) common++
+    const relative = [...from.slice(common).map(() => ".."), ...to.slice(common)].join("/")
+
+    return relative.startsWith(".") ? relative : `./${relative}`
+  }
+
+  /**
+   * Returns the protected native entry for one used stdlib provider operation.
+   * @param {string} operationName - Canonical operation name.
+   * @returns {string | undefined} Linked protected entry, or undefined when the operation stays inlined.
+   */
+  stdlibProviderEntryFor(operationName) {
+    return this.stdlibProviderEntries?.[operationName]
+  }
+
+  /**
+   * Returns a relative specifier for the planned stdlib provider artifact.
+   * @param {string} [extension] - Optional replacement extension.
+   * @returns {string} Relative POSIX specifier.
+   */
+  stdlibProviderSpecifier(extension) {
+    const targetPath = this.stdlibProviderPath
+
+    if (!targetPath) throw new RangeError("A stdlib provider specifier requires a planned provider path.")
     const adjustedTarget = extension ? targetPath.replace(/\.[^./]+$/u, extension) : targetPath
     const from = this.filename.split("/").slice(0, -1)
     const to = adjustedTarget.split("/")

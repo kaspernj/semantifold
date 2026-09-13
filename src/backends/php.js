@@ -314,6 +314,13 @@ function emitProgramHeader(module, writer) {
     writer.mapped(JSON.stringify(`/${relative}`), {mappingKind: "anchor", node: imported, path: importPath, role: "path"})
     writer.synthetic(";\n", "PHP require-once terminator", [imported], [importPath])
   }
+  if (writer.stdlibProviderEntries) {
+    const relative = writer.stdlibProviderSpecifier().replace(/^\.\//u, "")
+
+    writer.synthetic("require_once __DIR__ . ", "PHP stdlib provider require-once edge", [module])
+    writer.synthetic(JSON.stringify(`/${relative}`), "PHP stdlib provider require-once path", [module])
+    writer.synthetic(";\n", "PHP stdlib provider require-once terminator", [module])
+  }
   writer.synthetic("\n", "PHP namespace/declaration separator", [module])
 }
 

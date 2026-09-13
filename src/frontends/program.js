@@ -4,6 +4,7 @@ import {isDenseArray} from "../array.js"
 import {isSafeArtifactPath} from "../artifact-path.js"
 import {SemantifoldDiagnostic, semanticFailure, unsupportedCapability, unsupportedRole} from "../diagnostic.js"
 import {languageRegistry} from "../language-registry.js"
+import {normalizeCapabilityAuthority} from "../semantic/capabilities.js"
 import {moduleLocation} from "../semantic/location.js"
 import {annotateParsedModule} from "../semantic/provenance.js"
 import {moduleUncheckedErrorEffects, validateParsedModule} from "../semantic/validate.js"
@@ -25,6 +26,7 @@ const moduleIdPattern = /^[a-z][a-z0-9_]*(?:[.-][a-z][a-z0-9_]*)*$/u
  * @param {object} input - Program parse request.
  * @param {string} input.entryModule - Sole entry module identity.
  * @param {{filename: string, id: string, language: import("../semantic/types.js").SemanticLanguage, source: string}[]} input.sources - Complete source set.
+ * @param {Readonly<import("../semantic/types.js").CapabilityAuthority> | import("../semantic/types.js").CapabilityAuthorityInput} [input.capabilityAuthority] - Explicit compiler authority.
  * @returns {import("../semantic/types.js").SemanticProgram} Resolved semantic program.
  */
 export function parseProgramSource(input) {
@@ -32,8 +34,10 @@ export function parseProgramSource(input) {
     typeof input.entryModule != "string") invalidProgram("Program parsing requires a non-empty ordered source set and entry module.")
 
   const sources = input.sources.map((source, index) => validateSource(source, index))
-  if (Object.hasOwn(input, "capabilityAuthority")) {
-    unsupportedCapability(sources[0].language, "Task 034 capabilities are single-module only",
+  const authority = normalizeCapabilityAuthority(input.capabilityAuthority)
+
+  if (authority && !languageRegistry.record(sources[0].language).features.effectfulCapabilitiesAndResources) {
+    unsupportedCapability(sources[0].language, "Task 034 effectful capabilities and owned resources",
       moduleLocation(sources[0].filename, sources[0].source))
   }
   const registeredSources = sources.map((source, index) => ({
@@ -190,6 +194,7 @@ export function parseProgramSource(input) {
     const frontend = /** @type {(input: object) => import("../semantic/types.js").SemanticModule} */ (
       languageRegistry.resolve(source.language, "frontend"))
     const raw = frontend({
+      capabilities: authority?.capabilities,
       filename: source.filename,
       language: source.language,
       program: {
@@ -202,6 +207,7 @@ export function parseProgramSource(input) {
       source: source.source
     })
 
+    if (authority) raw.capabilities = /** @type {import("../semantic/types.js").EffectCapabilityDeclaration[]} */ (authority.capabilities)
     if ((raw.classes?.length ?? 0) > 0) {
       semanticFailure(source.language, "UNSUPPORTED_SYNTAX",
         "Task 033 reference classes are not supported by the Task 010 semantic program profile.",
@@ -280,6 +286,12 @@ export function parseProgramSource(input) {
     entryModule: input.entryModule,
     kind: "Program",
     modules: orderedIds.map((id) => /** @type {import("../semantic/types.js").SemanticProgramModule} */ (parsed.get(id))),
+    ...(authority ? {
+      stdlibContract: {
+        identity: authority.id,
+        ...(authority.contractVersion !== undefined ? {contractVersion: authority.contractVersion} : {})
+      }
+    } : {}),
     sources: registeredSources
   }
 }

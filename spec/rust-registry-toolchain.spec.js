@@ -13,7 +13,7 @@ describe("Rust registry and qualified native tool identities", () => {
     expect(languageCapabilities.find(({id}) => id == "rust")).toMatchObject({
       id: "rust", artifactMultiplicity: "multiple", roundTrip: true,
       acceptance: {stages: ["parse", "generate", "compile", "validate", "execute"], toolchains: ["rustc", "cargo"]},
-      roles: {frontend: true, textBackend: true, binaryBackend: false, applicationBackend: false, interoperability: false},
+      roles: {frontend: true, textBackend: true, binaryBackend: false, applicationBackend: false, interoperability: false, provider: false},
       mapping: {richText: true, sourceMapV3: true, binaryRanges: false}
     })
     expect(canonicalToolchains.rustc).toMatchObject({canonicalCommand: "rustc", overrideEnvironmentVariable: "SEMANTIFOLD_RUSTC"})

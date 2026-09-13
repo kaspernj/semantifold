@@ -146,15 +146,8 @@ console.log(use(counter))`
       (error) => error instanceof SemantifoldDiagnostic && error.code == "INVALID_CAPABILITY_AUTHORITY")
   })
 
-  it("keeps Task 034 authority outside the Task 010 multi-module profile", () => {
+  it("rejects program modules that carry capabilities without a declared stdlib contract", () => {
     const authority = createCapabilityAuthority(task034AuthorityInput())
-
-    assert.throws(() => parseProgram({
-      capabilityAuthority: authority,
-      entryModule: "main",
-      sources: [{filename: "main.ts", id: "main", language: "typescript",
-        source: "export function run(): string { return \"ok\" }\nconsole.log(run())\n"}]
-    }), (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY")
 
     const program = parseProgram({
       entryModule: "main",

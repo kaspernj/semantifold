@@ -34,7 +34,7 @@ const acceptanceStageOrder = ["parse", "generate", "restore", "compile", "link",
 const acceptanceStages = new Map(acceptanceStageOrder.map((stage, index) => [stage, index]))
 const registryKeys = new Set([
   "acceptance", "applicationBackend", "artifactMultiplicity", "binaryBackend", "defaultFilename", "frontend", "id",
-  "features", "interoperability", "mapping", "mediaType", "roundTrip", "textBackend"
+  "features", "interoperability", "mapping", "mediaType", "provider", "roundTrip", "textBackend"
 ])
 
 /** @typedef {"frontend" | "textBackend" | "binaryBackend" | "applicationBackend" | "interoperability"} RegistryRole */
@@ -64,6 +64,7 @@ const registryKeys = new Set([
  * @property {boolean} roundTrip - Round-trip declaration.
  * @property {string} [defaultFilename] - Default backend filename.
  * @property {string} [mediaType] - Default backend media type.
+ * @property {boolean} [provider] - Target host stdlib provider/native-binding role.
  * @property {RegistryImplementation} [frontend] - Frontend adapter.
  * @property {RegistryImplementation} [textBackend] - Text backend.
  * @property {RegistryImplementation} [binaryBackend] - Binary backend.
@@ -103,6 +104,9 @@ export function createLanguageRegistry(candidateRecords) {
     }
     if (recordsById.has(id)) invalidRegistry(`Duplicate registry ID '${id}'.`, id)
     if (Object.keys(candidate).some((key) => !registryKeys.has(key))) invalidRegistry(`Registry record '${id}' has unknown fields.`, id)
+    if (candidate.provider !== undefined && typeof candidate.provider != "boolean") {
+      invalidRegistry(`Registry record '${id}' declares an invalid provider role.`, id)
+    }
 
     for (const role of registryRoles) {
       if (candidate[role] !== undefined && typeof candidate[role] != "function") {
@@ -248,6 +252,7 @@ export function createLanguageRegistry(candidateRecords) {
       roundTrip: candidate.roundTrip,
       ...(typeof candidate.defaultFilename == "string" ? {defaultFilename: candidate.defaultFilename} : {}),
       ...(typeof candidate.mediaType == "string" ? {mediaType: candidate.mediaType} : {}),
+      ...(typeof candidate.provider == "boolean" ? {provider: candidate.provider} : {}),
       ...(typeof candidate.frontend == "function" ? {frontend: candidate.frontend} : {}),
       ...(typeof candidate.textBackend == "function" ? {textBackend: candidate.textBackend} : {}),
       ...(typeof candidate.binaryBackend == "function" ? {binaryBackend: candidate.binaryBackend} : {}),
@@ -265,6 +270,7 @@ export function createLanguageRegistry(candidateRecords) {
         binaryBackend: typeof candidate.binaryBackend == "function",
         frontend: typeof candidate.frontend == "function",
         interoperability: typeof candidate.interoperability == "function",
+        provider: candidate.provider === true,
         textBackend: typeof candidate.textBackend == "function"
       },
       roundTrip: candidate.roundTrip
@@ -493,6 +499,7 @@ function language(values) {
       typeParametersAndGenerics: ["php", "ruby", "javascript", "typescript", "java"].includes(String(values.id))
     },
     mapping: {binaryRanges: false, richText: true, sourceMapV3: true},
+    provider: ["php", "ruby", "javascript", "typescript", "java"].includes(String(values.id)),
     roundTrip: true,
     ...values
   }

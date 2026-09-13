@@ -21,6 +21,7 @@
  * @property {boolean} binaryBackend - Binary backend availability.
  * @property {boolean} applicationBackend - Application-artifact backend availability.
  * @property {boolean} interoperability - Interoperability bridge availability.
+ * @property {boolean} provider - Target host stdlib provider/native-binding availability.
  */
 
 /**
@@ -510,6 +511,7 @@
  * @property {1} schemaVersion - Authority payload version, not a standard-library contract version.
  * @property {string} id - Opaque caller-supplied authority identity.
  * @property {EffectCapabilityDeclaration[]} capabilities - Normalized declarations.
+ * @property {string} [contractVersion] - Declared standard-library contract version, present only when the caller supplied one.
  */
 
 /** @typedef {{name: string, type: SemanticTypeName | {kind: "OwnedResourceType", resource: string} | {kind: "OptionalType", valueType: SemanticTypeName}}} CapabilityParameterInput */
@@ -517,7 +519,7 @@
 /** @typedef {{kind: "none"} | {kind: "acquire", resource: string} | {kind: "borrow" | "close", parameterIndex: number, terminalFailure: string}} CapabilityResourceFlowInput */
 /** @typedef {{name: string, parameters: CapabilityParameterInput[], returnType: FunctionReturnTypeName | {kind: "OwnedResourceType", resource: string} | {kind: "OptionalType", valueType: SemanticTypeName}, effects: ["host"], failures: string[], resourceFlow: CapabilityResourceFlowInput}} CapabilityOperationInput */
 /** @typedef {{name: string, resources: CapabilityNamedInput[], failures: CapabilityNamedInput[], operations: CapabilityOperationInput[]}} CapabilityDeclarationInput */
-/** @typedef {{schema: "SemantifoldCapabilityAuthority", schemaVersion: 1, id: string, capabilities: CapabilityDeclarationInput[]}} CapabilityAuthorityInput */
+/** @typedef {{schema: "SemantifoldCapabilityAuthority", schemaVersion: 1, id: string, capabilities: CapabilityDeclarationInput[], contractVersion?: string}} CapabilityAuthorityInput */
 
 /**
  * @typedef ListLiteral
@@ -1081,6 +1083,7 @@
  * @property {FunctionDeclaration[]} functions - Top-level functions.
  * @property {SemanticImport[]} imports - Resolved imports in source order.
  * @property {SemanticExport[]} exports - Resolved exports in source order.
+ * @property {EffectCapabilityDeclaration[]} [capabilities] - Authority declarations shared by reference when the program declares a standard-library contract.
  * @property {EntryPoint} [entryPoint] - Sole executable entry point, present only on the selected module.
  * @property {SourceLocation} location - Source location.
  * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
@@ -1093,6 +1096,7 @@
  * @property {SemanticProgramModule[]} modules - Dependency-first deterministic module order.
  * @property {string} entryModule - Stable identity of the sole entry module.
  * @property {RegisteredSource[]} sources - Caller-order complete source registry.
+ * @property {{contractVersion?: string, identity: string}} [stdlibContract] - Declared standard-library contract; plain, never frozen.
  */
 
 /** @typedef {SemanticModule | SemanticProgramModule | SemanticImport | SemanticExport | RecordDeclaration | ClassDeclaration | ErrorDeclaration | EffectCapabilityDeclaration | EffectResourceDeclaration | EffectFailureDeclaration | EffectOperationDeclaration | RecordField | PrivateField | ConstructorDeclaration | MethodDeclaration | FunctionDeclaration | TypeParameter | Parameter | ValueBinding | CatchBinding | Block | Statement | EntryPoint | Expression | ErrorConstruction | ErrorType | MapEntry | SemanticValueType | FunctionReturnTypeReference} SemanticNode */
