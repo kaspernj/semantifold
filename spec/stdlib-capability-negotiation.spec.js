@@ -148,6 +148,77 @@ describe("stdlib capability negotiation", () => {
     ])
   })
 
+  it("fails with STDLIB_PROVIDER_MISSING when the selected provider does not cover every required operation", () => {
+    const contracts = createStdlibContractRegistry([
+      contract("example.alpha", "1.0.0", [operation("aBase"), operation("aHelper")])
+    ])
+    const providers = createStdlibProviderRegistry([
+      providerRecord("php", "semantifold.provider.php.example.alpha", "example.alpha", ["aBase"])
+    ])
+
+    assert.throws(
+      () => negotiateStdlibProviders({
+        contracts,
+        providers,
+        requirements: [{module: "example.alpha", operations: ["aBase", "aHelper"]}],
+        target: "php"
+      }),
+      (error) => error instanceof SemantifoldDiagnostic && error.code == "STDLIB_PROVIDER_MISSING"
+    )
+  })
+
+  it("traverses provider-only dependency modules through selection and result closure", () => {
+    const contracts = createStdlibContractRegistry([
+      contract("example.alpha", "1.0.0", [operation("aOne")]),
+      contract("example.beta", "1.0.0", [operation("bOne")])
+    ])
+    const providers = createStdlibProviderRegistry([
+      providerRecord("php", "semantifold.provider.php.example.alpha", "example.alpha", ["aOne"]),
+      providerRecord("php", "semantifold.provider.php.example.beta", "example.beta", ["bOne"],
+        [{module: "example.alpha", range: "1"}])
+    ])
+
+    const result = negotiateStdlibProviders({
+      contracts,
+      providers,
+      requirements: [{module: "example.beta", operations: ["bOne"]}],
+      target: "php"
+    })
+
+    expect(result.modules).toEqual([
+      {identity: "example.alpha", operations: [], version: "1.0.0"},
+      {identity: "example.beta", operations: ["bOne"], version: "1.0.0"}
+    ])
+    expect(result.providers.map(({identity, operations, nativeEntries}) => ({identity, operations, nativeEntries}))).toEqual([
+      {identity: "semantifold.provider.php.example.alpha", operations: [], nativeEntries: {}},
+      {identity: "semantifold.provider.php.example.beta", operations: ["bOne"],
+        nativeEntries: {bOne: protectedEntryName("php", "bOne")}}
+    ])
+  })
+
+  it("rejects provider-only dependency cycles with STDLIB_PROVIDER_CYCLE", () => {
+    const contracts = createStdlibContractRegistry([
+      contract("example.alpha", "1.0.0", [operation("aOne")]),
+      contract("example.beta", "1.0.0", [operation("bOne")])
+    ])
+    const providers = createStdlibProviderRegistry([
+      providerRecord("php", "semantifold.provider.php.example.alpha", "example.alpha", ["aOne"],
+        [{module: "example.beta", range: "1"}]),
+      providerRecord("php", "semantifold.provider.php.example.beta", "example.beta", ["bOne"],
+        [{module: "example.alpha", range: "1"}])
+    ])
+
+    assert.throws(
+      () => negotiateStdlibProviders({
+        contracts,
+        providers,
+        requirements: [{module: "example.beta", operations: ["bOne"]}],
+        target: "php"
+      }),
+      (error) => error instanceof SemantifoldDiagnostic && error.code == "STDLIB_PROVIDER_CYCLE"
+    )
+  })
+
   it("fails deterministically on dependency cycles, missing dependencies, and conflicting versions", () => {
     const cycled = createStdlibContractRegistry([
       contract("example.alpha", "1.0.0", [operation("aOne", "example.beta", "1", "bOne")]),

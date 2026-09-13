@@ -206,6 +206,59 @@ try {
       await rm(directory, {force: true, recursive: true})
     }
   })
+
+  it("shares one Java owner support block across multi-module capability programs", async () => {
+    const program = parseProgram({
+      capabilityAuthority: createCapabilityAuthority(task034AuthorityInput()),
+      entryModule: "main",
+      sources: [{
+        filename: "lib.ts",
+        id: "lib",
+        language: "typescript",
+        source: `export function consume(resource: ProbeResource): string {
+  try {
+    const line: string | null = probeRead(resource, false)
+    probeClose(resource, false)
+    if (line !== null) { return line }
+    return "eof"
+  } catch (error) {
+    if (!(error instanceof ProbeReadFailure)) { throw error }
+    probeClose(resource, false)
+    return error.message
+  }
+}
+`
+      }, {
+        filename: "main.ts",
+        id: "main",
+        language: "typescript",
+        source: `import {consume} from "./lib.js"
+const resource: ProbeResource = probeAcquire(false)
+console.log(consume(resource))
+console.log(probeTrace())
+`
+      }]
+    })
+    const set = generateProgramArtifactSet({language: "java", program})
+    const owner = set.artifacts.find(({path}) => path == "semantifold/generated/lib/Lib.java")
+    const entry = set.artifacts.find(({path}) => path == "semantifold/generated/main/Main.java")
+
+    expect(owner?.content).toContain("public static final class ProbeResource")
+    expect(owner?.content).toContain("__semantifold_provider_java_probeAcquire")
+    expect(entry?.content).toContain("import semantifold.generated.lib.Lib.ProbeResource;")
+    expect(entry?.content).toContain("import static semantifold.generated.lib.Lib.*;")
+    expect(entry?.content).not.toContain("final class ProbeResource")
+
+    const directory = await mkdtemp(join(tmpdir(), "semantifold-task035-java-"))
+    const environment = {...process.env, SEMANTIFOLD_TASK034_PROBE_PATH: join(directory, "probe.txt")}
+
+    try {
+      await writeFile(join(directory, "probe.txt"), "alpha\n", "utf8")
+      expect(await execute("java", set, directory, environment)).toEqual("alpha\nacquire,read,close")
+    } finally {
+      await rm(directory, {force: true, recursive: true})
+    }
+  })
 })
 
 async function write(set, directory) {

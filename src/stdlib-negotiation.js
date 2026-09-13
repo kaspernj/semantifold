@@ -181,10 +181,28 @@ export function negotiateStdlibProviders({contracts = builtinContracts, provider
           })
         }
         if (addRange(dependency.module, asVersionRange(dependency.range))) stable = false
+        if (!usedOperations.has(dependency.module)) {
+          usedOperations.set(dependency.module, new Set())
+          stable = false
+        }
       }
     }
   }
-  assertAcyclic(contracts, ranges, usedOperations)
+  for (const module of [...usedOperations.keys()].sort()) {
+    const provider = /** @type {StdlibProviderRecord} */ (selectedProviders.get(module))
+    const provided = new Set(provider.provides[0].operations)
+    const missing = [.../** @type {Set<string>} */ (usedOperations.get(module))].sort()
+      .filter((operation) => !provided.has(operation))
+
+    if (missing.length > 0) {
+      throw new SemantifoldDiagnostic({
+        code: "STDLIB_PROVIDER_MISSING",
+        language: target,
+        message: `Provider '${provider.identity}' does not provide operation${missing.length > 1 ? "s" : ""} '${missing.join("', '")}' of module '${module}'.`
+      })
+    }
+  }
+  assertAcyclic(contracts, ranges, usedOperations, selectedProviders)
   /** @type {{identity: string, operations: string[], version: string}[]} */
   const modules = [...usedOperations.keys()].sort().map((identity) => {
     const contract = resolveModuleVersion(contracts, identity, ranges.get(identity) ?? universalRange)
@@ -253,13 +271,15 @@ function resolveModuleVersion(contracts, module, range) {
 }
 
 /**
- * Fails deterministically when the canonical operation dependency graph cycles.
+ * Fails deterministically when canonical operation dependencies or selected provider
+ * module dependencies cycle.
  * @param {StdlibContractRegistry} contracts - Canonical contract registry.
  * @param {Map<string, VersionRange>} ranges - Combined ranges per module.
  * @param {Map<string, Set<string>>} usedOperations - Used operations per module.
+ * @param {Map<string, StdlibProviderRecord>} selectedProviders - Selected provider per module.
  * @returns {void}
  */
-function assertAcyclic(contracts, ranges, usedOperations) {
+function assertAcyclic(contracts, ranges, usedOperations, selectedProviders) {
   /** @type {Map<string, string[]>} */
   const edges = new Map()
 
@@ -277,6 +297,16 @@ function assertAcyclic(contracts, ranges, usedOperations) {
       }
       edges.set(nodeKey, targets.sort())
     }
+  }
+  for (const module of [...selectedProviders.keys()].sort()) {
+    const provider = /** @type {StdlibProviderRecord} */ (selectedProviders.get(module))
+    const nodeKey = `${module}\u0000\u0000`
+    const targets = /** @type {string[]} */ (edges.get(nodeKey) ?? [])
+
+    for (const dependency of provider.dependencies) {
+      targets.push(`${dependency.module}\u0000\u0000`)
+    }
+    edges.set(nodeKey, targets.sort())
   }
   /** @type {Map<string, number>} */
   const colors = new Map()

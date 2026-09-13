@@ -362,6 +362,8 @@ function validateContractRecord(candidate) {
   const resourceNames = new Set(resources.map(({name}) => name))
   const failureNames = new Set(failures.map(({name}) => name))
   const operationNames = new Set()
+
+  if (!isDenseArray(candidate.operations)) invalidContract("Canonical contract operations must be a dense array.")
   const operations = /** @type {unknown[]} */ (candidate.operations).map((operation) =>
     validateContractOperation(operation, resourceNames, failureNames, operationNames))
 
@@ -404,6 +406,7 @@ function validateContractOperation(candidate, resourceNames, failureNames, opera
   /** @type {{name: string, type: string}[]} */
   const parameters = []
 
+  if (!isDenseArray(candidate.parameters)) invalidContract(`Operation '${name}' parameters must be a dense array.`)
   for (const parameter of /** @type {unknown[]} */ (candidate.parameters)) {
     if (!isPlainObject(parameter)) invalidContract(`Operation '${name}' parameters must be plain objects.`)
     requireKeys(parameter, ["name", "type"], `operation '${name}' parameter`)

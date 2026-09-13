@@ -1,7 +1,7 @@
 // @ts-check
 
 import {emitExpression, emitType} from "./shared.js"
-import {emitEffectPrefixes, emitEffectSupport} from "./effects.js"
+import {emitEffectPrefixes, emitEffectProviderEntries, emitEffectSupport} from "./effects.js"
 
 /** @type {WeakMap<import("./writer.js").SourceWriter, Set<string>>} */
 const generatedNames = new WeakMap()
@@ -37,6 +37,18 @@ export function generateJava(module, writer) {
       writer.synthetic("import ", "Java program import", [imported], [importPath])
       writer.mapped(name, {mappingKind: "anchor", node: imported, path: importPath, role: "path"})
       writer.synthetic(";\n", "Java program import terminator", [imported], [importPath])
+    }
+    if (writer.program && writer.stdlibProviderOwnerModule !== undefined &&
+      writer.stdlibProviderOwnerModule != programModule.id) {
+      const owner = writer.stdlibProviderOwnerModule
+      const ownerClassName = writer.program.entryModule == owner ? "Main" : writer.programModuleName(owner)
+
+      for (const typeName of writer.stdlibProviderImports ?? []) {
+        writer.synthetic(`import semantifold.generated.${owner}.${ownerClassName}.${typeName};\n`, "Java stdlib capability type import", [module])
+      }
+      if (Object.keys(writer.stdlibProviderEntries ?? {}).length > 0) {
+        writer.synthetic(`import static semantifold.generated.${owner}.${ownerClassName}.*;\n`, "Java stdlib provider static import", [module])
+      }
     }
     writer.synthetic("\n", "Java program header separator", [module])
   }
@@ -126,6 +138,7 @@ export function generateJava(module, writer) {
 
   writer.synthetic(`public final class ${className} {\n`, "Java class scaffolding", [module])
   emitEffectSupport(writer, module, "java", "members")
+  emitEffectProviderEntries(writer, module)
 
   module.functions.forEach((declaration, functionIndex) => {
     if (functionIndex > 0) writer.synthetic("\n\n", "declaration separator", [declaration])

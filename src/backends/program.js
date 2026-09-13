@@ -59,7 +59,7 @@ export function generateProgramArtifacts(input) {
     role: "manifest"
   }] : []
 
-  if (linking) {
+  if (linking && input.language != "java") {
     artifacts.push({
       content: generateStdlibProviderContent(/** @type {"php" | "ruby" | "javascript" | "typescript"} */ (input.language),
         [.../** @type {string[]} */ (linking.negotiation.providers[0].operations)]),
@@ -91,9 +91,13 @@ export function generateProgramArtifacts(input) {
           name,
           /** @type {string} */ (linking.record.nativeEntries[name])
         ])),
-        stdlibProviderImports: input.language == "javascript" || input.language == "typescript" ?
+        stdlibProviderImports: input.language == "java" || input.language == "javascript" || input.language == "typescript" ?
           linking.providerImportsByModule.get(moduleId) : undefined,
-        stdlibProviderPath: linking.record.artifact.path
+        stdlibProviderPath: linking.record.artifact.path,
+        ...(input.language == "java" ? {
+          stdlibProviderOwnerModule: /** @type {string} */ (linking.ownerModuleId),
+          stdlibProviderShims: moduleId == linking.ownerModuleId ? linking.usedOperations : undefined
+        } : {})
       } : {})
     })
 
@@ -118,7 +122,7 @@ export function generateProgramArtifacts(input) {
 
   return createGeneratedArtifactSet({
     artifacts,
-    ...(linking ? {metadata: stdlibLinkMetadata(linking)} : {}),
+    ...(linking ? {metadata: stdlibLinkMetadata(linking, paths)} : {}),
     target: input.language
   })
 }
@@ -130,17 +134,18 @@ export function generateProgramArtifacts(input) {
  * @property {string[]} usedOperations - Program-wide used canonical operations in stable order.
  * @property {Map<string, string[]>} usedOperationsByModule - Used canonical operations by module identity.
  * @property {Map<string, string[]>} providerImportsByModule - Ordered provider import names by module identity.
+ * @property {string | null} ownerModuleId - Java target: first operation-using module identity hosting the shared support; null for artifact-materializing targets.
  */
 
 /**
  * Plans the linked stdlib provider for one program, or reports that no operation is used.
- * Java inlines its support per module file and never materializes a provider artifact.
+ * Java resolves the same negotiated provider record but hosts its support in the first
+ * operation-using module instead of a separate provider artifact.
  * @param {import("../semantic/types.js").SemanticProgram} program - Validated semantic program.
  * @param {import("../semantic/types.js").SemanticLanguage} language - Target language.
  * @returns {StdlibProgramLinking | null} Linking plan, or null when nothing is used.
  */
 function planStdlibLinking(program, language) {
-  if (language == "java") return null
   const {programWide, usedOperationsByModule} = collectUsedEffectOperations(program)
 
   if (programWide.length == 0) return null
@@ -162,10 +167,20 @@ function planStdlibLinking(program, language) {
       message: `Expected exactly one registered stdlib provider for '${contract.identity}' on '${language}'.`
     })
   }
+  const ownerModuleId = language == "java"
+    ? program.modules.map((module) => module.id).find((id) => (usedOperationsByModule.get(id) ?? []).length > 0)
+    : null
+
+  if (ownerModuleId === undefined) throw new SemantifoldDiagnostic({
+    code: "STDLIB_LINK_FAILURE",
+    language,
+    message: "Java program linking requires one module using canonical operations."
+  })
 
   return {
     negotiation,
-    providerImportsByModule: collectProviderImports(program, negotiation, usedOperationsByModule),
+    ownerModuleId,
+    providerImportsByModule: collectProviderImports(program, negotiation, usedOperationsByModule, language, ownerModuleId),
     record: /** @type {import("../stdlib-providers.js").StdlibProviderRecord} */ (records[0]),
     usedOperations: [...programWide],
     usedOperationsByModule
@@ -229,12 +244,15 @@ function collectUsedEffectOperations(program) {
 
 /**
  * Collects the ordered provider import names each module must pull from the linked provider.
+ * Java modules list referenced capability type names only; the owner lists none.
  * @param {import("../semantic/types.js").SemanticProgram} program - Validated semantic program.
  * @param {import("../stdlib-negotiation.js").StdlibNegotiationResult} negotiation - Negotiated closure.
  * @param {Map<string, string[]>} usedOperationsByModule - Used canonical operations by module identity.
+ * @param {import("../semantic/types.js").SemanticLanguage} language - Target language.
+ * @param {string | null} [ownerModuleId] - Java owner module identity.
  * @returns {Map<string, string[]>} Ordered provider import names by module identity.
  */
-function collectProviderImports(program, negotiation, usedOperationsByModule) {
+function collectProviderImports(program, negotiation, usedOperationsByModule, language, ownerModuleId = null) {
   const contractOperations = /** @type {string[]} */ (negotiation.providers[0].operations)
   /** @type {Map<string, string[]>} */
   const providerImportsByModule = new Map()
@@ -306,11 +324,15 @@ function collectProviderImports(program, negotiation, usedOperationsByModule) {
     visit(module)
     const names = []
 
-    for (const capability of module.capabilities) {
-      for (const resource of capability.resources) if (referenced.has(resource.name)) names.push(resource.name)
-      for (const failure of capability.failures) if (referenced.has(failure.name)) names.push(failure.name)
+    if (language != "java" || module.id != ownerModuleId) {
+      for (const capability of module.capabilities) {
+        for (const resource of capability.resources) if (referenced.has(resource.name)) names.push(resource.name)
+        for (const failure of capability.failures) if (referenced.has(failure.name)) names.push(failure.name)
+      }
     }
-    for (const operation of contractOperations) if (used.has(operation)) names.push(/** @type {string} */ (negotiation.providers[0].nativeEntries[operation]))
+    if (language != "java") {
+      for (const operation of contractOperations) if (used.has(operation)) names.push(/** @type {string} */ (negotiation.providers[0].nativeEntries[operation]))
+    }
 
     providerImportsByModule.set(module.id, names)
   }
@@ -319,11 +341,16 @@ function collectProviderImports(program, negotiation, usedOperationsByModule) {
 
 /**
  * Builds the truthful generated stdlib link metadata for one negotiated closure.
+ * Java reports the owner module file as the provider carrier instead of a separate artifact.
  * @param {StdlibProgramLinking} linking - Linking plan.
+ * @param {Map<string, string>} paths - Planned artifact path by module identity.
  * @returns {Record<string, unknown>} Plain JSON metadata.
  */
-function stdlibLinkMetadata(linking) {
+function stdlibLinkMetadata(linking, paths) {
   const {negotiation, record} = linking
+  const artifactPath = linking.ownerModuleId !== null
+    ? /** @type {string} */ (paths.get(linking.ownerModuleId))
+    : record.artifact.path
 
   return {
     modules: negotiation.modules.map((item) => ({
@@ -332,7 +359,7 @@ function stdlibLinkMetadata(linking) {
       version: item.version
     })),
     providers: negotiation.providers.map((item) => ({
-      artifact: {mediaType: record.artifact.mediaType, path: record.artifact.path},
+      artifact: {mediaType: record.artifact.mediaType, path: artifactPath},
       dependencies: record.dependencies.map((dependency) => ({module: dependency.module, range: dependency.range})),
       identity: item.identity,
       module: item.module,

@@ -148,12 +148,34 @@ function supportNameKey(name, language) {
  * @returns {void}
  */
 export function emitEffectSupport(writer, module, language, placement = "top") {
-  if (writer.stdlibProviderEntries) return
-  if (!module.capabilities || !moduleNeedsEffectSupport(module)) return
+  const linked = writer.stdlibProviderEntries !== undefined
+
+  if (language == "java" && linked) {
+    if (placement != "members" || writer.stdlibProviderShims === undefined) return
+  } else if (linked || !module.capabilities || !moduleNeedsEffectSupport(module)) {
+    return
+  }
   const content = language == "php" ? phpSupport : language == "ruby" ? rubySupport : language == "javascript" ? javascriptSupport :
-    language == "typescript" ? typescriptSupport : placement == "top" ? javaTopSupport : javaMemberSupport
+    language == "typescript" ? typescriptSupport :
+    writer.stdlibProviderShims !== undefined ? javaProgramNestedSupport + javaMemberSupport :
+    placement == "top" ? javaTopSupport : javaMemberSupport
 
   writer.synthetic(content, "semantifold-task034-support", [module])
+}
+
+/**
+ * Emits the public static provider shims for the program-wide used operations on the Java owner module.
+ * @param {import("./writer.js").SourceWriter} writer - Destination writer.
+ * @param {import("../semantic/types.js").SemanticModule} module - Owner module.
+ * @returns {void}
+ */
+export function emitEffectProviderEntries(writer, module) {
+  const operations = writer.stdlibProviderShims ?? []
+
+  if (operations.length == 0) return
+  const lines = operations.map((operation) => `  ${javaProviderShims[operation]}`)
+
+  writer.synthetic(`${lines.join("\n")}\n\n`, "semantifold-stdlib-provider-entries", [module])
 }
 
 /**
@@ -656,3 +678,23 @@ const javaMemberSupport = `  // semantifold-task034-support-members
   // semantifold-task034-support-members-end
 
 `
+
+const javaProgramNestedSupport = `  // semantifold-task034-support-program
+  public static final class ProbeOperationFailure extends RuntimeException { ProbeOperationFailure() { super("ProbeOperationFailure"); } }
+  public static final class ProbeAcquireFailure extends RuntimeException { ProbeAcquireFailure() { super("ProbeAcquireFailure"); } }
+  public static final class ProbeReadFailure extends RuntimeException { ProbeReadFailure() { super("ProbeReadFailure"); } }
+  public static final class ProbeCloseFailure extends RuntimeException { ProbeCloseFailure() { super("ProbeCloseFailure"); } }
+  public static final class ProbeResourceClosed extends RuntimeException { ProbeResourceClosed() { super("ProbeResourceClosed"); } }
+  public static final class ProbeResource { final java.nio.channels.FileChannel handle; boolean closed = false; ProbeResource(java.nio.channels.FileChannel handle) { this.handle = handle; } }
+  // semantifold-task034-support-program-end
+
+`
+
+/** @type {Record<string, string>} */
+const javaProviderShims = {
+  probeAcquire: "public static ProbeResource __semantifold_provider_java_probeAcquire(boolean fail) { return probeAcquire(fail); }",
+  probeClose: "public static void __semantifold_provider_java_probeClose(ProbeResource resource, boolean fail) { probeClose(resource, fail); }",
+  probeEffect: "public static int __semantifold_provider_java_probeEffect(String label, int value, boolean fail) { return probeEffect(label, value, fail); }",
+  probeRead: "public static java.util.Optional<String> __semantifold_provider_java_probeRead(ProbeResource resource, boolean fail) { return probeRead(resource, fail); }",
+  probeTrace: "public static String __semantifold_provider_java_probeTrace() { return probeTrace(); }"
+}

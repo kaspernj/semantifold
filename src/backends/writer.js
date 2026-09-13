@@ -76,8 +76,10 @@ export class SourceWriter {
    * @param {Record<string, string>} [options.stdlibProviderEntries] - Used operation to protected native entry for a linked stdlib provider.
    * @param {string} [options.stdlibProviderPath] - Planned stdlib provider artifact path.
    * @param {string[]} [options.stdlibProviderImports] - Ordered provider names this module must import.
+   * @param {string} [options.stdlibProviderOwnerModule] - Java owner module identity hosting the shared support block and shims.
+   * @param {string[]} [options.stdlibProviderShims] - Java owner program-wide used operations exposed as public static shims.
    */
-  constructor({filename, language, module, program, programPaths, sources, stdlibProviderEntries, stdlibProviderPath, stdlibProviderImports}) {
+  constructor({filename, language, module, program, programPaths, sources, stdlibProviderEntries, stdlibProviderPath, stdlibProviderImports, stdlibProviderOwnerModule, stdlibProviderShims}) {
     const index = createGenerationIndex(module, sources)
 
     this.filename = filename
@@ -89,6 +91,8 @@ export class SourceWriter {
     this.stdlibProviderEntries = stdlibProviderEntries
     this.stdlibProviderPath = stdlibProviderPath
     this.stdlibProviderImports = stdlibProviderImports
+    this.stdlibProviderOwnerModule = stdlibProviderOwnerModule
+    this.stdlibProviderShims = stdlibProviderShims
     const programRecords = program?.modules.flatMap((programModule) => programModule.records ?? []) ?? module.records ?? []
     const programClasses = program ? [] : module.classes ?? []
     const capabilityFailures = module.capabilities?.flatMap(({failures}) => failures) ?? []
