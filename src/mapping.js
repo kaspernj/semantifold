@@ -764,7 +764,7 @@ export function validateMapping(value) {
   for (const symbol of mapping.symbols) {
     if (!symbol || typeof symbol != "object" || typeof symbol.id != "string" || symbol.id.length == 0 || symbolIds.has(symbol.id) ||
       typeof symbol.name != "string" || symbol.name.length == 0 ||
-      !["record", "class", "error", "field", "constructor", "method", "function", "typeParameter", "parameter", "local", "iteration", "catch"].includes(symbol.kind) ||
+      !["capability", "resource", "failure", "operation", "record", "class", "error", "field", "constructor", "method", "function", "typeParameter", "parameter", "local", "iteration", "catch"].includes(symbol.kind) ||
       !nodeIds.has(symbol.declarationNodeId) || !Array.isArray(symbol.references) ||
       symbol.semanticDeclarationId !== undefined && (typeof symbol.semanticDeclarationId != "string" || !(
         symbol.kind == "function" && /^(?:[a-z][a-z0-9._-]*#)?function:[0-9]+$/u.test(symbol.semanticDeclarationId) ||
@@ -774,7 +774,11 @@ export function validateMapping(value) {
         symbol.kind == "field" && /^(?:[a-z][a-z0-9._-]*#)?(?:record|class):[0-9]+:field:[0-9]+$/u.test(symbol.semanticDeclarationId) ||
         symbol.kind == "constructor" && /^(?:[a-z][a-z0-9._-]*#)?class:[0-9]+:constructor$/u.test(symbol.semanticDeclarationId) ||
         symbol.kind == "method" && /^(?:[a-z][a-z0-9._-]*#)?class:[0-9]+:method:[0-9]+$/u.test(symbol.semanticDeclarationId) ||
-        symbol.kind == "typeParameter" && /^(?:[a-z][a-z0-9._-]*#)?(?:function|record):[0-9]+:type:[0-9]+$/u.test(symbol.semanticDeclarationId)
+        symbol.kind == "typeParameter" && /^(?:[a-z][a-z0-9._-]*#)?(?:function|record):[0-9]+:type:[0-9]+$/u.test(symbol.semanticDeclarationId) ||
+        symbol.kind == "capability" && /^capability:[0-9]+$/u.test(symbol.semanticDeclarationId) ||
+        symbol.kind == "resource" && /^capability:[0-9]+\/resource:[0-9]+$/u.test(symbol.semanticDeclarationId) ||
+        symbol.kind == "failure" && /^capability:[0-9]+\/failure:[0-9]+$/u.test(symbol.semanticDeclarationId) ||
+        symbol.kind == "operation" && /^capability:[0-9]+\/operation:[0-9]+$/u.test(symbol.semanticDeclarationId)
       ))) {
       throw new TypeError("Malformed or duplicate semantic symbol identity.")
     }

@@ -7,6 +7,7 @@ import {validateNativeGraph} from "./native-validation.js"
 import {validateBackendModule} from "./shared.js"
 import {SourceWriter} from "./writer.js"
 import {finalizeMapping, toSourceMapV3} from "../mapping.js"
+import {preflightEffectCapabilities} from "./effects.js"
 const syntheticArtifactBase = Object.freeze(["__semantifold_artifacts__"])
 
 /**
@@ -49,6 +50,7 @@ export function generateArtifactSource({language, filename, mapDirective = "none
     unsupportedCapability(/** @type {import("../semantic/types.js").BackendLanguage} */ (language),
       "Task 009 closed records", module.records[0].location ?? module.location)
   }
+  preflightEffectCapabilities(module, /** @type {import("../semantic/types.js").BackendLanguage} */ (language))
   if (language == "cpp" || language == "kotlin" || language == "swift") validateNativeGraph(module, language)
   validateBackendModule(module, /** @type {import("../semantic/types.js").BackendLanguage} */ (language))
 

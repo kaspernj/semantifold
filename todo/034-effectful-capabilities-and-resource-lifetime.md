@@ -1,6 +1,6 @@
 # 034 — Effectful capabilities and resource lifetime
 
-- Status: `todo`
+- Status: `implemented locally; independent review, TensorBuzz CI, and merge remain coordinator-owned`
 - Phase/priority: Phase S / P1
 - Dependencies: [005-general-function-signatures-and-calls.md](005-general-function-signatures-and-calls.md), [007-optional-values-and-presence-narrowing.md](007-optional-values-and-presence-narrowing.md), [011-typed-errors-and-handling.md](011-typed-errors-and-handling.md), [033-reference-classes-methods-and-constructors.md](033-reference-classes-methods-and-constructors.md)
 
@@ -62,3 +62,13 @@ Async operations, promises/futures, event loops, concurrency, threads, cancellat
 - Resource identity, ownership/transfer, typed absence/failure, exactly-once ordering, and deterministic close validate on all supported paths.
 - Real adopted targets preserve the contract or fail before any artifacts are returned.
 - Focused lifetime/failure diagnostics, deterministic real-toolchain coverage, documentation, and a behavior changelog fragment are complete.
+
+## Local implementation record — 2026-09-12
+
+The local implementation adds the frozen `SemantifoldCapabilityAuthority` v1 input and parser-neutral capability/resource/failure/operation declarations with deterministic identities. Calls become compiler-authorized `EffectCallExpression` nodes only after ordinary source declarations have won name resolution. Each site records its exact operation, ordered parameter/result identities, closed `host` effect, ordered nominal failures, resource transition, deterministic `effect:N` identity, source location, and provenance. The authority payload is unversioned with respect to future standard-library contracts: Task 035 still owns versioned canonical contracts, provider registries, negotiation, linking, protected provider artifacts, and tree-shaking.
+
+`OwnedResourceType` and `OwnedReferenceType` remain distinct from ordinary reference/value types. Parser normalization introduces explicit moves for local, parameter, constructor, and return transfer and immediate shared/exclusive borrows for use/close. Structured path analysis retains normal, return, raise, break, and continue states separately; acquisition succeeds with one owner or fails with none, borrows preserve the open owner on operation failure, a close attempt is terminal on success and declared close failure, and every scope/branch/catch/loop exit must close or transfer each owner. Resource-owning classes contain one direct private resource field and transfer the complete owner through the reference. Nested/container ownership, copying, reassignment, escaping borrows, path-dependent states, use after move/close, forbidden double close, and absence/failure conflation fail with stable located diagnostics.
+
+The bounded conformance authority `semantifold.task034.resource-probe` is adopted only by PHP, Ruby, JavaScript/JSDoc, TypeScript, and Java. Each target has one hard-coded compiler-owned probe binding around a real local file primitive. It is not a public file API or provider registry. Backend preflight validates the complete graph, lifetime state, effect-site order, target support, and excluded short-circuit/repeated-condition contexts before writer allocation. Nested eager effects are materialized into collision-safe statement-local temporaries in receiver/argument left-to-right order, exactly once. Native failures are caught and normalized to nominal probe failures; clean EOF alone is optional absence; close failure is terminal; repeated use detects `ProbeResourceClosed` before another native operation.
+
+Focused contract, lifetime, frontend, backend, provenance/mapping, public API, registry, and real-toolchain specs pass individually. The real-runtime proof generates deterministically, reparses under the same authority, compiles, and executes with real `php`, `ruby`, `node`, `tsc`, `javac`, and `java`. Async/concurrency/cancellation, `finally`/`ensure`/`defer`, RAII/destructors/finalizers/GC cleanup, retry, general effect polymorphism, unsafe native handles, shared mutable resources, distributed transactions, sockets/files as public APIs, standard-library facades, provider linking, release, and deployment remain excluded.

@@ -60,8 +60,14 @@ export function annotateParsedModule(module, {filename, language, source}) {
   for (const [index, entry] of entries.entries()) {
     const ranges = parserRanges.get(entry.node) ?? {}
     const location = "location" in entry.node ? entry.node.location : ranges.type ?? entry.ownerLocation
+    const related = {location, sourceId: "source:0"}
+    const origin = entry.path.startsWith("/capabilities/")
+      ? {kind: /** @type {const} */ ("synthetic"), reason: "compiler-authorized capability", relatedOrigins: [related]}
+      : entry.node.kind == "OwnedMoveExpression" || entry.node.kind == "OwnedBorrowExpression"
+        ? {kind: /** @type {const} */ ("derived"), origins: [related]}
+        : {kind: /** @type {const} */ ("source"), location, sourceId: "source:0"}
     const sourceProvenance = /** @type {import("./types.js").SemanticNodeSourceProvenance} */ ({
-      origin: {kind: "source", location, sourceId: "source:0"},
+      origin,
       ranges,
       schema: "SemantifoldNodeProvenance",
       version: 1
@@ -76,7 +82,7 @@ export function annotateParsedModule(module, {filename, language, source}) {
 
     records.push(record)
     recordsByPath.set(entry.path, record)
-    entry.node.sourceProvenance = sourceProvenance
+    if (Object.isExtensible(entry.node)) Reflect.set(entry.node, "sourceProvenance", sourceProvenance)
   }
 
   const symbols = resolveSymbols(module, recordsByPath)
@@ -131,13 +137,16 @@ export function createGenerationIndex(module, providedSources = []) {
 
   for (const [index, entry] of entries.entries()) {
     const located = "location" in entry.node ? entry.node.location : entry.ownerLocation
-    const associated = usableNodeProvenance(entry.node.sourceProvenance)
+    const associated = usableNodeProvenance(Reflect.get(entry.node, "sourceProvenance"))
     const ranges = associated ? validRanges(associated.ranges, verifiableSources) : {}
     const normalizedOrigin = associated
       ? normalizeOrigin(associated.origin, priorSourcesById, verifiableSources)
       : undefined
     const fallbackSource = sourceForLocation(located, sources)
-    const origin = normalizedOrigin ?? sourceOrigin(fallbackSource, located)
+    const origin = entry.path.startsWith("/capabilities/")
+      ? {kind: /** @type {const} */ ("synthetic"), reason: "compiler-authorized capability",
+        relatedOrigins: [{location: located, sourceId: fallbackSource.id}]}
+      : normalizedOrigin ?? sourceOrigin(fallbackSource, located)
 
     const record = {
       id: `node:${index}`,
@@ -487,6 +496,9 @@ export function semanticEntries(module) {
         ;(node.classes ?? []).forEach((child, index) => visit(child, `/classes/${index}`, location))
       }
       ;(node.errors ?? []).forEach((child, index) => visit(child, `/errors/${index}`, location))
+      if (!("sourceFilename" in node)) {
+        ;(node.capabilities ?? []).forEach((child, index) => visit(child, `/capabilities/${index}`, location))
+      }
       node.functions.forEach((child, index) => visit(child, `/functions/${index}`, location))
       if ("exports" in node) {
         node.exports.forEach((child, index) => visit(child, `/exports/${index}`, location))
@@ -495,6 +507,13 @@ export function semanticEntries(module) {
     } else if (node.kind == "RecordDeclaration") {
       ;(node.typeParameters ?? []).forEach((child, index) => visit(child, `${path}/typeParameters/${index}`, location))
       node.fields.forEach((child, index) => visit(child, `${path}/fields/${index}`, location))
+    } else if (node.kind == "EffectCapabilityDeclaration") {
+      node.resources.forEach((child, index) => visit(child, `${path}/resources/${index}`, location))
+      node.failures.forEach((child, index) => visit(child, `${path}/failures/${index}`, location))
+      node.operations.forEach((child, index) => visit(child, `${path}/operations/${index}`, location))
+    } else if (node.kind == "EffectOperationDeclaration") {
+      node.parameters.forEach((child, index) => visit(child.type, `${path}/parameters/${index}/type`, location))
+      visit(node.returnType, `${path}/returnType`, location)
     } else if (node.kind == "ClassDeclaration") {
       node.fields.forEach((child, index) => visit(child, `${path}/fields/${index}`, location))
       visit(node.constructor, `${path}/constructor`, location)
@@ -575,8 +594,10 @@ export function semanticEntries(module) {
     } else if (node.kind == "BinaryExpression") {
       visit(node.left, `${path}/left`, location)
       visit(node.right, `${path}/right`, location)
-    } else if (node.kind == "CallExpression") {
+    } else if (node.kind == "CallExpression" || node.kind == "EffectCallExpression") {
       node.arguments.forEach((child, index) => visit(child, `${path}/arguments/${index}`, location))
+    } else if (node.kind == "OwnedMoveExpression" || node.kind == "OwnedBorrowExpression") {
+      visit(node.expression, `${path}/expression`, location)
     } else if (node.kind == "MethodCallExpression") {
       visit(node.receiver, `${path}/receiver`, location)
       node.arguments.forEach((child, index) => visit(child, `${path}/arguments/${index}`, location))
@@ -643,6 +664,33 @@ function resolveSymbols(module, records) {
   const methodSymbols = new Map()
   /** @type {Map<string, string>} */
   const typeParameterSymbols = new Map()
+  /** @type {Map<string, string>} */
+  const resourceSymbols = new Map()
+  /** @type {Map<string, string>} */
+  const operationSymbols = new Map()
+
+  for (const [capabilityIndex, capability] of (module.capabilities ?? []).entries()) {
+    const capabilityPath = `/capabilities/${capabilityIndex}`
+
+    declare(capability, capability.name, "capability", capabilityPath)
+    for (const [resourceIndex, resource] of capability.resources.entries()) {
+      resourceSymbols.set(resource.id, declare(resource, resource.name, "resource", `${capabilityPath}/resources/${resourceIndex}`))
+    }
+    for (const [failureIndex, failure] of capability.failures.entries()) {
+      errorSymbols.set(failure.id, declare(failure, failure.name, "failure", `${capabilityPath}/failures/${failureIndex}`))
+    }
+    for (const [operationIndex, operation] of capability.operations.entries()) {
+      operationSymbols.set(operation.id, declare(operation, operation.name, "operation", `${capabilityPath}/operations/${operationIndex}`))
+    }
+  }
+  for (const [capabilityIndex, capability] of (module.capabilities ?? []).entries()) {
+    for (const [operationIndex, operation] of capability.operations.entries()) {
+      const operationPath = `/capabilities/${capabilityIndex}/operations/${operationIndex}`
+      operation.parameters.forEach((parameter, parameterIndex) =>
+        visitType(parameter.type, `${operationPath}/parameters/${parameterIndex}/type`))
+      visitType(operation.returnType, `${operationPath}/returnType`)
+    }
+  }
 
   for (const [index, declaration] of (module.records ?? []).entries()) {
     const declarationPath = `/records/${index}`
@@ -750,7 +798,7 @@ function resolveSymbols(module, records) {
 
   /**
    * Declares one canonical symbol.
-   * @param {import("./types.js").RecordDeclaration | import("./types.js").ClassDeclaration | import("./types.js").ErrorDeclaration | import("./types.js").RecordField | import("./types.js").PrivateField | import("./types.js").ConstructorDeclaration | import("./types.js").MethodDeclaration | import("./types.js").FunctionDeclaration | import("./types.js").TypeParameter | import("./types.js").Parameter | import("./types.js").LocalDeclaration | import("./types.js").ValueBinding | import("./types.js").CatchBinding} node - Declaration.
+   * @param {import("./types.js").EffectCapabilityDeclaration | import("./types.js").EffectResourceDeclaration | import("./types.js").EffectFailureDeclaration | import("./types.js").EffectOperationDeclaration | import("./types.js").RecordDeclaration | import("./types.js").ClassDeclaration | import("./types.js").ErrorDeclaration | import("./types.js").RecordField | import("./types.js").PrivateField | import("./types.js").ConstructorDeclaration | import("./types.js").MethodDeclaration | import("./types.js").FunctionDeclaration | import("./types.js").TypeParameter | import("./types.js").Parameter | import("./types.js").LocalDeclaration | import("./types.js").ValueBinding | import("./types.js").CatchBinding} node - Declaration.
    * @param {string} name - Symbol name.
    * @param {import("./types.js").SemanticSymbolKind} kind - Symbol kind.
    * @param {string} path - Declaration occurrence path.
@@ -761,7 +809,7 @@ function resolveSymbols(module, records) {
 
     if (!record) throw new Error(`Missing provenance for ${node.kind}.`)
 
-    const location = record.ranges.name ?? node.location
+    const location = record.ranges.name ?? ("location" in node ? node.location : primaryLocation(record.origin))
     const id = `symbol:${symbols.length}`
 
     record.symbolId = id
@@ -772,8 +820,8 @@ function resolveSymbols(module, records) {
       location,
       name,
       references: [],
-      ...(["record", "class", "error", "field", "constructor", "method", "function", "typeParameter"].includes(kind)
-        ? {semanticDeclarationId: /** @type {import("./types.js").RecordDeclaration | import("./types.js").ClassDeclaration | import("./types.js").ErrorDeclaration | import("./types.js").RecordField | import("./types.js").PrivateField | import("./types.js").ConstructorDeclaration | import("./types.js").MethodDeclaration | import("./types.js").FunctionDeclaration | import("./types.js").TypeParameter} */ (node).id}
+      ...(["capability", "resource", "failure", "operation", "record", "class", "error", "field", "constructor", "method", "function", "typeParameter"].includes(kind)
+        ? {semanticDeclarationId: /** @type {{id?: string}} */ (node).id}
         : {})
     })
 
@@ -877,6 +925,11 @@ function resolveSymbols(module, records) {
 
       reference(expression, declaration ? functions.get(declaration.name) : undefined, "call", path)
       for (const [index, argument] of expression.arguments.entries()) visitExpression(argument, scope, `${path}/arguments/${index}`)
+    } else if (expression.kind == "EffectCallExpression") {
+      reference(expression, operationSymbols.get(expression.operation), "call", path)
+      for (const [index, argument] of expression.arguments.entries()) visitExpression(argument, scope, `${path}/arguments/${index}`)
+    } else if (expression.kind == "OwnedMoveExpression" || expression.kind == "OwnedBorrowExpression") {
+      visitExpression(expression.expression, scope, `${path}/expression`)
     } else if (expression.kind == "RecordConstruction") {
       reference(expression, recordSymbols.get(expression.record.declarationId), "construct", path)
       for (const [index, argument] of expression.arguments.entries()) visitExpression(argument, scope, `${path}/arguments/${index}`)
@@ -935,7 +988,8 @@ function resolveSymbols(module, records) {
       for (const [index, argument] of (type.arguments ?? []).entries()) visitType(argument, `${path}/arguments/${index}`)
     }
     else if (type.kind == "ErrorType") reference(type, errorSymbols.get(type.declarationId), "type", path)
-    else if (type.kind == "ReferenceType") reference(type, classSymbols.get(type.declarationId), "type", path)
+    else if (type.kind == "ReferenceType" || type.kind == "OwnedReferenceType") reference(type, classSymbols.get(type.declarationId), "type", path)
+    else if (type.kind == "OwnedResourceType") reference(type, resourceSymbols.get(type.resourceId), "type", path)
     else if (type.kind == "ListType") visitType(type.elementType, `${path}/elementType`)
     else if (type.kind == "MapType" || type.kind == "OrderedMapType") {
       visitType(type.keyType, `${path}/keyType`)
@@ -945,7 +999,7 @@ function resolveSymbols(module, records) {
 
   /**
    * Attaches one resolved symbol reference.
-   * @param {import("./types.js").IdentifierExpression | import("./types.js").ReceiverExpression | import("./types.js").CallExpression | import("./types.js").MethodCallExpression | import("./types.js").TypeVariableReference | import("./types.js").RecordType | import("./types.js").ReferenceType | import("./types.js").RecordConstruction | import("./types.js").ReferenceConstruction | import("./types.js").MemberRead | import("./types.js").PrivateFieldRead | import("./types.js").PrivateFieldWriteStatement | import("./types.js").ErrorType | import("./types.js").ErrorConstruction} node - Reference node.
+   * @param {import("./types.js").IdentifierExpression | import("./types.js").ReceiverExpression | import("./types.js").CallExpression | import("./types.js").EffectCallExpression | import("./types.js").MethodCallExpression | import("./types.js").TypeVariableReference | import("./types.js").RecordType | import("./types.js").ReferenceType | import("./types.js").OwnedReferenceType | import("./types.js").OwnedResourceType | import("./types.js").RecordConstruction | import("./types.js").ReferenceConstruction | import("./types.js").MemberRead | import("./types.js").PrivateFieldRead | import("./types.js").PrivateFieldWriteStatement | import("./types.js").ErrorType | import("./types.js").ErrorConstruction} node - Reference node.
    * @param {string | undefined} symbolId - Resolved symbol.
    * @param {"type" | "construct" | "member" | "read" | "write" | "call"} role - Reference role.
    * @param {string} path - Reference occurrence path.

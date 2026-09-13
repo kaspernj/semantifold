@@ -1,6 +1,7 @@
 // @ts-check
 
 import {emitExpression, emitType} from "./shared.js"
+import {emitEffectPrefixes, emitEffectSupport} from "./effects.js"
 
 /**
  * Emits an independently executable PHP program through the source-aware writer.
@@ -11,6 +12,7 @@ import {emitExpression, emitType} from "./shared.js"
 export function generatePhp(module, writer) {
   if (writer.program) emitProgramHeader(module, writer)
   else writer.synthetic("<?php\ndeclare(strict_types=1);\n\n", "PHP program scaffolding", [module])
+  emitEffectSupport(writer, module, "php")
   const records = module.records ?? []
   const classes = module.classes ?? []
   const errors = module.errors ?? []
@@ -344,7 +346,7 @@ function emitNativePhpType(writer, type, path) {
     })
     return
   }
-  if (type.kind == "ReferenceType") {
+  if (type.kind == "ReferenceType" || type.kind == "OwnedResourceType" || type.kind == "OwnedReferenceType") {
     emitType(writer, type, path, "php")
     return
   }
@@ -394,6 +396,8 @@ function emitBlock(writer, block, indent, path) {
  * @returns {void}
  */
 function emitStatement(writer, statement, indent, path) {
+  emitEffectPrefixes(writer, statement, indent, path, "php",
+    (expression, expressionPath) => emitExpression(writer, expression, expressionPath, "php", phpIdentifier))
   if (statement.kind == "LocalDeclaration" || statement.kind == "AssignmentStatement") return emitLocal(writer, statement, indent, path)
   writer.synthetic(indent, "indentation", [statement], [path])
   if (statement.kind == "PrivateFieldWriteStatement") {

@@ -8,10 +8,12 @@ import {createGeneratedArtifactSet as constructArtifactSet} from "./src/artifact
 import {SemantifoldDiagnostic, unsupportedCapability} from "./src/diagnostic.js"
 import {languageRegistry} from "./src/language-registry.js"
 import {kotlinArtifactMetadata} from "./src/backends/kotlin.js"
+import {preflightEffectCapabilities} from "./src/backends/effects.js"
 
 const artifactBackendRoles = new Set(["text", "binary", "application"])
 
 export {SemantifoldDiagnostic}
+export {createCapabilityAuthority} from "./src/semantic/capabilities.js"
 export {languageCapabilities, supportedLanguages} from "./src/language-registry.js"
 export {createGeneratedArtifactSet} from "./src/artifacts.js"
 export {createByteMapping, parseByteMapping, stringifyByteMapping} from "./src/binary-mapping.js"
@@ -40,6 +42,7 @@ export {
  * @param {string} input.filename - Source filename used in diagnostics.
  * @param {import("./src/semantic/types.js").SemanticLanguage} input.language - Source language.
  * @param {string} input.source - Source text.
+ * @param {Readonly<import("./src/semantic/types.js").CapabilityAuthority> | import("./src/semantic/types.js").CapabilityAuthorityInput} [input.capabilityAuthority] - Explicit compiler authority.
  * @returns {import("./src/semantic/types.js").SemanticModule} Semantic module.
  */
 export function parse(input) {
@@ -131,6 +134,7 @@ export function generateArtifactSet(input) {
     })
   }
   const target = languageRegistry.record(language)
+  preflightEffectCapabilities(module, /** @type {import("./src/semantic/types.js").BackendLanguage} */ (language))
   const genericDeclaration = [...module?.records ?? [], ...module?.functions ?? []]
     .find((declaration) => (declaration?.typeParameters?.length ?? 0) > 0)
 
@@ -148,7 +152,6 @@ export function generateArtifactSet(input) {
     unsupportedCapability(/** @type {import("./src/semantic/types.js").BackendLanguage} */ (language),
       "Task 033 reference classes", module.classes[0].location ?? module.location)
   }
-
   if (role == "text") {
     if (target.artifactMultiplicity == "multiple") {
       const backend = languageRegistry.resolve(language, "textBackend", module?.location)

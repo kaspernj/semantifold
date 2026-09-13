@@ -136,6 +136,25 @@ npx velocious-test spec/language-registry.spec.js
 
 The adopted cohort is PHP, Ruby, JavaScript/JSDoc, TypeScript, and Java. Task 033 is single-module and does not add inheritance, open or virtual classes, arbitrary host objects, identity operators, escaping unchecked-error effects, resources, standard-library contracts, facades, providers, publication, or deployment behavior.
 
+## Task 034 effectful capabilities and resource lifetime
+
+Task 034 uses six dedicated focused specs plus the changed public API and language-registry contracts. They cover frozen explicit authority, deterministic capability/resource/failure/operation/effect identities, same-named ordinary source functions, exact typed failure boundaries, linear moves and immediate borrows, every-path close or transfer, terminal close failures, absence/failure separation, all five parser profiles, transactional target preflight, left-to-right exactly-once lowering, provenance/mappings, and the Task 010/non-cohort boundary.
+
+Run every file individually and sequentially. The runtime spec discovers and invokes real `php`, `ruby`, `node`, local `tsc`, `javac`, and `java`; a missing tool fails. Its fixture proves effectful receiver-before-argument order and nested single evaluation, acquisition/read/close failure normalization, clean EOF as optional absence, transfer through functions and constructors, explicit branch/catch/loop discharge, terminal repeated-close and read-after-close behavior without another native operation, deterministic generation, generated-source reparse under the same authority, compilation, execution, and absence of implicit cleanup events.
+
+```sh
+npx velocious-test spec/effectful-capability-contract.spec.js
+npx velocious-test spec/resource-lifetime-validation.spec.js
+npx velocious-test spec/effectful-capability-frontends.spec.js
+npx velocious-test spec/effectful-capability-backends.spec.js
+npx velocious-test spec/effectful-capability-provenance-and-mapping.spec.js
+LANG=C.UTF-8 LC_ALL=C.UTF-8 npx velocious-test spec/effectful-capability-runtime-execution.spec.js
+npx velocious-test spec/public-api.spec.js
+npx velocious-test spec/language-registry.spec.js
+```
+
+For the Task 034 local handoff, do not run `npm test`, a whole spec directory, or another aggregate. TensorBuzz owns clean aggregate discovery. Task 034 remains an unversioned single-module foundation with one fixed protected conformance binding; Task 035 owns canonical contract versions, facades, provider registries, negotiation, linking, and protected native provider artifacts.
+
 ## Task 025 core expanded-language acceptance
 
 Task 025 uses two data-driven focused specs instead of duplicating the eight owning language suites. `spec/core-language-baseline-acceptance.spec.js` normalizes all five Tasks 001–004 profiles for Python, C#, C, C++, Rust, Swift, Kotlin/JVM, and Go; generates, reparses, and really executes one operator round trip per language; runs the eleven-path spanning matrix documented in [language support](language-support.md#task-025-core-expanded-language-acceptance); checks deterministic artifact bytes/mappings/provenance; and asserts the public registry contract. Its ordered program checks eager left-before-right calls and both short-circuit sides. C and C++ run the exact ordered-region source at O0/O2 with and without sanitizers, Rust runs debug/release, and Swift runs debug/`-O`.

@@ -1,6 +1,7 @@
 // @ts-check
 
 import {emitExpression, emitType, requiresCanonicalZeroRendering} from "./shared.js"
+import {emitEffectPrefixes, emitEffectSupport} from "./effects.js"
 
 /**
  * Emits an independently executable TypeScript program through the source-aware writer.
@@ -15,6 +16,7 @@ export function generateTypeScript(module, writer) {
   const errors = module.errors ?? []
 
   emitProgramImports(module, writer)
+  emitEffectSupport(writer, module, "typescript")
 
   errors.forEach((error, errorIndex) => {
     const path = `/errors/${errorIndex}`
@@ -266,6 +268,8 @@ function emitBlock(writer, block, indent, path, canonicalizeZero) {
  * @returns {void}
  */
 function emitStatement(writer, statement, indent, path, canonicalizeZero) {
+  emitEffectPrefixes(writer, statement, indent, path, "typescript",
+    (expression, expressionPath) => emitExpression(writer, expression, expressionPath, "typescript", identity))
   if (statement.kind == "LocalDeclaration" || statement.kind == "AssignmentStatement") {
     emitLocal(writer, statement, indent, path)
     writer.synthetic("\n", "line break", [statement], [path])

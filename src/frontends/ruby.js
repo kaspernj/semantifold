@@ -49,15 +49,17 @@ import {locationFromOffsets, moduleLocation, utf8ByteOffsetToUtf16Offset} from "
 import {withAdaptedOperation} from "../semantic/operators.js"
 import {withParserRanges} from "../semantic/provenance.js"
 import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
+import {isTask034ResourceProbe} from "../semantic/capabilities.js"
+import {hasExactEffectSupport} from "../backends/effects.js"
 import {requireSourceReturnType} from "./scalars.js"
-import {documentedValueType, instantiatedRecordFieldType, iterationBindingType, iterationOperandType, knownCallReturnType, orderedMapTypeFromMap, preservesGenericOptionalEvidence, recordType, referenceType, sameValueType} from "./types.js"
+import {capabilityFunctionSignatures, documentedValueType, instantiatedRecordFieldType, iterationBindingType, iterationOperandType, knownCallReturnType, orderedMapTypeFromMap, preservesGenericOptionalEvidence, recordType, referenceType, sameValueType} from "./types.js"
 const parsePrism = await loadPrism()
 const referenceMethodHooks = new Set([
   "__send__", "extend", "fetch", "instance_eval", "instance_exec", "method", "method_missing", "public_send",
   "respond_to_missing?", "send", "singleton_class", "size"
 ])
 /** @typedef {{name: string, nameLocation: import("../semantic/types.js").SourceLocation, parameters: import("../semantic/types.js").Parameter[], returnType: import("../semantic/types.js").SemanticFunctionReturnType, typeParameters?: import("../semantic/types.js").TypeParameter[], location: import("../semantic/types.js").SourceLocation}} RubyFunctionSignature */
-/** @typedef {{bindings: Map<string, import("../semantic/types.js").SemanticBindingType>, classes: Map<string, import("../semantic/types.js").ClassDeclaration>, currentClass?: import("../semantic/types.js").ClassDeclaration, errorNames: Map<string, import("../semantic/types.js").ErrorDeclaration>, errors: Map<string, import("../semantic/types.js").ErrorDeclaration>, functions: Map<string, RubyFunctionSignature>, orderedMapDeclarations?: Set<object>, records: Map<string, import("../semantic/types.js").RecordDeclaration>, recordNames: Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>, loopDepth?: number, returnType?: import("../semantic/types.js").SemanticFunctionReturnType, typeParameters?: Map<string, import("../semantic/types.js").TypeParameter>}} RubyConversionContext */
+/** @typedef {{bindings: Map<string, import("../semantic/types.js").SemanticBindingType>, classes: Map<string, import("../semantic/types.js").ClassDeclaration>, currentClass?: import("../semantic/types.js").ClassDeclaration, errorNames: Map<string, import("../semantic/types.js").ErrorDeclaration>, errors: Map<string, import("../semantic/types.js").ErrorDeclaration>, functions: Map<string, RubyFunctionSignature>, orderedMapDeclarations?: Set<object>, records: Map<string, import("../semantic/types.js").RecordDeclaration>, recordNames: Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").EffectResourceDeclaration>, loopDepth?: number, returnType?: import("../semantic/types.js").SemanticFunctionReturnType, typeParameters?: Map<string, import("../semantic/types.js").TypeParameter>}} RubyConversionContext */
 const rubyBinaryOperations = new Map([
   ["+", "Add"],
   ["-", "Subtract"],
@@ -295,6 +297,9 @@ function convertExpression(node, filename, source, context, expectedType, preser
       reference: referenceType(/** @type {string} */ (declaration.id), nodeLocation(node.receiver, filename, source))},
       {class: nodeLocation(node.receiver, filename, source)})
     }
+    if (declaration.kind == "EffectResourceDeclaration") {
+      return unsupportedSyntax("ruby", "owned resource construction", nodeLocation(node.receiver, filename, source))
+    }
     const typeArguments = expectedType?.kind == "RecordType" && expectedType.declarationId == declaration.id
       ? expectedType.arguments
       : undefined
@@ -457,7 +462,7 @@ function convertExpression(node, filename, source, context, expectedType, preser
 
     return withParserRanges({arguments: (node.arguments_?.arguments_ ?? []).map((argument, index) =>
       convertExpression(argument, filename, source, context, method?.parameters[index]?.type)),
-    kind: /** @type {const} */ ("MethodCallExpression"), location, method: method?.name ?? node.name,
+    kind: /** @type {const} */ ("MethodCallExpression"), location, method: method?.id ?? node.name,
     receiver: convertExpression(node.receiver, filename, source, context)},
     {member: prismLocation(node.messageLoc ?? node.location, filename, source)})
   }
@@ -752,7 +757,7 @@ function associatedComments(comments, node, source) {
  * @param {LocalVariableWriteNode} node - Local write.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} recordNames - Nominal declarations by source name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").EffectResourceDeclaration>} recordNames - Nominal declarations by source name.
  * @param {Map<string, import("../semantic/types.js").TypeParameter>} [typeParameters] - Declaration-scoped parameters.
  * @returns {{immutable: boolean, type: import("../semantic/types.js").SemanticValueType} | undefined} Metadata when present.
  */
@@ -1156,7 +1161,7 @@ function isImmediateCommentGap(gap) {
  * @param {import("../semantic/types.js").SourceLocation} location - Source location.
  * @param {string} source - Complete parser input.
  * @param {import("../semantic/types.js").SourceLocation} [typeLocation] - Exact type comment token location.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} [recordNames] - Nominal declarations by source name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").EffectResourceDeclaration>} [recordNames] - Nominal declarations by source name.
  * @param {Map<string, import("../semantic/types.js").TypeParameter>} [typeParameters] - Declaration-scoped parameters.
  * @returns {import("../semantic/types.js").SemanticValueType} Semantic type.
  */
@@ -1170,7 +1175,7 @@ function convertType(sourceType, subject, location, source, typeLocation = locat
  * @param {import("@ruby/prism/src/deserialize.js").Comment[]} comments - Prism comments.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} recordNames - Nominal declarations by source name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").EffectResourceDeclaration>} recordNames - Nominal declarations by source name.
  * @param {string} ownerId - Stable function identity.
  * @returns {RubyFunctionSignature} Semantic signature.
  */
@@ -1232,7 +1237,7 @@ function convertFunctionSignature(node, comments, filename, source, recordNames,
  * @param {DefNode} node - Prism definition.
  * @param {RubyFunctionSignature} signature - Converted signature.
  * @param {Map<string, RubyFunctionSignature>} functions - Module signatures.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} recordNames - Nominal declarations by source name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").EffectResourceDeclaration>} recordNames - Nominal declarations by source name.
  * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} records - Record declarations by identity.
  * @param {Map<string, import("../semantic/types.js").ClassDeclaration>} classes - Reference classes by identity.
  * @param {Map<string, import("../semantic/types.js").ErrorDeclaration>} errorNames - Error declarations by source name.
@@ -1343,7 +1348,7 @@ function convertRubyError(node, declaration, filename, source) {
  * Converts the bounded Ruby reference-class profile.
  * @param {ClassNode} node - Prism class declaration.
  * @param {import("../semantic/types.js").ClassDeclaration} declaration - Predeclared class identity.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} nominalNames - Visible nominal declarations.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").EffectResourceDeclaration>} nominalNames - Visible nominal declarations.
  * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} records - Records by identity.
  * @param {Map<string, import("../semantic/types.js").ClassDeclaration>} classes - Classes by identity.
  * @param {Map<string, RubyFunctionSignature>} functions - Top-level signatures.
@@ -1438,7 +1443,7 @@ function convertRubyReferenceClass(node, declaration, nominalNames, records, cla
  * Converts one exact typed-reader/initializer/freeze Ruby record profile.
  * @param {ClassNode} node - Prism class declaration.
  * @param {import("../semantic/types.js").RecordDeclaration} declaration - Predeclared nominal identity.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} recordNames - Nominal declarations by name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").EffectResourceDeclaration>} recordNames - Nominal declarations by name.
  * @param {import("@ruby/prism/src/deserialize.js").Comment[]} comments - Parser-owned comments.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
@@ -1657,10 +1662,11 @@ function convertPrint(node, filename, source, context) {
  * @param {object} input - Parser input.
  * @param {string} input.filename - Source filename.
  * @param {string} input.source - Source text.
+ * @param {readonly import("../semantic/types.js").EffectCapabilityDeclaration[]} [input.capabilities] - Compiler-authorized declarations.
  * @param {{isEntry: boolean, functions: Map<string, import("../semantic/types.js").FunctionDeclaration>, records: Map<string, import("../semantic/types.js").RecordDeclaration>, errors?: Map<string, import("../semantic/types.js").ErrorDeclaration>}} [input.program] - Resolved program imports and entry role.
  * @returns {import("../semantic/types.js").SemanticModule} Semantic module.
  */
-export function parseRuby({filename, source, program}) {
+export function parseRuby({capabilities = [], filename, source, program}) {
   const result = parsePrism(source, {filepath: filename})
 
   if (result.errors.length > 0) {
@@ -1672,7 +1678,7 @@ export function parseRuby({filename, source, program}) {
 
   if (!(result.value instanceof ProgramNode)) throw new Error("Prism returned a non-program root.")
 
-  let body = result.value.statements.body
+  let body = task034RubyBody(result.value.statements.body, result.comments, capabilities, filename, source)
 
   if (program) {
     inspectRubyModule({filename, source})
@@ -1724,9 +1730,13 @@ export function parseRuby({filename, source, program}) {
     classDeclarations.findIndex((candidate) => candidate.name == declaration.name) != index)
 
   if (reopened) return unsupportedSyntax("ruby", `reference class reopening '${reopened.name}'`, reopened.location)
-  const recordNames = /** @type {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} */ (
+  const recordNames = /** @type {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").EffectResourceDeclaration>} */ (
     new Map(program?.records ?? []))
+  for (const resource of capabilities.flatMap(({resources}) => resources)) recordNames.set(resource.name, resource)
   const errorNames = new Map(program?.errors ?? [])
+  for (const failure of capabilities.flatMap(({failures}) => failures)) {
+    errorNames.set(failure.name, /** @type {import("../semantic/types.js").ErrorDeclaration} */ (/** @type {unknown} */ (failure)))
+  }
   for (const declaration of errorDeclarations) errorNames.set(declaration.name, declaration)
   const errorsById = new Map([...errorNames.values()].map((declaration) => [/** @type {string} */ (declaration.id), declaration]))
   const errors = errorNodes.map((node, index) => convertRubyError(node, errorDeclarations[index], filename, source))
@@ -1737,7 +1747,8 @@ export function parseRuby({filename, source, program}) {
   const functionNodes = body.filter((node) => node instanceof DefNode)
   const signatures = functionNodes.map((node, index) =>
     convertFunctionSignature(node, result.comments, filename, source, recordNames, `function:${index}`))
-  const functionSignatures = new Map([...(program?.functions ?? [])].map(([localName, declaration]) => [localName, {
+  const functionSignatures = new Map([...capabilityFunctionSignatures(capabilities, moduleLocation(filename, source)),
+    ...(program?.functions ?? [])].map(([localName, declaration]) => [localName, {
     location: declaration.location,
     name: localName,
     nameLocation: declaration.location,
@@ -1791,6 +1802,42 @@ export function parseRuby({filename, source, program}) {
     ...(errors.length > 0 ? {errors} : {}),
     ...(records.length > 0 ? {records} : {})
   }
+}
+
+/**
+ * Removes exact protected Ruby probe support before portable conversion.
+ * @param {import("@ruby/prism").Node[]} body - Parsed top-level nodes.
+ * @param {{location: {startOffset: number, length: number}}[]} comments - Parser comments.
+ * @param {readonly import("../semantic/types.js").EffectCapabilityDeclaration[]} capabilities - Authorized declarations.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @returns {import("@ruby/prism").Node[]} Portable nodes.
+ */
+function task034RubyBody(body, comments, capabilities, filename, source) {
+  if (!isTask034ResourceProbe(capabilities)) return body
+  const marker = comments.find((comment) =>
+    source.slice(comment.location.startOffset, comment.location.startOffset + comment.location.length) ==
+      "# semantifold-task034-support")
+
+  if (!marker) return body
+  if (!hasExactEffectSupport(source, "ruby")) {
+    return unsupportedSyntax("ruby", "malformed protected Task 034 support", nodeLocation(body[0], filename, source))
+  }
+  const expected = [
+    ["ClassNode", "ProbeOperationFailure"], ["ClassNode", "ProbeAcquireFailure"], ["ClassNode", "ProbeReadFailure"],
+    ["ClassNode", "ProbeCloseFailure"], ["ClassNode", "ProbeResourceClosed"], ["ClassNode", "ProbeResource"],
+    ["GlobalVariableWriteNode", "$__semantifold_task034_trace"], ["DefNode", "probeEffect"], ["DefNode", "probeAcquire"],
+    ["DefNode", "probeRead"], ["DefNode", "probeClose"], ["DefNode", "probeTrace"]
+  ]
+  const matches = expected.every(([kind, name], index) => body[index]?.constructor.name == kind && Reflect.get(body[index], "name") == name)
+  const end = comments.find((comment) =>
+    source.slice(comment.location.startOffset, comment.location.startOffset + comment.location.length) ==
+      "# semantifold-task034-support-end")
+
+  if (!matches || !end || end.location.startOffset < body[expected.length - 1].location.startOffset + body[expected.length - 1].location.length) {
+    return unsupportedSyntax("ruby", "malformed protected Task 034 support", nodeLocation(body[0], filename, source))
+  }
+  return body.slice(expected.length)
 }
 
 /**

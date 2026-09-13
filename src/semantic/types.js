@@ -8,7 +8,7 @@
 /** @typedef {SemanticTypeName | "void"} FunctionReturnTypeName */
 /** @typedef {"IntegerNegate" | "BooleanNot"} SemanticUnaryOperation */
 /** @typedef {"IntegerAdd" | "IntegerSubtract" | "IntegerMultiply" | "BooleanAnd" | "BooleanOr" | "IntegerEqual" | "IntegerNotEqual" | "BooleanEqual" | "BooleanNotEqual" | "StringEqual" | "StringNotEqual" | "IntegerLessThan" | "IntegerLessThanOrEqual" | "IntegerGreaterThan" | "IntegerGreaterThanOrEqual" | "StringConcat"} SemanticBinaryOperation */
-/** @typedef {"record" | "class" | "error" | "field" | "constructor" | "method" | "function" | "typeParameter" | "parameter" | "local" | "iteration" | "catch"} SemanticSymbolKind */
+/** @typedef {"capability" | "resource" | "failure" | "operation" | "record" | "class" | "error" | "field" | "constructor" | "method" | "function" | "typeParameter" | "parameter" | "local" | "iteration" | "catch"} SemanticSymbolKind */
 /** @typedef {"record" | "class" | "error" | "function"} SemanticDeclarationKind */
 /** @typedef {"declaration" | "type" | "construct" | "member" | "read" | "write" | "call"} SemanticSymbolRole */
 /** @typedef {"parse" | "generate" | "restore" | "compile" | "link" | "validate" | "instantiate" | "execute"} AcceptanceStage */
@@ -48,6 +48,7 @@
  * @property {boolean} typedErrors - Task 011 nominal unchecked errors, raises, and exact typed catches.
  * @property {boolean} typeParametersAndGenerics - Task 012 invariant unbounded type parameters and closed generic applications.
  * @property {boolean} referenceClasses - Task 033 nominal reference classes, private instance state, exact constructors, and receiver methods.
+ * @property {boolean} effectfulCapabilitiesAndResources - Task 034 authorized host effects, typed failures, and owned resources.
  */
 
 /**
@@ -369,7 +370,21 @@
  * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned type-name range.
  */
 
-/** @typedef {TypeReference | TypeVariableReference | ListType | MapType | OrderedMapType | OptionalType | RecordType | ReferenceType} SemanticValueType */
+/**
+ * @typedef OwnedResourceType
+ * @property {"OwnedResourceType"} kind - Compiler-owned linear resource type.
+ * @property {string} resourceId - Exact authority resource declaration identity.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned type-name range.
+ */
+
+/**
+ * @typedef OwnedReferenceType
+ * @property {"OwnedReferenceType"} kind - Linear reference that owns one protected resource.
+ * @property {string} declarationId - Exact owned class declaration identity.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned type-name range.
+ */
+
+/** @typedef {TypeReference | TypeVariableReference | ListType | MapType | OrderedMapType | OptionalType | RecordType | ReferenceType | OwnedResourceType | OwnedReferenceType} SemanticValueType */
 /** @typedef {SemanticValueType | ErrorType} SemanticBindingType */
 
 /**
@@ -381,7 +396,7 @@
 
 /** @typedef {SemanticValueType | FunctionReturnTypeReference} SemanticFunctionReturnType */
 
-/** @typedef {SemanticTypeName | {kind: "TypeVariableReference", parameterId: string} | {kind: "ListType", elementType: SemanticTypeIdentity} | {kind: "MapType", keyType: SemanticTypeIdentity, valueType: SemanticTypeIdentity} | {kind: "OrderedMapType", keyType: SemanticTypeIdentity, valueType: SemanticTypeIdentity, order: "insertion"} | {kind: "OptionalType", valueType: SemanticTypeIdentity} | {kind: "RecordType", declarationId: string, arguments?: SemanticTypeIdentity[]} | {kind: "ReferenceType", declarationId: string}} SemanticTypeIdentity */
+/** @typedef {SemanticTypeName | {kind: "TypeVariableReference", parameterId: string} | {kind: "ListType", elementType: SemanticTypeIdentity} | {kind: "MapType", keyType: SemanticTypeIdentity, valueType: SemanticTypeIdentity} | {kind: "OrderedMapType", keyType: SemanticTypeIdentity, valueType: SemanticTypeIdentity, order: "insertion"} | {kind: "OptionalType", valueType: SemanticTypeIdentity} | {kind: "RecordType", declarationId: string, arguments?: SemanticTypeIdentity[]} | {kind: "ReferenceType", declarationId: string} | {kind: "OwnedResourceType", resourceId: string} | {kind: "OwnedReferenceType", declarationId: string}} SemanticTypeIdentity */
 /** @typedef {SemanticTypeIdentity | "void"} FunctionReturnTypeIdentity */
 
 /**
@@ -401,6 +416,108 @@
  * @property {SourceLocation} location - Source location.
  * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
  */
+
+/**
+ * @typedef ResolvedEffectOperationSignature
+ * @property {"ResolvedEffectOperationSignature"} kind - Resolution discriminator.
+ * @property {string} capabilityId - Exact capability declaration identity.
+ * @property {string} operationId - Exact operation declaration identity.
+ * @property {SemanticTypeIdentity[]} parameterTypes - Exact ordered parameter types.
+ * @property {FunctionReturnTypeIdentity} returnType - Exact operation result.
+ * @property {readonly ["host"]} effects - Closed initial effect set.
+ * @property {string[]} failureIds - Exact ordered declared failures.
+ * @property {EffectResourceFlow} resourceFlow - Exact ownership transition.
+ */
+
+/**
+ * @typedef OwnedMoveExpression
+ * @property {"OwnedMoveExpression"} kind - Explicit linear ownership transfer.
+ * @property {IdentifierExpression} expression - Moved owner.
+ * @property {OwnedResourceType | OwnedReferenceType} type - Exact owned type.
+ * @property {SourceLocation} location - Exact transfer location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Derived source provenance.
+ */
+
+/**
+ * @typedef OwnedBorrowExpression
+ * @property {"OwnedBorrowExpression"} kind - Immediate nonescaping resource borrow.
+ * @property {"shared" | "exclusive"} mode - Borrow mode.
+ * @property {IdentifierExpression | ReceiverExpression | PrivateFieldRead} expression - Borrowed place.
+ * @property {OwnedResourceType | OwnedReferenceType} type - Exact owned type.
+ * @property {SourceLocation} location - Exact borrow location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Derived source provenance.
+ */
+
+/**
+ * @typedef EffectCallExpression
+ * @property {"EffectCallExpression"} kind - Compiler-authorized effect invocation.
+ * @property {string} operation - Exact operation declaration identity.
+ * @property {Expression[]} arguments - Source-ordered arguments.
+ * @property {string} effectSiteId - Deterministic semantic evaluation identity.
+ * @property {ResolvedEffectOperationSignature} resolution - Complete authority resolution.
+ * @property {SourceLocation} location - Complete call location.
+ * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned operation-name range.
+ */
+
+/**
+ * @typedef EffectParameter
+ * @property {string} name - Stable parameter name.
+ * @property {SemanticValueType} type - Exact ordered parameter type.
+ */
+
+/** @typedef {{kind: "none"} | {kind: "acquire", resourceId: string} | {kind: "borrow" | "close", parameterIndex: number, terminalFailureId: string}} EffectResourceFlow */
+
+/**
+ * @typedef EffectResourceDeclaration
+ * @property {"EffectResourceDeclaration"} kind - Capability resource declaration.
+ * @property {string} id - Deterministic authority-local identity.
+ * @property {string} name - Source-visible nominal resource name.
+ */
+
+/**
+ * @typedef EffectFailureDeclaration
+ * @property {"EffectFailureDeclaration"} kind - Capability failure declaration.
+ * @property {string} id - Deterministic authority-local identity.
+ * @property {string} name - Source-visible nominal failure name.
+ */
+
+/**
+ * @typedef EffectOperationDeclaration
+ * @property {"EffectOperationDeclaration"} kind - Compiler-authorized operation declaration.
+ * @property {string} id - Deterministic authority-local identity.
+ * @property {string} name - Source-visible operation name.
+ * @property {EffectParameter[]} parameters - Exact positional parameters.
+ * @property {SemanticFunctionReturnType} returnType - Exact result type.
+ * @property {readonly ["host"]} effects - Closed initial effect set.
+ * @property {string[]} failureIds - Ordered nominal failure identities.
+ * @property {EffectResourceFlow} resourceFlow - Exact ownership transition.
+ */
+
+/**
+ * @typedef EffectCapabilityDeclaration
+ * @property {"EffectCapabilityDeclaration"} kind - Authorized capability declaration.
+ * @property {string} id - Deterministic module-local identity.
+ * @property {string} authorityId - Opaque authority identity.
+ * @property {string} name - Capability name.
+ * @property {EffectResourceDeclaration[]} resources - Ordered resources.
+ * @property {EffectFailureDeclaration[]} failures - Ordered failures.
+ * @property {EffectOperationDeclaration[]} operations - Ordered operations.
+ */
+
+/**
+ * @typedef CapabilityAuthority
+ * @property {"SemantifoldCapabilityAuthority"} schema - Authority schema discriminator.
+ * @property {1} schemaVersion - Authority payload version, not a standard-library contract version.
+ * @property {string} id - Opaque caller-supplied authority identity.
+ * @property {EffectCapabilityDeclaration[]} capabilities - Normalized declarations.
+ */
+
+/** @typedef {{name: string, type: SemanticTypeName | {kind: "OwnedResourceType", resource: string} | {kind: "OptionalType", valueType: SemanticTypeName}}} CapabilityParameterInput */
+/** @typedef {{name: string}} CapabilityNamedInput */
+/** @typedef {{kind: "none"} | {kind: "acquire", resource: string} | {kind: "borrow" | "close", parameterIndex: number, terminalFailure: string}} CapabilityResourceFlowInput */
+/** @typedef {{name: string, parameters: CapabilityParameterInput[], returnType: FunctionReturnTypeName | {kind: "OwnedResourceType", resource: string} | {kind: "OptionalType", valueType: SemanticTypeName}, effects: ["host"], failures: string[], resourceFlow: CapabilityResourceFlowInput}} CapabilityOperationInput */
+/** @typedef {{name: string, resources: CapabilityNamedInput[], failures: CapabilityNamedInput[], operations: CapabilityOperationInput[]}} CapabilityDeclarationInput */
+/** @typedef {{schema: "SemantifoldCapabilityAuthority", schemaVersion: 1, id: string, capabilities: CapabilityDeclarationInput[]}} CapabilityAuthorityInput */
 
 /**
  * @typedef ListLiteral
@@ -554,6 +671,9 @@
  * @property {string} callee - Function name.
  * @property {Expression[]} arguments - Positional arguments.
  * @property {ResolvedFunctionSignature} [resolution] - Deterministic declaration and signature binding, required after frontend validation.
+ * @property {string} [effectSiteId] - Deterministic site identity when the resolved function reaches a host effect.
+ * @property {readonly ["host"]} [effects] - Inferred checked host-effect fact.
+ * @property {string[]} [failureIds] - Ordered capability failures reachable through this call.
  * @property {SourceLocation} location - Source location.
  * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
  */
@@ -571,6 +691,7 @@
  * @property {string} declarationId - Exact resolved method identity.
  * @property {SemanticTypeIdentity[]} parameterTypes - Exact method parameter types.
  * @property {FunctionReturnTypeIdentity} returnType - Exact method return type.
+ * @property {{kind: "preserve" | "terminal", terminalFailureId?: string}} [resourceFlow] - Owned receiver transition and declared terminal-use failure when applicable.
  */
 
 /**
@@ -584,9 +705,12 @@
 /**
  * @typedef ReferenceConstruction
  * @property {"ReferenceConstruction"} kind - Fresh nominal reference construction.
- * @property {ReferenceType} reference - Exact class type.
+ * @property {ReferenceType | OwnedReferenceType} reference - Exact class type.
  * @property {Expression[]} arguments - Source-ordered constructor arguments.
  * @property {ResolvedConstructorSignature} [resolution] - Exact constructor binding, required after validation.
+ * @property {string} [effectSiteId] - Deterministic site identity when construction reaches a host effect.
+ * @property {readonly ["host"]} [effects] - Inferred checked host-effect fact.
+ * @property {string[]} [failureIds] - Ordered capability failures reachable through construction.
  * @property {SourceLocation} location - Complete construction location.
  * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned class-name range.
  */
@@ -598,6 +722,9 @@
  * @property {string} method - Stable method identity after validation.
  * @property {Expression[]} arguments - Source-ordered arguments.
  * @property {ResolvedMethodSignature} [resolution] - Exact method binding, required after validation.
+ * @property {string} [effectSiteId] - Deterministic site identity when the method reaches a host effect.
+ * @property {readonly ["host"]} [effects] - Inferred checked host-effect fact.
+ * @property {string[]} [failureIds] - Ordered capability failures reachable through the method.
  * @property {SourceLocation} location - Complete call location.
  * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned method-name range.
  */
@@ -637,7 +764,7 @@
  * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned message-member range.
  */
 
-/** @typedef {IdentifierExpression | ReceiverExpression | IntegerLiteral | BooleanLiteral | StringLiteral | OptionalNone | OptionalSome | OptionalIsPresent | OptionalUnwrap | ListLiteral | MapLiteral | OrderedMapLiteral | ListIndexExpression | MapLookupExpression | CollectionSizeExpression | UnaryExpression | BinaryExpression | CallExpression | MethodCallExpression | ReferenceConstruction | RecordConstruction | MemberRead | PrivateFieldRead | ErrorMessageRead} Expression */
+/** @typedef {IdentifierExpression | ReceiverExpression | IntegerLiteral | BooleanLiteral | StringLiteral | OptionalNone | OptionalSome | OptionalIsPresent | OptionalUnwrap | ListLiteral | MapLiteral | OrderedMapLiteral | ListIndexExpression | MapLookupExpression | CollectionSizeExpression | UnaryExpression | BinaryExpression | CallExpression | EffectCallExpression | OwnedMoveExpression | OwnedBorrowExpression | MethodCallExpression | ReferenceConstruction | RecordConstruction | MemberRead | PrivateFieldRead | ErrorMessageRead} Expression */
 
 /**
  * @typedef LocalDeclaration
@@ -680,7 +807,7 @@
 /**
  * @typedef ExpressionStatement
  * @property {"ExpressionStatement"} kind - Node discriminator.
- * @property {CallExpression | MethodCallExpression} expression - A direct or receiver call whose resolved return type is void.
+ * @property {CallExpression | MethodCallExpression | EffectCallExpression} expression - A direct, receiver, or authorized call whose resolved return type is void.
  * @property {SourceLocation} location - Source location.
  * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
  */
@@ -877,6 +1004,7 @@
  * @property {PrivateField[]} fields - Ordered private instance state.
  * @property {ConstructorDeclaration} constructor - Sole exact constructor.
  * @property {MethodDeclaration[]} methods - Ordered receiver methods.
+ * @property {{kind: "ordinary"} | {kind: "ownedResource", fieldId: string, resourceId: string}} [ownership] - Explicit class ownership profile.
  * @property {SourceLocation} location - Complete class location.
  * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned class-name range.
  */
@@ -912,6 +1040,7 @@
  * @property {RecordDeclaration[]} [records] - Top-level nominal record declarations in source order; omitted when empty.
  * @property {ClassDeclaration[]} [classes] - Top-level nominal reference classes in source order; omitted when empty.
  * @property {ErrorDeclaration[]} [errors] - Top-level nominal unchecked error declarations in source order; omitted when empty.
+ * @property {EffectCapabilityDeclaration[]} [capabilities] - Compiler-authorized Task 034 declarations; omission is the legacy empty set.
  * @property {FunctionDeclaration[]} functions - Top-level functions.
  * @property {EntryPoint} entryPoint - Executable entry point.
  * @property {SourceLocation} location - Source location.
@@ -966,7 +1095,7 @@
  * @property {RegisteredSource[]} sources - Caller-order complete source registry.
  */
 
-/** @typedef {SemanticModule | SemanticProgramModule | SemanticImport | SemanticExport | RecordDeclaration | ClassDeclaration | ErrorDeclaration | RecordField | PrivateField | ConstructorDeclaration | MethodDeclaration | FunctionDeclaration | TypeParameter | Parameter | ValueBinding | CatchBinding | Block | Statement | EntryPoint | Expression | ErrorConstruction | ErrorType | MapEntry | SemanticValueType | FunctionReturnTypeReference} SemanticNode */
+/** @typedef {SemanticModule | SemanticProgramModule | SemanticImport | SemanticExport | RecordDeclaration | ClassDeclaration | ErrorDeclaration | EffectCapabilityDeclaration | EffectResourceDeclaration | EffectFailureDeclaration | EffectOperationDeclaration | RecordField | PrivateField | ConstructorDeclaration | MethodDeclaration | FunctionDeclaration | TypeParameter | Parameter | ValueBinding | CatchBinding | Block | Statement | EntryPoint | Expression | ErrorConstruction | ErrorType | MapEntry | SemanticValueType | FunctionReturnTypeReference} SemanticNode */
 /** @typedef {SemanticNode} SemanticNodeWithoutLocations */
 
 export {}

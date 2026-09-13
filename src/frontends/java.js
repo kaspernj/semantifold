@@ -6,8 +6,10 @@ import {locationFromOffsets, moduleLocation} from "../semantic/location.js"
 import {withAdaptedOperation} from "../semantic/operators.js"
 import {withParserRanges} from "../semantic/provenance.js"
 import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
+import {isTask034ResourceProbe} from "../semantic/capabilities.js"
+import {hasExactEffectSupport} from "../backends/effects.js"
 import {requireSourceReturnType, sourceScalarType} from "./scalars.js"
-import {instantiatedRecordFieldType, iterationBindingType, iterationOperandType, knownCallReturnType, listType, mapType, optionalType, orderedMapType, recordType, referenceType, sameValueType, typeVariable} from "./types.js"
+import {capabilityFunctionSignatures, instantiatedRecordFieldType, iterationBindingType, iterationOperandType, knownCallReturnType, listType, mapType, optionalType, orderedMapType, ownedResourceType, recordType, referenceType, sameValueType, typeVariable} from "./types.js"
 
 /** @type {Readonly<Record<string, string>>} */
 const simpleStringEscapes = Object.freeze({
@@ -45,7 +47,7 @@ const referenceMethodHooks = new Set(["clone", "equals", "finalize", "getClass",
  * @property {Map<string, import("../semantic/types.js").ErrorDeclaration>} errors - Errors by identity.
  * @property {Set<string>} erasedBindingNames - Source bindings consumed by exact semantic folds in this scope.
  * @property {Map<string, JavaFunctionSignature>} functions - Explicit module function signatures.
- * @property {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} recordNames - Nominal declarations by source name.
+ * @property {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").EffectResourceDeclaration>} recordNames - Nominal declarations by source name.
  * @property {Map<string, import("../semantic/types.js").RecordDeclaration>} records - Records by identity.
  * @property {import("../semantic/types.js").SemanticFunctionReturnType | undefined} returnType - Enclosing return type.
  * @property {Map<string, import("../semantic/types.js").TypeParameter>} [typeParameters] - Declaration-scoped parameters.
@@ -256,6 +258,9 @@ function convertExpression(node, filename, source, context, expectedType) {
       kind: /** @type {const} */ ("ReferenceConstruction"), location,
       reference: referenceType(/** @type {string} */ (declaration.id), classLocation)}, {class: classLocation})
     }
+    if (declaration.kind == "EffectResourceDeclaration") {
+      return unsupportedSyntax("java", "owned resource construction", nodeLocation(typeNode, filename, source))
+    }
     const typeArgumentsNode = typeNode.getChild("TypeArguments")
 
     if (typeNode.name == "GenericType" && !typeArgumentsNode) {
@@ -362,7 +367,7 @@ function convertExpression(node, filename, source, context, expectedType) {
 
       return withParserRanges({arguments: argumentNodes.map((argument, index) =>
         convertExpression(argument, filename, source, context, declaredMethod?.parameters[index]?.type)),
-      kind: /** @type {const} */ ("MethodCallExpression"), location, method: declaredMethod?.name ?? method,
+      kind: /** @type {const} */ ("MethodCallExpression"), location, method: declaredMethod?.id ?? method,
       receiver: convertExpression(receiver, filename, source, context)}, {member: nodeLocation(methodName, filename, source)})
     }
 
@@ -1505,7 +1510,7 @@ function convertJavaOrderedMapSequence(statements, start, filename, source, cont
  * @param {import("../semantic/types.js").SourceLocation} location - Source location.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} [recordNames] - Nominal declarations by source name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").EffectResourceDeclaration>} [recordNames] - Nominal declarations by source name.
  * @param {Map<string, import("../semantic/types.js").TypeParameter>} [typeParameters] - Declaration-scoped parameters.
  * @returns {import("../semantic/types.js").SemanticValueType} Semantic type.
  */
@@ -1589,7 +1594,9 @@ function convertType(sourceType, subject, location, filename, source, recordName
 
   if (declaration?.id) return declaration.kind == "ClassDeclaration"
     ? referenceType(declaration.id, nodeLocation(sourceType, filename, source))
-    : recordType(declaration.id, nodeLocation(sourceType, filename, source))
+    : declaration.kind == "EffectResourceDeclaration"
+      ? ownedResourceType(declaration.id, nodeLocation(sourceType, filename, source))
+      : recordType(declaration.id, nodeLocation(sourceType, filename, source))
 
   const type = sourceScalarType("java", nodeText(sourceType, source), nodeLocation(sourceType, filename, source))
 
@@ -1605,7 +1612,7 @@ function convertType(sourceType, subject, location, filename, source, recordName
  * @param {import("../semantic/types.js").SourceLocation} location - Owning location.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} [recordNames] - Nominal declarations by source name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").EffectResourceDeclaration>} [recordNames] - Nominal declarations by source name.
  * @param {Map<string, import("../semantic/types.js").TypeParameter>} [typeParameters] - Declaration-scoped parameters.
  * @returns {import("../semantic/types.js").SemanticValueType} Semantic type.
  */
@@ -1618,7 +1625,9 @@ function convertJavaTypeArgument(node, subject, location, filename, source, reco
 
   if (declaration?.id) return declaration.kind == "ClassDeclaration"
     ? referenceType(declaration.id, nodeLocation(node, filename, source))
-    : recordType(declaration.id, nodeLocation(node, filename, source))
+    : declaration.kind == "EffectResourceDeclaration"
+      ? ownedResourceType(declaration.id, nodeLocation(node, filename, source))
+      : recordType(declaration.id, nodeLocation(node, filename, source))
   const spelling = nodeText(node, source)
   const scalar = spelling == "Integer" ? "integer" : spelling == "Boolean" ? "boolean" : spelling == "String" ? "string" : undefined
 
@@ -1635,7 +1644,7 @@ function convertJavaTypeArgument(node, subject, location, filename, source, reco
  * @param {import("../semantic/types.js").SourceLocation} location - Function location.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} [recordNames] - Nominal declarations by source name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").EffectResourceDeclaration>} [recordNames] - Nominal declarations by source name.
  * @param {Map<string, import("../semantic/types.js").TypeParameter>} [typeParameters] - Declaration-scoped parameters.
  * @returns {import("../semantic/types.js").SemanticFunctionReturnType} Semantic return type.
  */
@@ -1691,7 +1700,7 @@ function convertJavaTypeParameters(node, ownerId, filename, source) {
  * @param {import("@lezer/common").SyntaxNode} node - Method declaration.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} recordNames - Nominal declarations by source name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").EffectResourceDeclaration>} recordNames - Nominal declarations by source name.
  * @param {boolean} [programFunction] - Whether the canonical project profile admits explicit public or private visibility.
  * @param {string} [ownerId] - Stable function identity.
  * @param {boolean} [referenceModule] - Whether package-visible static functions are required by sibling reference classes.
@@ -1761,7 +1770,7 @@ function convertFunctionSignature(node, filename, source, recordNames, programFu
  * @param {import("@lezer/common").SyntaxNode} node - Method declaration.
  * @param {JavaFunctionSignature} signature - Preconverted function signature.
  * @param {Map<string, JavaFunctionSignature>} functions - Module function signatures.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} recordNames - Nominal declarations by source name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").EffectResourceDeclaration>} recordNames - Nominal declarations by source name.
  * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} records - Record declarations by identity.
  * @param {Map<string, import("../semantic/types.js").ClassDeclaration>} classes - Reference classes by identity.
  * @param {Map<string, import("../semantic/types.js").ErrorDeclaration>} errorNames - Error declarations by source name.
@@ -1850,7 +1859,7 @@ function convertJavaError(node, declaration, filename, source, programError = fa
  * Reads one package-private Java reference constructor or instance-method signature.
  * @param {import("@lezer/common").SyntaxNode} node - Constructor or method declaration.
  * @param {import("../semantic/types.js").ClassDeclaration} declaration - Declaring class.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} nominalNames - Visible nominal declarations.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").EffectResourceDeclaration>} nominalNames - Visible nominal declarations.
  * @param {boolean} constructor - Whether this is the sole constructor.
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
@@ -1896,7 +1905,7 @@ function convertJavaClassCallableSignature(node, declaration, nominalNames, cons
  * Converts the bounded final/private-field Java reference-class profile.
  * @param {import("@lezer/common").SyntaxNode} node - Class declaration.
  * @param {import("../semantic/types.js").ClassDeclaration} declaration - Predeclared class identity.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} nominalNames - Visible nominal declarations.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").EffectResourceDeclaration>} nominalNames - Visible nominal declarations.
  * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} records - Records by identity.
  * @param {Map<string, import("../semantic/types.js").ClassDeclaration>} classes - Classes by identity.
  * @param {Map<string, JavaFunctionSignature>} functions - Top-level signatures.
@@ -2194,7 +2203,7 @@ function convertWhile(node, filename, source, context) {
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source.
  * @param {Map<string, JavaFunctionSignature>} functions - Module function signatures.
- * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} recordNames - Nominal declarations by source name.
+ * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").EffectResourceDeclaration>} recordNames - Nominal declarations by source name.
  * @param {Map<string, import("../semantic/types.js").RecordDeclaration>} records - Record declarations by identity.
  * @param {Map<string, import("../semantic/types.js").ClassDeclaration>} classes - Reference classes by identity.
  * @param {Map<string, import("../semantic/types.js").ErrorDeclaration>} errorNames - Error declarations by source name.
@@ -2274,10 +2283,11 @@ function convertPrint(statement, filename, source, context) {
  * @param {object} input - Parser input.
  * @param {string} input.filename - Source filename.
  * @param {string} input.source - Source text.
+ * @param {readonly import("../semantic/types.js").EffectCapabilityDeclaration[]} [input.capabilities] - Compiler-authorized declarations.
  * @param {{isEntry: boolean, functions: Map<string, import("../semantic/types.js").FunctionDeclaration>, records: Map<string, import("../semantic/types.js").RecordDeclaration>, errors?: Map<string, import("../semantic/types.js").ErrorDeclaration>}} [input.program] - Resolved program imports and entry role.
  * @returns {import("../semantic/types.js").SemanticModule} Semantic module.
  */
-export function parseJava({filename, source, program}) {
+export function parseJava({capabilities = [], filename, source, program}) {
   const tree = parser.parse(source)
   const error = descendants(tree.topNode, "⚠")[0]
 
@@ -2295,7 +2305,7 @@ export function parseJava({filename, source, program}) {
 
   if (program) return parseJavaProgramModule(tree.topNode, filename, source, program)
 
-  const programMembers = structuralChildren(tree.topNode)
+  const programMembers = task034JavaProgramMembers(structuralChildren(tree.topNode), capabilities, filename, source)
   const classDeclarations = programMembers.filter((member) => member.name == "ClassDeclaration")
   const unexpectedProgramMember = programMembers.find((member) => member.name != "ClassDeclaration")
   const mainClasses = classDeclarations.filter((declaration) => nodeText(requiredChild(declaration, "Definition", filename, source), source) == "Main")
@@ -2313,7 +2323,7 @@ export function parseJava({filename, source, program}) {
     return unsupportedSyntax("java", "public final Main class", nodeLocation(classDeclaration, filename, source))
   }
   const classBody = requiredChild(classDeclaration, "ClassBody", filename, source)
-  const members = structuralChildren(classBody)
+  const members = task034JavaMainMembers(structuralChildren(classBody), capabilities, filename, source)
   const unsupportedMember = members.find((member) => member.name != "MethodDeclaration")
 
   if (unsupportedMember) return unsupportedSyntax("java", unsupportedMember.name, nodeLocation(unsupportedMember, filename, source))
@@ -2359,11 +2369,16 @@ export function parseJava({filename, source, program}) {
     kind: /** @type {const} */ ("ClassDeclaration"), location: nodeLocation(classNode, filename, source), methods: [],
     name: nodeText(requiredChild(classNode, "Definition", filename, source), source)
   }))
-  const recordNames = /** @type {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration>} */ (
-    new Map(recordDeclarations.map((declaration) => [declaration.name, declaration])))
+  const recordNames = /** @type {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").EffectResourceDeclaration>} */ (
+    new Map(recordDeclarations.map((declaration) => /** @type {const} */ ([declaration.name, declaration]))))
+  for (const resource of capabilities.flatMap(({resources}) => resources)) recordNames.set(resource.name, resource)
   for (const declaration of referenceDeclarations) recordNames.set(declaration.name, declaration)
-  const errorNames = new Map(errorDeclarations.map((declaration) => [declaration.name, declaration]))
-  const errorsById = new Map(errorDeclarations.map((declaration) => [/** @type {string} */ (declaration.id), declaration]))
+  /** @type {Map<string, import("../semantic/types.js").ErrorDeclaration>} */
+  const errorNames = new Map(errorDeclarations.map((declaration) => /** @type {const} */ ([declaration.name, declaration])))
+  for (const failure of capabilities.flatMap(({failures}) => failures)) {
+    errorNames.set(failure.name, /** @type {import("../semantic/types.js").ErrorDeclaration} */ (/** @type {unknown} */ (failure)))
+  }
+  const errorsById = new Map([...errorNames.values()].map((declaration) => [/** @type {string} */ (declaration.id), declaration]))
   const errors = errorNodes.map((errorNode, index) => convertJavaError(errorNode, errorDeclarations[index], filename, source))
   const recordsById = new Map(recordDeclarations.map((declaration) => [/** @type {string} */ (declaration.id), declaration]))
   const classesById = new Map(referenceDeclarations.map((declaration) => [/** @type {string} */ (declaration.id), declaration]))
@@ -2372,7 +2387,9 @@ export function parseJava({filename, source, program}) {
       /** @type {Map<string, import("../semantic/types.js").RecordDeclaration>} */ (/** @type {unknown} */ (recordNames)), filename, source))
   const signatures = functionMethods.map((method, index) =>
     convertFunctionSignature(method, filename, source, recordNames, false, `function:${index}`, referenceDeclarations.length > 0))
-  const functionSignatures = new Map(signatures.map((signature) => [signature.name, signature]))
+  /** @type {Map<string, JavaFunctionSignature>} */
+  const functionSignatures = new Map(capabilityFunctionSignatures(capabilities, location))
+  for (const signature of signatures) functionSignatures.set(signature.name, signature)
   const classes = referenceClassNodes.map((classNode, index) => convertJavaReferenceClass(classNode, referenceDeclarations[index],
     recordNames, recordsById, classesById, functionSignatures, errorNames, errorsById, filename, source))
   const functions = functionMethods.map((method, index) =>
@@ -2383,6 +2400,61 @@ export function parseJava({filename, source, program}) {
 
   return {entryPoint, functions, kind: "Module", location, ...(errors.length > 0 ? {errors} : {}),
     ...(classes.length > 0 ? {classes} : {}), ...(records.length > 0 ? {records} : {})}
+}
+
+/**
+ * Removes the exact protected top-level support emitted for the built-in probe.
+ * @param {import("@lezer/common").SyntaxNode[]} members - Parsed program members.
+ * @param {readonly import("../semantic/types.js").EffectCapabilityDeclaration[]} capabilities - Authorized declarations.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @returns {import("@lezer/common").SyntaxNode[]} Portable program members.
+ */
+function task034JavaProgramMembers(members, capabilities, filename, source) {
+  if (!isTask034ResourceProbe(capabilities) || nodeText(members[0], source) != "// semantifold-task034-support") return members
+  if (!hasExactEffectSupport(source, "java", "top")) {
+    return unsupportedSyntax("java", "malformed protected Task 034 top-level support", nodeLocation(members[0], filename, source))
+  }
+  const names = ["ProbeOperationFailure", "ProbeAcquireFailure", "ProbeReadFailure", "ProbeCloseFailure",
+    "ProbeResourceClosed", "ProbeResource"]
+  const matches = names.every((name, index) => members[index + 1]?.name == "ClassDeclaration" &&
+    nodeText(requiredChild(members[index + 1], "Definition", filename, source), source) == name)
+
+  if (!matches || nodeText(members[names.length + 1], source) != "// semantifold-task034-support-top-end") {
+    return unsupportedSyntax("java", "malformed protected Task 034 top-level support", nodeLocation(members[0], filename, source))
+  }
+  return members.slice(names.length + 2)
+}
+
+/**
+ * Removes the exact protected Main-member support emitted for the built-in probe.
+ * @param {import("@lezer/common").SyntaxNode[]} members - Parsed Main members.
+ * @param {readonly import("../semantic/types.js").EffectCapabilityDeclaration[]} capabilities - Authorized declarations.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @returns {import("@lezer/common").SyntaxNode[]} Portable Main members.
+ */
+function task034JavaMainMembers(members, capabilities, filename, source) {
+  if (!isTask034ResourceProbe(capabilities) || nodeText(members[0], source) != "// semantifold-task034-support-members") return members
+  if (!hasExactEffectSupport(source, "java", "members")) {
+    return unsupportedSyntax("java", "malformed protected Task 034 member support", nodeLocation(members[0], filename, source))
+  }
+  const expected = [
+    ["FieldDeclaration", "__semantifoldTask034Trace"], ["MethodDeclaration", "probeEffect"],
+    ["MethodDeclaration", "probeAcquire"], ["MethodDeclaration", "probeRead"],
+    ["MethodDeclaration", "probeClose"], ["MethodDeclaration", "probeTrace"]
+  ]
+  const matches = expected.every(([kind, name], index) => {
+    const member = members[index + 1]
+    if (member?.name != kind) return false
+    if (kind == "FieldDeclaration") return nodeText(member, source).includes(` ${name} =`)
+    return nodeText(requiredChild(member, "Definition", filename, source), source) == name
+  })
+
+  if (!matches || nodeText(members[expected.length + 1], source) != "// semantifold-task034-support-members-end") {
+    return unsupportedSyntax("java", "malformed protected Task 034 member support", nodeLocation(members[0], filename, source))
+  }
+  return members.slice(expected.length + 2)
 }
 
 /**
