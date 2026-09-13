@@ -271,4 +271,67 @@ class Reader {
   indirectEffect(): void { const value: number = effectValue() }
 }`)
   })
+
+  it("rejects an open owner on ordinary error exits from called functions and owned methods", () => {
+    rejects("LEAKED_RESOURCE", `class Boom extends Error {}
+function boom(): void {
+  throw new Boom("boom")
+}
+function run(): string {
+  const resource: ProbeResource = probeAcquire(false)
+  boom()
+  probeClose(resource, false)
+  return "ok"
+}
+console.log(run())`)
+    rejects("LEAKED_RESOURCE", `class Boom extends Error {}
+function boom(): void {
+  throw new Boom("boom")
+}
+function wrap(): void {
+  boom()
+}
+function run(): string {
+  const resource: ProbeResource = probeAcquire(false)
+  wrap()
+  probeClose(resource, false)
+  return "ok"
+}
+console.log(run())`)
+    rejects("LEAKED_RESOURCE", `class Boom extends Error {}
+class Reader {
+  private resource: ProbeResource
+  constructor(resource: ProbeResource) { this.resource = resource }
+  fail(): void {
+    throw new Boom("boom")
+  }
+  close(): void { probeClose(this.resource, false) }
+}
+function run(): string {
+  const reader: Reader = new Reader(probeAcquire(false))
+  reader.fail()
+  reader.close()
+  return "ok"
+}
+console.log(run())`)
+
+    const module = parseTypeScript(`class Boom extends Error {}
+function boom(): void {
+  throw new Boom("boom")
+}
+function run(): void {
+  const resource: ProbeResource = probeAcquire(false)
+  try {
+    boom()
+  } catch (error) {
+    if (!(error instanceof Boom)) { throw error }
+    probeClose(resource, false)
+    throw new Boom("wrapped")
+  }
+  probeClose(resource, false)
+}
+run()`)
+
+    expect(module.functions[1].body.statements[1].kind).toBe("TryStatement")
+  })
 })

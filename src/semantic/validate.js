@@ -65,7 +65,7 @@ export function validateParsedModule(module, language, visible = {}) {
   const fail = (code, detail, location) => semanticFailure(language, code, detail, location)
 
   validateModuleTypes(module, fail, true, visible)
-  validateResourceLifetimes(module, fail)
+  validateResourceLifetimes(module, inferEscapingErrorEffects(module, visible.callEffects), fail)
 
   return module
 }
@@ -119,7 +119,7 @@ export function validateBackendTypes(module, language, visible = {}) {
   const fail = (_code, detail, location) => unsupportedCapability(language, detail, location)
 
   validateModuleTypes(module, fail, false, visible)
-  validateResourceLifetimes(module, fail)
+  validateResourceLifetimes(module, inferEscapingErrorEffects(module, visible.callEffects), fail)
 }
 
 /**
@@ -1162,9 +1162,10 @@ function addAll(target, source) {
  * @param {Set<string>} target - Destination identities.
  * @param {unknown} expression - Candidate semantic expression.
  * @param {Map<string, Set<string>>} callEffects - Inferred call effects.
+ * @param {Map<string, Set<string>>} [methodEffects] - Inferred effects by resolved method identity.
  * @returns {void}
  */
-function addExpressionEffects(target, expression, callEffects) {
+function addExpressionEffects(target, expression, callEffects, methodEffects = new Map()) {
   const pending = [expression]
   const seen = new Set()
 
@@ -1177,6 +1178,7 @@ function addExpressionEffects(target, expression, callEffects) {
     if (Reflect.get(value, "kind") == "MethodCallExpression") {
       const failures = Reflect.get(value, "failureIds")
       if (Array.isArray(failures)) for (const failure of failures) if (typeof failure == "string") target.add(failure)
+      addAll(target, methodEffects.get(Reflect.get(value, "method")) ?? new Set())
     }
     if (Reflect.get(value, "kind") == "EffectCallExpression") {
       const resolution = Reflect.get(value, "resolution")
@@ -1229,9 +1231,10 @@ function inferCallEffects(functions, seedEffects = new Map(), localFunctionNames
  * Computes escaping identities from one block for the call-effect fixed point.
  * @param {unknown} block - Candidate block.
  * @param {Map<string, Set<string>>} callEffects - Current fixed-point state.
+ * @param {Map<string, Set<string>>} [methodEffects] - Current method fixed-point state.
  * @returns {Set<string>} Escaping identities.
  */
-function syntacticBlockEffects(block, callEffects) {
+function syntacticBlockEffects(block, callEffects, methodEffects = new Map()) {
   const result = new Set()
   const statements = Reflect.get(/** @type {object} */ (block ?? {}), "statements")
 
@@ -1246,40 +1249,90 @@ function syntacticBlockEffects(block, callEffects) {
       const declarationId = type && typeof type == "object" ? Reflect.get(type, "declarationId") : undefined
 
       if (typeof declarationId == "string") result.add(declarationId)
-      if (construction && typeof construction == "object") addExpressionEffects(result, Reflect.get(construction, "message"), callEffects)
+      if (construction && typeof construction == "object") {
+        addExpressionEffects(result, Reflect.get(construction, "message"), callEffects, methodEffects)
+      }
       continue
     }
     if (kind == "TryStatement") {
-      const bodyEffects = syntacticBlockEffects(Reflect.get(statement, "body"), callEffects)
+      const bodyEffects = syntacticBlockEffects(Reflect.get(statement, "body"), callEffects, methodEffects)
       const catchType = Reflect.get(statement, "catchType")
       const caughtId = catchType && typeof catchType == "object" ? Reflect.get(catchType, "declarationId") : undefined
 
       if (typeof caughtId == "string" && bodyEffects.delete(caughtId)) {
-        addAll(bodyEffects, syntacticBlockEffects(Reflect.get(statement, "catchBody"), callEffects))
+        addAll(bodyEffects, syntacticBlockEffects(Reflect.get(statement, "catchBody"), callEffects, methodEffects))
       }
       addAll(result, bodyEffects)
       continue
     }
     if (kind == "IfStatement") {
-      addExpressionEffects(result, Reflect.get(statement, "condition"), callEffects)
-      addAll(result, syntacticBlockEffects(Reflect.get(statement, "consequent"), callEffects))
-      addAll(result, syntacticBlockEffects(Reflect.get(statement, "alternate"), callEffects))
+      addExpressionEffects(result, Reflect.get(statement, "condition"), callEffects, methodEffects)
+      addAll(result, syntacticBlockEffects(Reflect.get(statement, "consequent"), callEffects, methodEffects))
+      addAll(result, syntacticBlockEffects(Reflect.get(statement, "alternate"), callEffects, methodEffects))
       continue
     }
     if (kind == "ForEachStatement" || kind == "ForEachMapStatement") {
-      addExpressionEffects(result, Reflect.get(statement, kind == "ForEachStatement" ? "list" : "map"), callEffects)
-      addAll(result, syntacticBlockEffects(Reflect.get(statement, "body"), callEffects))
+      addExpressionEffects(result, Reflect.get(statement, kind == "ForEachStatement" ? "list" : "map"), callEffects,
+        methodEffects)
+      addAll(result, syntacticBlockEffects(Reflect.get(statement, "body"), callEffects, methodEffects))
       continue
     }
     if (kind == "WhileStatement") {
-      addExpressionEffects(result, Reflect.get(statement, "condition"), callEffects)
-      addAll(result, syntacticBlockEffects(Reflect.get(statement, "body"), callEffects))
+      addExpressionEffects(result, Reflect.get(statement, "condition"), callEffects, methodEffects)
+      addAll(result, syntacticBlockEffects(Reflect.get(statement, "body"), callEffects, methodEffects))
       continue
     }
-    for (const key of ["expression", "initializer"]) addExpressionEffects(result, Reflect.get(statement, key), callEffects)
+    for (const key of ["expression", "initializer"]) {
+      addExpressionEffects(result, Reflect.get(statement, key), callEffects, methodEffects)
+    }
   }
 
   return result
+}
+
+/**
+ * Derives the escaping user-defined error sets for local functions and resolved class methods.
+ * The fixed point is computed over every unchecked error; capability failures are projected out
+ * because call sites already carry their capability-failure boundary through resolution metadata.
+ * @param {import("./types.js").SemanticModule} module - Resolved module.
+ * @param {Map<string, Set<string>>} [seedEffects] - Dependency effects keyed by local import name.
+ * @returns {{functions: Map<string, Set<string>>, methods: Map<string, Set<string>>}} Escaping user-defined error identities by function name and method identity.
+ */
+export function inferEscapingErrorEffects(module, seedEffects = new Map()) {
+  const functions = new Map(module.functions.map((declaration) => [declaration.name, declaration]))
+  const functionEffects = new Map([...functions.keys()].map((name) => [name, new Set(seedEffects.get(name) ?? [])]))
+  const classes = module.classes ?? []
+  const methodEffects = new Map()
+  const capabilityFailureIds = new Set((module.capabilities ?? []).flatMap(({failures}) => failures).map(({id}) => id))
+
+  for (const declaration of classes) for (const method of declaration.methods) methodEffects.set(method.id, new Set())
+  let changed = true
+
+  while (changed) {
+    changed = false
+    for (const declaration of module.functions) {
+      const current = /** @type {Set<string>} */ (functionEffects.get(declaration.name))
+      for (const error of syntacticBlockEffects(declaration.body, functionEffects, methodEffects)) {
+        if (!current.has(error)) { current.add(error); changed = true }
+      }
+    }
+    for (const declaration of classes) {
+      for (const method of declaration.methods) {
+        const current = /** @type {Set<string>} */ (methodEffects.get(method.id))
+        for (const error of syntacticBlockEffects(method.body, functionEffects, methodEffects)) {
+          if (!current.has(error)) { current.add(error); changed = true }
+        }
+      }
+    }
+  }
+
+  for (const effects of [functionEffects, methodEffects]) {
+    for (const errors of effects.values()) {
+      for (const error of [...errors]) if (capabilityFailureIds.has(error)) errors.delete(error)
+    }
+  }
+
+  return {functions: functionEffects, methods: methodEffects}
 }
 
 /**

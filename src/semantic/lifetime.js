@@ -7,19 +7,20 @@
 /**
  * Performs path-sensitive structured lifetime validation for Task 034 owned values.
  * @param {import("./types.js").SemanticModule} module - Fully type-resolved module.
+ * @param {{functions: Map<string, Set<string>>, methods: Map<string, Set<string>>}} errorEffects - Complete escaping error sets per function and method.
  * @param {LifetimeFail} fail - Located failure.
  * @returns {void}
  */
-export function validateResourceLifetimes(module, fail) {
+export function validateResourceLifetimes(module, errorEffects, fail) {
   if (!(module.capabilities ?? []).some(({resources}) => resources.length > 0) && !moduleContainsOwnedType(module)) return
 
   for (const declaration of module.classes ?? []) {
-    analyzeOwner(declaration.constructor.parameters, declaration.constructor.body, fail)
+    analyzeOwner(declaration.constructor.parameters, declaration.constructor.body, fail, undefined, errorEffects)
     for (const method of declaration.methods) analyzeOwner(method.parameters, method.body, fail,
-      declaration.ownership?.kind == "ownedResource" ? declaration.ownership.fieldId : undefined)
+      declaration.ownership?.kind == "ownedResource" ? declaration.ownership.fieldId : undefined, errorEffects)
   }
-  for (const declaration of module.functions) analyzeOwner(declaration.parameters, declaration.body, fail)
-  analyzeOwner([], module.entryPoint.body, fail)
+  for (const declaration of module.functions) analyzeOwner(declaration.parameters, declaration.body, fail, undefined, errorEffects)
+  analyzeOwner([], module.entryPoint.body, fail, undefined, errorEffects)
 }
 
 /**
@@ -27,10 +28,11 @@ export function validateResourceLifetimes(module, fail) {
  * @param {import("./types.js").Parameter[]} parameters - Owned parameters.
  * @param {import("./types.js").Block} body - Structured body.
  * @param {LifetimeFail} fail - Located failure.
- * @param {string} [borrowedFieldId] - Owned receiver field, when present.
+ * @param {string | undefined} borrowedFieldId - Owned receiver field, when present.
+ * @param {{functions: Map<string, Set<string>>, methods: Map<string, Set<string>>}} errorEffects - Complete escaping error sets per function and method.
  * @returns {void}
  */
-function analyzeOwner(parameters, body, fail, borrowedFieldId) {
+function analyzeOwner(parameters, body, fail, borrowedFieldId, errorEffects) {
   /** @type {Map<string, OwnerState>} */
   const initial = new Map()
   const obligations = new Set(parameters.filter(({type}) => isOwned(type)).map(({name}) => name))
@@ -39,7 +41,7 @@ function analyzeOwner(parameters, body, fail, borrowedFieldId) {
     if (isOwned(parameter.type)) initial.set(parameter.name, openState(`parameter:${parameter.name}`, parameter.location))
   }
   if (borrowedFieldId) initial.set(`this.${borrowedFieldId}`, openState(`receiver:${borrowedFieldId}`, body.location))
-  const exits = analyzeBlock(body, [{kind: "normal", state: initial}], fail)
+  const exits = analyzeBlock(body, [{kind: "normal", state: initial}], fail, errorEffects)
 
   for (const exit of exits) checkLeaks(exit.state, obligations, exit.location ?? body.location, fail)
 }
@@ -49,9 +51,10 @@ function analyzeOwner(parameters, body, fail, borrowedFieldId) {
  * @param {import("./types.js").Block} block - Structured block.
  * @param {LifetimeExit[]} incoming - Incoming control-flow states.
  * @param {LifetimeFail} fail - Located failure.
+ * @param {{functions: Map<string, Set<string>>, methods: Map<string, Set<string>>}} errorEffects - Complete escaping error sets per function and method.
  * @returns {LifetimeExit[]} Reachable exits.
  */
-function analyzeBlock(block, incoming, fail) {
+function analyzeBlock(block, incoming, fail, errorEffects) {
   let active = incoming.filter(({kind}) => kind == "normal")
   const departed = incoming.filter(({kind}) => kind != "normal")
   /** @type {Set<string>} */
@@ -61,7 +64,7 @@ function analyzeBlock(block, incoming, fail) {
     if (active.length == 0) break
     const next = []
 
-    for (const flow of active) next.push(...analyzeStatement(statement, flow.state, fail, locals))
+    for (const flow of active) next.push(...analyzeStatement(statement, flow.state, fail, locals, errorEffects))
     departed.push(...next.filter(({kind}) => kind != "normal"))
     active = mergeEquivalentNormals(next.filter(({kind}) => kind == "normal"), statement.location, fail)
   }
@@ -80,11 +83,12 @@ function analyzeBlock(block, incoming, fail) {
  * @param {Map<string, OwnerState>} state - Incoming ownership state.
  * @param {LifetimeFail} fail - Located failure.
  * @param {Set<string>} locals - Locals introduced in the current block.
+ * @param {{functions: Map<string, Set<string>>, methods: Map<string, Set<string>>}} errorEffects - Complete escaping error sets per function and method.
  * @returns {LifetimeExit[]} Reachable exits.
  */
-function analyzeStatement(statement, state, fail, locals) {
+function analyzeStatement(statement, state, fail, locals, errorEffects) {
   if (statement.kind == "LocalDeclaration") {
-    const flows = evaluateExpression(statement.initializer, cloneState(state), fail)
+    const flows = evaluateExpression(statement.initializer, cloneState(state), fail, errorEffects)
 
     if (isOwned(statement.type)) {
       locals.add(statement.name)
@@ -99,33 +103,36 @@ function analyzeStatement(statement, state, fail, locals) {
     return flows.map((flow) => ({...flow, location: statement.location}))
   }
   if (statement.kind == "ExpressionStatement" || statement.kind == "PrintStatement") {
-    return evaluateExpression(statement.expression, cloneState(state), fail).map((flow) => ({...flow, location: statement.location}))
+    return evaluateExpression(statement.expression, cloneState(state), fail, errorEffects)
+      .map((flow) => ({...flow, location: statement.location}))
   }
   if (statement.kind == "AssignmentStatement" || statement.kind == "PrivateFieldWriteStatement") {
-    return evaluateExpression(statement.expression, cloneState(state), fail).map((flow) => ({...flow, location: statement.location}))
+    return evaluateExpression(statement.expression, cloneState(state), fail, errorEffects)
+      .map((flow) => ({...flow, location: statement.location}))
   }
   if (statement.kind == "ReturnStatement") {
-    const flows = statement.expression ? evaluateExpression(statement.expression, cloneState(state), fail) :
+    const flows = statement.expression ? evaluateExpression(statement.expression, cloneState(state), fail, errorEffects) :
       /** @type {LifetimeExit[]} */ ([{kind: "normal", state: cloneState(state)}])
     return flows.map((flow) => flow.kind == "normal"
       ? {kind: "return", location: statement.location, state: flow.state}
       : {...flow, location: statement.location})
   }
   if (statement.kind == "RaiseStatement") {
-    const flows = evaluateExpression(statement.error.message, cloneState(state), fail)
+    const flows = evaluateExpression(statement.error.message, cloneState(state), fail, errorEffects)
     return flows.map((flow) => flow.kind == "normal"
       ? {errorId: statement.error.error.declarationId, kind: "raise", location: statement.location, state: flow.state}
       : {...flow, location: statement.location})
   }
   if (statement.kind == "IfStatement") {
-    const conditions = evaluateExpression(statement.condition, cloneState(state), fail)
+    const conditions = evaluateExpression(statement.condition, cloneState(state), fail, errorEffects)
     /** @type {LifetimeExit[]} */
     const result = conditions.filter(({kind}) => kind != "normal")
 
     for (const condition of conditions.filter(({kind}) => kind == "normal")) {
-      result.push(...analyzeBlock(statement.consequent, [{kind: "normal", state: cloneState(condition.state)}], fail))
+      result.push(...analyzeBlock(statement.consequent, [{kind: "normal", state: cloneState(condition.state)}], fail,
+        errorEffects))
       const alternate = statement.alternate
-        ? analyzeBlock(statement.alternate, [{kind: "normal", state: cloneState(condition.state)}], fail)
+        ? analyzeBlock(statement.alternate, [{kind: "normal", state: cloneState(condition.state)}], fail, errorEffects)
         : /** @type {LifetimeExit[]} */ ([{kind: "normal", location: statement.location, state: cloneState(condition.state)}])
 
       result.push(...alternate)
@@ -133,22 +140,23 @@ function analyzeStatement(statement, state, fail, locals) {
     return mergeEquivalentNormals(result, statement.location, fail)
   }
   if (statement.kind == "TryStatement") {
-    const bodyExits = analyzeBlock(statement.body, [{kind: "normal", state: cloneState(state)}], fail)
+    const bodyExits = analyzeBlock(statement.body, [{kind: "normal", state: cloneState(state)}], fail, errorEffects)
     /** @type {LifetimeExit[]} */
     const result = bodyExits.filter((flow) => flow.kind != "raise" || flow.errorId != statement.catchType.declarationId)
 
     for (const caught of bodyExits.filter((flow) => flow.kind == "raise" && flow.errorId == statement.catchType.declarationId)) {
-      result.push(...analyzeBlock(statement.catchBody, [{kind: "normal", state: cloneState(caught.state)}], fail))
+      result.push(...analyzeBlock(statement.catchBody, [{kind: "normal", state: cloneState(caught.state)}], fail, errorEffects))
     }
     return mergeEquivalentNormals(result, statement.location, fail)
   }
   if (statement.kind == "WhileStatement") {
-    const conditions = evaluateExpression(statement.condition, cloneState(state), fail)
+    const conditions = evaluateExpression(statement.condition, cloneState(state), fail, errorEffects)
     /** @type {LifetimeExit[]} */
     const result = conditions.filter(({kind}) => kind != "normal")
 
     for (const condition of conditions.filter(({kind}) => kind == "normal")) {
-      const bodyExits = analyzeBlock(statement.body, [{kind: "normal", state: cloneState(condition.state)}], fail)
+      const bodyExits = analyzeBlock(statement.body, [{kind: "normal", state: cloneState(condition.state)}], fail,
+        errorEffects)
       for (const exit of bodyExits) {
         if (exit.kind == "normal" || exit.kind == "continue") requireSameState(condition.state, exit.state, statement.location, fail)
         else if (exit.kind == "break") {
@@ -162,12 +170,13 @@ function analyzeStatement(statement, state, fail, locals) {
   }
   if (statement.kind == "ForEachStatement" || statement.kind == "ForEachMapStatement") {
     const operand = statement.kind == "ForEachStatement" ? statement.list : statement.map
-    const operands = evaluateExpression(operand, cloneState(state), fail)
+    const operands = evaluateExpression(operand, cloneState(state), fail, errorEffects)
     /** @type {LifetimeExit[]} */
     const result = operands.filter(({kind}) => kind != "normal")
 
     for (const evaluated of operands.filter(({kind}) => kind == "normal")) {
-      const bodyExits = analyzeBlock(statement.body, [{kind: "normal", state: cloneState(evaluated.state)}], fail)
+      const bodyExits = analyzeBlock(statement.body, [{kind: "normal", state: cloneState(evaluated.state)}], fail,
+        errorEffects)
       for (const exit of bodyExits) {
         if (exit.kind == "normal" || exit.kind == "continue") requireSameState(evaluated.state, exit.state, statement.location, fail)
         else if (exit.kind == "break") {
@@ -190,9 +199,10 @@ function analyzeStatement(statement, state, fail, locals) {
  * @param {import("./types.js").Expression} expression - Expression.
  * @param {Map<string, OwnerState>} state - Incoming ownership state.
  * @param {LifetimeFail} fail - Located failure.
+ * @param {{functions: Map<string, Set<string>>, methods: Map<string, Set<string>>}} errorEffects - Complete escaping error sets per function and method.
  * @returns {LifetimeExit[]} Reachable exits.
  */
-function evaluateExpression(expression, state, fail) {
+function evaluateExpression(expression, state, fail, errorEffects) {
   if (expression.kind == "OwnedMoveExpression") {
     const owner = requireOwner(expression.expression.name, state, expression.location, fail)
 
@@ -208,14 +218,14 @@ function evaluateExpression(expression, state, fail) {
     if (owner.kind == "moved") fail("USE_AFTER_MOVE", `Resource '${name}' was moved before this borrow.`, expression.location)
     return [{kind: "normal", state}]
   }
-  if (expression.kind == "EffectCallExpression") return evaluateEffectCall(expression, state, fail)
+  if (expression.kind == "EffectCallExpression") return evaluateEffectCall(expression, state, fail, errorEffects)
   if (expression.kind == "CallExpression" || expression.kind == "MethodCallExpression" || expression.kind == "ReferenceConstruction") {
-    return evaluateOrdinaryCall(expression, state, fail)
+    return evaluateOrdinaryCall(expression, state, fail, errorEffects)
   }
 
   /** @type {LifetimeExit[]} */
   let flows = [{kind: "normal", state}]
-  for (const child of expressionChildren(expression)) flows = evaluateForFlows(child, flows, fail)
+  for (const child of expressionChildren(expression)) flows = evaluateForFlows(child, flows, fail, errorEffects)
   return flows
 }
 
@@ -224,13 +234,14 @@ function evaluateExpression(expression, state, fail) {
  * @param {import("./types.js").EffectCallExpression} expression - Effect call.
  * @param {Map<string, OwnerState>} state - Incoming ownership state.
  * @param {LifetimeFail} fail - Located failure.
+ * @param {{functions: Map<string, Set<string>>, methods: Map<string, Set<string>>}} errorEffects - Complete escaping error sets per function and method.
  * @returns {LifetimeExit[]} Reachable exits.
  */
-function evaluateEffectCall(expression, state, fail) {
+function evaluateEffectCall(expression, state, fail, errorEffects) {
   /** @type {LifetimeExit[]} */
   let flows = [{kind: "normal", state}]
 
-  for (const argument of expression.arguments) flows = evaluateForFlows(argument, flows, fail)
+  for (const argument of expression.arguments) flows = evaluateForFlows(argument, flows, fail, errorEffects)
   const result = flows.filter(({kind}) => kind != "normal")
   const resourceFlow = expression.resolution.resourceFlow
 
@@ -268,9 +279,10 @@ function evaluateEffectCall(expression, state, fail) {
  * @param {import("./types.js").CallExpression | import("./types.js").MethodCallExpression | import("./types.js").ReferenceConstruction} expression - Call.
  * @param {Map<string, OwnerState>} state - Incoming ownership state.
  * @param {LifetimeFail} fail - Located failure.
+ * @param {{functions: Map<string, Set<string>>, methods: Map<string, Set<string>>}} errorEffects - Complete escaping error sets per function and method.
  * @returns {LifetimeExit[]} Reachable exits.
  */
-function evaluateOrdinaryCall(expression, state, fail) {
+function evaluateOrdinaryCall(expression, state, fail, errorEffects) {
   const arguments_ = expression.kind == "MethodCallExpression" ? [expression.receiver, ...expression.arguments] : expression.arguments
   /** @type {LifetimeExit[]} */
   let flows = [{kind: "normal", state}]
@@ -288,7 +300,7 @@ function evaluateOrdinaryCall(expression, state, fail) {
         fail("RESOURCE_ALIAS", `Resource '${argument.expression.name}' cannot be transferred to two parameters.`, argument.location)
       }
       reservedMoves.push(argument.expression.name)
-    } else flows = evaluateForFlows(argument, flows, fail)
+    } else flows = evaluateForFlows(argument, flows, fail, errorEffects)
   }
   const result = flows.filter(({kind}) => kind != "normal")
 
@@ -321,7 +333,14 @@ function evaluateOrdinaryCall(expression, state, fail) {
       }
     }
     result.push({kind: "normal", state: cloneState(entered)})
-    for (const errorId of expression.failureIds ?? []) {
+    const escaping = new Set(expression.failureIds ?? [])
+
+    if (expression.kind == "CallExpression") {
+      for (const errorId of errorEffects.functions.get(expression.callee) ?? []) escaping.add(errorId)
+    } else if (expression.kind == "MethodCallExpression") {
+      for (const errorId of errorEffects.methods.get(expression.method) ?? []) escaping.add(errorId)
+    }
+    for (const errorId of escaping) {
       result.push({errorId, kind: "raise", location: expression.location, state: cloneState(entered)})
     }
   }
@@ -333,11 +352,14 @@ function evaluateOrdinaryCall(expression, state, fail) {
  * @param {import("./types.js").Expression} expression - Child expression.
  * @param {LifetimeExit[]} flows - Incoming paths.
  * @param {LifetimeFail} fail - Located failure.
+ * @param {{functions: Map<string, Set<string>>, methods: Map<string, Set<string>>}} errorEffects - Complete escaping error sets per function and method.
  * @returns {LifetimeExit[]} Reachable exits.
  */
-function evaluateForFlows(expression, flows, fail) {
+function evaluateForFlows(expression, flows, fail, errorEffects) {
   const result = flows.filter(({kind}) => kind != "normal")
-  for (const flow of flows.filter(({kind}) => kind == "normal")) result.push(...evaluateExpression(expression, cloneState(flow.state), fail))
+  for (const flow of flows.filter(({kind}) => kind == "normal")) {
+    result.push(...evaluateExpression(expression, cloneState(flow.state), fail, errorEffects))
+  }
   return result
 }
 

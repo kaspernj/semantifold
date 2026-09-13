@@ -1705,11 +1705,12 @@ function predeclareReferenceClass(node, declaration, nominalNames, language, fil
       location: fieldLocation, name, type}, {name: nameLocation})
   })
   const ownedFields = declaration.fields.filter(({type}) => type.kind == "OwnedResourceType")
-  const ownedField = /** @type {import("../semantic/types.js").PrivateField & {type: import("../semantic/types.js").OwnedResourceType}} */ (ownedFields[0])
 
-  declaration.ownership = ownedFields.length == 1
-    ? {fieldId: /** @type {string} */ (ownedField.id), kind: "ownedResource", resourceId: ownedField.type.resourceId}
-    : {kind: "ordinary"}
+  if (ownedFields.length == 1) {
+    const ownedField = /** @type {import("../semantic/types.js").PrivateField & {type: import("../semantic/types.js").OwnedResourceType}} */ (ownedFields[0])
+
+    declaration.ownership = {fieldId: /** @type {string} */ (ownedField.id), kind: "ownedResource", resourceId: ownedField.type.resourceId}
+  }
 
   const constructorNode = /** @type {import("@babel/types").ClassMethod} */ (constructorNodes[0])
   const constructorSignature = convertClassCallableSignature(constructorNode, declaration, nominalNames, language,

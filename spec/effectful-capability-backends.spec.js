@@ -204,4 +204,39 @@ console.log(mapping().size)`
       parse({capabilityAuthority: authority, filename: filenames.get(language), language, source: code})
     }
   })
+
+  it("lowers a nested acquire operand to an exactly-once temporary and never to a null argument", () => {
+    const module = parse({
+      capabilityAuthority: authority,
+      filename: "nested-acquire.ts",
+      language: "typescript",
+      source: `function consume(resource: ProbeResource): string {
+  probeClose(resource, false)
+  return "consumed"
+}
+console.log(consume(probeAcquire(false)))`
+    })
+
+    for (const language of ["php", "ruby", "javascript", "typescript", "java"]) {
+      const code = generate({language, module})
+
+      expect(code.split("probeAcquire(false)").length - 1).toBe(1)
+      expect(/consume\(\s*(?:\$)?__semantifold_effect_[0-9]+\s*\)/u.test(code)).toBe(true)
+      expect(/consume\(\s*(?:null|nil|NULL)\s*\)/u.test(code)).toBe(false)
+    }
+
+    assert.throws(
+      () => parse({
+        capabilityAuthority: authority,
+        filename: "nested-borrow.ts",
+        language: "typescript",
+        source: `function run(): string | null {
+  return probeRead(probeAcquire(false), true)
+}
+console.log(run())`
+      }),
+      (error) => error instanceof SemantifoldDiagnostic && error.code == "INVALID_RESOURCE_BORROW" &&
+        error.location?.filename == "nested-borrow.ts"
+    )
+  })
 })
