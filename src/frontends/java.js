@@ -2303,7 +2303,7 @@ export function parseJava({capabilities = [], filename, source, program}) {
     })
   }
 
-  if (program) return parseJavaProgramModule(tree.topNode, filename, source, program)
+  if (program) return parseJavaProgramModule(tree.topNode, filename, source, program, capabilities)
 
   const programMembers = task034JavaProgramMembers(structuralChildren(tree.topNode), capabilities, filename, source)
   const classDeclarations = programMembers.filter((member) => member.name == "ClassDeclaration")
@@ -2463,9 +2463,10 @@ function task034JavaMainMembers(members, capabilities, filename, source) {
  * @param {string} filename - Source filename.
  * @param {string} source - Complete source text.
  * @param {{isEntry: boolean, functions: Map<string, import("../semantic/types.js").FunctionDeclaration>, records: Map<string, import("../semantic/types.js").RecordDeclaration>, errors?: Map<string, import("../semantic/types.js").ErrorDeclaration>}} program - Resolved program imports and entry role.
+ * @param {readonly import("../semantic/types.js").EffectCapabilityDeclaration[]} capabilities - Compiler-authorized declarations.
  * @returns {import("../semantic/types.js").SemanticModule} Semantic module.
  */
-function parseJavaProgramModule(root, filename, source, program) {
+function parseJavaProgramModule(root, filename, source, program, capabilities) {
   inspectJavaModule({filename, source})
   const classDeclaration = /** @type {import("@lezer/common").SyntaxNode} */ (structuralChildren(root).find((node) => node.name == "ClassDeclaration"))
   const classModifiers = classDeclaration.getChild("Modifiers")
@@ -2506,28 +2507,38 @@ function parseJavaProgramModule(root, filename, source, program) {
     name: nodeText(requiredChild(classDeclaration, "Definition", filename, source), source),
     ...(recordTypeParameters ? {typeParameters: recordTypeParameters} : {})
   }] : []
+  /** @type {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").EffectResourceDeclaration>} */
   const recordNames = new Map(program.records)
   const errorNames = new Map(program.errors ?? [])
 
+  for (const resource of capabilities.flatMap(({resources}) => resources)) recordNames.set(resource.name, resource)
+  for (const failure of capabilities.flatMap(({failures}) => failures)) {
+    errorNames.set(failure.name, /** @type {import("../semantic/types.js").ErrorDeclaration} */ (/** @type {unknown} */ (failure)))
+  }
   for (const declaration of recordDeclarations) recordNames.set(declaration.name, declaration)
   for (const declaration of errorDeclarations) errorNames.set(declaration.name, declaration)
   const errorsById = new Map([...errorNames.values()].map((declaration) => [/** @type {string} */ (declaration.id), declaration]))
   const errors = errorDeclarations.map((declaration) => convertJavaError(classDeclaration, declaration, filename, source, true))
-  const recordsById = new Map([...recordNames.values()].map((declaration) => [/** @type {string} */ (declaration.id), declaration]))
+  const recordsById = new Map([...program.records.values(), ...recordDeclarations]
+    .map((declaration) => [/** @type {string} */ (declaration.id), declaration]))
   const classesById = new Map()
   const records = recordDeclarations.map((declaration) =>
-    convertJavaRecord(classDeclaration, declaration, recordNames, filename, source, true))
+    convertJavaRecord(classDeclaration, declaration,
+      /** @type {Map<string, import("../semantic/types.js").RecordDeclaration>} */ (/** @type {unknown} */ (recordNames)),
+      filename, source, true))
   const functionMethods = isRecord || isError ? [] : members.filter((member) => member.name == "MethodDeclaration" && !mainMethods.includes(member))
   const signatures = functionMethods.map((method, index) =>
     convertFunctionSignature(method, filename, source, recordNames, true, `function:${index}`))
-  const functionSignatures = new Map([...program.functions].map(([localName, declaration]) => [localName, {
+  /** @type {[string, JavaFunctionSignature][]} */
+  const importedFunctionSignatures = [...program.functions].map(([localName, declaration]) => [localName, {
     location: declaration.location,
     name: localName,
     nameLocation: declaration.location,
     parameters: declaration.parameters,
     returnType: declaration.returnType,
     ...(declaration.typeParameters ? {typeParameters: declaration.typeParameters} : {})
-  }]))
+  }])
+  const functionSignatures = new Map([...capabilityFunctionSignatures(capabilities, location), ...importedFunctionSignatures])
 
   for (const signature of signatures) functionSignatures.set(signature.name, signature)
   const functions = functionMethods.map((method, index) =>

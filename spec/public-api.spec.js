@@ -8,6 +8,7 @@ import {
   createCapabilityAuthority,
   createByteMapping,
   createGeneratedArtifactSet,
+  createStdlibFacadeRegistry,
   discoverCanonicalToolchain,
   discoverToolchain,
   generate,
@@ -18,6 +19,7 @@ import {
   getNodeProvenance,
   getSymbolProvenance,
   languageCapabilities,
+  listStdlibFacades,
   mappingFromSourceMap,
   originalPositionFor,
   parse,
@@ -27,6 +29,7 @@ import {
   primaryLocation,
   remapDiagnostic,
   remapLocation,
+  resolveStdlibFacade,
   runAcceptanceStages,
   SemantifoldDiagnostic,
   spansForNode,
@@ -48,6 +51,9 @@ describe("public API", () => {
     expect(typeof generateArtifactSet).toEqual("function")
     expect(typeof parseProgram).toEqual("function")
     expect(typeof generateProgramArtifactSet).toEqual("function")
+    expect(typeof createStdlibFacadeRegistry).toEqual("function")
+    expect(typeof listStdlibFacades).toEqual("function")
+    expect(typeof resolveStdlibFacade).toEqual("function")
     expect(Array.isArray(languageCapabilities)).toBeTrue()
     expect(languageCapabilities.filter(({features}) => features.optionalValues).map(({id}) => id))
       .toEqual(["php", "ruby", "javascript", "typescript", "java"])

@@ -1,6 +1,6 @@
 # 035 — Versioned standard-library contracts and provider linking
 
-- Status: `implemented locally; independent review, TensorBuzz CI, and merge remain coordinator-owned`
+- Status: `delivered through PR #45; merged as a2aad9d4932bfc6087adc4ff8bca43678c92413c`
 - Phase/priority: Phase S / P1
 - Dependencies: [010-multifile-modules-and-names.md](010-multifile-modules-and-names.md), [034-effectful-capabilities-and-resource-lifetime.md](034-effectful-capabilities-and-resource-lifetime.md)
 
@@ -68,7 +68,7 @@ Language-specific compatibility facades, broad stdlib coverage, pairwise adapter
 - Protected native access, collision-safe deterministic linking, safe module-level tree-shaking, provenance, and transactional artifacts are enforced.
 - Focused negotiation/link diagnostics and real-toolchain provider execution pass with documentation and a behavior changelog fragment.
 
-## Local implementation record — 2026-09-13
+## Implementation delivery record — 2026-09-13
 
 The local implementation adds the versioned canonical contract registry (`createStdlibContractRegistry`, `listStdlibModules`, `resolveStdlibModule`) with the built-in `semantifold.task034.resource-probe@1.0.0`: five closed operations (`probeEffect`, `probeAcquire`, `probeRead`, `probeClose`, `probeTrace`) with exact parameter/result types, declared typed failures, optional/presence EOF meaning, and ownership/close behavior. Versions are exact `X.Y.Z` values; references resolve by identity plus a declared half-open range and select the highest registered satisfying version. Malformed records, unknown identities, and incompatible versions fail with located `STDLIB_CONTRACT_INVALID`, `STDLIB_MODULE_UNKNOWN`, `STDLIB_VERSION_INCOMPATIBLE`, or `STDLIB_VERSION_MALFORMED` diagnostics; registry contents are detached copies.
 

@@ -1,6 +1,6 @@
 # 036 — Language compatibility stdlib/facades
 
-- Status: `todo`
+- Status: `implemented on topic branch; pull-request review, TensorBuzz CI, merge, and publication remain outstanding`
 - Phase/priority: Phase S / P1
 - Dependencies: [035-versioned-standard-library-contracts-and-provider-linking.md](035-versioned-standard-library-contracts-and-provider-linking.md)
 
@@ -10,7 +10,7 @@ Add source-language native-looking portable compatibility stdlib/facades as exec
 
 ## Current evidence and gap
 
-The current `semantifold@0.2.0` frontends reject imports/requires, classes, receiver calls, and host APIs. Task 035 will provide canonical capabilities and target providers but not the source API shapes users write. A name rewrite such as `TCPSocket` to `fsockopen` would erase constructor/method/resource behavior, confuse user-defined names with stdlib symbols, and create one implementation per language pair.
+The published `semantifold@0.3.0` release rejects the required imports/requires and host APIs. Task 035 now provides canonical capabilities and target providers but intentionally not the source API shapes users write. A name rewrite such as `TCPSocket` to `fsockopen` would erase constructor/method/resource behavior, confuse user-defined names with stdlib symbols, and create one implementation per language pair.
 
 ## Facade contract and executable behavior
 
@@ -66,3 +66,13 @@ Complete standard libraries, arbitrary applications, pairwise source-target adap
 - Parser-backed resolution substitutes only proved native stdlib symbols and rejects every dynamic, shadowed, unresolved, or modified case precisely.
 - Compiled target syntax preserves collision-safe source API shape and links only reachable facade/provider modules.
 - Same-language protected binding isolation, real-toolchain behavior, diagnostics, provenance, documentation, and changelog coverage pass.
+
+## Implementation record — 2026-09-13
+
+Task 036 adds `createStdlibFacadeRegistry`, `listStdlibFacades`, and `resolveStdlibFacade` with detached immutable `1.0.0` records for PHP, Ruby, JavaScript/JSDoc, TypeScript, and Java. Each language has a public neutral qualification facade, an internal runner dependency, and an unreachable facade used to prove elimination. Records close the runtime profile, exact native module and symbol identities, public direct-call declaration, compiler-owned executable source, versioned facade dependencies, and canonical-only requirements. The public function accepts one string and returns the Task 034 trace after the runner calls `probeEffect`; only the runner receives compiler-derived range-`1` authority for `semantifold.task034.resource-probe`. No facade calls a target API or protected provider name.
+
+`parseProgram` recognizes only exact parser-backed qualification identities. It selects a dependency-first closure, adds only reachable facade sources, compiles every facade with its ordinary source frontend and semantic validation, and records `SemantifoldStdlibFacadeResolution` v1 import evidence plus the complete `SemantifoldStdlibFacades` v1 program descriptor. Source provenance distinguishes `application` and `facade` ownership. Dynamic or computed import, unresolved identity/member, source binding mutation, PHP shadowing, Ruby reopening, reflection, native extension loading, caller path/module collision, and caller-supplied canonical authority fail with stable located `STDLIB_FACADE_*` diagnostics; parser failure remains terminal without source scanning.
+
+Program generation validates registry versions, descriptor bytes, semantic module markers, compiler-owned source, and native identity evidence before allocating a writer. Selected facades compile through every ordinary original-five backend under the reserved `semantifold/facade/<source-language>/...` artifact namespace, use collision-checked target identifiers, carry mapped source provenance and the `support` role, and extend `SemantifoldStdlibLink` metadata with the full facade closure. Task 035 provider selection and protected-role/version rules remain unchanged. Same-language PHP, Ruby, JavaScript, TypeScript, and Java lanes prove the provider carrier does not contain or resolve the public compatibility alias.
+
+Focused acceptance covers immutable registry definitions, exact and compatible lookup, public declarations, transitive selection, same-spelling non-substitution, negative resolution forms, collision and descriptor failures, unused elimination, complete deterministic artifacts, mappings/metadata, all 25 original-five source-to-target real-toolchain routes, and five same-language isolation routes. The fixture is deliberately neutral: no TCP, `TCPSocket`, `fsockopen`, networking, or other concrete Task 037 API is implemented.
