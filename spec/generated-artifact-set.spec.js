@@ -702,7 +702,7 @@ describe("generated artifact sets", () => {
     expectInvalid(() => generateArtifactSet(undefined))
   })
 
-  it("rejects lone path surrogates while preserving complete Unicode scalar pairs", () => {
+  it("rejects path characters outside portable ASCII while preserving Unicode artifact content", () => {
     const artifact = {
       content: "ok\n",
       contentKind: "text",
@@ -712,17 +712,19 @@ describe("generated artifact sets", () => {
       role: "entry"
     }
 
-    for (const artifactPath of ["high-\uD800.txt", "low-\uDC00.txt"]) {
+    for (const artifactPath of ["high-\uD800.txt", "low-\uDC00.txt", "rocket-\uD83D\uDE80.txt", "Straße.txt", "Σigma.txt",
+      "Café.txt", "Cafe\u0301.txt"]) {
       expectInvalid(() => createGeneratedArtifactSet({
         artifacts: [{...artifact, path: artifactPath}],
         target: "demo"
       }))
     }
 
-    const validPath = "rocket-\uD83D\uDE80.txt"
-    const set = createGeneratedArtifactSet({artifacts: [{...artifact, path: validPath}], target: "demo"})
+    const content = "rocket \uD83D\uDE80, Straße, Σigma, Café\n"
+    const set = createGeneratedArtifactSet({artifacts: [{...artifact, content, path: "rocket.txt"}], target: "demo"})
 
-    expect(set.entry).toEqual(validPath)
+    expect(set.entry).toEqual("rocket.txt")
+    expect(set.artifacts[0].content).toEqual(content)
   })
 
   it("normalizes malformed artifact backend roles without coercing caller values", async () => {
