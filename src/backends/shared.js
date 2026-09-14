@@ -2152,10 +2152,12 @@ export function emitExpression(writer, expression, path, language, emitIdentifie
   }
   if (expression.kind == "OptionalIsPresent") {
     if (language == "ruby") writer.mapped("!", {mappingKind: "exact", node: expression, path, role: "operator"})
+    else if (language != "java") writer.mapped("(", {mappingKind: "anchor", node: expression, path})
     emitExpression(writer, expression.operand, `${path}/operand`, language, emitIdentifier)
     writer.mapped(language == "java" ? ".isPresent()" : language == "ruby" ? ".nil?" : " !== null", {
       mappingKind: "exact", node: expression, path, role: "operator"
     })
+    if (language != "ruby" && language != "java") writer.mapped(")", {mappingKind: "anchor", node: expression, path})
     return
   }
   if (expression.kind == "OptionalUnwrap") {

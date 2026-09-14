@@ -1190,10 +1190,12 @@ function addExpressionEffects(target, expression, callEffects, methodEffects = n
     if (!value || typeof value != "object" || seen.has(value)) continue
     seen.add(value)
     if (Reflect.get(value, "kind") == "CallExpression") addAll(target, callEffects.get(Reflect.get(value, "callee")) ?? new Set())
-    if (Reflect.get(value, "kind") == "MethodCallExpression") {
+    if (Reflect.get(value, "kind") == "MethodCallExpression" || Reflect.get(value, "kind") == "ReferenceConstruction") {
       const failures = Reflect.get(value, "failureIds")
       if (Array.isArray(failures)) for (const failure of failures) if (typeof failure == "string") target.add(failure)
-      addAll(target, methodEffects.get(Reflect.get(value, "method")) ?? new Set())
+      if (Reflect.get(value, "kind") == "MethodCallExpression") {
+        addAll(target, methodEffects.get(Reflect.get(value, "method")) ?? new Set())
+      }
     }
     if (Reflect.get(value, "kind") == "EffectCallExpression") {
       const resolution = Reflect.get(value, "resolution")
