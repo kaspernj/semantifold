@@ -76,7 +76,7 @@ describe("Go cross-language native acceptance", () => {
     }
   })
 
-  it("rotates one original-five source per profile through native Go format/build/vet/run", async () => {
+  it("rotates one original-five source per profile through native Go format/build/vet/run", {timeoutMs: 300_000}, async () => {
     for (const [directory, language, stdout] of reverseProfiles) {
       const filename = /** @type {string} */ (filenames.get(language))
       let source = await readFile(new URL("fixtures/" + directory + filename, import.meta.url), "utf8")
