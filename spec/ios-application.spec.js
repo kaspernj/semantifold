@@ -482,6 +482,44 @@ for line in SemantifoldModuleMain.semantifoldEntry() {
     })
   })
 
+  it("attributes configuration ranges only to the renderer-owned field that emitted them", () => {
+    const module = parse({filename: "program.swift", language: "swift", source: swiftSource})
+    const values = configuration()
+    const set = generateArtifactSet({configuration: values, language: "ios", module, role: "application"})
+    const artifacts = new Map(set.artifacts.map(artifact => [artifact.path, artifact]))
+    const manifestArtifact = artifacts.get("semantifold-project.json")
+
+    assert.ok(manifestArtifact && typeof manifestArtifact.content == "string")
+    const manifest = JSON.parse(manifestArtifact.content)
+    const citations = new Map(manifest.provenance.configuration.map(citation => [citation.field, citation]))
+    const displayName = citations.get("displayName")
+    const organization = citations.get("organizationPrefix")
+    const moduleName = citations.get("moduleName")
+    const productName = citations.get("productName")
+    const bundleIdentifier = citations.get("bundleIdentifier")
+
+    expect(displayName.outputs.map(({path}) => path)).toEqual(["Configuration/Info.plist"])
+    expect(organization.outputs).toEqual([])
+    expect(moduleName.outputs).not.toEqual(productName.outputs)
+    const baseArtifact = artifacts.get("Configuration/Base.xcconfig")
+
+    assert.ok(baseArtifact && typeof baseArtifact.content == "string")
+    const base = baseArtifact.content
+    const rangeFor = (citation, path) => citation.outputs.find(output => output.path == path)?.ranges ?? []
+    const expectedRange = (prefix, value) => {
+      const start = base.indexOf(`${prefix}${value}`) + prefix.length
+
+      return [{end: start + value.length, start}]
+    }
+
+    expect(rangeFor(moduleName, "Configuration/Base.xcconfig"))
+      .toEqual(expectedRange("PRODUCT_MODULE_NAME = ", values.moduleName))
+    expect(rangeFor(productName, "Configuration/Base.xcconfig"))
+      .toEqual(expectedRange("PRODUCT_NAME = ", values.productName))
+    expect(rangeFor(bundleIdentifier, "Configuration/Base.xcconfig"))
+      .toEqual(expectedRange("PRODUCT_BUNDLE_IDENTIFIER = ", values.bundleIdentifier))
+  })
+
   it("derives Xcode IDs from SHA-256 identities and rejects shortened collisions", () => {
     const ids = allocateXcodeObjectIds(["target:app", "target:tests"])
 

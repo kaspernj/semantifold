@@ -76,6 +76,56 @@ func semantifold_keep_mutable<T>(_ value: inout T) {
 }
 `
 
+/** @typedef {{content: string, field: string}} ConfigurationFragment */
+/** @typedef {string | ConfigurationFragment} ConfigurationTextPart */
+/** @typedef {string | readonly ConfigurationTextPart[]} ConfigurationLine */
+/** @typedef {{end: number, field: string, start: number}} ConfigurationSpan */
+/** @typedef {{content: string, configurationSpans: ConfigurationSpan[]}} RenderedConfigurationText */
+/** @typedef {{end: number, field: string, path: string, start: number}} ConfigurationArtifactSpan */
+
+/** Records configuration causality while an owning renderer emits text. */
+class ConfigurationTextWriter {
+  constructor() {
+    this.content = ""
+    /** @type {ConfigurationSpan[]} */
+    this.configurationSpans = []
+  }
+
+  /**
+   * Appends literal or field-owned text.
+   * @param {ConfigurationTextPart | readonly ConfigurationTextPart[]} value - Ordered output text.
+   */
+  append(value) {
+    const parts = Array.isArray(value) ? value : [value]
+
+    for (const part of parts) {
+      if (typeof part == "string") {
+        this.content += part
+      } else {
+        const start = this.content.length
+
+        this.content += part.content
+        this.configurationSpans.push({end: this.content.length, field: part.field, start})
+      }
+    }
+  }
+
+  /** @returns {RenderedConfigurationText} Finished content and causal spans. */
+  finish() {
+    return {configurationSpans: this.configurationSpans, content: this.content}
+  }
+}
+
+/**
+ * Marks text as causally owned by one normalized configuration field.
+ * @param {string} field - Configuration field.
+ * @param {string} content - Exact rendered token content.
+ * @returns {ConfigurationFragment} Tagged token.
+ */
+function configurationFragment(field, content) {
+  return {content, field}
+}
+
 /**
  * Preflights one complete project against the delivered Swift Tasks 001-004 profile.
  * @param {object} input - iOS application generation input.
@@ -128,6 +178,11 @@ export function generateIosApplication(input) {
   const semanticArtifacts = renderSemanticArtifacts(prepared)
   const applicationPaths = applicationArtifactPaths(prepared)
   const project = renderPbxProject(prepared, applicationPaths)
+  const scheme = renderSharedScheme(prepared)
+  const baseConfiguration = renderBaseConfiguration(prepared.configuration)
+  const infoPlist = renderInfoPlist(prepared.configuration)
+  const unitTests = renderUnitTests(prepared.configuration)
+  const uiTests = renderUiTests(prepared.configuration)
   const configuration = prepared.configuration
   const entryNamespace = `SemantifoldModule${moduleName(prepared.program.entryModule)}`
   const app = `import SwiftUI
@@ -159,14 +214,17 @@ struct SemantifoldOutputView: View {
 }
 `
   const product = configuration.productName
+  /** @type {ConfigurationArtifactSpan[]} */
+  const configurationSpans = []
   const artifacts = [
-    syntheticText(`${product}.xcodeproj/project.pbxproj`, "manifest", project,
+    configuredSyntheticText(`${product}.xcodeproj/project.pbxproj`, "manifest", project,
+      configurationSpans,
       "Canonical deterministic Xcode project structure."),
-    syntheticText(`${product}.xcodeproj/xcshareddata/xcschemes/${product}.xcscheme`, "support",
-      renderSharedScheme(prepared), "Canonical shared Xcode application/test scheme."),
-    syntheticText("Configuration/Base.xcconfig", "support", renderBaseConfiguration(configuration),
+    configuredSyntheticText(`${product}.xcodeproj/xcshareddata/xcschemes/${product}.xcscheme`, "support",
+      scheme, configurationSpans, "Canonical shared Xcode application/test scheme."),
+    configuredSyntheticText("Configuration/Base.xcconfig", "support", baseConfiguration, configurationSpans,
       "Closed unsigned iOS build configuration."),
-    syntheticText("Configuration/Info.plist", "support", renderInfoPlist(configuration),
+    configuredSyntheticText("Configuration/Info.plist", "support", infoPlist, configurationSpans,
       "Allowlisted iOS application property list."),
     ...semanticArtifacts,
     syntheticText("Sources/Application/App.swift", "entry", app, "Synthetic SwiftUI application lifecycle."),
@@ -178,14 +236,15 @@ struct SemantifoldOutputView: View {
       info: {author: "semantifold", version: 1}
     }), "Base asset-catalog metadata; no application icon is synthesized."),
     ...prepared.assets.map(assetArtifact),
-    syntheticText(`Tests/${product}Tests.swift`, "support", renderUnitTests(configuration),
+    configuredSyntheticText(`Tests/${product}Tests.swift`, "support", unitTests, configurationSpans,
       "Synthetic pure-logic determinism XCTest source."),
-    syntheticText(`UITests/${product}UITests.swift`, "support", renderUiTests(configuration),
+    configuredSyntheticText(`UITests/${product}UITests.swift`, "support", uiTests, configurationSpans,
       "Synthetic XCUI accessibility-route test source.")
   ]
   const manifestPath = "semantifold-project.json"
 
-  artifacts.push(syntheticText(manifestPath, "manifest", renderProjectManifest(prepared, artifacts, manifestPath),
+  artifacts.push(syntheticText(manifestPath, "manifest",
+    renderProjectManifest(prepared, artifacts, manifestPath, configurationSpans),
     "Versioned iOS project ownership and provenance manifest."))
 
   return {
@@ -200,9 +259,10 @@ struct SemantifoldOutputView: View {
  * @param {ReturnType<typeof preflightIosApplication>} prepared - Fully preflighted application.
  * @param {import("../semantic/types.js").GeneratedSetArtifact[]} artifacts - All non-manifest output artifacts.
  * @param {string} manifestPath - Owned manifest path.
+ * @param {ConfigurationArtifactSpan[]} configurationSpans - Renderer-owned configuration ranges.
  * @returns {string} Canonical manifest JSON.
  */
-function renderProjectManifest(prepared, artifacts, manifestPath) {
+function renderProjectManifest(prepared, artifacts, manifestPath, configurationSpans) {
   const assetPaths = new Set(prepared.assets.map(({path}) => path))
   const semanticArtifacts = artifacts.filter(artifact => artifact.provenance.kind == "text")
   const configuration = prepared.configuration
@@ -233,7 +293,7 @@ function renderProjectManifest(prepared, artifacts, manifestPath) {
       configuration: Object.keys(configuration).sort().map(field => ({
         field,
         manifestPointer: `/configuration/${field}`,
-        outputs: configurationOutputCitations(artifacts, Reflect.get(configuration, field))
+        outputs: configurationOutputCitations(configurationSpans, field)
       })),
       semanticSources: prepared.sources.map(source => ({
         artifacts: semanticArtifacts.filter(artifact => artifact.provenance.kind == "text" &&
@@ -269,32 +329,24 @@ function originReferencesFilename(origin, filename) {
 }
 
 /**
- * Locates exact configuration scalar occurrences in generated text artifacts.
- * Non-scalar and transformed uses remain explicitly cited by their manifest pointer.
- * @param {import("../semantic/types.js").GeneratedSetArtifact[]} artifacts - Generated non-manifest artifacts.
- * @param {unknown} value - Normalized configuration value.
+ * Groups renderer-recorded configuration ranges without scanning generated text.
+ * @param {ConfigurationArtifactSpan[]} spans - Causal artifact spans.
+ * @param {string} field - Normalized configuration field.
  * @returns {{path: string, ranges: {end: number, start: number}[]}[]} Stable output citations.
  */
-function configurationOutputCitations(artifacts, value) {
-  if (typeof value != "string" || value.length == 0) return []
-  /** @type {{path: string, ranges: {end: number, start: number}[]}[]} */
-  const outputs = []
+function configurationOutputCitations(spans, field) {
+  /** @type {Map<string, {end: number, start: number}[]>} */
+  const byPath = new Map()
 
-  for (const artifact of artifacts) {
-    if (artifact.contentKind != "text") continue
-    const content = /** @type {string} */ (artifact.content)
-    /** @type {{end: number, start: number}[]} */
-    const ranges = []
-    let start = content.indexOf(value)
+  for (const span of spans) {
+    if (span.field != field) continue
+    const ranges = byPath.get(span.path) ?? []
 
-    while (start >= 0) {
-      ranges.push({end: start + value.length, start})
-      start = content.indexOf(value, start + value.length)
-    }
-    if (ranges.length > 0) outputs.push({path: artifact.path, ranges})
+    ranges.push({end: span.end, start: span.start})
+    byPath.set(span.path, ranges)
   }
 
-  return outputs
+  return [...byPath].map(([path, ranges]) => ({path, ranges}))
 }
 
 /**
@@ -362,17 +414,17 @@ function renderSemanticArtifacts(prepared) {
  * @returns {{appSources: string[], assets: string[], infoPlist: string, unitTest: string, uiTest: string, xcconfig: string}} Paths.
  */
 function applicationArtifactPaths(prepared) {
-  const product = prepared.configuration.productName
+  const {productName: product, resourceRoot, sourceRoot} = prepared.configuration
 
   return {
     appSources: [
-      "Sources/Generated/SemantifoldRuntime.swift",
+      `${sourceRoot}/Generated/SemantifoldRuntime.swift`,
       ...prepared.modulePaths.values(),
-      "Sources/Application/App.swift",
-      "Sources/Application/SemantifoldBridge.swift",
-      "Sources/Application/SemantifoldOutputView.swift"
+      `${sourceRoot}/Application/App.swift`,
+      `${sourceRoot}/Application/SemantifoldBridge.swift`,
+      `${sourceRoot}/Application/SemantifoldOutputView.swift`
     ],
-    assets: ["Assets.xcassets", ...prepared.assets.map(({path}) => path)],
+    assets: [resourceRoot, ...prepared.assets.map(({path}) => path)],
     infoPlist: "Configuration/Info.plist",
     unitTest: `Tests/${product}Tests.swift`,
     uiTest: `UITests/${product}UITests.swift`,
@@ -421,11 +473,13 @@ export function allocateXcodeObjectIds(identities, digest = identity => createHa
  * Platform execution remains deferred until the repository has a qualified Apple lane.
  * @param {ReturnType<typeof preflightIosApplication>} prepared - Prepared application.
  * @param {ReturnType<typeof applicationArtifactPaths>} paths - Complete owned paths.
- * @returns {string} Canonical LF project file.
+ * @returns {RenderedConfigurationText} Canonical LF project file and causal configuration spans.
  */
 function renderPbxProject(prepared, paths) {
   const configuration = prepared.configuration
   const product = configuration.productName
+  const resourceRoot = configuration.resourceRoot
+  const sourceRoot = configuration.sourceRoot
   const identities = [
     "project", "group:main", "group:sources", "group:generated", "group:application", "group:configuration",
     "group:tests", "group:uitests", "group:products", "target:app", "target:tests", "target:uitests",
@@ -436,10 +490,10 @@ function renderPbxProject(prepared, paths) {
     "config-list:project", "config-list:app", "config-list:tests", "config-list:uitests",
     "config:project:debug", "config:project:release", "config:app:debug", "config:app:release",
     "config:tests:debug", "config:tests:release", "config:uitests:debug", "config:uitests:release",
-    `file:${paths.xcconfig}`, `file:${paths.infoPlist}`, "file:Assets.xcassets",
+    `file:${paths.xcconfig}`, `file:${paths.infoPlist}`, `file:${resourceRoot}`,
     `file:${paths.unitTest}`, `file:${paths.uiTest}`,
     ...paths.appSources.flatMap(path => [`file:${path}`, `build:app:${path}`]),
-    "build:app:Assets.xcassets", `build:tests:${paths.unitTest}`, `build:uitests:${paths.uiTest}`
+    `build:app:${resourceRoot}`, `build:tests:${paths.unitTest}`, `build:uitests:${paths.uiTest}`
   ]
   const ids = allocateXcodeObjectIds(identities)
   /**
@@ -454,13 +508,13 @@ function renderPbxProject(prepared, paths) {
 
     return value
   }
-  /** @type {Map<string, {identity: string, body: string[]}[]>} */
+  /** @type {Map<string, {identity: string, body: ConfigurationLine[]}[]>} */
   const sections = new Map()
   /**
    * Adds an object to one PBX section.
    * @param {string} section - PBX section.
    * @param {string} identity - Object identity.
-   * @param {string[]} body - Object fields.
+   * @param {ConfigurationLine[]} body - Object fields.
    */
   const add = (section, identity, body) => {
     const entries = sections.get(section) ?? []
@@ -484,41 +538,43 @@ function renderPbxProject(prepared, paths) {
   for (const path of paths.appSources) {
     add("PBXBuildFile", `build:app:${path}`, ["isa = PBXBuildFile;", `fileRef = ${id(`file:${path}`)};`])
     add("PBXFileReference", `file:${path}`, ["isa = PBXFileReference;", "lastKnownFileType = sourcecode.swift;",
-      `path = ${pbxString(path)};`, "sourceTree = SOURCE_ROOT;"])
+      ["path = ", ...pbxConfigurationPath(configuration, path), ";"], "sourceTree = SOURCE_ROOT;"])
   }
-  add("PBXBuildFile", "build:app:Assets.xcassets", ["isa = PBXBuildFile;", `fileRef = ${id("file:Assets.xcassets")};`])
+  add("PBXBuildFile", `build:app:${resourceRoot}`, ["isa = PBXBuildFile;", `fileRef = ${id(`file:${resourceRoot}`)};`])
   add("PBXBuildFile", `build:tests:${paths.unitTest}`, ["isa = PBXBuildFile;", `fileRef = ${id(`file:${paths.unitTest}`)};`])
   add("PBXBuildFile", `build:uitests:${paths.uiTest}`, ["isa = PBXBuildFile;", `fileRef = ${id(`file:${paths.uiTest}`)};`])
   add("PBXContainerItemProxy", "proxy:tests:app", ["isa = PBXContainerItemProxy;", `containerPortal = ${id("project")};`,
-    "proxyType = 1;", `remoteGlobalIDString = ${id("target:app")};`, `remoteInfo = ${pbxString(product)};`])
+    "proxyType = 1;", `remoteGlobalIDString = ${id("target:app")};`,
+    ["remoteInfo = \"", configurationFragment("productName", product), "\";"]])
   add("PBXContainerItemProxy", "proxy:uitests:app", ["isa = PBXContainerItemProxy;", `containerPortal = ${id("project")};`,
-    "proxyType = 1;", `remoteGlobalIDString = ${id("target:app")};`, `remoteInfo = ${pbxString(product)};`])
+    "proxyType = 1;", `remoteGlobalIDString = ${id("target:app")};`,
+    ["remoteInfo = \"", configurationFragment("productName", product), "\";"]])
   add("PBXFileReference", `file:${paths.xcconfig}`, ["isa = PBXFileReference;", "lastKnownFileType = text.xcconfig;",
     `path = ${pbxString(paths.xcconfig)};`, "sourceTree = SOURCE_ROOT;"])
   add("PBXFileReference", `file:${paths.infoPlist}`, ["isa = PBXFileReference;", "lastKnownFileType = text.plist.xml;",
     `path = ${pbxString(paths.infoPlist)};`, "sourceTree = SOURCE_ROOT;"])
-  add("PBXFileReference", "file:Assets.xcassets", ["isa = PBXFileReference;", "lastKnownFileType = folder.assetcatalog;",
-    "path = Assets.xcassets;", "sourceTree = SOURCE_ROOT;"])
+  add("PBXFileReference", `file:${resourceRoot}`, ["isa = PBXFileReference;", "lastKnownFileType = folder.assetcatalog;",
+    ["path = ", configurationFragment("resourceRoot", resourceRoot), ";"], "sourceTree = SOURCE_ROOT;"])
   add("PBXFileReference", `file:${paths.unitTest}`, ["isa = PBXFileReference;", "lastKnownFileType = sourcecode.swift;",
-    `path = ${pbxString(paths.unitTest)};`, "sourceTree = SOURCE_ROOT;"])
+    ["path = ", ...pbxConfigurationPath(configuration, paths.unitTest), ";"], "sourceTree = SOURCE_ROOT;"])
   add("PBXFileReference", `file:${paths.uiTest}`, ["isa = PBXFileReference;", "lastKnownFileType = sourcecode.swift;",
-    `path = ${pbxString(paths.uiTest)};`, "sourceTree = SOURCE_ROOT;"])
+    ["path = ", ...pbxConfigurationPath(configuration, paths.uiTest), ";"], "sourceTree = SOURCE_ROOT;"])
   add("PBXFileReference", "product:app", ["isa = PBXFileReference;", "explicitFileType = wrapper.application;", "includeInIndex = 0;",
-    `path = ${pbxString(`${product}.app`)};`, "sourceTree = BUILT_PRODUCTS_DIR;"])
+    ["path = \"", configurationFragment("productName", product), ".app\";"], "sourceTree = BUILT_PRODUCTS_DIR;"])
   add("PBXFileReference", "product:tests", ["isa = PBXFileReference;", "explicitFileType = wrapper.cfbundle;", "includeInIndex = 0;",
-    `path = ${pbxString(`${product}Tests.xctest`)};`, "sourceTree = BUILT_PRODUCTS_DIR;"])
+    ["path = \"", configurationFragment("productName", product), "Tests.xctest\";"], "sourceTree = BUILT_PRODUCTS_DIR;"])
   add("PBXFileReference", "product:uitests", ["isa = PBXFileReference;", "explicitFileType = wrapper.cfbundle;", "includeInIndex = 0;",
-    `path = ${pbxString(`${product}UITests.xctest`)};`, "sourceTree = BUILT_PRODUCTS_DIR;"])
+    ["path = \"", configurationFragment("productName", product), "UITests.xctest\";"], "sourceTree = BUILT_PRODUCTS_DIR;"])
 
-  const generatedRefs = sorted(paths.appSources.filter(path => path.startsWith("Sources/Generated/"))).map(path => id(`file:${path}`))
-  const applicationRefs = sorted(paths.appSources.filter(path => path.startsWith("Sources/Application/"))).map(path => id(`file:${path}`))
+  const generatedRefs = sorted(paths.appSources.filter(path => path.startsWith(`${sourceRoot}/Generated/`))).map(path => id(`file:${path}`))
+  const applicationRefs = sorted(paths.appSources.filter(path => path.startsWith(`${sourceRoot}/Application/`))).map(path => id(`file:${path}`))
 
   add("PBXGroup", "group:main", ["isa = PBXGroup;", `children = (\n${list([
-    id("group:configuration"), id("group:sources"), id("file:Assets.xcassets"), id("group:tests"), id("group:uitests"),
+    id("group:configuration"), id("group:sources"), id(`file:${resourceRoot}`), id("group:tests"), id("group:uitests"),
     id("group:products")
   ])}\n\t\t\t);`, "sourceTree = \"<group>\";"])
   add("PBXGroup", "group:sources", ["isa = PBXGroup;", `children = (\n${list([id("group:application"), id("group:generated")])}\n\t\t\t);`,
-    "name = Sources;", "sourceTree = \"<group>\";"])
+    ["name = ", configurationFragment("sourceRoot", sourceRoot), ";"], "sourceTree = \"<group>\";"])
   add("PBXGroup", "group:generated", ["isa = PBXGroup;", `children = (\n${list(generatedRefs)}\n\t\t\t);`,
     "name = Generated;", "sourceTree = \"<group>\";"])
   add("PBXGroup", "group:application", ["isa = PBXGroup;", `children = (\n${list(applicationRefs)}\n\t\t\t);`,
@@ -532,11 +588,11 @@ function renderPbxProject(prepared, paths) {
   add("PBXGroup", "group:products", ["isa = PBXGroup;", `children = (\n${list([id("product:app"), id("product:tests"), id("product:uitests")])}\n\t\t\t);`,
     "name = Products;", "sourceTree = \"<group>\";"])
 
-  addNativeTarget(add, id, "target:app", product, "com.apple.product-type.application", "product:app",
+  addNativeTarget(add, id, configuration, "target:app", "", "com.apple.product-type.application", "product:app",
     "config-list:app", ["phase:app:sources", "phase:app:frameworks", "phase:app:resources"], [])
-  addNativeTarget(add, id, "target:tests", `${product}Tests`, "com.apple.product-type.bundle.unit-test", "product:tests",
+  addNativeTarget(add, id, configuration, "target:tests", "Tests", "com.apple.product-type.bundle.unit-test", "product:tests",
     "config-list:tests", ["phase:tests:sources", "phase:tests:frameworks", "phase:tests:resources"], ["dependency:tests:app"])
-  addNativeTarget(add, id, "target:uitests", `${product}UITests`, "com.apple.product-type.bundle.ui-testing", "product:uitests",
+  addNativeTarget(add, id, configuration, "target:uitests", "UITests", "com.apple.product-type.bundle.ui-testing", "product:uitests",
     "config-list:uitests", ["phase:uitests:sources", "phase:uitests:frameworks", "phase:uitests:resources"], ["dependency:uitests:app"])
   add("PBXProject", "project", ["isa = PBXProject;", "attributes = { BuildIndependentTargetsInParallel = YES; };",
     `buildConfigurationList = ${id("config-list:project")};`, "developmentRegion = en;", "hasScannedForEncodings = 0;",
@@ -545,7 +601,7 @@ function renderPbxProject(prepared, paths) {
     `targets = (\n${list([id("target:app"), id("target:tests"), id("target:uitests")])}\n\t\t\t);`])
 
   addBuildPhase(add, id, "PBXFrameworksBuildPhase", "phase:app:frameworks", [])
-  addBuildPhase(add, id, "PBXResourcesBuildPhase", "phase:app:resources", ["build:app:Assets.xcassets"])
+  addBuildPhase(add, id, "PBXResourcesBuildPhase", "phase:app:resources", [`build:app:${resourceRoot}`])
   addBuildPhase(add, id, "PBXSourcesBuildPhase", "phase:app:sources", sorted(paths.appSources).map(path => `build:app:${path}`))
   for (const target of ["tests", "uitests"]) {
     addBuildPhase(add, id, "PBXFrameworksBuildPhase", `phase:${target}:frameworks`, [])
@@ -563,7 +619,7 @@ function renderPbxProject(prepared, paths) {
       const settings = buildSettings(owner, variant, configuration, paths)
 
       add("XCBuildConfiguration", `config:${owner}:${variant}`, ["isa = XCBuildConfiguration;",
-        `baseConfigurationReference = ${id(`file:${paths.xcconfig}`)};`, `buildSettings = {\n${settings}\n\t\t\t};`,
+        `baseConfigurationReference = ${id(`file:${paths.xcconfig}`)};`, ["buildSettings = {\n", ...settings, "\n\t\t\t};"],
         `name = ${variant == "debug" ? "Debug" : "Release"};`])
     }
     add("XCConfigurationList", `config-list:${owner}`, ["isa = XCConfigurationList;",
@@ -574,53 +630,62 @@ function renderPbxProject(prepared, paths) {
   const order = ["PBXBuildFile", "PBXContainerItemProxy", "PBXFileReference", "PBXFrameworksBuildPhase", "PBXGroup",
     "PBXNativeTarget", "PBXProject", "PBXResourcesBuildPhase", "PBXSourcesBuildPhase", "PBXTargetDependency",
     "XCBuildConfiguration", "XCConfigurationList"]
-  let output = "// !$*UTF8*$!\n{\n\tarchiveVersion = 1;\n\tclasses = {};\n\tobjectVersion = 56;\n\tobjects = {\n"
+  const writer = new ConfigurationTextWriter()
+
+  writer.append("// !$*UTF8*$!\n{\n\tarchiveVersion = 1;\n\tclasses = {};\n\tobjectVersion = 56;\n\tobjects = {\n")
 
   for (const section of order) {
     const entries = (sections.get(section) ?? []).sort((left, right) => left.identity < right.identity ? -1 : 1)
 
-    output += `\n/* Begin ${section} section */\n`
+    writer.append(`\n/* Begin ${section} section */\n`)
     for (const entry of entries) {
-      output += `\t\t${id(entry.identity)} = {\n`
-      for (const line of entry.body) output += `\t\t\t${line}\n`
-      output += "\t\t};\n"
+      writer.append(`\t\t${id(entry.identity)} = {\n`)
+      for (const line of entry.body) {
+        writer.append("\t\t\t")
+        writer.append(line)
+        writer.append("\n")
+      }
+      writer.append("\t\t};\n")
     }
-    output += `/* End ${section} section */\n`
+    writer.append(`/* End ${section} section */\n`)
   }
-  output += `\t};\n\trootObject = ${id("project")};\n}\n`
+  writer.append(`\t};\n\trootObject = ${id("project")};\n}\n`)
 
-  return output
+  return writer.finish()
 }
 
 /**
  * Adds one native target object to the project model.
- * @param {(section: string, identity: string, body: string[]) => void} add - Object sink.
+ * @param {(section: string, identity: string, body: ConfigurationLine[]) => void} add - Object sink.
  * @param {(identity: string) => string} id - ID lookup.
+ * @param {import("../semantic/types.js").IosApplicationConfiguration} configuration - Application configuration.
  * @param {string} identity - Target identity.
- * @param {string} name - Product name.
+ * @param {string} nameSuffix - Target suffix after the product name.
  * @param {string} productType - Product type.
  * @param {string} productReference - Product reference identity.
  * @param {string} configurationList - Configuration list identity.
  * @param {string[]} phases - Phase identities.
  * @param {string[]} dependencies - Dependency identities.
  */
-function addNativeTarget(add, id, identity, name, productType, productReference, configurationList, phases, dependencies) {
+function addNativeTarget(add, id, configuration, identity, nameSuffix, productType, productReference, configurationList,
+  phases, dependencies) {
   /**
    * Renders target identity values.
    * @param {string[]} values - Target identity values.
    * @returns {string} Rendered target list.
    */
   const lines = values => values.map(value => `\t\t\t\t${id(value)},`).join("\n")
+  const name = ["\"", configurationFragment("productName", configuration.productName), `${nameSuffix}\"`]
 
   add("PBXNativeTarget", identity, ["isa = PBXNativeTarget;", `buildConfigurationList = ${id(configurationList)};`,
     `buildPhases = (\n${lines(phases)}\n\t\t\t);`, "buildRules = ();", `dependencies = (\n${lines(dependencies)}\n\t\t\t);`,
-    `name = ${pbxString(name)};`, `productName = ${pbxString(name)};`, `productReference = ${id(productReference)};`,
+    ["name = ", ...name, ";"], ["productName = ", ...name, ";"], `productReference = ${id(productReference)};`,
     `productType = ${pbxString(productType)};`])
 }
 
 /**
  * Adds one build phase to the project model.
- * @param {(section: string, identity: string, body: string[]) => void} add - Object sink.
+ * @param {(section: string, identity: string, body: ConfigurationLine[]) => void} add - Object sink.
  * @param {(identity: string) => string} id - ID lookup.
  * @param {string} section - Phase ISA.
  * @param {string} identity - Phase identity.
@@ -639,39 +704,52 @@ function addBuildPhase(add, id, section, identity, files) {
  * @param {string} variant - Debug or release.
  * @param {import("../semantic/types.js").IosApplicationConfiguration} configuration - Application configuration.
  * @param {ReturnType<typeof applicationArtifactPaths>} paths - Planned paths.
- * @returns {string} Sorted PBX build settings.
+ * @returns {ConfigurationTextPart[]} Sorted PBX build settings.
  */
 function buildSettings(owner, variant, configuration, paths) {
-  /** @type {Record<string, string>} */
+  /** @type {Record<string, ConfigurationTextPart | ConfigurationTextPart[]>} */
   const values = owner == "project" ? {
     CODE_SIGNING_ALLOWED: "NO",
     CODE_SIGNING_REQUIRED: "NO"
   } : owner == "app" ? {
     GENERATE_INFOPLIST_FILE: "NO",
     INFOPLIST_FILE: pbxString(paths.infoPlist),
-    IPHONEOS_DEPLOYMENT_TARGET: configuration.deploymentTarget,
-    PRODUCT_BUNDLE_IDENTIFIER: configuration.bundleIdentifier,
-    PRODUCT_MODULE_NAME: configuration.moduleName,
-    PRODUCT_NAME: configuration.productName,
+    IPHONEOS_DEPLOYMENT_TARGET: configurationFragment("deploymentTarget", configuration.deploymentTarget),
+    PRODUCT_BUNDLE_IDENTIFIER: configurationFragment("bundleIdentifier", configuration.bundleIdentifier),
+    PRODUCT_MODULE_NAME: configurationFragment("moduleName", configuration.moduleName),
+    PRODUCT_NAME: configurationFragment("productName", configuration.productName),
     SDKROOT: "iphoneos",
     SUPPORTED_PLATFORMS: pbxString("iphoneos iphonesimulator"),
     TARGETED_DEVICE_FAMILY: "1"
   } : owner == "tests" ? {
     BUNDLE_LOADER: pbxString("$(TEST_HOST)"),
-    PRODUCT_BUNDLE_IDENTIFIER: `${configuration.bundleIdentifier}.tests`,
-    PRODUCT_MODULE_NAME: `${configuration.moduleName}Tests`,
+    PRODUCT_BUNDLE_IDENTIFIER: [configurationFragment("bundleIdentifier", configuration.bundleIdentifier), ".tests"],
+    PRODUCT_MODULE_NAME: [configurationFragment("moduleName", configuration.moduleName), "Tests"],
     PRODUCT_NAME: "$(TARGET_NAME)",
-    TEST_HOST: pbxString(`$(BUILT_PRODUCTS_DIR)/${configuration.productName}.app/${configuration.productName}`)
+    TEST_HOST: ["\"$(BUILT_PRODUCTS_DIR)/", configurationFragment("productName", configuration.productName),
+      ".app/", configurationFragment("productName", configuration.productName), "\""]
   } : {
-    PRODUCT_BUNDLE_IDENTIFIER: `${configuration.bundleIdentifier}.uitests`,
-    PRODUCT_MODULE_NAME: `${configuration.moduleName}UITests`,
+    PRODUCT_BUNDLE_IDENTIFIER: [configurationFragment("bundleIdentifier", configuration.bundleIdentifier), ".uitests"],
+    PRODUCT_MODULE_NAME: [configurationFragment("moduleName", configuration.moduleName), "UITests"],
     PRODUCT_NAME: "$(TARGET_NAME)",
-    TEST_TARGET_NAME: configuration.productName
+    TEST_TARGET_NAME: configurationFragment("productName", configuration.productName)
   }
 
   if (variant == "release") values.SWIFT_OPTIMIZATION_LEVEL = pbxString("-O")
 
-  return Object.keys(values).sort().map(key => `\t\t\t\t${key} = ${values[key]};`).join("\n")
+  /** @type {ConfigurationTextPart[]} */
+  const output = []
+
+  for (const [index, key] of Object.keys(values).sort().entries()) {
+    const value = values[key]
+
+    if (index > 0) output.push("\n")
+    output.push(`\t\t\t\t${key} = `)
+    output.push(...(Array.isArray(value) ? value : [value]))
+    output.push(";")
+  }
+
+  return output
 }
 
 /**
@@ -684,9 +762,32 @@ function pbxString(value) {
 }
 
 /**
+ * Renders a quoted PBX path while retaining causality for its configured component.
+ * @param {import("../semantic/types.js").IosApplicationConfiguration} configuration - Application configuration.
+ * @param {string} path - Planned artifact path.
+ * @returns {ConfigurationTextPart[]} Quoted PBX path fragments.
+ */
+function pbxConfigurationPath(configuration, path) {
+  if (path.startsWith(`${configuration.sourceRoot}/`)) {
+    return ["\"", configurationFragment("sourceRoot", configuration.sourceRoot), path.slice(configuration.sourceRoot.length), "\""]
+  }
+  if (path == configuration.resourceRoot) {
+    return ["\"", configurationFragment("resourceRoot", configuration.resourceRoot), "\""]
+  }
+  if (path == `Tests/${configuration.productName}Tests.swift`) {
+    return ["\"Tests/", configurationFragment("productName", configuration.productName), "Tests.swift\""]
+  }
+  if (path == `UITests/${configuration.productName}UITests.swift`) {
+    return ["\"UITests/", configurationFragment("productName", configuration.productName), "UITests.swift\""]
+  }
+
+  return [pbxString(path)]
+}
+
+/**
  * Renders the shared scheme XML.
  * @param {ReturnType<typeof preflightIosApplication>} prepared - Prepared application.
- * @returns {string} Shared scheme XML.
+ * @returns {RenderedConfigurationText} Shared scheme XML and causal configuration spans.
  */
 function renderSharedScheme(prepared) {
   const product = prepared.configuration.productName
@@ -695,85 +796,111 @@ function renderSharedScheme(prepared) {
   const uiTestId = allocateXcodeObjectIds(["target:uitests"]).get("target:uitests")
   /**
    * Renders one scheme buildable reference.
-   * @param {string} name - Blueprint name.
-   * @param {string} buildable - Product filename.
+   * @param {string} nameSuffix - Blueprint suffix after product name.
+   * @param {string} buildableSuffix - Product filename suffix.
    * @param {string | undefined} id - Object ID.
-   * @returns {string} XML reference.
+   * @returns {ConfigurationTextPart[]} XML reference.
    */
-  const reference = (name, buildable, id) => `<BuildableReference
+  const reference = (nameSuffix, buildableSuffix, id) => [`<BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "${id}"
-               BuildableName = "${xmlEscape(buildable)}"
-               BlueprintName = "${xmlEscape(name)}"
-               ReferencedContainer = "container:${xmlEscape(product)}.xcodeproj">
-            </BuildableReference>`
+               BuildableName = "`, configurationFragment("productName", product), `${buildableSuffix}"
+               BlueprintName = "`, configurationFragment("productName", product), `${nameSuffix}"
+               ReferencedContainer = "container:`, configurationFragment("productName", product), `.xcodeproj">
+            </BuildableReference>`]
+  const writer = new ConfigurationTextWriter()
 
-  return `<?xml version="1.0" encoding="UTF-8"?>
+  writer.append(`<?xml version="1.0" encoding="UTF-8"?>
 <Scheme version="1.7">
    <BuildAction parallelizeBuildables="YES" buildImplicitDependencies="YES">
       <BuildActionEntries>
          <BuildActionEntry buildForTesting="YES" buildForRunning="YES" buildForProfiling="YES" buildForArchiving="YES" buildForAnalyzing="YES">
-            ${reference(product, `${product}.app`, appId)}
+            `)
+  writer.append(reference("", ".app", appId))
+  writer.append(`
          </BuildActionEntry>
       </BuildActionEntries>
    </BuildAction>
    <TestAction buildConfiguration="Debug" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.DebuggerFoundation.Launcher.LLDB" shouldUseLaunchSchemeArgsEnv="YES">
       <Testables>
          <TestableReference skipped="NO">
-            ${reference(`${product}Tests`, `${product}Tests.xctest`, testId)}
+            `)
+  writer.append(reference("Tests", "Tests.xctest", testId))
+  writer.append(`
          </TestableReference>
          <TestableReference skipped="NO">
-            ${reference(`${product}UITests`, `${product}UITests.xctest`, uiTestId)}
+            `)
+  writer.append(reference("UITests", "UITests.xctest", uiTestId))
+  writer.append(`
          </TestableReference>
       </Testables>
    </TestAction>
    <LaunchAction buildConfiguration="Debug" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.DebuggerFoundation.Launcher.LLDB" launchStyle="0" useCustomWorkingDirectory="NO" ignoresPersistentStateOnLaunch="NO" debugDocumentVersioning="YES" debugServiceExtension="internal" allowLocationSimulation="YES">
       <BuildableProductRunnable runnableDebuggingMode="0">
-         ${reference(product, `${product}.app`, appId)}
+         `)
+  writer.append(reference("", ".app", appId))
+  writer.append(`
       </BuildableProductRunnable>
    </LaunchAction>
    <ProfileAction buildConfiguration="Release" shouldUseLaunchSchemeArgsEnv="YES" savedToolIdentifier="" useCustomWorkingDirectory="NO" debugDocumentVersioning="YES">
       <BuildableProductRunnable runnableDebuggingMode="0">
-         ${reference(product, `${product}.app`, appId)}
+         `)
+  writer.append(reference("", ".app", appId))
+  writer.append(`
       </BuildableProductRunnable>
    </ProfileAction>
    <AnalyzeAction buildConfiguration="Debug"/>
    <ArchiveAction buildConfiguration="Release" revealArchiveInOrganizer="YES"/>
 </Scheme>
-`
+`)
+
+  return writer.finish()
 }
 
 /**
  * Renders the closed unsigned base configuration.
  * @param {import("../semantic/types.js").IosApplicationConfiguration} configuration - Application configuration.
- * @returns {string} Base xcconfig.
+ * @returns {RenderedConfigurationText} Base xcconfig and causal configuration spans.
  */
 function renderBaseConfiguration(configuration) {
-  return `CODE_SIGNING_ALLOWED = NO
+  const writer = new ConfigurationTextWriter()
+
+  writer.append(`CODE_SIGNING_ALLOWED = NO
 CODE_SIGNING_REQUIRED = NO
 GENERATE_INFOPLIST_FILE = NO
-IPHONEOS_DEPLOYMENT_TARGET = ${configuration.deploymentTarget}
-PRODUCT_BUNDLE_IDENTIFIER = ${configuration.bundleIdentifier}
-PRODUCT_MODULE_NAME = ${configuration.moduleName}
-PRODUCT_NAME = ${configuration.productName}
+IPHONEOS_DEPLOYMENT_TARGET = `)
+  writer.append(configurationFragment("deploymentTarget", configuration.deploymentTarget))
+  writer.append("\nPRODUCT_BUNDLE_IDENTIFIER = ")
+  writer.append(configurationFragment("bundleIdentifier", configuration.bundleIdentifier))
+  writer.append("\nPRODUCT_MODULE_NAME = ")
+  writer.append(configurationFragment("moduleName", configuration.moduleName))
+  writer.append("\nPRODUCT_NAME = ")
+  writer.append(configurationFragment("productName", configuration.productName))
+  writer.append(`
 SDKROOT = iphoneos
 SUPPORTED_PLATFORMS = iphoneos iphonesimulator
 TARGETED_DEVICE_FAMILY = 1
-`
+`)
+
+  return writer.finish()
 }
 
 /**
  * Renders the allowlisted application property list.
  * @param {import("../semantic/types.js").IosApplicationConfiguration} configuration - Application configuration.
- * @returns {string} Property-list XML.
+ * @returns {RenderedConfigurationText} Property-list XML and causal configuration spans.
  */
 function renderInfoPlist(configuration) {
-  return `<?xml version="1.0" encoding="UTF-8"?>
+  const writer = new ConfigurationTextWriter()
+
+  writer.append(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
   <key>CFBundleDisplayName</key>
-  <string>${xmlEscape(configuration.displayName)}</string>
+  <string>`)
+  writer.append(configurationFragment("displayName", xmlEscape(configuration.displayName)))
+  writer.append(`</string>
   <key>CFBundleExecutable</key>
   <string>$(EXECUTABLE_NAME)</string>
   <key>CFBundleIdentifier</key>
@@ -794,19 +921,24 @@ function renderInfoPlist(configuration) {
   <dict/>
 </dict>
 </plist>
-`
+`)
+
+  return writer.finish()
 }
 
 /**
  * Renders pure-logic XCTest source.
  * @param {import("../semantic/types.js").IosApplicationConfiguration} configuration - Application configuration.
- * @returns {string} XCTest source.
+ * @returns {RenderedConfigurationText} XCTest source and causal configuration spans.
  */
 function renderUnitTests(configuration) {
-  return `import XCTest
-@testable import ${configuration.moduleName}
+  const writer = new ConfigurationTextWriter()
 
-final class ${configuration.productName}Tests: XCTestCase {
+  writer.append("import XCTest\n@testable import ")
+  writer.append(configurationFragment("moduleName", configuration.moduleName))
+  writer.append("\n\nfinal class ")
+  writer.append(configurationFragment("productName", configuration.productName))
+  writer.append(`Tests: XCTestCase {
   func testSemanticOutputIsDeterministic() {
     XCTAssertEqual(SemantifoldBridge.run(), SemantifoldBridge.run())
   }
@@ -819,25 +951,31 @@ final class ${configuration.productName}Tests: XCTestCase {
     XCTAssertEqual(output.lines, ["7", "true", "é😀"])
   }
 }
-`
+`)
+
+  return writer.finish()
 }
 
 /**
  * Renders the accessibility-route XCUI source.
  * @param {import("../semantic/types.js").IosApplicationConfiguration} configuration - Application configuration.
- * @returns {string} XCUI source.
+ * @returns {RenderedConfigurationText} XCUI source and causal configuration spans.
  */
 function renderUiTests(configuration) {
-  return `import XCTest
+  const writer = new ConfigurationTextWriter()
 
-final class ${configuration.productName}UITests: XCTestCase {
+  writer.append("import XCTest\n\nfinal class ")
+  writer.append(configurationFragment("productName", configuration.productName))
+  writer.append(`UITests: XCTestCase {
   func testOutputViewIsAccessible() {
     let application = XCUIApplication()
     application.launch()
     XCTAssertTrue(application.staticTexts["semantifold-output"].waitForExistence(timeout: 5))
   }
 }
-`
+`)
+
+  return writer.finish()
 }
 
 /**
@@ -869,6 +1007,21 @@ function syntheticText(path, role, content, reason) {
     provenance: {kind: "synthetic", reason, relatedOrigins: []},
     role
   }
+}
+
+/**
+ * Creates a synthetic artifact and transfers its renderer-owned configuration spans to the manifest ledger.
+ * @param {string} path - Artifact path.
+ * @param {import("../semantic/types.js").GeneratedArtifactRole} role - Artifact role.
+ * @param {RenderedConfigurationText} rendered - Rendered content and causal spans.
+ * @param {ConfigurationArtifactSpan[]} spans - Application-wide causal span ledger.
+ * @param {string} reason - Provenance reason.
+ * @returns {import("../semantic/types.js").GeneratedSetArtifact} Artifact candidate.
+ */
+function configuredSyntheticText(path, role, rendered, spans, reason) {
+  spans.push(...rendered.configurationSpans.map(span => ({...span, path})))
+
+  return syntheticText(path, role, rendered.content, reason)
 }
 
 /**
