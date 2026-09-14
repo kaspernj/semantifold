@@ -520,6 +520,76 @@ for line in SemantifoldModuleMain.semantifoldEntry() {
       .toEqual(expectedRange("PRODUCT_BUNDLE_IDENTIFIER = ", values.bundleIdentifier))
   })
 
+  it("records ordered stable semantic program identities and generated-artifact linkage", () => {
+    const sources = [
+      {
+        filename: "launch.rb",
+        id: "application.entry",
+        language: /** @type {const} */ ("ruby"),
+        source: "require_relative \"shared\"\nmodule Main\n  puts Logic.decorate(\"x\", \"!\")\nend\n"
+      },
+      {
+        filename: "shared.rb",
+        id: "domain.logic",
+        language: /** @type {const} */ ("ruby"),
+        source: "module Logic\n  module_function\n  # @param value [String]\n  # @param suffix [String]\n" +
+          "  # @return [String]\n  def decorate(value, suffix)\n    return value + suffix\n  end\nend\n"
+      }
+    ]
+    const program = parseProgram({entryModule: "application.entry", sources})
+    const set = generateProgramArtifactSet({configuration: configuration(), language: "ios", program, role: "application"})
+    const manifestArtifact = set.artifacts.find(({path}) => path == "semantifold-project.json")
+
+    assert.ok(manifestArtifact && typeof manifestArtifact.content == "string")
+    const manifest = JSON.parse(manifestArtifact.content)
+
+    expect(manifest.semanticProgram).toEqual({
+      entry: {
+        applicationArtifact: "Sources/Application/App.swift",
+        bridgeArtifact: "Sources/Application/SemantifoldBridge.swift",
+        generatedArtifact: "Sources/Generated/ApplicationEntry.swift",
+        generatedFunctionIdentity: "SemantifoldModuleApplicationEntry.semantifoldEntry",
+        moduleId: "application.entry"
+      },
+      modules: [
+        {
+          dependencies: [],
+          generatedArtifacts: ["Sources/Generated/DomainLogic.swift"],
+          id: "domain.logic",
+          namespace: "SemantifoldModuleDomainLogic",
+          source: {filename: "shared.rb", id: "source:1", sha256: sha256(sources[1].source)}
+        },
+        {
+          dependencies: ["domain.logic"],
+          generatedArtifacts: ["Sources/Generated/ApplicationEntry.swift"],
+          id: "application.entry",
+          namespace: "SemantifoldModuleApplicationEntry",
+          source: {filename: "launch.rb", id: "source:0", sha256: sha256(sources[0].source)}
+        }
+      ],
+      schema: "SemantifoldIosSemanticProgram",
+      sources: [
+        {
+          filename: "launch.rb",
+          id: "source:0",
+          language: "ruby",
+          moduleIds: ["application.entry"],
+          ownership: "application",
+          sha256: sha256(sources[0].source)
+        },
+        {
+          filename: "shared.rb",
+          id: "source:1",
+          language: "ruby",
+          moduleIds: ["domain.logic"],
+          ownership: "application",
+          sha256: sha256(sources[1].source)
+        }
+      ],
+      version: 1
+    })
+  })
+
   it("derives Xcode IDs from SHA-256 identities and rejects shortened collisions", () => {
     const ids = allocateXcodeObjectIds(["target:app", "target:tests"])
 

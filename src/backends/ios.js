@@ -310,9 +310,73 @@ function renderProjectManifest(prepared, artifacts, manifestPath, configurationS
       ]
     },
     schema: "SemantifoldIosProject",
+    semanticProgram: semanticProgramManifest(prepared),
     target: "ios",
     version: 1
   })
+}
+
+/**
+ * Records stable semantic input identities and their generated Swift linkage.
+ * @param {ReturnType<typeof preflightIosApplication>} prepared - Fully preflighted application.
+ * @returns {Record<string, unknown>} Versioned semantic-program manifest section.
+ */
+function semanticProgramManifest(prepared) {
+  const moduleIds = new Map(prepared.program.modules.map((module, index) => [module.id, index]))
+  const sourceContent = new Map(prepared.sources.map(source => [source.filename, source.content]))
+  const modules = prepared.program.modules.map(module => {
+    const id = module.id
+    const path = /** @type {string} */ (prepared.modulePaths.get(id))
+    const source = prepared.program.sources.find(candidate => candidate.filename == module.sourceFilename)
+    const content = sourceContent.get(module.sourceFilename)
+
+    if (!source || content === undefined) throw new TypeError(`Preflighted iOS module '${id}' lost its source ownership.`)
+    const dependencies = [...new Set(module.imports.map(({moduleId}) => moduleId))]
+      .sort((left, right) => /** @type {number} */ (moduleIds.get(left)) - /** @type {number} */ (moduleIds.get(right)))
+
+    return {
+      dependencies,
+      generatedArtifacts: [path],
+      id,
+      namespace: `SemantifoldModule${moduleName(id)}`,
+      source: {
+        filename: source.filename,
+        id: source.id,
+        sha256: createHash("sha256").update(content).digest("hex")
+      }
+    }
+  })
+  const sources = prepared.program.sources.map(source => {
+    const content = sourceContent.get(source.filename)
+
+    if (content === undefined) throw new TypeError(`Preflighted iOS source '${source.filename}' lost its content.`)
+
+    return {
+      filename: source.filename,
+      id: source.id,
+      language: source.language,
+      moduleIds: modules.filter(module => module.source.filename == source.filename).map(({id}) => id),
+      ownership: source.ownership ?? "application",
+      sha256: createHash("sha256").update(content).digest("hex")
+    }
+  })
+  const entryId = prepared.program.entryModule
+  const entryArtifact = /** @type {string} */ (prepared.modulePaths.get(entryId))
+  const entryNamespace = `SemantifoldModule${moduleName(entryId)}`
+
+  return {
+    entry: {
+      applicationArtifact: `${prepared.configuration.sourceRoot}/Application/App.swift`,
+      bridgeArtifact: `${prepared.configuration.sourceRoot}/Application/SemantifoldBridge.swift`,
+      generatedArtifact: entryArtifact,
+      generatedFunctionIdentity: `${entryNamespace}.semantifoldEntry`,
+      moduleId: entryId
+    },
+    modules,
+    schema: "SemantifoldIosSemanticProgram",
+    sources,
+    version: 1
+  }
 }
 
 /**
