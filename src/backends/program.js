@@ -22,6 +22,8 @@ import {programImportName, SourceWriter} from "./writer.js"
 
 /** @type {Readonly<Set<import("../semantic/types.js").SemanticLanguage>>} */
 const programTargets = new Set(["php", "ruby", "javascript", "typescript", "java"])
+/** @type {Readonly<Set<import("../semantic/types.js").BackendLanguage>>} */
+const programApplicationTargets = new Set(["ios"])
 
 /**
  * Validates and prepares a complete semantic program for a non-text backend without allocating a writer.
@@ -77,6 +79,7 @@ export function generateProgramArtifacts(input) {
   if (role != "text" && role != "application") invalidProgramGeneration("Program artifact role must be 'text' or 'application'.")
   languageRegistry.record(input.language)
   if (role == "application") {
+    if (!programApplicationTargets.has(input.language)) unsupportedRole(input.language, "multi-file application backend")
     const backend = languageRegistry.resolve(input.language, "applicationBackend")
 
     return createGeneratedArtifactSet(backend(input))

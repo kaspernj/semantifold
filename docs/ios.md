@@ -36,6 +36,8 @@ const artifactSet = generateProgramArtifactSet({
 
 `generateArtifactSet` accepts the same application fields for one semantic module and normalizes it to one project module. Both routes validate the entire semantic graph before rendering. The supported semantics are exactly the Tasks 001–004 Swift subset from Task 022: typed scalar values, typed locals/assignment, the closed scalar operators, nested statement blocks/conditionals, exact two-argument scalar-return functions, resolved calls, and deterministic text output. Task 010 owns project modules, source ownership, imports, exports, and dependency order. iOS adds no parser rule or semantic node for SwiftUI, application lifecycle, capture, configuration, resources, signing, or Apple APIs.
 
+Program-shaped application dispatch is limited to program-capable application targets, currently only `ios`. The separate Wasm application backend remains available through the single-module `generateArtifactSet` route and is rejected with `UNSUPPORTED_ROLE` when requested through `generateProgramArtifactSet`; a program object is never passed to that module backend.
+
 Unsupported source or caller-supplied IR produces a located `SemantifoldDiagnostic` with `UNSUPPORTED_CAPABILITY` and target `ios`. The backend never embeds Ruby, invokes a Ruby runtime from the app, translates through JavaScript, emulates dynamic Ruby behavior, or discovers sources/packages.
 
 ## Closed configuration and assets
