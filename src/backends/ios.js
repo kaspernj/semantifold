@@ -18,6 +18,14 @@ const configurationFields = new Set([
   "moduleName", "organizationPrefix", "permissions", "privacyDeclarations", "productName", "resourceRoot", "sourceRoot"
 ])
 const assetFields = new Set(["content", "mediaType", "path", "sha256"])
+const generatorVersion = "0.3.0"
+const excludedPathPatterns = Object.freeze([
+  "**/*.xcuserstate",
+  "**/xcuserdata/**",
+  ".swiftpm/**",
+  "DerivedData/**",
+  "build/**"
+])
 const mediaTypePattern = /^[A-Za-z0-9!#$&^_.+-]+\/[A-Za-z0-9!#$&^_.+-]+(?:;[\u0020-\u007e]+)?$/u
 const binaryOperations = Object.freeze({
   BooleanAnd: "&&",
@@ -111,7 +119,7 @@ export function preflightIosApplication(input) {
 /**
  * Generates the deterministic semantic Swift portion of one iOS application artifact set.
  * @param {Parameters<typeof preflightIosApplication>[0]} input - iOS generation request.
- * @returns {{artifacts: import("../semantic/types.js").GeneratedSetArtifact[], target: "ios"}} Candidate artifact set.
+ * @returns {{artifacts: import("../semantic/types.js").GeneratedSetArtifact[], metadata: {applicationManifest: string, platformQualification: string}, target: "ios"}} Candidate artifact set.
  */
 export function generateIosApplication(input) {
   const prepared = preflightIosApplication(input)
@@ -171,15 +179,119 @@ struct SemantifoldOutputView: View {
     syntheticText(`Tests/${product}Tests.swift`, "support", renderUnitTests(configuration),
       "Synthetic pure-logic determinism XCTest source."),
     syntheticText(`UITests/${product}UITests.swift`, "support", renderUiTests(configuration),
-      "Synthetic XCUI accessibility-route test source."),
-    syntheticText("semantifold-project.json", "manifest", stringifyCanonicalJson({
-      platformProof: "deferred",
-      schema: "SemantifoldIosProject",
-      version: 1
-    }), "Versioned Semantifold iOS project manifest placeholder." )
+      "Synthetic XCUI accessibility-route test source.")
   ]
+  const manifestPath = "semantifold-project.json"
 
-  return {artifacts, target: "ios"}
+  artifacts.push(syntheticText(manifestPath, "manifest", renderProjectManifest(prepared, artifacts, manifestPath),
+    "Versioned iOS project ownership and provenance manifest."))
+
+  return {
+    artifacts,
+    metadata: {applicationManifest: manifestPath, platformQualification: "deferred"},
+    target: "ios"
+  }
+}
+
+/**
+ * Renders the complete deterministic application ownership and provenance record.
+ * @param {ReturnType<typeof preflightIosApplication>} prepared - Fully preflighted application.
+ * @param {import("../semantic/types.js").GeneratedSetArtifact[]} artifacts - All non-manifest output artifacts.
+ * @param {string} manifestPath - Owned manifest path.
+ * @returns {string} Canonical manifest JSON.
+ */
+function renderProjectManifest(prepared, artifacts, manifestPath) {
+  const assetPaths = new Set(prepared.assets.map(({path}) => path))
+  const semanticArtifacts = artifacts.filter(artifact => artifact.provenance.kind == "text")
+  const configuration = prepared.configuration
+
+  return stringifyCanonicalJson({
+    configuration,
+    generator: {name: "semantifold", version: generatorVersion},
+    ownership: {
+      excludedPathPatterns,
+      ownedPaths: [...artifacts.map(({path}) => path), manifestPath]
+    },
+    platformRequirements: {
+      appleSdk: {status: "deferred"},
+      iosSimulator: {status: "deferred"},
+      macosHost: {status: "deferred"},
+      swiftc: {status: "deferred"},
+      xcode: {status: "deferred"},
+      xctest: {status: "deferred"},
+      xcuiautomation: {status: "deferred"}
+    },
+    provenance: {
+      assets: prepared.assets.map(asset => ({
+        contentKind: typeof asset.content == "string" ? "text" : "binary",
+        mediaType: asset.mediaType,
+        path: asset.path,
+        sha256: asset.sha256
+      })),
+      configuration: Object.keys(configuration).sort().map(field => ({
+        field,
+        manifestPointer: `/configuration/${field}`,
+        outputs: configurationOutputCitations(artifacts, Reflect.get(configuration, field))
+      })),
+      semanticSources: prepared.sources.map(source => ({
+        artifacts: semanticArtifacts.filter(artifact => artifact.provenance.kind == "text" &&
+          artifact.provenance.mapping.spans.some(({origin}) => originReferencesFilename(origin, source.filename)))
+          .map(({path}) => path),
+        filename: source.filename,
+        ...(source.language === undefined ? {} : {language: source.language}),
+        sha256: createHash("sha256").update(source.content).digest("hex")
+      })),
+      syntheticScaffolding: [
+        ...artifacts.filter(artifact => artifact.provenance.kind == "synthetic" && !assetPaths.has(artifact.path))
+          .map(({path}) => path),
+        manifestPath
+      ]
+    },
+    schema: "SemantifoldIosProject",
+    target: "ios",
+    version: 1
+  })
+}
+
+/**
+ * Determines whether one closed semantic origin cites a source filename.
+ * @param {import("../semantic/types.js").SemanticOrigin} origin - Mapped origin.
+ * @param {string} filename - Original caller filename.
+ * @returns {boolean} Whether the source participates in the origin.
+ */
+function originReferencesFilename(origin, filename) {
+  if (origin.kind == "source") return origin.location.filename == filename
+  if (origin.kind == "derived") return origin.origins.some(({location}) => location.filename == filename)
+
+  return origin.relatedOrigins.some(({location}) => location.filename == filename)
+}
+
+/**
+ * Locates exact configuration scalar occurrences in generated text artifacts.
+ * Non-scalar and transformed uses remain explicitly cited by their manifest pointer.
+ * @param {import("../semantic/types.js").GeneratedSetArtifact[]} artifacts - Generated non-manifest artifacts.
+ * @param {unknown} value - Normalized configuration value.
+ * @returns {{path: string, ranges: {end: number, start: number}[]}[]} Stable output citations.
+ */
+function configurationOutputCitations(artifacts, value) {
+  if (typeof value != "string" || value.length == 0) return []
+  /** @type {{path: string, ranges: {end: number, start: number}[]}[]} */
+  const outputs = []
+
+  for (const artifact of artifacts) {
+    if (artifact.contentKind != "text") continue
+    /** @type {{end: number, start: number}[]} */
+    const ranges = []
+    let start = artifact.content.indexOf(value)
+
+    while (start >= 0) {
+      ranges.push({end: start + value.length, start})
+      start = artifact.content.indexOf(value, start + value.length)
+    }
+    if (ranges.length > 0) outputs.push({path: artifact.path, ranges})
+  }
+
+  return outputs
 }
 
 /**

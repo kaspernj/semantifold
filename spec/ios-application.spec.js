@@ -268,6 +268,100 @@ puts values[0]
     expect(new Set(objectDefinitions).size).toEqual(objectDefinitions.length)
   })
 
+  it("records exact ownership and caller provenance in the versioned project manifest", () => {
+    const sources = rubySources()
+    const program = parseProgram({entryModule: "main", sources})
+    const assetContent = new Uint8Array([0, 1, 2, 255])
+    const asset = {
+      content: assetContent,
+      mediaType: "application/octet-stream",
+      path: "Assets.xcassets/Data.dataset/payload.bin",
+      sha256: sha256(assetContent)
+    }
+    const set = generateProgramArtifactSet({
+      assets: [asset],
+      configuration: configuration(),
+      language: "ios",
+      program,
+      role: "application"
+    })
+    const artifactByPath = new Map(set.artifacts.map(artifact => [artifact.path, artifact]))
+    const manifestArtifact = artifactByPath.get("semantifold-project.json")
+
+    assert.ok(manifestArtifact)
+    assert.equal(typeof manifestArtifact.content, "string")
+    const manifest = JSON.parse(manifestArtifact.content)
+
+    expect(manifest.schema).toEqual("SemantifoldIosProject")
+    expect(manifest.version).toEqual(1)
+    expect(manifest.target).toEqual("ios")
+    expect(manifest.generator).toEqual({name: "semantifold", version: "0.3.0"})
+    expect(manifest.configuration).toEqual({
+      ...configuration(),
+      capabilities: [],
+      entitlements: [],
+      infoPlist: {},
+      lifecycle: "swiftui",
+      permissions: [],
+      privacyDeclarations: [],
+      resourceRoot: "Assets.xcassets",
+      sourceRoot: "Sources"
+    })
+    expect(manifest.ownership.ownedPaths).toEqual(set.artifacts.map(({path}) => path))
+    expect(manifest.ownership.excludedPathPatterns).toEqual([
+      "**/*.xcuserstate",
+      "**/xcuserdata/**",
+      ".swiftpm/**",
+      "DerivedData/**",
+      "build/**"
+    ])
+    expect(manifest.platformRequirements).toEqual({
+      appleSdk: {status: "deferred"},
+      iosSimulator: {status: "deferred"},
+      macosHost: {status: "deferred"},
+      swiftc: {status: "deferred"},
+      xcode: {status: "deferred"},
+      xctest: {status: "deferred"},
+      xcuiautomation: {status: "deferred"}
+    })
+    expect(manifest.provenance.assets).toEqual([{
+      contentKind: "binary",
+      mediaType: asset.mediaType,
+      path: asset.path,
+      sha256: asset.sha256
+    }])
+    expect(manifest.provenance.semanticSources).toEqual(sources.map(source => ({
+      artifacts: [`Sources/Generated/${source.id == "main" ? "Main" : "MathTools"}.swift`],
+      filename: source.filename,
+      language: source.language,
+      sha256: sha256(source.source)
+    })))
+    expect(manifest.provenance.syntheticScaffolding).toContain("Sources/Application/App.swift")
+    expect(manifest.provenance.syntheticScaffolding).toContain("semantifold-project.json")
+    expect(manifest.provenance.syntheticScaffolding).not.toContain(asset.path)
+    expect(manifest.provenance.configuration.map(({field}) => field)).toEqual([
+      "bundleIdentifier", "capabilities", "deploymentTarget", "displayName", "entitlements", "infoPlist", "lifecycle",
+      "moduleName", "organizationPrefix", "permissions", "privacyDeclarations", "productName", "resourceRoot", "sourceRoot"
+    ])
+    const bundleCitation = manifest.provenance.configuration.find(({field}) => field == "bundleIdentifier")
+
+    expect(bundleCitation.manifestPointer).toEqual("/configuration/bundleIdentifier")
+    expect(bundleCitation.outputs.map(({path}) => path)).toContain("Configuration/Base.xcconfig")
+    for (const output of bundleCitation.outputs) {
+      const artifact = artifactByPath.get(output.path)
+
+      assert.ok(artifact)
+      assert.equal(typeof artifact.content, "string")
+      for (const range of output.ranges) {
+        expect(artifact.content.slice(range.start, range.end)).toEqual(configuration().bundleIdentifier)
+      }
+    }
+    expect(set.metadata).toEqual({
+      applicationManifest: "semantifold-project.json",
+      platformQualification: "deferred"
+    })
+  })
+
   it("derives Xcode IDs from SHA-256 identities and rejects shortened collisions", () => {
     const ids = allocateXcodeObjectIds(["target:app", "target:tests"])
 
