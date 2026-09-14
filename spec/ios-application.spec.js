@@ -258,6 +258,44 @@ for line in SemantifoldModuleMain.semantifoldEntry() {
     assert.deepEqual(generatedAssets[1].content, new Uint8Array([0, 1, 2, 255]))
   })
 
+  it("restricts artifact and resource paths to the complete portable ASCII comparison domain", () => {
+    const module = parse({filename: "café.swift", language: "swift", source: swiftSource})
+    const content = "hé😀\n"
+    const unicodePaths = [
+      "Assets.xcassets/Straße.dataset/value.txt",
+      "Assets.xcassets/Σigma.dataset/value.txt",
+      "Assets.xcassets/ςigma.dataset/value.txt",
+      "Assets.xcassets/Café.dataset/value.txt",
+      "Assets.xcassets/Cafe\u0301.dataset/value.txt"
+    ]
+    const sourceSet = generateArtifactSet({configuration: configuration(), language: "ios", module, role: "application"})
+
+    expect(sourceSet.artifacts.find(({path}) => path == "Sources/Generated/Main.swift")?.content).toContain("hé😀")
+
+    for (const assetPath of unicodePaths) {
+      assert.throws(
+        () => generateArtifactSet({
+          assets: [{content, mediaType: "text/plain", path: assetPath, sha256: sha256(content)}],
+          configuration: configuration(),
+          language: "ios",
+          module,
+          role: "application"
+        }),
+        error => error instanceof SemantifoldDiagnostic && error.code == "INVALID_APPLICATION_ASSET" && error.language == "ios"
+      )
+    }
+
+    const prefixAssets = [
+      {content, mediaType: "text/plain", path: "Assets.xcassets/Prefix.dataset", sha256: sha256(content)},
+      {content, mediaType: "text/plain", path: "Assets.xcassets/prefix.DATASET/value.txt", sha256: sha256(content)}
+    ]
+
+    assert.throws(
+      () => generateArtifactSet({assets: prefixAssets, configuration: configuration(), language: "ios", module, role: "application"}),
+      error => error instanceof SemantifoldDiagnostic && error.code == "INVALID_APPLICATION_PATH" && error.language == "ios"
+    )
+  })
+
   it("rejects unknown configuration, identity, lifecycle, capability, asset, and portable-path values", () => {
     const module = parse({filename: "program.swift", language: "swift", source: swiftSource})
     const validAsset = {content: "asset\n", mediaType: "text/plain", path: "Assets.xcassets/Data.dataset/value.txt",

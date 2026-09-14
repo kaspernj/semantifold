@@ -1,7 +1,7 @@
 // @ts-check
 
 import {isDenseArray} from "../array.js"
-import {isSafeArtifactPath} from "../artifact-path.js"
+import {isSafeArtifactPath, isSafeSourcePath} from "../artifact-path.js"
 import {createGeneratedArtifactSet} from "../artifacts.js"
 import {SemantifoldDiagnostic, unsupportedCapability, unsupportedRole} from "../diagnostic.js"
 import {parseProgramSource} from "../frontends/program.js"
@@ -758,7 +758,7 @@ function validateProgram(candidate, language, sourceLanguages = programTargets) 
 
   for (const source of program.sources) {
     if (!isPlainObject(source) || typeof source.id != "string" || sourceIds.has(source.id) ||
-      typeof source.filename != "string" || !isSafeArtifactPath(source.filename) || sourceFilenames.has(source.filename) ||
+      typeof source.filename != "string" || !isSafeSourcePath(source.filename) || sourceFilenames.has(source.filename) ||
       typeof source.content != "string" || typeof source.language != "string" || !sourceLanguages.has(source.language)) {
       invalidProgramGeneration("Malformed or duplicate semantic program source registry.")
     }
