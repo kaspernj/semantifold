@@ -1,7 +1,7 @@
 // @ts-check
 
 import {isDenseArray} from "./array.js"
-import {SemantifoldDiagnostic, unsupportedCapability, unsupportedRole} from "./diagnostic.js"
+import {SemantifoldDiagnostic, unsupportedRole} from "./diagnostic.js"
 import {generateJava} from "./backends/java.js"
 import {generateKotlin} from "./backends/kotlin.js"
 import {generateCSharpProject} from "./backends/csharp.js"
@@ -14,6 +14,7 @@ import {generatePython} from "./backends/python.js"
 import {generateRuby} from "./backends/ruby.js"
 import {generateTypeScript} from "./backends/typescript.js"
 import {generateBrowserWasm} from "./backends/wasm.js"
+import {generateIosApplication} from "./backends/ios.js"
 import {parseJava} from "./frontends/java.js"
 import {parseKotlin} from "./frontends/kotlin.js"
 import {parseCSharp} from "./frontends/csharp.js"
@@ -472,7 +473,7 @@ const records = [
   },
   {
     acceptance: {stages: ["generate"], toolchains: []},
-    applicationBackend: iosApplicationBoundary,
+    applicationBackend: generateIosApplication,
     artifactMultiplicity: "multiple",
     features: {closedRecords: false, conditionControlledLoops: false, effectfulCapabilitiesAndResources: false, generalFunctionsAndCalls: false, immutableCollections: false, optionalValues: false, orderedListIteration: false, orderedMapIteration: false, referenceClasses: false, typedErrors: false, typeParametersAndGenerics: false},
     id: "ios",
@@ -487,14 +488,6 @@ export const languageCapabilities = languageRegistry.descriptors
 export const supportedLanguages = Object.freeze(languageCapabilities
   .filter(({roles}) => roles.frontend && roles.textBackend)
   .map(({id}) => /** @type {import("./semantic/types.js").SemanticLanguage} */ (id)))
-
-/**
- * Keeps the registered application route fail-loud until the owning iOS backend preflights it.
- * @returns {never} Always throws without producing candidate artifacts.
- */
-function iosApplicationBoundary() {
-  return unsupportedCapability("ios", "application target semantic project validation")
-}
 
 /**
  * Supplies common original-five capability declarations.

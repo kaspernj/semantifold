@@ -23,6 +23,43 @@ import {programImportName, SourceWriter} from "./writer.js"
 const programTargets = new Set(["php", "ruby", "javascript", "typescript", "java"])
 
 /**
+ * Validates and prepares a complete semantic program for a non-text backend without allocating a writer.
+ * @param {object} input - Backend preflight request.
+ * @param {import("../semantic/types.js").SemanticLanguage} input.backendLanguage - Existing semantic backend profile to enforce.
+ * @param {import("../semantic/types.js").BackendLanguage} input.diagnosticLanguage - Public target identity for capability failures.
+ * @param {import("../semantic/types.js").SemanticProgram} input.program - Complete candidate program.
+ * @param {ReadonlySet<import("../semantic/types.js").SemanticLanguage>} [input.sourceLanguages] - Accepted source provenance languages.
+ * @returns {{modules: import("../semantic/types.js").SemanticModule[], program: import("../semantic/types.js").SemanticProgram, sources: {content: string, filename: string, language?: import("../semantic/types.js").SemanticLanguage}[]}} Prepared immutable-input views.
+ */
+export function preflightSemanticProgram({backendLanguage, diagnosticLanguage, program: candidate, sourceLanguages}) {
+  try {
+    const program = validateProgram(candidate, backendLanguage, sourceLanguages)
+    const modules = prepareEmissionModules(program, backendLanguage)
+
+    validateProgramSourceOwnership(program, backendLanguage)
+    const sources = program.sources.map((source) => {
+      if (source.content === null) invalidProgramGeneration(`Program source '${source.filename}' has no retained content.`)
+
+      return {content: source.content, filename: source.filename, ...(source.language ? {language: source.language} : {})}
+    })
+
+    return {modules, program, sources}
+  } catch (error) {
+    if (error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
+      error.language != diagnosticLanguage) {
+      throw new SemantifoldDiagnostic({
+        cause: error,
+        code: error.code,
+        language: diagnosticLanguage,
+        location: error.location,
+        message: error.detail
+      })
+    }
+    throw error
+  }
+}
+
+/**
  * Generates a complete deterministic mapped artifact set for one semantic program.
  * @param {object} input - Program generation request.
  * @param {import("../semantic/types.js").BackendLanguage} input.language - Registered program target.
@@ -696,9 +733,10 @@ function prepareEmissionModules(program, language, linking = null) {
  * Validates the closed parser-neutral program graph before any target emission.
  * @param {unknown} candidate - Candidate semantic program.
  * @param {import("../semantic/types.js").SemanticLanguage} language - Target language.
+ * @param {ReadonlySet<import("../semantic/types.js").SemanticLanguage>} [sourceLanguages] - Accepted source languages.
  * @returns {import("../semantic/types.js").SemanticProgram} Validated program.
  */
-function validateProgram(candidate, language) {
+function validateProgram(candidate, language, sourceLanguages = programTargets) {
   if (!isPlainObject(candidate) || candidate.kind != "Program" || typeof candidate.entryModule != "string" ||
     !isDenseArray(candidate.modules) || candidate.modules.length == 0 || !isDenseArray(candidate.sources) || candidate.sources.length == 0) {
     invalidProgramGeneration("Malformed semantic program.")
@@ -716,7 +754,7 @@ function validateProgram(candidate, language) {
   for (const source of program.sources) {
     if (!isPlainObject(source) || typeof source.id != "string" || sourceIds.has(source.id) ||
       typeof source.filename != "string" || !isSafeArtifactPath(source.filename) || sourceFilenames.has(source.filename) ||
-      typeof source.content != "string" || typeof source.language != "string" || !programTargets.has(source.language)) {
+      typeof source.content != "string" || typeof source.language != "string" || !sourceLanguages.has(source.language)) {
       invalidProgramGeneration("Malformed or duplicate semantic program source registry.")
     }
     sourceIds.add(source.id)
