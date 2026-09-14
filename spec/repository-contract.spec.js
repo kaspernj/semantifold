@@ -389,4 +389,48 @@ describe("repository delivery contracts", () => {
     assert.equal(dev.volumes[1].bind.create_host_path, false)
     assert.equal(dev.volumes[1].read_only, true)
   })
+
+  it("documents the implemented iOS generation boundary without claiming deferred Apple acceptance", async () => {
+    const [readme, architecture, languageSupport, sourceMaps, testing, ios, task, roadmap, changelog, tensorbuzz] = await Promise.all([
+      readFile(new URL("../README.md", import.meta.url), "utf8"),
+      readFile(new URL("../docs/architecture.md", import.meta.url), "utf8"),
+      readFile(new URL("../docs/language-support.md", import.meta.url), "utf8"),
+      readFile(new URL("../docs/source-maps.md", import.meta.url), "utf8"),
+      readFile(new URL("../docs/testing.md", import.meta.url), "utf8"),
+      readFile(new URL("../docs/ios.md", import.meta.url), "utf8"),
+      readFile(new URL("../todo/026-apple-ios-application-target.md", import.meta.url), "utf8"),
+      readFile(new URL("../todo/README.md", import.meta.url), "utf8"),
+      readFile(new URL("../changelog.d/20260914190000-ios-application-target.md", import.meta.url), "utf8"),
+      readFile(new URL("../tensorbuzz.yml", import.meta.url), "utf8")
+    ])
+
+    expect(readme).toContain("[iOS application target](docs/ios.md)")
+    expect(readme).toContain("target-only `ios` application backend")
+    expect(architecture).toContain("[iOS application target](ios.md)")
+    expect(architecture).toContain("`src/materialization.js`")
+    expect(languageSupport).toContain("implemented application generation; Apple acceptance deferred")
+    expect(sourceMaps).toContain("iOS project manifest")
+    expect(sourceMaps).toContain("configuration-field citations")
+    for (const command of [
+      "npx velocious-test spec/ios-application.spec.js",
+      "npx velocious-test spec/ios-materialization.spec.js",
+      "npx velocious-test spec/ios-packed-consumer.spec.js"
+    ]) expect(testing).toContain(command)
+    expect(ios).toContain("materializeGeneratedArtifactSet")
+    expect(ios).toContain("semantifold-output")
+    for (let criterion = 1; criterion <= 16; criterion += 1) {
+      expect(ios).toContain(`AC${String(criterion).padStart(2, "0")}`)
+    }
+    for (const criterion of ["AC12", "AC13", "AC14"]) {
+      expect(ios).toMatch(new RegExp(`\\| ${criterion} \\| deferred \\|`, "u"))
+    }
+    expect(task).toContain("Status: `in progress — generation/materialization implemented; Apple acceptance deferred`")
+    expect(task).toContain("AC12–AC14 remain deferred")
+    expect(roadmap).toContain("implemented application generation; Apple acceptance deferred")
+    expect(roadmap).toContain("| [027](027-objective-c-interoperability.md) | P | P2 | Objective-C legacy-host bridge | 005, 026 |")
+    expect(roadmap).toContain("| [028](028-android-application-target.md) | P | P1 | Kotlin Android application artifacts | 010, 023 |")
+    expect(changelog).toContain("iOS")
+    expect(changelog).toContain("Apple acceptance remains deferred")
+    expect(tensorbuzz).not.toContain("xcodebuild")
+  })
 })

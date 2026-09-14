@@ -1,6 +1,6 @@
 # 026 — Apple/iOS application artifact target
 
-- Status: `todo`
+- Status: `in progress — generation/materialization implemented; Apple acceptance deferred`
 - Phase/priority: Phase P / P1
 - Dependencies: [010-multifile-modules-and-names.md](010-multifile-modules-and-names.md), [022-swift-source-and-target.md](022-swift-source-and-target.md)
 
@@ -44,6 +44,16 @@ Document Ruby-to-iOS as semantic translation, exact project ownership/layout, co
 - A supported Ruby semantic project deterministically produces Xcode-compatible Swift application sources/artifacts, builds, launches, and displays the expected text in a real configured iOS Simulator without distribution credentials.
 - No Ruby interpreter, gem, extension, or unsupported dynamic/runtime behavior is included or approximated.
 - Artifact ownership/safety, simulator tests, real Xcode build, diagnostics, provenance, documentation/changelog, and repository gates pass.
+
+## Partial implementation record — 2026-09-14
+
+The authorized non-macOS scope is implemented on the Task 026 topic branch. The `ios` registry identity is application-only; it consumes Task 010 programs or normalized modules, enforces the Task 022 Tasks 001–004 Swift subset, lowers deterministic per-module captured Swift, and generates the unsigned SwiftUI/project/configuration/test/asset/manifest artifact set. Closed configuration/assets, exact hashes, rich Ruby-to-Swift provenance, deterministic Xcode IDs, byte-identical regeneration, and fail-loud diagnostics have focused coverage.
+
+The separate public `materializeGeneratedArtifactSet` operation is create-only. It requires an absent absolute destination, performs full portable/symlink preflight, writes exclusively in an adjacent private stage, publishes by atomic rename, cleans only that stage on failure, and never implements regeneration/adoption/overwrite. Fresh packed-consumer checks repeat generation, materialization, dependency listing, and strict typing after ordinary install and clean `npm ci` with empty npm configs, fresh caches, the public registry, and no inherited credentials. Real Ruby output equals generated semantic Swift output under exact Swift 6.3.3 Linux debug and optimized builds.
+
+Kasper's 2026-09-14 direction, “Lets skip OSX stuff for now and continue with the others,” explicitly defers the mandatory macOS/Xcode/Apple SDK/Swift/XCTest/XCUIAutomation/iOS Simulator lane and real `xcodebuild`/simulator acceptance. No TensorBuzz, Docker, or Compose infrastructure was changed to manufacture that proof. No Apple runtime was downloaded and no signing/account/team/certificate/provisioning route was used.
+
+AC12–AC14 remain deferred: no qualified Xcode build/list/test result exists, no official named iOS Simulator has booted/installed/launched the app, and XCUIAutomation has not observed exact `semantifold-output` text. The generated Xcode format therefore remains platform-unqualified. Task 026 must not be marked delivered until those proofs and the remaining coordinator-owned review/CI/merge steps complete. Task 027 remains dependent on Task 026; Task 028 remains a separate Android lane.
 
 ## Non-goals
 
