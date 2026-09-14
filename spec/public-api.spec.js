@@ -1,6 +1,7 @@
 // @ts-check
 
 import {describe, expect, it} from "@velocious/testing"
+import * as semantifold from "../index.js"
 import {
   canonicalToolchains,
   composeMappings,
@@ -21,7 +22,6 @@ import {
   languageCapabilities,
   listStdlibFacades,
   mappingFromSourceMap,
-  materializeGeneratedArtifactSet,
   originalPositionFor,
   parse,
   parseProgram,
@@ -77,7 +77,6 @@ describe("public API", () => {
       getNodeProvenance,
       getSymbolProvenance,
       mappingFromSourceMap,
-      materializeGeneratedArtifactSet,
       originalPositionFor,
       parseByteMapping,
       parseMapping,
@@ -91,6 +90,7 @@ describe("public API", () => {
       stringifyMapping,
       toSourceMapV3
     ]) expect(typeof api).toEqual("function")
+    expect(Object.hasOwn(semantifold, "materializeGeneratedArtifactSet")).toBeFalse()
   })
 
   it("routes iOS application requests without changing default text program generation", () => {

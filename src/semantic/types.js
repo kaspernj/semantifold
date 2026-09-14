@@ -312,14 +312,6 @@
  */
 
 /**
- * @typedef ArtifactMaterializationResult
- * @property {"ArtifactMaterialization"} schema - Schema discriminator.
- * @property {1} version - Schema version.
- * @property {string} destination - Exact absolute published directory.
- * @property {readonly string[]} paths - Complete ordered relative artifact paths.
- */
-
-/**
  * @typedef DiscoveredToolchain
  * @property {string} id - Toolchain ID.
  * @property {string} command - Documented canonical command.

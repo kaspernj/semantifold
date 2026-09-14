@@ -20,7 +20,7 @@ const executeFile = promisify(execFile)
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url))
 
 describe("packed iOS application consumer", () => {
-  it("generates and create-only materializes through the packed public API after install and clean ci", {timeoutMs: 300_000}, async () => {
+  it("generates through the packed public API after install and clean ci without a materializer surface", {timeoutMs: 300_000}, async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "semantifold-ios-packed-"))
     const packDirectory = path.join(root, "pack")
     const consumerDirectory = path.join(root, "consumer")
@@ -48,8 +48,10 @@ describe("packed iOS application consumer", () => {
       const tarball = path.join(packDirectory, packResult.filename)
 
       expect({name: packResult.name, version: packResult.version}).toEqual({name: "semantifold", version: sourceManifest.version})
-      for (const filename of ["build/index.js", "build/index.d.ts", "build/src/materialization.js", "build/src/materialization.d.ts",
-        "src/materialization.js"]) expect(packedFiles).toContain(filename)
+      for (const filename of ["build/index.js", "build/index.d.ts"]) expect(packedFiles).toContain(filename)
+      for (const filename of ["build/src/materialization.js", "build/src/materialization.d.ts", "src/materialization.js"]) {
+        expect(packedFiles.includes(filename)).toBeFalse()
+      }
       expect(packedFiles.includes(".npmrc")).toBeFalse()
       await writeFile(path.join(consumerDirectory, "package.json"), `${JSON.stringify({
         dependencies: {semantifold: `file:${tarball}`},
@@ -96,7 +98,6 @@ describe("packed iOS application consumer", () => {
         expect(JSON.parse(executed.stdout)).toEqual({
           artifactCount: 14,
           manifestTarget: "ios",
-          materialized: true,
           target: "ios"
         })
         const typed = await executeFile(path.join(consumerDirectory, "node_modules/.bin/tsc"), [

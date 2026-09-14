@@ -2,14 +2,9 @@
 
 export const iosPackedConsumerSource = `
 import assert from "node:assert/strict"
-import {mkdtemp, readFile, rm} from "node:fs/promises"
-import os from "node:os"
-import path from "node:path"
 import {
   generateProgramArtifactSet,
-  materializeGeneratedArtifactSet,
-  parseProgram,
-  SemantifoldDiagnostic
+  parseProgram
 } from "semantifold"
 
 const sources = [
@@ -44,29 +39,15 @@ assert.equal(first.target, "ios")
 const manifest = JSON.parse(first.artifacts.find(({path: artifactPath}) => artifactPath == "semantifold-project.json").content)
 assert.equal(manifest.target, "ios")
 assert.deepEqual(manifest.provenance.semanticSources.map(({language}) => language), ["ruby", "ruby"])
-const root = await mkdtemp(path.join(os.tmpdir(), "semantifold-ios-packed-runtime-"))
-const destination = path.join(root, "Application")
-try {
-  const result = await materializeGeneratedArtifactSet({artifactSet: first, destination})
-  assert.equal(result.destination, destination)
-  assert.equal(JSON.parse(await readFile(path.join(destination, "semantifold-project.json"), "utf8")).target, "ios")
-  await assert.rejects(
-    materializeGeneratedArtifactSet({artifactSet: first, destination}),
-    error => error instanceof SemantifoldDiagnostic && error.code == "MATERIALIZATION_REFUSED"
-  )
-  process.stdout.write(JSON.stringify({
-    artifactCount: first.artifacts.length,
-    manifestTarget: manifest.target,
-    materialized: true,
-    target: first.target
-  }))
-} finally {
-  await rm(root, {force: true, recursive: true})
-}
+process.stdout.write(JSON.stringify({
+  artifactCount: first.artifacts.length,
+  manifestTarget: manifest.target,
+  target: first.target
+}))
 `
 
 export const iosTypeConsumerSource = `
-import {generateProgramArtifactSet, materializeGeneratedArtifactSet, parseProgram} from "semantifold"
+import {generateProgramArtifactSet, parseProgram} from "semantifold"
 
 const program = parseProgram({
   entryModule: "main",
@@ -90,9 +71,8 @@ const artifactSet = generateProgramArtifactSet({
   program,
   role: "application"
 })
-const materialization = materializeGeneratedArtifactSet({artifactSet, destination: "/tmp/semantifold-type-only"})
 
-void materialization
+void artifactSet
 `
 
 /**

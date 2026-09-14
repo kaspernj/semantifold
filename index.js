@@ -16,7 +16,6 @@ export {SemantifoldDiagnostic}
 export {createCapabilityAuthority} from "./src/semantic/capabilities.js"
 export {languageCapabilities, supportedLanguages} from "./src/language-registry.js"
 export {createGeneratedArtifactSet} from "./src/artifacts.js"
-export {materializeGeneratedArtifactSet} from "./src/materialization.js"
 export {createStdlibContractRegistry, listStdlibModules, resolveStdlibModule} from "./src/semantic/stdlib.js"
 export {createStdlibProviderRegistry, listStdlibProviders} from "./src/stdlib-providers.js"
 export {negotiateStdlibProviders} from "./src/stdlib-negotiation.js"
