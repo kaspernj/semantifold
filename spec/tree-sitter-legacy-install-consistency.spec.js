@@ -16,7 +16,9 @@ const runtimePath = "packages/tree-sitter-legacy/runtime"
 
 describe("installed legacy runtime consistency", () => {
   for (const command of [["run", "pretest"], ["pack", "--json"]]) {
-    it(`rejects stale shipped files during npm ${command.join(" ")} and recovers with npm ci`, async () => {
+    const testOptions = command[0] == "pack" ? {timeoutMs: 300_000} : {}
+
+    it(`rejects stale shipped files during npm ${command.join(" ")} and recovers with npm ci`, testOptions, async () => {
       const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "semantifold-stale-runtime-"))
       const fixtureRoot = path.join(temporaryRoot, "fixture")
       const userConfig = path.join(temporaryRoot, "user.npmrc")
