@@ -13,7 +13,7 @@ import {createLanguageRegistry} from "../src/language-registry.js"
 
 const originalFive = ["php", "ruby", "javascript", "typescript", "java"]
 const allLanguages = [...originalFive, "kotlin", "python", "csharp", "go", "c", "cpp", "rust", "swift"]
-const allTargets = [...allLanguages, "wasm"]
+const allTargets = [...allLanguages, "wasm", "ios"]
 
 describe("language role registry", () => {
   it("derives stable immutable public discovery from the dispatch registry", () => {
@@ -27,7 +27,7 @@ describe("language role registry", () => {
       expect(Object.isFrozen(descriptor.features)).toBeTrue()
       expect(Object.isFrozen(descriptor.mapping)).toBeTrue()
       expect(Object.isFrozen(descriptor.acceptance)).toBeTrue()
-      if (descriptor.id == "wasm") {
+      if (descriptor.id == "wasm" || descriptor.id == "ios") {
         expect(descriptor.features).toEqual({
           closedRecords: false,
           conditionControlledLoops: false,
@@ -43,7 +43,7 @@ describe("language role registry", () => {
         })
         expect(descriptor.roles).toEqual({
           applicationBackend: true,
-          binaryBackend: true,
+          binaryBackend: descriptor.id == "wasm",
           frontend: false,
           interoperability: false,
           provider: false,
@@ -52,6 +52,10 @@ describe("language role registry", () => {
         expect(descriptor.artifactMultiplicity).toEqual("multiple")
         expect(descriptor.roundTrip).toBeFalse()
         expect(descriptor.mapping).toEqual({binaryRanges: true, richText: true, sourceMapV3: true})
+        expect(descriptor.acceptance).toEqual(descriptor.id == "wasm" ? {
+          stages: ["generate", "validate", "instantiate", "execute"],
+          toolchains: ["wasm-validate", "node", "chromium"]
+        } : {stages: ["generate"], toolchains: []})
         continue
       }
       expect(descriptor.roles).toEqual({

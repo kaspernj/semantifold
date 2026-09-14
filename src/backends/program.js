@@ -25,29 +25,39 @@ const programTargets = new Set(["php", "ruby", "javascript", "typescript", "java
 /**
  * Generates a complete deterministic mapped artifact set for one semantic program.
  * @param {object} input - Program generation request.
- * @param {import("../semantic/types.js").SemanticLanguage} input.language - Original-five target language.
+ * @param {import("../semantic/types.js").BackendLanguage} input.language - Registered program target.
  * @param {import("../semantic/types.js").SemanticProgram} input.program - Complete semantic program.
+ * @param {"text" | "application"} [input.role] - Explicit artifact role; omitted preserves text generation.
  * @returns {import("../semantic/types.js").GeneratedArtifactSet} Transactionally validated artifact set.
  */
 export function generateProgramArtifacts(input) {
   if (!isPlainObject(input) || typeof input.language != "string") invalidProgramGeneration("Program generation requires a target language and program.")
+  const role = input.role ?? "text"
+
+  if (role != "text" && role != "application") invalidProgramGeneration("Program artifact role must be 'text' or 'application'.")
   languageRegistry.record(input.language)
+  if (role == "application") {
+    const backend = languageRegistry.resolve(input.language, "applicationBackend")
+
+    return createGeneratedArtifactSet(backend(input))
+  }
   if (!programTargets.has(input.language)) unsupportedRole(input.language, "multi-file text backend")
-  const program = validateProgram(input.program, input.language)
-  const linking = planStdlibLinking(program, input.language)
-  const emissionModules = prepareEmissionModules(program, input.language, linking)
-  validateProgramSourceOwnership(program, input.language)
-  const paths = planModulePaths(program, input.language, linking)
+  const language = /** @type {import("../semantic/types.js").SemanticLanguage} */ (input.language)
+  const program = validateProgram(input.program, language)
+  const linking = planStdlibLinking(program, language)
+  const emissionModules = prepareEmissionModules(program, language, linking)
+  validateProgramSourceOwnership(program, language)
+  const paths = planModulePaths(program, language, linking)
   const sources = program.sources.map((source) => {
     if (source.content === null) invalidProgramGeneration(`Program source '${source.filename}' has no retained content.`)
 
     return {content: source.content, filename: source.filename, ...(source.language ? {language: source.language} : {})}
   })
   const backend = /** @type {typeof import("./javascript.js").generateJavaScript} */ (
-    languageRegistry.resolve(input.language, "textBackend"))
-  const mediaType = languageRegistry.record(input.language).mediaType
+    languageRegistry.resolve(language, "textBackend"))
+  const mediaType = languageRegistry.record(language).mediaType
   /** @type {import("../semantic/types.js").GeneratedSetArtifact[]} */
-  const artifacts = input.language == "javascript" || input.language == "typescript" ? [{
+  const artifacts = language == "javascript" || language == "typescript" ? [{
     content: "{\n  \"type\": \"module\"\n}\n",
     contentKind: /** @type {const} */ ("text"),
     mediaType: "application/json",
@@ -61,12 +71,12 @@ export function generateProgramArtifacts(input) {
     role: "manifest"
   }] : []
 
-  if (linking && input.language != "java") {
+  if (linking && language != "java") {
     for (const provider of linking.negotiation.providers) {
       const record = /** @type {import("../stdlib-providers.js").StdlibProviderRecord} */ (linking.records.get(provider.module))
 
       artifacts.push({
-        content: generateStdlibProviderContent(/** @type {"php" | "ruby" | "javascript" | "typescript"} */ (input.language),
+        content: generateStdlibProviderContent(/** @type {"php" | "ruby" | "javascript" | "typescript"} */ (language),
           [...provider.operations], provider.module),
         contentKind: /** @type {const} */ ("text"),
         mediaType: record.artifact.mediaType,
@@ -87,7 +97,7 @@ export function generateProgramArtifacts(input) {
     const filename = /** @type {string} */ (paths.get(moduleId))
     const writer = new SourceWriter({
       filename,
-      language: input.language,
+      language,
       module: emissionModule,
       program,
       programPaths: paths,
@@ -97,10 +107,10 @@ export function generateProgramArtifacts(input) {
           qualifiedOperationKey(module, operation),
           /** @type {string} */ (linking.records.get(module)?.nativeEntries[operation])
         ])),
-        stdlibProviderImports: input.language == "java" || input.language == "javascript" || input.language == "typescript" ?
+        stdlibProviderImports: language == "java" || language == "javascript" || language == "typescript" ?
           linking.providerImportsByModule.get(moduleId) : undefined,
         stdlibProviderPaths: linking.providerPathsByModule.get(moduleId),
-        ...(input.language == "java" ? {
+        ...(language == "java" ? {
           stdlibProviderOwnerModule: /** @type {string} */ (linking.ownerModuleId),
           stdlibProviderShims: moduleId == linking.ownerModuleId ? linking.usedOperations.map(({operation}) => operation) : undefined
         } : {})
@@ -130,7 +140,7 @@ export function generateProgramArtifacts(input) {
   return createGeneratedArtifactSet({
     artifacts,
     ...(linking || program.stdlibFacades ? {metadata: stdlibLinkMetadata(linking, paths, program.stdlibFacades)} : {}),
-    target: input.language
+    target: language
   })
 }
 

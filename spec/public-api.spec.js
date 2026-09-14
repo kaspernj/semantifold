@@ -1,5 +1,6 @@
 // @ts-check
 
+import assert from "node:assert/strict"
 import {describe, expect, it} from "@velocious/testing"
 import {
   canonicalToolchains,
@@ -89,5 +90,24 @@ describe("public API", () => {
       stringifyMapping,
       toSourceMapV3
     ]) expect(typeof api).toEqual("function")
+  })
+
+  it("routes iOS application requests without changing default text program generation", () => {
+    const source = "function sum(left: number, right: number): number { return left + right; } console.log(sum(4, 9));"
+    const module = parse({filename: "source.ts", language: "typescript", source})
+    const program = parseProgram({
+      entryModule: "main",
+      sources: [{filename: "source.ts", id: "main", language: "typescript", source}]
+    })
+
+    expect(generateProgramArtifactSet({language: "typescript", program}).target).toEqual("typescript")
+    for (const generateIos of [
+      () => generateArtifactSet({language: "ios", module, role: "application"}),
+      () => generateProgramArtifactSet({language: "ios", program, role: "application"})
+    ]) {
+      assert.throws(generateIos, error => error instanceof SemantifoldDiagnostic &&
+        error.code == "UNSUPPORTED_CAPABILITY" && error.language == "ios" &&
+        error.detail == "Backend cannot emit semantic capability 'application target semantic project validation'.")
+    }
   })
 })

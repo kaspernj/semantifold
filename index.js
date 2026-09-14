@@ -94,8 +94,9 @@ export function generateArtifact(input) {
 /**
  * Generates a deterministic mapped artifact set for a complete semantic program.
  * @param {object} input - Program generation request.
- * @param {import("./src/semantic/types.js").SemanticLanguage} input.language - Original-five target language.
+ * @param {import("./src/semantic/types.js").BackendLanguage} input.language - Registered program target.
  * @param {import("./src/semantic/types.js").SemanticProgram} input.program - Complete resolved program.
+ * @param {"text" | "application"} [input.role] - Explicit role; omitted preserves text generation.
  * @returns {import("./src/semantic/types.js").GeneratedArtifactSet} Complete generated set.
  */
 export function generateProgramArtifactSet(input) {

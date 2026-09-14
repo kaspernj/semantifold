@@ -1,7 +1,7 @@
 // @ts-check
 
 import {isDenseArray} from "./array.js"
-import {SemantifoldDiagnostic, unsupportedRole} from "./diagnostic.js"
+import {SemantifoldDiagnostic, unsupportedCapability, unsupportedRole} from "./diagnostic.js"
 import {generateJava} from "./backends/java.js"
 import {generateKotlin} from "./backends/kotlin.js"
 import {generateCSharpProject} from "./backends/csharp.js"
@@ -230,11 +230,13 @@ export function createLanguageRegistry(candidateRecords) {
       invalidRegistry(`Registry record '${id}' declares an acceptance stage without its required role.`, id)
     }
 
-    if ((hasBackend || candidate.defaultFilename !== undefined) &&
+    const hasDefaultedBackend = hasTextBackend || hasBinaryBackend
+
+    if ((hasDefaultedBackend || candidate.defaultFilename !== undefined) &&
       (typeof candidate.defaultFilename != "string" || candidate.defaultFilename.length == 0)) {
       invalidRegistry(`Registry backend '${id}' requires a default filename.`, id)
     }
-    if ((hasBackend || candidate.mediaType !== undefined) &&
+    if ((hasDefaultedBackend || candidate.mediaType !== undefined) &&
       (typeof candidate.mediaType != "string" || candidate.mediaType.length == 0)) {
       invalidRegistry(`Registry backend '${id}' requires a media type.`, id)
     }
@@ -467,6 +469,15 @@ const records = [
     mapping: {binaryRanges: true, richText: true, sourceMapV3: true},
     mediaType: "application/wasm",
     roundTrip: false
+  },
+  {
+    acceptance: {stages: ["generate"], toolchains: []},
+    applicationBackend: iosApplicationBoundary,
+    artifactMultiplicity: "multiple",
+    features: {closedRecords: false, conditionControlledLoops: false, effectfulCapabilitiesAndResources: false, generalFunctionsAndCalls: false, immutableCollections: false, optionalValues: false, orderedListIteration: false, orderedMapIteration: false, referenceClasses: false, typedErrors: false, typeParametersAndGenerics: false},
+    id: "ios",
+    mapping: {binaryRanges: true, richText: true, sourceMapV3: true},
+    roundTrip: false
   }
 ]
 
@@ -476,6 +487,14 @@ export const languageCapabilities = languageRegistry.descriptors
 export const supportedLanguages = Object.freeze(languageCapabilities
   .filter(({roles}) => roles.frontend && roles.textBackend)
   .map(({id}) => /** @type {import("./semantic/types.js").SemanticLanguage} */ (id)))
+
+/**
+ * Keeps the registered application route fail-loud until the owning iOS backend preflights it.
+ * @returns {never} Always throws without producing candidate artifacts.
+ */
+function iosApplicationBoundary() {
+  return unsupportedCapability("ios", "application target semantic project validation")
+}
 
 /**
  * Supplies common original-five capability declarations.

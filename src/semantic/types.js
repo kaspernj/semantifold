@@ -2,7 +2,7 @@
 
 /** @typedef {"php" | "ruby" | "javascript" | "typescript" | "java" | "kotlin" | "python" | "csharp" | "go" | "c" | "cpp" | "rust" | "swift"} SemanticLanguage */
 /** @typedef {SemanticLanguage} TextBackendLanguage */
-/** @typedef {TextBackendLanguage | "wasm"} BackendLanguage */
+/** @typedef {TextBackendLanguage | "wasm" | "ios"} BackendLanguage */
 /** @typedef {SemanticLanguage | "html"} GeneratedTextLanguage */
 /** @typedef {"integer" | "boolean" | "string"} SemanticTypeName */
 /** @typedef {SemanticTypeName | "void"} FunctionReturnTypeName */
