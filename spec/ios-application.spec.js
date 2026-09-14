@@ -3,8 +3,18 @@
 import assert from "node:assert/strict"
 import {createHash} from "node:crypto"
 import {describe, expect, it} from "@velocious/testing"
-import {generateArtifactSet, generateProgramArtifactSet, parse, parseProgram, SemantifoldDiagnostic} from "../index.js"
+import {
+  createGeneratedArtifactSet,
+  discoverCanonicalToolchain,
+  generateArtifactSet,
+  generateProgramArtifactSet,
+  parse,
+  parseProgram,
+  runAcceptanceStages,
+  SemantifoldDiagnostic
+} from "../index.js"
 import {allocateXcodeObjectIds, preflightIosApplication} from "../src/backends/ios.js"
+import {executeSwiftArtifacts} from "./support/swift-toolchain.js"
 
 const rubySources = () => [
   {
@@ -153,6 +163,60 @@ puts values[0]
       expect(libraryArtifact.provenance.mapping.spans.some(({mappingKind}) => mappingKind == "exact")).toBeTrue()
     }
     expect(ruby.artifacts.find(({path}) => path.endsWith("SemantifoldRuntime.swift"))?.provenance.kind).toEqual("synthetic")
+  })
+
+  it("matches real Ruby behavior in generated semantic Swift debug and optimized execution", async () => {
+    const sources = rubySources()
+    const program = parseProgram({entryModule: "main", sources})
+    const rubyTool = await discoverCanonicalToolchain("ruby")
+    const rubyArtifacts = createGeneratedArtifactSet({
+      artifacts: sources.map((source, index) => ({
+        content: source.source,
+        contentKind: "text",
+        mediaType: "text/x-ruby",
+        ownership: "generated",
+        path: source.filename,
+        provenance: {kind: "synthetic", reason: "Exact iOS acceptance source fixture.", relatedOrigins: []},
+        role: index == 0 ? "entry" : "source"
+      })),
+      target: "ruby"
+    })
+    const ruby = await runAcceptanceStages({
+      artifacts: rubyArtifacts,
+      environment: {LANG: "C.UTF-8", LC_ALL: "C.UTF-8", PATH: process.env.PATH},
+      stages: [{arguments: ["main.rb"], stage: "execute", tool: rubyTool}],
+      target: "ruby"
+    })
+    const generated = generateProgramArtifactSet({
+      configuration: configuration(),
+      language: "ios",
+      program,
+      role: "application"
+    })
+    const semanticSwift = generated.artifacts.filter(({path: artifactPath}) => artifactPath.startsWith("Sources/Generated/"))
+      .map(({content}) => content).join("\n") + `
+for line in SemantifoldModuleMain.semantifoldEntry() {
+  print(line)
+}
+`
+    const swift = await executeSwiftArtifacts({artifacts: [{content: semanticSwift, path: "program.swift"}]}, {label: "ios-semantic"})
+    const expected = "hé😀\nhé😀!\nhé😀!?\n"
+
+    expect(ruby.stages[0].stdout).toEqual(expected)
+    expect(ruby.stages[0].stderr).toEqual("")
+    expect(swift.modes.map(({mode, stdout, stderr}) => ({mode, stdout, stderr}))).toEqual([
+      {mode: "debug", stderr: "", stdout: expected},
+      {mode: "optimized", stderr: "", stdout: expected}
+    ])
+  })
+
+  it("fails acceptance when the required Ruby or Swift command is unavailable", async () => {
+    for (const tool of ["ruby", "swiftc"]) {
+      await assert.rejects(
+        discoverCanonicalToolchain(/** @type {"ruby" | "swiftc"} */ (tool), {environment: {PATH: ""}}),
+        error => error instanceof SemantifoldDiagnostic && error.code == "TOOL_NOT_FOUND"
+      )
+    }
   })
 
   it("preserves exact caller assets with validated paths and SHA-256", () => {
