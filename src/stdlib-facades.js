@@ -760,7 +760,6 @@ function builtinTask037RubyFacades() {
     # @return [void]
     def close
       v1_close(@resource)
-      return
     end
   end
 end

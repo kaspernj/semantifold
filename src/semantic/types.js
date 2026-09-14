@@ -986,6 +986,8 @@
  * @property {string} [id] - Stable class-scoped constructor identity, required after validation.
  * @property {Parameter[]} parameters - Exact positional constructor signature.
  * @property {Block} body - Field-order initialization body.
+ * @property {readonly ["host"]} [effects] - Inferred checked host-effect fact.
+ * @property {string[]} [failureIds] - Ordered capability failures reachable through construction.
  * @property {SourceLocation} location - Complete constructor location.
  * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned constructor range.
  */
@@ -998,6 +1000,8 @@
  * @property {Parameter[]} parameters - Exact positional method signature.
  * @property {SemanticFunctionReturnType} returnType - Exact return type.
  * @property {Block} body - Method body.
+ * @property {readonly ["host"]} [effects] - Inferred checked host-effect fact.
+ * @property {string[]} [failureIds] - Ordered capability failures reachable through the method.
  * @property {SourceLocation} location - Complete method location.
  * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned method-name range.
  */
@@ -1094,6 +1098,7 @@
  * @property {string} id - Stable caller-supplied logical module identity.
  * @property {string} sourceFilename - Explicit source filename; never an implicit read request.
  * @property {RecordDeclaration[]} [records] - Top-level nominal record declarations.
+ * @property {ClassDeclaration[]} [classes] - Compiler-owned facade reference classes.
  * @property {ErrorDeclaration[]} [errors] - Top-level nominal unchecked error declarations.
  * @property {FunctionDeclaration[]} functions - Top-level functions.
  * @property {SemanticImport[]} imports - Resolved imports in source order.

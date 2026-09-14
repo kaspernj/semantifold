@@ -97,6 +97,77 @@ end
     expect(program.stdlibFacades).toBe(undefined)
   })
 
+  it("admits only the compiler-owned socket class and binds its owned effects into the application", () => {
+    const program = parseProgram({
+      entryModule: "main",
+      sources: [{filename: "main.rb", id: "main", language: "ruby", source: `require "socket"
+module Main
+  module_function
+  # @return [void]
+  def run()
+    # @type [TCPSocket]
+    socket = TCPSocket.new("127.0.0.1", 1234)
+    begin
+      begin
+        begin
+          # @type [String?]
+          line = socket.gets
+          if !line.nil?
+            puts line
+          end
+        rescue WriteFailure => write_error
+          socket.close
+          return
+        end
+      rescue DecodeFailure => decode_error
+        socket.close
+        return
+      end
+    rescue ReadFailure => read_error
+      socket.close
+      return
+    end
+    socket.close
+    return
+  end
+
+  run()
+end
+`}]
+    })
+
+    expect(program.modules.map(({id}) => id)).toEqual([
+      "semantifold.facade.ruby.socket", "semantifold.facade.ruby.output", "main"
+    ])
+    const socketFacade = program.modules[0]
+    const application = program.modules[2]
+    const socketClass = socketFacade.classes?.[0]
+
+    expect(socketClass).toMatchObject({
+      constructor: {effects: ["host"], kind: "ConstructorDeclaration"},
+      kind: "ClassDeclaration",
+      methods: [
+        {effects: ["host"], name: "gets", returnType: {kind: "OptionalType"}},
+        {effects: ["host"], name: "close", returnType: {kind: "TypeReference", name: "void"}}
+      ],
+      name: "TCPSocket",
+      ownership: {kind: "ownedResource"}
+    })
+    expect((socketClass?.constructor.failureIds?.length ?? 0) > 0).toBe(true)
+    expect(socketClass?.methods.every(({failureIds}) => (failureIds?.length ?? 0) > 0)).toBe(true)
+    expect(socketFacade.capabilities?.flatMap(({operations}) => operations.map(({name}) => name))).toEqual([
+      "v1_connect", "v1_read_line", "v1_close"
+    ])
+    expect(application.capabilities).toBe(undefined)
+    expect(application.imports).toMatchObject([{importedName: "TCPSocket", localName: "TCPSocket", symbolKind: "class"}])
+    expect(application.functions[0].body.statements[0]).toMatchObject({
+      initializer: {effects: ["host"], kind: "ReferenceConstruction", reference: {kind: "OwnedReferenceType"}}
+    })
+    expect(application.entryPoint?.body.statements[0]).toMatchObject({
+      expression: {effects: ["host"], kind: "CallExpression"}, kind: "ExpressionStatement"
+    })
+  })
+
   it("rejects dynamic socket requires and does not grant caller operation authority", () => {
     assert.throws(
       () => parseProgram({entryModule: "main", sources: [{filename: "dynamic.rb", id: "main", language: "ruby",

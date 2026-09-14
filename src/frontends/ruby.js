@@ -1386,12 +1386,29 @@ function convertRubyReferenceClass(node, declaration, nominalNames, records, cla
     initializer.parameters.block].find(Boolean)
   const statements = initializer.body instanceof StatementsNode ? initializer.body.body : []
   const annotations = typeComments(comments, initializer, filename, source)
+  const acquisition = statements.length == 1 && statements[0] instanceof InstanceVariableWriteNode &&
+    statements[0].name == "@resource" && statements[0].value instanceof CallNode && !statements[0].value.receiver &&
+    !statements[0].value.block && statements[0].value.name == "v1_connect" &&
+    statements[0].value.arguments_?.arguments_.length == 2 && parameters.length == 2 &&
+    parameters[0] instanceof RequiredParameterNode && parameters[0].name == "host" &&
+    parameters[1] instanceof RequiredParameterNode && parameters[1].name == "port" &&
+    statements[0].value.arguments_.arguments_[0] instanceof LocalVariableReadNode &&
+    statements[0].value.arguments_.arguments_[0].name == "host" &&
+    statements[0].value.arguments_.arguments_[1] instanceof LocalVariableReadNode &&
+    statements[0].value.arguments_.arguments_[1].name == "port" && declaration.name == "TCPSocket" &&
+    functions.get("v1_connect")?.returnType.kind == "OwnedResourceType"
 
   if (initializer.receiver || invalidParameter || annotations.returnType || annotations.parameters.size != parameters.length ||
-    statements.length != parameters.length) {
+    !acquisition && statements.length != parameters.length) {
     return unsupportedSyntax("ruby", "noncanonical reference class initializer", nodeLocation(initializer, filename, source))
   }
-  declaration.fields = parameters.map((candidate, index) => {
+  declaration.fields = acquisition ? [withParserRanges({
+    id: `${declaration.id}:field:0`,
+    kind: /** @type {const} */ ("PrivateField"),
+    location: nodeLocation(/** @type {InstanceVariableWriteNode} */ (statements[0]), filename, source),
+    name: "resource",
+    type: /** @type {import("../semantic/types.js").OwnedResourceType} */ (structuredClone(functions.get("v1_connect")?.returnType))
+  }, {name: nodeLocation(/** @type {InstanceVariableWriteNode} */ (statements[0]), filename, source)})] : parameters.map((candidate, index) => {
     const parameter = /** @type {RequiredParameterNode} */ (candidate)
     const assignment = statements[index]
     const annotated = annotations.parameters.get(parameter.name)
@@ -1410,9 +1427,13 @@ function convertRubyReferenceClass(node, declaration, nominalNames, records, cla
   const constructorParameters = parameters.map((candidate, index) => {
     const parameter = /** @type {RequiredParameterNode} */ (candidate)
     const parameterLocation = nodeLocation(parameter, filename, source)
+    const annotated = annotations.parameters.get(parameter.name)
 
     return withParserRanges({kind: /** @type {const} */ ("Parameter"), location: parameterLocation, name: parameter.name,
-      type: declaration.fields[index].type}, {name: parameterLocation})
+      type: acquisition
+        ? convertType(annotated?.sourceType, `Constructor parameter '${parameter.name}'`, parameterLocation, source,
+          annotated?.location, nominalNames)
+        : declaration.fields[index].type}, {name: parameterLocation})
   })
   declaration.constructor = withParserRanges({body: /** @type {import("../semantic/types.js").Block} */ ({}),
     id: `${declaration.id}:constructor`, kind: /** @type {const} */ ("ConstructorDeclaration"), location: nodeLocation(initializer, filename, source),
@@ -1667,7 +1688,7 @@ function convertPrint(node, filename, source, context) {
  * @param {string} input.filename - Source filename.
  * @param {string} input.source - Source text.
  * @param {readonly import("../semantic/types.js").EffectCapabilityDeclaration[]} [input.capabilities] - Compiler-authorized declarations.
- * @param {{isEntry: boolean, functions: Map<string, import("../semantic/types.js").FunctionDeclaration>, records: Map<string, import("../semantic/types.js").RecordDeclaration>, errors?: Map<string, import("../semantic/types.js").ErrorDeclaration>}} [input.program] - Resolved program imports and entry role.
+ * @param {{isEntry: boolean, classes?: Map<string, import("../semantic/types.js").ClassDeclaration>, functions: Map<string, import("../semantic/types.js").FunctionDeclaration>, records: Map<string, import("../semantic/types.js").RecordDeclaration>, errors?: Map<string, import("../semantic/types.js").ErrorDeclaration>}} [input.program] - Resolved program imports and entry role.
  * @returns {import("../semantic/types.js").SemanticModule} Semantic module.
  */
 export function parseRuby({capabilities = [], filename, source, program}) {
@@ -1736,6 +1757,7 @@ export function parseRuby({capabilities = [], filename, source, program}) {
   if (reopened) return unsupportedSyntax("ruby", `reference class reopening '${reopened.name}'`, reopened.location)
   const recordNames = /** @type {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").EffectResourceDeclaration>} */ (
     new Map(program?.records ?? []))
+  for (const [name, declaration] of program?.classes ?? []) recordNames.set(name, declaration)
   for (const resource of capabilities.flatMap(({resources}) => resources)) recordNames.set(resource.name, resource)
   const errorNames = new Map(program?.errors ?? [])
   for (const failure of capabilities.flatMap(({failures}) => failures)) {
@@ -1747,7 +1769,12 @@ export function parseRuby({capabilities = [], filename, source, program}) {
   for (const declaration of recordDeclarations) recordNames.set(declaration.name, declaration)
   for (const declaration of classDeclarations) recordNames.set(declaration.name, declaration)
   const recordsById = new Map(recordDeclarations.map((declaration) => [/** @type {string} */ (declaration.id), declaration]))
-  const classesById = new Map(classDeclarations.map((declaration) => [/** @type {string} */ (declaration.id), declaration]))
+  const classesById = new Map([
+    ...[...program?.classes?.values() ?? []].map((declaration) => /** @type {[string, import("../semantic/types.js").ClassDeclaration]} */ (
+      [/** @type {string} */ (declaration.id), declaration])),
+    ...classDeclarations.map((declaration) => /** @type {[string, import("../semantic/types.js").ClassDeclaration]} */ (
+      [/** @type {string} */ (declaration.id), declaration]))
+  ])
   const functionNodes = body.filter((node) => node instanceof DefNode)
   const allowsBuiltinOutput = capabilities.some(({operations}) => operations.some(({name}) => name == "v1_write_line"))
   const signatures = functionNodes.map((node, index) =>
@@ -1923,13 +1950,15 @@ export function inspectRubyModule({filename, source}) {
   }
   const exports = moduleBody.flatMap((node) => {
     if (node instanceof DefNode || node instanceof ClassNode) {
-      const kind = node instanceof DefNode ? "function" : "record"
+      const kind = node instanceof DefNode ? "function" : node.body instanceof StatementsNode && node.body.body.length > 0 &&
+        node.body.body.every((member) => member instanceof DefNode) ? "class" : "record"
 
       if (visibility.get(node.name) == kind) return []
       return [{
         exportedName: node.name,
         localName: node.name,
         location: nodeLocation(node instanceof ClassNode ? node.constantPath : node, filename, source),
+        symbolKind: /** @type {import("../semantic/types.js").SemanticDeclarationKind} */ (kind),
         typeOnly: /** @type {const} */ (false)
       }]
     }
