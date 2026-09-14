@@ -600,12 +600,13 @@ function prepareEmissionModules(program, language, linking = null) {
     const externalDeclarationIds = new Set()
 
     const neededFailureIds = collectReferencedFailureIds(programModule)
+    const localFailureIds = new Set(programModule.capabilities?.flatMap(({failures}) => failures.map(({id}) => id)) ?? [])
 
     for (const owner of program.modules) {
       if (owner.id == programModule.id) continue
       for (const capability of owner.capabilities ?? []) {
         for (const failure of capability.failures) {
-          if (neededFailureIds.has(failure.id)) visibleErrors.set(failure.id, failure)
+          if (!localFailureIds.has(failure.id) && neededFailureIds.has(failure.id)) visibleErrors.set(failure.id, failure)
         }
       }
     }
