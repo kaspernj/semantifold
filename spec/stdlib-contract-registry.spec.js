@@ -12,7 +12,13 @@ describe("versioned canonical stdlib contract registry", () => {
   it("exposes the built-in probe contract as public, inspectable, versioned declarations", () => {
     const modules = listStdlibModules()
 
-    expect(modules).toEqual([{identity: probeIdentity, versions: ["1.0.0"]}])
+    expect(modules).toEqual([
+      {identity: probeIdentity, versions: ["1.0.0"]},
+      {identity: "semantifold.socket-client", versions: ["1.0.0"]},
+      {identity: "semantifold.text-stream", versions: ["1.0.0"]},
+      {identity: "semantifold.output", versions: ["1.0.0"]},
+      {identity: "semantifold.resource", versions: ["1.0.0"]}
+    ])
     expect(Object.isFrozen(modules)).toBe(true)
     expect(Object.isFrozen(modules[0])).toBe(true)
     expect(Object.isFrozen(modules[0].versions)).toBe(true)
@@ -23,6 +29,7 @@ describe("versioned canonical stdlib contract registry", () => {
     expect(contract.version).toEqual("1.0.0")
     expect(contract.schema).toEqual("SemantifoldStdlibContract")
     expect(contract.schemaVersion).toEqual(1)
+    expect(contract.dependencies).toEqual([])
     expect(contract.resources).toEqual([{name: "ProbeResource"}])
     expect(contract.failures).toEqual([
       {name: "ProbeOperationFailure"},
@@ -188,6 +195,7 @@ function moduleRecord(identity, version, operations = undefined) {
   const failure = identity == probeIdentity ? [{name: "ProbeOperationFailure"}] : []
 
   return {
+    dependencies: [],
     failures: failure,
     identity,
     operations: operations ?? [{

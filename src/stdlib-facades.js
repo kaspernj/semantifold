@@ -293,10 +293,11 @@ export function facadeCapabilityAuthority(records) {
 
 /**
  * Converts one registry contract type to a capability-authority input type.
- * @param {string} type - Canonical contract type.
+ * @param {string | import("./semantic/stdlib.js").CanonicalDeclarationReference} type - Canonical contract type.
  * @returns {import("./semantic/types.js").FunctionReturnTypeName | {kind: "OwnedResourceType", resource: string} | {kind: "OptionalType", valueType: import("./semantic/types.js").SemanticTypeName}} Semantic authority type.
  */
 function canonicalCapabilityType(type) {
+  if (typeof type != "string") invalidFacade("Task 036 facade contracts cannot import dependency-qualified types.")
   if (type == "void" || type == "boolean" || type == "integer" || type == "string") return type
   if (type.startsWith("optional:")) return {kind: "OptionalType",
     valueType: /** @type {import("./semantic/types.js").SemanticTypeName} */ (type.slice("optional:".length))}
@@ -305,7 +306,7 @@ function canonicalCapabilityType(type) {
 
 /**
  * Converts a non-void registry parameter type to capability-authority input.
- * @param {string} type - Canonical parameter type.
+ * @param {string | import("./semantic/stdlib.js").CanonicalDeclarationReference} type - Canonical parameter type.
  * @returns {import("./semantic/types.js").SemanticTypeName | {kind: "OwnedResourceType", resource: string} | {kind: "OptionalType", valueType: import("./semantic/types.js").SemanticTypeName}} Semantic parameter type.
  */
 function canonicalCapabilityParameterType(type) {

@@ -509,18 +509,21 @@
 /**
  * @typedef CapabilityAuthority
  * @property {"SemantifoldCapabilityAuthority"} schema - Authority schema discriminator.
- * @property {1} schemaVersion - Authority payload version, not a standard-library contract version.
+ * @property {1 | 2} schemaVersion - Authority payload version, not a standard-library contract version.
  * @property {string} id - Opaque caller-supplied authority identity.
  * @property {EffectCapabilityDeclaration[]} capabilities - Normalized declarations.
  * @property {string} [contractVersion] - Declared standard-library contract version, present only when the caller supplied one.
+ * @property {{identity: string, contractVersion: string, capabilities: EffectCapabilityDeclaration[]}[]} [modules] - Schema-v2 canonical module authorities.
  */
 
-/** @typedef {{name: string, type: SemanticTypeName | {kind: "OwnedResourceType", resource: string} | {kind: "OptionalType", valueType: SemanticTypeName}}} CapabilityParameterInput */
+/** @typedef {{module: string, name: string}} CapabilityDeclarationReferenceInput */
+/** @typedef {{name: string, type: SemanticTypeName | {kind: "OwnedResourceType", resource: string | CapabilityDeclarationReferenceInput} | {kind: "OptionalType", valueType: SemanticTypeName}}} CapabilityParameterInput */
 /** @typedef {{name: string}} CapabilityNamedInput */
-/** @typedef {{kind: "none"} | {kind: "acquire", resource: string} | {kind: "borrow" | "close", parameterIndex: number, terminalFailure: string}} CapabilityResourceFlowInput */
-/** @typedef {{name: string, parameters: CapabilityParameterInput[], returnType: FunctionReturnTypeName | {kind: "OwnedResourceType", resource: string} | {kind: "OptionalType", valueType: SemanticTypeName}, effects: ["host"], failures: string[], resourceFlow: CapabilityResourceFlowInput}} CapabilityOperationInput */
+/** @typedef {{kind: "none"} | {kind: "acquire", resource: string | CapabilityDeclarationReferenceInput} | {kind: "borrow" | "close", parameterIndex: number, terminalFailure: string | CapabilityDeclarationReferenceInput}} CapabilityResourceFlowInput */
+/** @typedef {{name: string, parameters: CapabilityParameterInput[], returnType: FunctionReturnTypeName | {kind: "OwnedResourceType", resource: string | CapabilityDeclarationReferenceInput} | {kind: "OptionalType", valueType: SemanticTypeName}, effects: ["host"], failures: (string | CapabilityDeclarationReferenceInput)[], resourceFlow: CapabilityResourceFlowInput}} CapabilityOperationInput */
 /** @typedef {{name: string, resources: CapabilityNamedInput[], failures: CapabilityNamedInput[], operations: CapabilityOperationInput[]}} CapabilityDeclarationInput */
-/** @typedef {{schema: "SemantifoldCapabilityAuthority", schemaVersion: 1, id: string, capabilities: CapabilityDeclarationInput[], contractVersion?: string}} CapabilityAuthorityInput */
+/** @typedef {{identity: string, contractVersion: string, capabilities: CapabilityDeclarationInput[]}} CapabilityAuthorityModuleInput */
+/** @typedef {{schema: "SemantifoldCapabilityAuthority", schemaVersion: 1, id: string, capabilities: CapabilityDeclarationInput[], contractVersion?: string} | {schema: "SemantifoldCapabilityAuthority", schemaVersion: 2, id: string, modules: CapabilityAuthorityModuleInput[]}} CapabilityAuthorityInput */
 
 /**
  * @typedef ListLiteral

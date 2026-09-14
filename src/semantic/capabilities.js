@@ -8,6 +8,15 @@ const authorityIdPattern = /^[a-z][a-z0-9.-]*$/u
 const declarationNamePattern = /^[A-Za-z_][A-Za-z0-9_]*$/u
 const scalarNames = new Set(["boolean", "integer", "string"])
 const createdAuthorities = new WeakSet()
+/**
+ * @typedef CapabilityAuthorityV2State
+ * @property {{candidate: import("./types.js").CapabilityDeclarationInput, capabilityId: string, failures: import("./types.js").EffectFailureDeclaration[], resources: import("./types.js").EffectResourceDeclaration[]}[]} capabilities - Prepared capability declarations.
+ * @property {Map<string, string | undefined>} failureNames - Module-local failures.
+ * @property {string} identity - Canonical module identity.
+ * @property {number} moduleIndex - Stable module position.
+ * @property {Map<string, string | undefined>} resourceNames - Module-local resources.
+ * @property {string} contractVersion - Canonical contract range.
+ */
 const task034ProbeOperations = Object.freeze([
   Object.freeze({failures: Object.freeze(["capability:0/failure:0"]), flow: Object.freeze({kind: "none"}),
     name: "probeEffect", parameters: Object.freeze([["label", "string"], ["value", "integer"], ["fail", "boolean"]]),
@@ -35,6 +44,8 @@ export function createCapabilityAuthority(input) {
     if (createdAuthorities.has(/** @type {object} */ (input))) return /** @type {Readonly<import("./types.js").CapabilityAuthority>} */ (input)
     requirePlain(input, "authority")
     const authorityInput = /** @type {import("./types.js").CapabilityAuthorityInput} */ (input)
+
+    if (authorityInput.schemaVersion == 2) return createCapabilityAuthorityV2(authorityInput)
     const hasContractVersion = Object.hasOwn(authorityInput, "contractVersion")
 
     requireKeys(authorityInput, hasContractVersion
@@ -141,6 +152,217 @@ export function createCapabilityAuthority(input) {
     if (error instanceof SemantifoldDiagnostic) throw error
     return invalid("Authority payload is malformed.")
   }
+}
+
+/**
+ * Normalizes a strict multi-module schema-v2 authority.
+ * @param {import("./types.js").CapabilityAuthorityInput} authorityInput - Validated outer object candidate.
+ * @returns {Readonly<import("./types.js").CapabilityAuthority>} Normalized authority.
+ */
+function createCapabilityAuthorityV2(authorityInput) {
+  requireKeys(/** @type {Record<string, unknown>} */ (authorityInput), ["id", "modules", "schema", "schemaVersion"], "authority")
+  if (authorityInput.schema != authoritySchema || authorityInput.schemaVersion != 2 ||
+    typeof authorityInput.id != "string" || !authorityIdPattern.test(authorityInput.id) || !dense(authorityInput.modules)) {
+    invalid("Authority schema, version, identity, or module list is invalid.")
+  }
+  const identities = new Set()
+  const moduleInputs = authorityInput.modules.map((candidate, moduleIndex) => {
+    requirePlain(candidate, `module ${moduleIndex}`)
+    requireKeys(candidate, ["capabilities", "contractVersion", "identity"], `module ${moduleIndex}`)
+    if (typeof candidate.identity != "string" || !authorityIdPattern.test(candidate.identity) || identities.has(candidate.identity) ||
+      parseStdlibVersionRange(candidate.contractVersion) === null || !dense(candidate.capabilities)) {
+      invalid(`Authority module ${moduleIndex} is invalid or duplicate.`)
+    }
+    identities.add(candidate.identity)
+    return candidate
+  })
+  const states = moduleInputs.map((moduleInput, moduleIndex) => {
+    const resourceNames = new Map()
+    const failureNames = new Map()
+    const capabilityNames = new Set()
+    const capabilities = moduleInput.capabilities.map((candidate, capabilityIndex) => {
+      requirePlain(candidate, `module ${moduleIndex} capability ${capabilityIndex}`)
+      requireKeys(candidate, ["failures", "name", "operations", "resources"], `module ${moduleIndex} capability ${capabilityIndex}`)
+      requireName(candidate.name, capabilityNames, "capability")
+      if (!dense(candidate.resources) || !dense(candidate.failures) || !dense(candidate.operations)) {
+        invalid(`Capability '${candidate.name}' requires ordered resource, failure, and operation arrays.`)
+      }
+      const capabilityId = `module:${moduleIndex}/capability:${capabilityIndex}`
+      const resources = candidate.resources.map((resource, resourceIndex) => {
+        requireNamed(resource, resourceNames, "module resource")
+        const id = `${capabilityId}/resource:${resourceIndex}`
+
+        resourceNames.set(resource.name, id)
+        return {id, kind: /** @type {const} */ ("EffectResourceDeclaration"), name: resource.name}
+      })
+      const failures = candidate.failures.map((failure, failureIndex) => {
+        requireNamed(failure, failureNames, "module failure")
+        const id = `${capabilityId}/failure:${failureIndex}`
+
+        failureNames.set(failure.name, id)
+        return {id, kind: /** @type {const} */ ("EffectFailureDeclaration"), name: failure.name}
+      })
+
+      return {candidate, capabilityId, failures, resources}
+    })
+
+    return {capabilities, failureNames, identity: moduleInput.identity, moduleIndex, resourceNames,
+      contractVersion: moduleInput.contractVersion}
+  })
+  const operationNames = new Set()
+  const normalizedModules = states.map((state) => {
+    const capabilities = state.capabilities.map((capabilityState) => {
+      const localOperationNames = new Set()
+      const operations = capabilityState.candidate.operations.map((operation, operationIndex) => {
+        requirePlain(operation, `module ${state.moduleIndex} operation ${operationIndex}`)
+        requireKeys(operation, ["effects", "failures", "name", "parameters", "resourceFlow", "returnType"],
+          `module ${state.moduleIndex} operation ${operationIndex}`)
+        requireName(operation.name, localOperationNames, "operation")
+        const qualifiedOperationName = `${state.identity}\u0000${operation.name}`
+
+        if (operationNames.has(qualifiedOperationName)) invalid(`Duplicate authority operation '${operation.name}'.`)
+        operationNames.add(qualifiedOperationName)
+        if (!dense(operation.parameters) || !dense(operation.failures) || !dense(operation.effects) ||
+          operation.effects.length != 1 || operation.effects[0] != "host") {
+          invalid(`Operation '${operation.name}' has an invalid effect declaration.`)
+        }
+        const parameterNames = new Set()
+        const parameters = operation.parameters.map((parameter, parameterIndex) => {
+          requirePlain(parameter, `parameter ${parameterIndex}`)
+          requireKeys(parameter, ["name", "type"], `parameter ${parameterIndex}`)
+          requireName(parameter.name, parameterNames, "parameter")
+          return {name: parameter.name, type: normalizeV2ValueType(parameter.type, state, states)}
+        })
+        const returnType = operation.returnType == "void"
+          ? {kind: /** @type {const} */ ("TypeReference"), name: /** @type {const} */ ("void")}
+          : normalizeV2ValueType(operation.returnType, state, states)
+        const failureIds = operation.failures.map((failure) => resolveV2Declaration(failure, state, states, "failure"))
+
+        if (new Set(failureIds).size != failureIds.length) invalid(`Operation '${operation.name}' repeats a declared failure.`)
+        const resourceFlow = normalizeV2ResourceFlow(operation.resourceFlow, parameters, state, states)
+
+        validateResourceOperation(operation.name, parameters, returnType, failureIds, resourceFlow)
+        return {
+          effects: /** @type {const} */ (["host"]),
+          failureIds,
+          id: `${capabilityState.capabilityId}/operation:${operationIndex}`,
+          kind: /** @type {const} */ ("EffectOperationDeclaration"),
+          name: operation.name,
+          parameters,
+          resourceFlow,
+          returnType
+        }
+      })
+
+      return {
+        authorityId: state.identity,
+        failures: capabilityState.failures,
+        id: capabilityState.capabilityId,
+        kind: /** @type {const} */ ("EffectCapabilityDeclaration"),
+        name: capabilityState.candidate.name,
+        operations,
+        resources: capabilityState.resources
+      }
+    })
+
+    return {capabilities, contractVersion: state.contractVersion, identity: state.identity}
+  })
+  const result = /** @type {import("./types.js").CapabilityAuthority} */ ({
+    capabilities: normalizedModules.flatMap(({capabilities}) => capabilities),
+    id: authorityInput.id,
+    modules: normalizedModules,
+    schema: authoritySchema,
+    schemaVersion: 2
+  })
+
+  deepFreeze(result)
+  createdAuthorities.add(result)
+  return result
+}
+
+/**
+ * Normalizes one schema-v2 value type.
+ * @param {unknown} candidate - Candidate type.
+ * @param {CapabilityAuthorityV2State} state - Current module state.
+ * @param {CapabilityAuthorityV2State[]} states - Complete authority states.
+ * @returns {import("./types.js").SemanticValueType} Normalized type.
+ */
+function normalizeV2ValueType(candidate, state, states) {
+  if (typeof candidate == "string" && scalarNames.has(candidate)) {
+    return {kind: /** @type {const} */ ("TypeReference"), name: /** @type {import("./types.js").SemanticTypeName} */ (candidate)}
+  }
+  requirePlain(candidate, "operation type")
+  if (candidate.kind == "OwnedResourceType") {
+    requireKeys(candidate, ["kind", "resource"], "owned resource type")
+    return {kind: /** @type {const} */ ("OwnedResourceType"), resourceId: resolveV2Declaration(candidate.resource, state, states, "resource")}
+  }
+  if (candidate.kind == "OptionalType") {
+    requireKeys(candidate, ["kind", "valueType"], "optional type")
+    if (typeof candidate.valueType != "string" || !scalarNames.has(candidate.valueType)) {
+      invalid("Capability optionals may contain only scalar values.")
+    }
+    return {kind: /** @type {const} */ ("OptionalType"), valueType: {kind: /** @type {const} */ ("TypeReference"),
+      name: /** @type {import("./types.js").SemanticTypeName} */ (candidate.valueType)}}
+  }
+  return invalid("Unsupported capability value type.")
+}
+
+/**
+ * Normalizes one schema-v2 resource transition.
+ * @param {unknown} candidate - Candidate transition.
+ * @param {import("./types.js").EffectParameter[]} parameters - Normalized parameters.
+ * @param {CapabilityAuthorityV2State} state - Current module state.
+ * @param {CapabilityAuthorityV2State[]} states - Complete authority states.
+ * @returns {import("./types.js").EffectResourceFlow} Normalized transition.
+ */
+function normalizeV2ResourceFlow(candidate, parameters, state, states) {
+  requirePlain(candidate, "resource flow")
+  if (candidate.kind == "none") {
+    requireKeys(candidate, ["kind"], "resource flow")
+    return {kind: /** @type {const} */ ("none")}
+  }
+  if (candidate.kind == "acquire") {
+    requireKeys(candidate, ["kind", "resource"], "acquisition flow")
+    return {kind: /** @type {const} */ ("acquire"), resourceId: resolveV2Declaration(candidate.resource, state, states, "resource")}
+  }
+  if (candidate.kind == "borrow" || candidate.kind == "close") {
+    requireKeys(candidate, ["kind", "parameterIndex", "terminalFailure"], `${candidate.kind} flow`)
+    const parameterIndex = /** @type {number} */ (candidate.parameterIndex)
+
+    if (!Number.isSafeInteger(parameterIndex) || parameterIndex < 0 || parameterIndex >= parameters.length ||
+      parameters[parameterIndex].type.kind != "OwnedResourceType") invalid(`${candidate.kind} flow requires an owned resource parameter.`)
+    return {kind: /** @type {"borrow" | "close"} */ (candidate.kind), parameterIndex,
+      terminalFailureId: resolveV2Declaration(candidate.terminalFailure, state, states, "failure")}
+  }
+  return invalid("Unknown resource-flow kind.")
+}
+
+/**
+ * Resolves one local or qualified schema-v2 resource/failure reference.
+ * @param {unknown} candidate - Candidate reference.
+ * @param {CapabilityAuthorityV2State} state - Current module state.
+ * @param {CapabilityAuthorityV2State[]} states - Complete authority states.
+ * @param {"resource" | "failure"} kind - Declaration namespace.
+ * @returns {string} Normalized declaration identity.
+ */
+function resolveV2Declaration(candidate, state, states, kind) {
+  /** @type {CapabilityAuthorityV2State | undefined} */
+  let owner = state
+  let name = candidate
+
+  if (candidate !== null && typeof candidate == "object" && !Array.isArray(candidate)) {
+    requirePlain(candidate, `${kind} reference`)
+    requireKeys(candidate, ["module", "name"], `${kind} reference`)
+    if (typeof candidate.module != "string" || typeof candidate.name != "string") invalid(`Invalid qualified ${kind} reference.`)
+    owner = states.find(({identity}) => identity == candidate.module)
+    name = candidate.name
+  }
+  if (!owner || typeof name != "string") invalid(`Unknown ${kind} reference.`)
+  const declarations = kind == "resource" ? owner.resourceNames : owner.failureNames
+  const id = declarations.get(name)
+
+  if (id === undefined) invalid(`Unknown ${kind} '${owner.identity}.${name}'.`)
+  return id
 }
 
 /**
