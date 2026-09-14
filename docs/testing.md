@@ -454,21 +454,20 @@ Required local gates remain runtime consistency, focused named specs, lint, root
 
 ## Task026 iOS application generation acceptance
 
-Task 026's implemented Linux scope is kept in three focused files. Run them individually and sequentially; do not replace them with local spec-directory discovery or a broad suite:
+Task 026's implemented Linux generation/provenance scope is kept in two focused files. Run them individually and sequentially; do not replace them with local spec-directory discovery or a broad suite:
 
 ```sh
 npx velocious-test spec/ios-application.spec.js
-npx velocious-test spec/ios-materialization.spec.js
 npx velocious-test spec/ios-packed-consumer.spec.js
 ```
 
-`ios-application.spec.js` validates the complete Task 010 graph, closed configuration/assets, deterministic project/SwiftUI artifacts, manifest ownership/provenance, Xcode-ID collision handling, and byte-identical double generation. Its Linux execution case discovers the real canonical Ruby and Swift 6.3.3 commands, runs the original Ruby modules, combines only the generated semantic Swift/runtime with a test harness, then typechecks, compiles, and executes debug and `-O` binaries. Exact Unicode `[String]` output/order must match; an absent Ruby or Swift command fails.
+`ios-application.spec.js` validates the complete Task 010 graph, closed configuration/assets, the portable ASCII artifact/resource path boundary, deterministic project/SwiftUI artifacts, renderer-owned configuration ranges, stable semantic-program manifest identities/linkage, Xcode-ID collision handling, and byte-identical double generation. Its Linux execution case discovers the real canonical Ruby and Swift 6.3.3 commands, runs the original Ruby modules, combines only the generated semantic Swift/runtime with a test harness, then typechecks, compiles, and executes debug and `-O` binaries. Exact Unicode `[String]` output/order must match; an absent Ruby or Swift command fails.
 
-`ios-materialization.spec.js` uses task-owned temporary directories to prove absent-destination publication, exact text/binary bytes, preflight rejection of traversal/prefix/case-fold conflicts, existing file/directory/symlink and symlink-parent refusal, exclusive writes, injected mid-write cleanup, and preservation of caller paths. Only the private adjacent stage is removed on failure.
+`ios-packed-consumer.spec.js` runs the real root packing lifecycle, proves the package contains no materializer implementation or declarations, then uses empty user/global npm configurations, an explicit public registry, default `install-links=false`, and case-insensitive removal of inherited npm config/token variables. Separate fresh caches cover ordinary `npm install` and clean `npm ci`; each phase runs production/all dependency listings, deterministic public iOS generation with manifest identity checks, and strict TypeScript consumption.
 
-`ios-packed-consumer.spec.js` runs the real root packing lifecycle, checks the shipped public implementation/declarations, then uses empty user/global npm configurations, an explicit public registry, default `install-links=false`, and case-insensitive removal of inherited npm config/token variables. Separate fresh caches cover ordinary `npm install` and clean `npm ci`; each phase runs production/all dependency listings, public iOS generation/create-only materialization, and strict TypeScript consumption.
+Transactional create-only directory materialization is deferred. Node's public filesystem API cannot provide both genuine atomic no-replace publication of a complete directory and descriptor-relative no-follow staging/publication/cleanup. No best-effort materializer test or package surface substitutes for a separately authorized native boundary.
 
-These are not Apple platform acceptance. Per the 2026-09-14 owner direction to defer OSX work, no local or TensorBuzz command runs `xcodebuild`, downloads an Apple runtime, boots/installs/launches an iOS Simulator, configures signing, or executes XCTest/XCUIAutomation. AC12–AC14 remain deferred, missing Apple prerequisites may not be skipped to green, and no fake iOS acceptance spec or manufactured TensorBuzz lane is permitted. The [iOS application target](ios.md) records the precise partial status.
+These are not Apple platform acceptance. Per the 2026-09-14 owner direction to defer OSX work, no local or TensorBuzz command runs `xcodebuild`, downloads an Apple runtime, boots/installs/launches an iOS Simulator, configures signing, or executes XCTest/XCUIAutomation. AC07 and AC12–AC14 remain deferred, missing prerequisites may not be skipped to green, and no fake acceptance spec or manufactured TensorBuzz lane is permitted. The [iOS application target](ios.md) records the precise partial status.
 
 ## Task022 Swift acceptance
 

@@ -1,17 +1,13 @@
 # iOS application target
 
-Task 026 has an implemented Linux-qualified generation and materialization slice and an explicitly deferred Apple-platform acceptance slice. The registered `ios` identity is a target-only application backend: it has no frontend, text backend, binary-backend route, interoperability bridge, provider role, source-discovery behavior, or entry in `supportedLanguages`. Real Xcode, Apple SDK, XCTest, XCUIAutomation, and iOS Simulator proof has not been run, so the task is not delivered and the generated Xcode model is not yet platform-qualified.
+Task 026 has an implemented Linux-qualified deterministic generation/provenance slice, with materialization and Apple-platform acceptance explicitly deferred. The registered `ios` identity is a target-only application backend: it has no frontend, text backend, binary-backend route, interoperability bridge, provider role, source-discovery behavior, filesystem writer, or entry in `supportedLanguages`. Real Xcode, Apple SDK, XCTest, XCUIAutomation, and iOS Simulator proof has not been run, so the task is not delivered and the generated Xcode model is not yet platform-qualified.
 
 ## Public route
 
 Callers parse source normally, build an explicit Task 010 program, and request the application role. Omitting `role` retains ordinary text generation. Generation is pure and performs no filesystem access.
 
 ```js
-import {
-  generateProgramArtifactSet,
-  materializeGeneratedArtifactSet,
-  parseProgram
-} from "semantifold"
+import {generateProgramArtifactSet, parseProgram} from "semantifold"
 
 const program = parseProgram({
   entryModule: "main",
@@ -35,11 +31,6 @@ const artifactSet = generateProgramArtifactSet({
   language: "ios",
   program,
   role: "application"
-})
-
-await materializeGeneratedArtifactSet({
-  artifactSet,
-  destination: "/absolute/absent/SemantifoldApp"
 })
 ```
 
@@ -66,7 +57,7 @@ The only defaults are:
 
 The schema is closed. Unknown fields, any nonempty plist extension/capability set, alternate lifecycle/root, or invalid identity fails before emission. The baseline creates no entitlements file and does not synthesize an icon.
 
-Every asset is explicit `{path, content, mediaType, sha256}` input. Its path must be safe and below `Assets.xcassets`, its content is a nonempty exact string or `Uint8Array`, and its lowercase SHA-256 must match the exact UTF-8 text or bytes. Assets are defensively copied and sorted. Duplicate, Unicode-normalization/case-fold, and file/directory-prefix collisions fail before an artifact set is returned.
+Every asset is explicit `{path, content, mediaType, sha256}` input. Its path must use only ASCII letters, digits, `.`, `_`, and `-` in nonempty relative POSIX components below `Assets.xcassets`; this closed alphabet has complete ASCII case-fold comparison. Sharp-S, sigma, composed/decomposed non-ASCII names, traversal, duplicates, case-fold collisions, and file/directory-prefix collisions fail at input validation before an artifact set is returned. This path restriction does not alter Unicode semantic source filenames, source text, string values, or generated Swift content. Asset content is a nonempty exact string or `Uint8Array`, and its lowercase SHA-256 must match the exact UTF-8 text or bytes. Assets are defensively copied and sorted.
 
 ## Deterministic artifact contract
 
@@ -82,21 +73,21 @@ Generation returns one ordered `GeneratedArtifactSet` with exactly one `entry`, 
 
 The semantic renderer uses one shared reference-type `SemantifoldOutputSink`. Nested calls receive that same sink, preserving exact evaluation/output order. The semantic entry returns `[String]`; the bridge invokes it; the SwiftUI view joins with one LF and assigns accessibility identifier `semantifold-output`. Per-module Swift lives in deterministic `SemantifoldModule…` namespaces.
 
-Xcode object IDs are the uppercase first 24 hexadecimal digits of built-in SHA-256 over normalized, collision-checked full identities. Project sections, groups, build phases, build settings, paths, configuration JSON, and assets have canonical ordering; text uses LF and relative paths. Signing is disabled and no entitlement/team/account/certificate/provision data is emitted. Two generations from the same validated input are byte-identical before any Apple build tool can mutate a materialized project.
+Xcode object IDs are the uppercase first 24 hexadecimal digits of built-in SHA-256 over normalized, collision-checked full identities. Project sections, groups, build phases, build settings, paths, configuration JSON, and assets have canonical ordering; text uses LF and relative paths. Signing is disabled and no entitlement/team/account/certificate/provision data is emitted. Two generations from the same validated input return byte-identical artifacts. The generated Xcode source/project syntax is deterministic but remains platform-unqualified.
 
 ## Manifest and provenance
 
-`semantifold-project.json` is `SemantifoldIosProject` version 1. It records generator identity/version, target, the complete normalized configuration, caller source and asset hashes, exact ordered owned paths, explicit excluded path patterns, and Apple tool requirements whose status is `deferred`.
+`semantifold-project.json` is `SemantifoldIosProject` version 1. It records generator identity/version, target, the complete normalized configuration, caller source and asset hashes, exact ordered owned paths, explicit excluded path patterns, and Apple tool requirements whose status is `deferred`. Its `SemantifoldIosSemanticProgram` version 1 section preserves caller-order source IDs, filenames, hashes and ownership; dependency-order caller module IDs and import dependencies; source-to-module ownership links; generated namespaces/artifacts; and the selected entry module, generated function, bridge, and application artifact linkage.
 
-Mapped semantic Swift retains rich UTF-16 range provenance and Source Map v3 projection through every originating module, including Ruby. Synthetic runtime, SwiftUI, project, configuration, asset-catalog base metadata, and test scaffolding carry explicit synthetic provenance. The manifest contains configuration-field citations with JSON pointers and exact output ranges when the caller scalar appears literally. Exact assets record path, media type, representation, and SHA-256; binary artifact provenance spans every byte.
+Mapped semantic Swift retains rich UTF-16 range provenance and Source Map v3 projection through every originating module, including Ruby. Synthetic runtime, SwiftUI, project, configuration, asset-catalog base metadata, and test scaffolding carry explicit synthetic provenance. Each owning renderer records causal configuration spans while emitting a specific field-derived token; the manifest groups only those ranges with their JSON pointers and never reconstructs ownership through substring scans. Equal module/product values, an organization prefix embedded in a bundle ID, and synthetic text matching the display name therefore cannot create false citations. Exact assets record path, media type, representation, and SHA-256; binary artifact provenance spans every byte.
 
-Build products, `DerivedData`, Xcode user data, code signatures, and caller files outside the owned path list are excluded. The manifest is not permission to overwrite or adopt a project.
+Build products, `DerivedData`, Xcode user data, code signatures, and caller files outside the owned path list are excluded. The manifest is an ownership description, not a filesystem mutation or permission to overwrite or adopt a project.
 
-## Create-only materialization
+## Deferred filesystem publication
 
-`materializeGeneratedArtifactSet({artifactSet, destination})` is a separate explicit filesystem operation. `destination` must be a normalized absolute absent path below an existing real directory. Existing files, directories, symlinks, case-fold-equivalent siblings, symlinked parent components, unsafe artifact paths, duplicates, portable case-fold collisions, and file/directory-prefix collisions are refused.
+Materialization is deferred and this release exposes no public project writer. Node's public filesystem API does not provide the combination required by the accepted contract: genuine atomic no-replace publication of a complete directory plus descriptor-relative no-follow anchoring for staging, publication, and cleanup. A path preflight followed by ordinary rename can replace a raced empty directory or follow an exchanged ancestor, so it is not retained as best effort.
 
-The materializer revalidates the complete set and destination before creating anything. It creates an adjacent private stage, makes directories in deterministic parent-first order, writes each file exclusively, rejects symlinks/non-files in the stage, rechecks the destination, and publishes with one same-filesystem atomic directory rename. Failure removes only that private stage. It never overwrites, adopts, or removes the requested destination or another caller path. Regeneration and merge-into-existing-project behavior are not implemented; callers must choose a new absent destination.
+A future materializer requires a separately authorized, reviewed, and platform-qualified native boundary. Until then, generation returns only an immutable in-memory artifact set; no transactional filesystem, regeneration, adoption, merge, or overwrite claim is made.
 
 ## Acceptance status
 
@@ -105,23 +96,23 @@ The materializer revalidates the complete set and destination before creating an
 | AC01 | implemented | Complete Task 010 graph preflight and Tasks 001–004 lowering are focused-spec covered. |
 | AC02 | partial | SwiftUI shell/bridge/view and capture are generated; real Apple compilation is deferred. |
 | AC03 | implemented | Closed caller configuration and identity validation are covered. |
-| AC04 | implemented | Empty capabilities and exact hashed assets are covered. |
+| AC04 | implemented | Empty capabilities, exact hashed assets, and the complete portable ASCII path boundary are covered. |
 | AC05 | partial | Canonical project, IDs, paths, LF, and double generation are covered; `xcodebuild` validation is deferred. |
 | AC06 | partial | Unit/UI sources and Linux semantic execution exist; real XCTest/XCUI execution is deferred. |
-| AC07 | implemented | Create-only preflight, exclusive staging, refusal, cleanup, and atomic publication are covered. |
-| AC08 | implemented | Ruby/Swift semantic, synthetic, configuration, ownership, and asset provenance are covered. |
-| AC09 | implemented | Located capability and stable application/materialization diagnostics are covered. |
+| AC07 | deferred | No public materializer ships; atomic no-replace plus descriptor-relative no-follow publication requires a separately authorized native boundary. |
+| AC08 | implemented | Ruby/Swift mapping, renderer-owned configuration spans, stable semantic program identities/linkage, ownership, and asset provenance are covered. |
+| AC09 | partial | Located capability and stable application diagnostics are covered; filesystem safety diagnostics remain deferred with materialization. |
 | AC10 | implemented | Real Ruby output equals generated Swift output in debug and optimized Linux execution. |
 | AC11 | implemented | No VM, runtime emulation, credentials, entitlements, dependencies, signing, or host leakage is emitted. |
 | AC12 | deferred | No qualified macOS/Xcode/Apple SDK/Swift compiler lane has listed or built the project. |
 | AC13 | deferred | No named iOS Simulator has been booted, installed to, or launched. |
 | AC14 | deferred | No XCTest/XCUIAutomation run has observed exact `semantifold-output` text. |
-| AC15 | implemented locally | Focused generation/materialization/packing and repository gates are required; coordinator review/CI remains external. |
-| AC16 | implemented for this partial scope | Public contract, boundaries, safety, provenance, testing, changelog, task, and roadmap are documented without claiming delivery. |
+| AC15 | implemented locally for generator scope | Focused generation and packed-generator proofs are required; materializer/Apple proof and coordinator CI remain deferred or external. |
+| AC16 | implemented for this reduced scope | Public generator contract, provenance, path boundary, deferrals, testing, changelog, task, and roadmap are documented without claiming delivery. |
 
-Linux acceptance runs real Ruby and exact Swift 6.3.3 on x86_64 Linux. Generated semantic Swift is typechecked, compiled, and run in debug and optimized modes with exact Unicode/output assertions. The packed proof uses a fresh cache, empty npm configurations, explicit public registry, default `install-links=false`, ordinary install and clean `npm ci`, full dependency listings, repeated runtime generation/materialization, and strict type consumption. Missing Ruby or Swift commands fail.
+Linux acceptance runs real Ruby and exact Swift 6.3.3 on x86_64 Linux. Generated semantic Swift is typechecked, compiled, and run in debug and optimized modes with exact Unicode/output assertions. The packed proof uses a fresh cache, empty npm configurations, explicit public registry, default `install-links=false`, ordinary install and clean `npm ci`, full dependency listings, repeated deterministic generation/manifest checks, strict type consumption, and proof that no materializer implementation/declaration is shipped. Missing Ruby or Swift commands fail.
 
-Per Kasper's 2026-09-14 direction to skip OSX work for now, no `xcodebuild`, Apple SDK, signing, runtime download, simulator, XCTest, or XCUIAutomation command was run, and TensorBuzz configuration was not changed to manufacture a lane. AC12–AC14 remain deferred. Task 026 and its roadmap row therefore remain in progress rather than delivered.
+Kasper separately selected “Defer the materializer and ship the generator/provenance scope,” so AC07 remains deferred without weakening its transaction guarantee. Per Kasper's 2026-09-14 direction to skip OSX work for now, no `xcodebuild`, Apple SDK, signing, runtime download, simulator, XCTest, or XCUIAutomation command was run, and TensorBuzz configuration was not changed to manufacture a lane. AC12–AC14 also remain deferred. Task 026 and its roadmap row therefore remain in progress rather than delivered.
 
 ## Non-goals
 

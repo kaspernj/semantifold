@@ -49,9 +49,7 @@ describe("packed iOS application consumer", () => {
 
       expect({name: packResult.name, version: packResult.version}).toEqual({name: "semantifold", version: sourceManifest.version})
       for (const filename of ["build/index.js", "build/index.d.ts"]) expect(packedFiles).toContain(filename)
-      for (const filename of ["build/src/materialization.js", "build/src/materialization.d.ts", "src/materialization.js"]) {
-        expect(packedFiles.includes(filename)).toBeFalse()
-      }
+      expect(packedFiles.filter(filename => /materialization/iu.test(filename))).toEqual([])
       expect(packedFiles.includes(".npmrc")).toBeFalse()
       await writeFile(path.join(consumerDirectory, "package.json"), `${JSON.stringify({
         dependencies: {semantifold: `file:${tarball}`},
@@ -97,6 +95,7 @@ describe("packed iOS application consumer", () => {
 
         expect(JSON.parse(executed.stdout)).toEqual({
           artifactCount: 14,
+          entryModule: "main",
           manifestTarget: "ios",
           target: "ios"
         })

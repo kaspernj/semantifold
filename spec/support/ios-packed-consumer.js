@@ -39,8 +39,11 @@ assert.equal(first.target, "ios")
 const manifest = JSON.parse(first.artifacts.find(({path: artifactPath}) => artifactPath == "semantifold-project.json").content)
 assert.equal(manifest.target, "ios")
 assert.deepEqual(manifest.provenance.semanticSources.map(({language}) => language), ["ruby", "ruby"])
+assert.deepEqual(manifest.semanticProgram.modules.map(({id}) => id), ["math_tools", "main"])
+assert.equal(manifest.semanticProgram.entry.generatedFunctionIdentity, "SemantifoldModuleMain.semantifoldEntry")
 process.stdout.write(JSON.stringify({
   artifactCount: first.artifacts.length,
+  entryModule: manifest.semanticProgram.entry.moduleId,
   manifestTarget: manifest.target,
   target: first.target
 }))

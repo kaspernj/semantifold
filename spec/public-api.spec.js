@@ -90,7 +90,7 @@ describe("public API", () => {
       stringifyMapping,
       toSourceMapV3
     ]) expect(typeof api).toEqual("function")
-    expect(Object.hasOwn(semantifold, "materializeGeneratedArtifactSet")).toBeFalse()
+    expect(Object.keys(semantifold).filter(name => /materializ/iu.test(name))).toEqual([])
   })
 
   it("routes iOS application requests without changing default text program generation", () => {

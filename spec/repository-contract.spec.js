@@ -406,30 +406,33 @@ describe("repository delivery contracts", () => {
 
     expect(readme).toContain("[iOS application target](docs/ios.md)")
     expect(readme).toContain("target-only `ios` application backend")
+    expect(readme).toContain("Transactional create-only directory materialization remains deferred")
     expect(architecture).toContain("[iOS application target](ios.md)")
-    expect(architecture).toContain("`src/materialization.js`")
-    expect(languageSupport).toContain("implemented application generation; Apple acceptance deferred")
+    expect(architecture).toContain("no public project materializer")
+    expect(languageSupport).toContain("implemented deterministic generation/provenance; materialization and Apple acceptance deferred")
     expect(sourceMaps).toContain("iOS project manifest")
-    expect(sourceMaps).toContain("configuration-field citations")
+    expect(sourceMaps).toContain("renderer-owned configuration-field citations")
+    expect(sourceMaps).toContain("SemantifoldIosSemanticProgram")
     for (const command of [
       "npx velocious-test spec/ios-application.spec.js",
-      "npx velocious-test spec/ios-materialization.spec.js",
       "npx velocious-test spec/ios-packed-consumer.spec.js"
     ]) expect(testing).toContain(command)
-    expect(ios).toContain("materializeGeneratedArtifactSet")
+    expect(testing).toContain("No best-effort materializer test")
+    expect(ios).toContain("Materialization is deferred")
     expect(ios).toContain("semantifold-output")
     for (let criterion = 1; criterion <= 16; criterion += 1) {
       expect(ios).toContain(`AC${String(criterion).padStart(2, "0")}`)
     }
-    for (const criterion of ["AC12", "AC13", "AC14"]) {
+    for (const criterion of ["AC07", "AC12", "AC13", "AC14"]) {
       expect(ios).toMatch(new RegExp(`\\| ${criterion} \\| deferred \\|`, "u"))
     }
-    expect(task).toContain("Status: `in progress — generation/materialization implemented; Apple acceptance deferred`")
-    expect(task).toContain("AC12–AC14 remain deferred")
-    expect(roadmap).toContain("implemented application generation; Apple acceptance deferred")
+    expect(task).toContain("Status: `in progress — deterministic generation/provenance implemented; materialization and Apple acceptance deferred`")
+    expect(task).toContain("AC07 and AC12–AC14 remain deferred")
+    expect(roadmap).toContain("deterministic generation/provenance implemented; materialization and Apple acceptance deferred")
     expect(roadmap).toContain("| [027](027-objective-c-interoperability.md) | P | P2 | Objective-C legacy-host bridge | 005, 026 |")
     expect(roadmap).toContain("| [028](028-android-application-target.md) | P | P1 | Kotlin Android application artifacts | 010, 023 |")
     expect(changelog).toContain("iOS")
+    expect(changelog).toContain("Materialization remains deferred")
     expect(changelog).toContain("Apple acceptance remains deferred")
     expect(tensorbuzz).not.toContain("xcodebuild")
   })
