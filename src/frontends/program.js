@@ -8,6 +8,9 @@ import {normalizeCapabilityAuthority} from "../semantic/capabilities.js"
 import {moduleLocation} from "../semantic/location.js"
 import {annotateParsedModule} from "../semantic/provenance.js"
 import {moduleUncheckedErrorEffects, validateParsedModule} from "../semantic/validate.js"
+import {
+  facadeCapabilityAuthority, resolveStdlibFacadeClosure, stdlibFacadeProgramDescriptor, stdlibFacadeRegistry
+} from "../stdlib-facades.js"
 import {inspectJavaScriptTypeScriptModule} from "./javascript-typescript.js"
 import {inspectJavaModule} from "./java.js"
 import {inspectPhpModule} from "./php.js"
@@ -16,8 +19,8 @@ import {inspectRubyModule} from "./ruby.js"
 const programLanguages = new Set(["php", "ruby", "javascript", "typescript", "java"])
 const moduleIdPattern = /^[a-z][a-z0-9_]*(?:[.-][a-z][a-z0-9_]*)*$/u
 
-/** @typedef {{filename: string, id: string, language: import("../semantic/types.js").SemanticLanguage, source: string}} ProgramSource */
-/** @typedef {{declarationLocation?: import("../semantic/types.js").SourceLocation, importedName: string, importedNameLocation?: import("../semantic/types.js").SourceLocation, localName: string, localNameLocation?: import("../semantic/types.js").SourceLocation, location: import("../semantic/types.js").SourceLocation, namespace?: boolean, pathLocation: import("../semantic/types.js").SourceLocation, specifier: string, typeOnly: boolean}} ProgramImportRequest */
+/** @typedef {{facade?: import("../stdlib-facades.js").StdlibFacadeRecord, filename: string, id: string, language: import("../semantic/types.js").SemanticLanguage, ownership: "application" | "facade", source: string}} ProgramSource */
+/** @typedef {{declarationLocation?: import("../semantic/types.js").SourceLocation, facade?: import("../stdlib-facades.js").StdlibFacadeRecord, importedName: string, importedNameLocation?: import("../semantic/types.js").SourceLocation, localName: string, localNameLocation?: import("../semantic/types.js").SourceLocation, location: import("../semantic/types.js").SourceLocation, namespace?: boolean, pathLocation: import("../semantic/types.js").SourceLocation, specifier: string, stdlibCandidate?: true, typeOnly: boolean}} ProgramImportRequest */
 /** @typedef {{importedName: string, localName: string, location: import("../semantic/types.js").SourceLocation, nativeName: string, symbolKind: import("../semantic/types.js").SemanticDeclarationKind, typeOnly: boolean}} ProgramNativeBinding */
 /** @typedef {{imports: ProgramImportRequest[], exports: {declarationLocation?: import("../semantic/types.js").SourceLocation, exportedName: string, exportedNameLocation?: import("../semantic/types.js").SourceLocation, localName: string, localNameLocation?: import("../semantic/types.js").SourceLocation, location: import("../semantic/types.js").SourceLocation, typeOnly: boolean}[], bindings?: ProgramNativeBinding[], nativeName?: string}} ProgramHeader */
 
@@ -33,39 +36,68 @@ export function parseProgramSource(input) {
   if (!isPlainObject(input) || !isDenseArray(input.sources) || input.sources.length == 0 ||
     typeof input.entryModule != "string") invalidProgram("Program parsing requires a non-empty ordered source set and entry module.")
 
-  const sources = input.sources.map((source, index) => validateSource(source, index))
-  const authority = normalizeCapabilityAuthority(input.capabilityAuthority)
-
-  if (authority && !languageRegistry.record(sources[0].language).features.effectfulCapabilitiesAndResources) {
-    unsupportedCapability(sources[0].language, "Task 034 effectful capabilities and owned resources",
-      moduleLocation(sources[0].filename, sources[0].source))
-  }
-  const registeredSources = sources.map((source, index) => ({
-    content: source.source,
-    filename: source.filename,
-    id: `source:${index}`,
-    language: source.language
-  }))
-  const sourceIds = new Map(sources.map((source, index) => [source.id, `source:${index}`]))
-  const sourceLanguages = new Set(sources.map(({language}) => language))
+  const applicationSources = input.sources.map((source, index) => validateSource(source, index))
+  const requestedAuthority = normalizeCapabilityAuthority(input.capabilityAuthority)
+  const sourceLanguages = new Set(applicationSources.map(({language}) => language))
 
   if (sourceLanguages.size != 1) {
-    semanticFailure(sources[0].language, "MIXED_SOURCE_LANGUAGES", "A semantic program must use one source-language compatibility profile.", undefined)
+    semanticFailure(applicationSources[0].language, "MIXED_SOURCE_LANGUAGES", "A semantic program must use one source-language compatibility profile.", undefined)
+  }
+  if (requestedAuthority && !languageRegistry.record(applicationSources[0].language).features.effectfulCapabilitiesAndResources) {
+    unsupportedCapability(applicationSources[0].language, "Task 034 effectful capabilities and owned resources",
+      moduleLocation(applicationSources[0].filename, applicationSources[0].source))
   }
   const byId = new Map()
   const byFilename = new Map()
 
-  for (const source of sources) {
+  for (const source of applicationSources) {
     if (byId.has(source.id)) semanticFailure(source.language, "DUPLICATE_MODULE", `Duplicate module identity '${source.id}'.`, undefined)
     if (byFilename.has(source.filename)) semanticFailure(source.language, "DUPLICATE_MODULE", `Duplicate module filename '${source.filename}'.`, undefined)
     byId.set(source.id, source)
     byFilename.set(source.filename, source)
   }
   if (!byId.has(input.entryModule)) {
-    semanticFailure(sources[0].language, "INVALID_ENTRY_MODULE", `Unknown entry module '${input.entryModule}'.`, undefined)
+    semanticFailure(applicationSources[0].language, "INVALID_ENTRY_MODULE", `Unknown entry module '${input.entryModule}'.`, undefined)
   }
 
-  const headers = new Map(sources.map((source) => [source.id, inspectSource(source)]))
+  const headers = new Map(applicationSources.map((source) => [source.id, inspectSource(source)]))
+  const facadeRoots = resolveFacadeImports(applicationSources, headers)
+  const facadeRecords = resolveStdlibFacadeClosure(facadeRoots)
+
+  if (facadeRecords.length > 0 && requestedAuthority) {
+    const located = applicationSources.flatMap((source) => requiredMapValue(headers, source.id).imports)
+      .find(({facade}) => facade)?.location
+
+    facadeFailure(applicationSources[0].language, "STDLIB_FACADE_AUTHORITY_FORGED",
+      "Programs resolved through compiler-owned facades cannot supply their own canonical capability authority.", located)
+  }
+  const facadeAuthority = facadeCapabilityAuthority(facadeRecords)
+  const authority = requestedAuthority ?? (facadeAuthority ? normalizeCapabilityAuthority(facadeAuthority.input) : undefined)
+  const facadeSources = facadeRecords.map((facade) => /** @type {ProgramSource} */ ({
+    facade,
+    filename: facade.source.filename,
+    id: facade.source.id,
+    language: facade.language,
+    ownership: "facade",
+    source: facade.source.content
+  }))
+
+  validateFacadeCollisions(applicationSources, headers, facadeSources)
+  const sources = [...applicationSources, ...facadeSources]
+
+  for (const source of facadeSources) {
+    byId.set(source.id, source)
+    byFilename.set(source.filename, source)
+    headers.set(source.id, inspectSource(source))
+  }
+  const registeredSources = sources.map((source, index) => ({
+    content: source.source,
+    filename: source.filename,
+    id: `source:${index}`,
+    language: source.language,
+    ownership: source.ownership
+  }))
+  const sourceIds = new Map(sources.map((source, index) => [source.id, `source:${index}`]))
 
   validateNativeModuleIdentities(sources, headers)
   /** @type {Map<string, {source: typeof sources[number], requests: (ReturnType<typeof inspectSource>["imports"][number] & {moduleId: string})[]}>} */
@@ -74,7 +106,7 @@ export function parseProgramSource(input) {
   for (const source of sources) {
     const requests = requiredMapValue(headers, source.id).imports.map((request) => ({
       ...request,
-      moduleId: resolveImportModule(source, request.specifier, request.pathLocation, byFilename, headers)
+      moduleId: request.facade?.source.id ?? resolveImportModule(source, request.specifier, request.pathLocation, byFilename, headers)
     }))
 
     graph.set(source.id, {requests, source})
@@ -108,8 +140,10 @@ export function parseProgramSource(input) {
         throw new Error(`Dependency '${request.moduleId}' was not parsed before '${source.id}'.`)
       }
       const dependencyHeader = requiredMapValue(headers, request.moduleId)
+      const nativeBindingPrefix = request.facade?.nativeModules.find(({identity}) => identity == request.specifier)?.identity ??
+        dependencyHeader.nativeName
       const nativeBindings = source.language == "php" && request.namespace
-        ? (header.bindings ?? []).filter(({nativeName}) => nativeName.startsWith(`${dependencyHeader.nativeName}\\`))
+        ? (header.bindings ?? []).filter(({nativeName}) => nativeName.startsWith(`${nativeBindingPrefix}\\`))
         : []
       const selectedExports = request.namespace && source.language == "php"
         ? dependency.exports.filter(({exportedName}) => nativeBindings.some(({importedName}) => importedName == exportedName))
@@ -167,7 +201,7 @@ export function parseProgramSource(input) {
           path: request.pathLocation
         }
 
-        if (!request.namespace || nativeBinding) {
+        if (!request.namespace || nativeBinding || request.facade) {
           ranges.importedName = nativeBinding?.location ?? request.importedNameLocation ?? importLocation
           ranges.localName = nativeBinding?.location ?? request.localNameLocation ?? importLocation
         }
@@ -179,6 +213,14 @@ export function parseProgramSource(input) {
           localName,
           location: importLocation,
           moduleId: request.moduleId,
+          ...(request.facade ? {stdlibFacade: {
+            facadeIdentity: request.facade.identity,
+            facadeVersion: request.facade.version,
+            nativeModule: request.specifier,
+            nativeSymbol: exported.exportedName,
+            schema: /** @type {const} */ ("SemantifoldStdlibFacadeResolution"),
+            version: /** @type {const} */ (1)
+          }} : {}),
           sourceProvenance: sourceAssociation(importLocation, ranges, sourceId),
           symbolKind: exported.symbolKind,
           typeOnly
@@ -193,8 +235,10 @@ export function parseProgramSource(input) {
 
     const frontend = /** @type {(input: object) => import("../semantic/types.js").SemanticModule} */ (
       languageRegistry.resolve(source.language, "frontend"))
+    const moduleCapabilities = requestedAuthority?.capabilities ??
+      (source.facade?.requirements.length ? authority?.capabilities : undefined)
     const raw = frontend({
-      capabilities: authority?.capabilities,
+      capabilities: moduleCapabilities,
       filename: source.filename,
       language: source.language,
       program: {
@@ -207,7 +251,7 @@ export function parseProgramSource(input) {
       source: source.source
     })
 
-    if (authority) raw.capabilities = /** @type {import("../semantic/types.js").EffectCapabilityDeclaration[]} */ (authority.capabilities)
+    if (moduleCapabilities) raw.capabilities = /** @type {import("../semantic/types.js").EffectCapabilityDeclaration[]} */ (moduleCapabilities)
     if ((raw.classes?.length ?? 0) > 0) {
       semanticFailure(source.language, "UNSUPPORTED_SYNTAX",
         "Task 033 reference classes are not supported by the Task 010 semantic program profile.",
@@ -276,8 +320,11 @@ export function parseProgramSource(input) {
       exports,
       id: source.id,
       imports,
+      ...(source.facade ? {stdlibFacade: {identity: source.facade.identity, version: source.facade.version}} : {}),
       sourceFilename: source.filename
     })
+
+    if (source.facade) validateParsedFacade(source.facade, module)
 
     parsed.set(source.id, module)
   }
@@ -286,14 +333,243 @@ export function parseProgramSource(input) {
     entryModule: input.entryModule,
     kind: "Program",
     modules: orderedIds.map((id) => /** @type {import("../semantic/types.js").SemanticProgramModule} */ (parsed.get(id))),
-    ...(authority ? {
+    ...(requestedAuthority ? {
       stdlibContract: {
-        identity: authority.id,
-        ...(authority.contractVersion !== undefined ? {contractVersion: authority.contractVersion} : {})
+        identity: requestedAuthority.id,
+        ...(requestedAuthority.contractVersion !== undefined ? {contractVersion: requestedAuthority.contractVersion} : {})
       }
-    } : {}),
+    } : facadeAuthority ? {stdlibContract: facadeAuthority.contract} : {}),
+    ...(facadeRecords.length > 0 ? {stdlibFacades: stdlibFacadeProgramDescriptor(applicationSources[0].language, facadeRecords)} : {}),
     sources: registeredSources
   }
+}
+
+/**
+ * Resolves parser-owned native module and symbol evidence to facade roots.
+ * Mutating the private header requests keeps the proof attached to the exact import node.
+ * @param {ProgramSource[]} sources - Caller-owned sources.
+ * @param {Map<string, ProgramHeader>} headers - Parser-owned source headers.
+ * @returns {import("../stdlib-facades.js").StdlibFacadeRecord[]} Selected facade roots.
+ */
+function resolveFacadeImports(sources, headers) {
+  /** @type {import("../stdlib-facades.js").StdlibFacadeRecord[]} */
+  const roots = []
+
+  for (const source of sources) {
+    const header = requiredMapValue(headers, source.id)
+
+    if (source.language == "php") {
+      for (const binding of header.bindings ?? []) {
+        const parts = binding.nativeName.split("\\")
+        const symbol = /** @type {string} */ (parts.pop())
+        const nativeModule = parts.join("\\")
+
+        if (!nativeModule.startsWith("Semantifold\\Task036\\")) continue
+        const facade = resolveFacadeAt(source, nativeModule, symbol, binding.location)
+
+        header.imports.push({
+          declarationLocation: binding.location,
+          facade,
+          importedName: "*",
+          importedNameLocation: binding.location,
+          localName: "",
+          localNameLocation: binding.location,
+          location: binding.location,
+          namespace: true,
+          pathLocation: binding.location,
+          specifier: nativeModule,
+          stdlibCandidate: true,
+          typeOnly: false
+        })
+        roots.push(facade)
+      }
+    }
+
+    for (const request of header.imports) {
+      const javaCandidate = source.language == "java" && request.specifier.startsWith("semantifold.task036.")
+
+      if (!request.stdlibCandidate && !javaCandidate) continue
+      if (request.facade) continue
+      if (/\.(?:bundle|dll|node|so)$/iu.test(request.specifier)) {
+        facadeFailure(source.language, "STDLIB_FACADE_NATIVE_EXTENSION_UNSUPPORTED",
+          "Native-extension loading cannot participate in a portable stdlib facade.", request.pathLocation)
+      }
+      const supplied = [...headers.entries()].find(([, candidate]) => candidate.nativeName == request.specifier)
+
+      if (supplied) {
+        facadeFailure(source.language, "STDLIB_FACADE_SHADOWED",
+          `Caller-supplied module '${supplied[0]}' replaces the catalogued native facade identity '${request.specifier}'.`, request.pathLocation)
+      }
+      const facade = request.namespace
+        ? resolveFacadeModuleAt(source, request.specifier, request.pathLocation)
+        : resolveFacadeAt(source, request.specifier, request.importedName, request.importedNameLocation ?? request.location)
+
+      request.facade = facade
+      roots.push(facade)
+    }
+  }
+
+  return roots
+}
+
+/**
+ * Resolves one exact native module and symbol while preserving parser location.
+ * @param {ProgramSource} source - Importing source.
+ * @param {string} nativeModule - Parser-proved native module identity.
+ * @param {string} symbol - Parser-proved native symbol.
+ * @param {import("../semantic/types.js").SourceLocation} location - Identity evidence location.
+ * @returns {import("../stdlib-facades.js").StdlibFacadeRecord} Located exact native facade resolution.
+ */
+function resolveFacadeAt(source, nativeModule, symbol, location) {
+  try {
+    return stdlibFacadeRegistry.resolveFacade(source.language, nativeModule, symbol)
+  } catch (error) {
+    if (error instanceof SemantifoldDiagnostic) facadeFailure(source.language, error.code, error.detail, location)
+    throw error
+  }
+}
+
+/**
+ * Resolves one exact namespace-style native module while preserving parser location.
+ * @param {ProgramSource} source - Importing source.
+ * @param {string} nativeModule - Parser-proved native module identity.
+ * @param {import("../semantic/types.js").SourceLocation} location - Identity evidence location.
+ * @returns {import("../stdlib-facades.js").StdlibFacadeRecord} Located exact native facade-module resolution.
+ */
+function resolveFacadeModuleAt(source, nativeModule, location) {
+  try {
+    return stdlibFacadeRegistry.resolveModule(source.language, nativeModule)
+  } catch (error) {
+    if (error instanceof SemantifoldDiagnostic) facadeFailure(source.language, error.code, error.detail, location)
+    throw error
+  }
+}
+
+/**
+ * Rejects caller capture of compiler-owned module/source/native names and imported bindings.
+ * @param {ProgramSource[]} applicationSources - Caller-owned sources.
+ * @param {Map<string, ProgramHeader>} headers - Caller parser headers.
+ * @param {ProgramSource[]} facadeSources - Selected compiler-owned facade sources.
+ * @returns {void}
+ */
+function validateFacadeCollisions(applicationSources, headers, facadeSources) {
+  const facadeIds = new Set(facadeSources.map(({id}) => id))
+  const facadeFilenames = new Set(facadeSources.map(({filename}) => filename))
+  const facadeNativeNames = new Set(facadeSources.map((source) => inspectSource(source).nativeName).filter(Boolean))
+
+  for (const source of applicationSources) {
+    const header = requiredMapValue(headers, source.id)
+
+    if (facadeIds.has(source.id) || facadeFilenames.has(source.filename)) {
+      facadeFailure(source.language, "STDLIB_FACADE_NAME_COLLISION",
+        `Caller module '${source.id}' collides with a compiler-owned facade module or source path.`, moduleLocation(source.filename, source.source))
+    }
+    if (header.nativeName && facadeNativeNames.has(header.nativeName)) {
+      facadeFailure(source.language, "STDLIB_FACADE_REOPENED",
+        `Caller source reopens the compiler-owned facade native identity '${header.nativeName}'.`, moduleLocation(source.filename, source.source))
+    }
+    const importedBindings = new Set(header.imports.filter(({facade}) => facade && !facade.publicDeclarations.some(({name}) => name == ""))
+      .flatMap((request) => request.namespace && source.language == "php"
+        ? (header.bindings ?? []).filter(({nativeName}) => nativeName.startsWith(`${request.specifier}\\`)).map(({localName}) => localName)
+        : request.namespace ? [] : [request.localName]))
+    const shadowed = header.exports.find(({localName}) => importedBindings.has(localName))
+
+    if (shadowed) facadeFailure(source.language, "STDLIB_FACADE_SHADOWED",
+      `Local declaration '${shadowed.localName}' shadows a parser-proved stdlib facade binding.`, shadowed.location)
+  }
+}
+
+/**
+ * Validates a parsed compiler-owned facade against its registry declaration and canonical-only requirements.
+ * @param {import("../stdlib-facades.js").StdlibFacadeRecord} facade - Selected facade record.
+ * @param {import("../semantic/types.js").SemanticProgramModule} module - Parsed semantic module.
+ * @returns {void}
+ */
+function validateParsedFacade(facade, module) {
+  const exported = new Map(module.exports.map((item) => [item.exportedName, item]))
+
+  for (const declaration of facade.publicDeclarations) {
+    const exportedDeclaration = exported.get(declaration.name)
+    const parsed = exportedDeclaration ? module.functions.find(({id}) => id == exportedDeclaration.declarationId) : undefined
+    const signatureMatches = parsed && parsed.parameters.length == declaration.parameters.length &&
+      parsed.parameters.every((parameter, index) => parameter.name == declaration.parameters[index].name &&
+        semanticTypeName(parameter.type) == declaration.parameters[index].type) &&
+      semanticTypeName(parsed.returnType) == declaration.returnType
+
+    if (!signatureMatches) facadeFailure(facade.language, "STDLIB_FACADE_DECLARATION_MISMATCH",
+      `Facade '${facade.identity}' executable source does not match public declaration '${declaration.name}'.`, parsed?.location ?? module.location)
+  }
+  const dependencyIds = new Set(facade.dependencies.map((dependency) =>
+    stdlibFacadeRegistry.resolveIdentity(dependency.identity, facade.language, dependency.range).source.id))
+
+  if (module.imports.some(({moduleId}) => !dependencyIds.has(moduleId)) ||
+    [...dependencyIds].some((moduleId) => !module.imports.some((imported) => imported.moduleId == moduleId))) {
+    facadeFailure(facade.language, "STDLIB_FACADE_DECLARATION_MISMATCH",
+      `Facade '${facade.identity}' executable imports do not match its declared dependencies.`, module.location)
+  }
+  const allowedOperations = new Set(facade.requirements.flatMap(({operations}) => operations))
+  const operationNames = new Map((module.capabilities ?? []).flatMap(({operations}) => operations.map(({id, name}) => [id, name])))
+  const usedOperations = collectEffectOperations(module, operationNames)
+
+  if ([...usedOperations].some((operation) => !allowedOperations.has(operation)) ||
+    [...allowedOperations].some((operation) => !usedOperations.has(operation))) {
+    facadeFailure(facade.language, "STDLIB_FACADE_AUTHORITY_FORGED",
+      `Facade '${facade.identity}' canonical calls do not match its declared requirements.`, module.location)
+  }
+}
+
+/**
+ * Collects canonical operation names reached in one facade module.
+ * @param {import("../semantic/types.js").SemanticProgramModule} module - Parsed facade module.
+ * @param {Map<string, string>} operationNames - Canonical names by operation identity.
+ * @returns {Set<string>} Used operation names.
+ */
+function collectEffectOperations(module, operationNames) {
+  const used = new Set()
+  const seen = new WeakSet()
+
+  /**
+   * Visits one semantic subtree without following authority or provenance graphs.
+   * @param {unknown} value - Semantic subtree.
+   * @returns {void}
+   */
+  function visit(value) {
+    if (!value || typeof value != "object" || seen.has(value)) return
+    seen.add(value)
+    if (!Array.isArray(value) && Reflect.get(value, "kind") == "EffectCallExpression") {
+      const name = operationNames.get(Reflect.get(value, "operation"))
+
+      if (name) used.add(name)
+    }
+    for (const [key, child] of Object.entries(value)) {
+      if (key != "capabilities" && key != "location" && key != "provenance" && key != "sourceProvenance") visit(child)
+    }
+  }
+  visit(module)
+  return used
+}
+
+/**
+ * Converts one parsed semantic type to the facade declaration vocabulary.
+ * @param {import("../semantic/types.js").SemanticFunctionReturnType} type - Parsed type.
+ * @returns {string} Closed canonical public type name.
+ */
+function semanticTypeName(type) {
+  if (type.kind == "TypeReference") return type.name
+  return type.kind == "OptionalType" && type.valueType.kind == "TypeReference"
+    ? `optional:${type.valueType.name}` : "unsupported"
+}
+
+/**
+ * Throws one stable located facade diagnostic.
+ * @param {string} language - Source language.
+ * @param {string} code - Stable diagnostic code.
+ * @param {string} message - Diagnostic detail.
+ * @param {import("../semantic/types.js").SourceLocation | undefined} location - Parser-owned location.
+ * @returns {never} Always throws.
+ */
+function facadeFailure(language, code, message, location) {
+  throw new SemantifoldDiagnostic({code, language, location, message})
 }
 
 /**
@@ -347,6 +623,7 @@ function validateSource(candidate, index) {
     filename: candidate.filename,
     id: candidate.id,
     language: candidate.language,
+    ownership: "application",
     source: candidate.source
   })
 }

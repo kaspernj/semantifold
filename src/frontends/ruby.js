@@ -1848,7 +1848,7 @@ function task034RubyBody(body, comments, capabilities, filename, source) {
  * @param {object} input - Parser input.
  * @param {string} input.filename - Source filename.
  * @param {string} input.source - Source text.
- * @returns {{imports: {importedName: string, localName: string, location: import("../semantic/types.js").SourceLocation, namespace: true, pathLocation: import("../semantic/types.js").SourceLocation, specifier: string, typeOnly: false}[], exports: {exportedName: string, localName: string, location: import("../semantic/types.js").SourceLocation, typeOnly: false}[], nativeName: string}} Parser-owned Ruby module header.
+ * @returns {{imports: {importedName: string, localName: string, location: import("../semantic/types.js").SourceLocation, namespace: true, pathLocation: import("../semantic/types.js").SourceLocation, specifier: string, stdlibCandidate?: true, typeOnly: false}[], exports: {exportedName: string, localName: string, location: import("../semantic/types.js").SourceLocation, typeOnly: false}[], nativeName: string}} Parser-owned Ruby module header.
  */
 export function inspectRubyModule({filename, source}) {
   const result = parsePrism(source, {filepath: filename})
@@ -1862,15 +1862,26 @@ export function inspectRubyModule({filename, source}) {
   if (!(result.value instanceof ProgramNode)) throw new Error("Prism returned a non-program root.")
   const body = result.value.statements.body
   const modules = body.filter((node) => node instanceof ModuleNode)
-  const invalid = body.find((node) => !(node instanceof ModuleNode) && !isRequireRelative(node))
+  const dynamicRequire = body.find(isDynamicStdlibRequire)
+
+  if (dynamicRequire) {
+    throw new SemantifoldDiagnostic({
+      code: "STDLIB_FACADE_DYNAMIC_REFERENCE",
+      language: "ruby",
+      location: nodeLocation(dynamicRequire, filename, source),
+      message: "Dynamic require cannot prove a standard-library facade identity."
+    })
+  }
+  const invalid = body.find((node) => !(node instanceof ModuleNode) && !isRequireRelative(node) && !isStdlibRequire(node))
 
   if (modules.length != 1 || !(modules[0].constantPath instanceof ConstantReadNode) || invalid) {
     return unsupportedSyntax("ruby", "one simple module with literal require_relative declarations",
       nodeLocation(invalid ?? modules[1] ?? modules[0] ?? result.value, filename, source))
   }
-  const imports = body.filter(isRequireRelative).map((node) => {
+  const imports = body.filter((node) => isRequireRelative(node) || isStdlibRequire(node)).map((node) => {
     const call = /** @type {CallNode} */ (node)
     const argument = /** @type {StringNode} */ (call.arguments_?.arguments_[0])
+    const stdlibCandidate = isStdlibRequire(call)
 
     if (!argument.unescaped.validEncoding || argument.unescaped.encoding != "utf-8" || argument.isForcedBinaryEncoding()) {
       return unsupportedSyntax("ruby", "non-UTF-8 require_relative path", nodeLocation(argument, filename, source))
@@ -1884,6 +1895,7 @@ export function inspectRubyModule({filename, source}) {
       namespace: /** @type {const} */ (true),
       pathLocation: nodeLocation(argument, filename, source),
       specifier: argument.unescaped.value,
+      ...(stdlibCandidate ? {stdlibCandidate: /** @type {const} */ (true)} : {}),
       typeOnly: /** @type {const} */ (false)
     }
   })
@@ -1931,6 +1943,32 @@ export function inspectRubyModule({filename, source}) {
 function isRequireRelative(node) {
   return node instanceof CallNode && !node.receiver && !node.block && node.name == "require_relative" &&
     node.arguments_?.arguments_.length == 1 && node.arguments_.arguments_[0] instanceof StringNode
+}
+
+/**
+ * Reports whether a Ruby node is one parser-proved literal facade require candidate.
+ * Other load-path requires retain the Task 010 unsupported profile.
+ * @param {import("@ruby/prism").Node} node - Candidate call.
+ * @returns {boolean} Whether the node is a literal Semantifold facade require.
+ */
+function isStdlibRequire(node) {
+  return node instanceof CallNode && !node.receiver && !node.block && node.name == "require" &&
+    node.arguments_?.arguments_.length == 1 && node.arguments_.arguments_[0] instanceof StringNode &&
+    node.arguments_.arguments_[0].unescaped.value.startsWith("semantifold/")
+}
+
+/**
+ * Reports whether a Ruby node dynamically constructs a catalog-style facade require.
+ * @param {import("@ruby/prism").Node} node - Candidate call.
+ * @returns {boolean} Whether the parser exposes a Semantifold-prefixed interpolated require.
+ */
+function isDynamicStdlibRequire(node) {
+  if (!(node instanceof CallNode) || node.receiver || node.block || node.name != "require" ||
+    node.arguments_?.arguments_.length != 1) return false
+  const argument = node.arguments_.arguments_[0]
+
+  return argument instanceof InterpolatedStringNode && argument.parts[0] instanceof StringNode &&
+    argument.parts[0].unescaped.value.startsWith("semantifold/")
 }
 
 /**

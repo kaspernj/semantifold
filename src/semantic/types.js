@@ -83,6 +83,7 @@
  * @property {string} filename - Original filename, preserved verbatim.
  * @property {string | null} content - Original source content, preserved verbatim when available.
  * @property {SemanticLanguage | null} language - Parser language when known.
+ * @property {"application" | "facade"} [ownership] - Caller or compiler-owned source role for semantic programs.
  */
 
 /**
@@ -1061,6 +1062,17 @@
  * @property {boolean} typeOnly - Whether source syntax admitted only type-position use.
  * @property {SourceLocation} location - Complete import declaration/specifier location.
  * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned import ranges.
+ * @property {StdlibFacadeResolutionEvidence} [stdlibFacade] - Exact parser-proved native facade identity evidence.
+ */
+
+/**
+ * @typedef StdlibFacadeResolutionEvidence
+ * @property {"SemantifoldStdlibFacadeResolution"} schema - Evidence schema.
+ * @property {1} version - Evidence version.
+ * @property {string} facadeIdentity - Selected facade identity.
+ * @property {string} facadeVersion - Selected exact facade version.
+ * @property {string} nativeModule - Parser-proved source stdlib module identity.
+ * @property {string} nativeSymbol - Parser-proved source stdlib symbol identity.
  */
 
 /**
@@ -1088,6 +1100,28 @@
  * @property {SourceLocation} location - Source location.
  * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Node-associated provenance.
  * @property {SemanticProvenance} [provenance] - Parser-authored source and identity index.
+ * @property {{identity: string, version: string}} [stdlibFacade] - Selected compiler-owned facade module identity.
+ */
+
+/**
+ * @typedef StdlibFacadeProgramModuleDescriptor
+ * @property {{identity: string, range: string}[]} dependencies - Versioned facade dependencies.
+ * @property {string} identity - Facade identity.
+ * @property {{identity: string, symbols: string[]}[]} nativeModules - Exact native source identities.
+ * @property {{effects: string[], failures: string[], forms: ["direct-call"], kind: "function", name: string, ownership: "not-applicable", parameters: {name: string, type: string}[], returnType: string}[]} publicDeclarations - Public source declarations.
+ * @property {{module: string, operations: string[], range: string}[]} requirements - Canonical capability requirements.
+ * @property {string} runtimeProfile - Exact source runtime profile.
+ * @property {string} sourceModule - Compiler-owned semantic module identity.
+ * @property {string} version - Exact facade version.
+ * @property {"internal" | "public"} visibility - Native-selectable visibility.
+ */
+
+/**
+ * @typedef StdlibFacadeProgramDescriptor
+ * @property {"SemantifoldStdlibFacades"} schema - Facade descriptor schema.
+ * @property {1} version - Facade descriptor version.
+ * @property {SemanticLanguage} language - Source-language compatibility profile.
+ * @property {StdlibFacadeProgramModuleDescriptor[]} modules - Dependency-first selected executable closure.
  */
 
 /**
@@ -1097,6 +1131,7 @@
  * @property {string} entryModule - Stable identity of the sole entry module.
  * @property {RegisteredSource[]} sources - Caller-order complete source registry.
  * @property {{contractVersion?: string, identity: string}} [stdlibContract] - Declared standard-library contract; plain, never frozen.
+ * @property {StdlibFacadeProgramDescriptor} [stdlibFacades] - Complete selected source-language facade closure.
  */
 
 /** @typedef {SemanticModule | SemanticProgramModule | SemanticImport | SemanticExport | RecordDeclaration | ClassDeclaration | ErrorDeclaration | EffectCapabilityDeclaration | EffectResourceDeclaration | EffectFailureDeclaration | EffectOperationDeclaration | RecordField | PrivateField | ConstructorDeclaration | MethodDeclaration | FunctionDeclaration | TypeParameter | Parameter | ValueBinding | CatchBinding | Block | Statement | EntryPoint | Expression | ErrorConstruction | ErrorType | MapEntry | SemanticValueType | FunctionReturnTypeReference} SemanticNode */

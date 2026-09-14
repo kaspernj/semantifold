@@ -153,7 +153,7 @@ npx velocious-test spec/public-api.spec.js
 npx velocious-test spec/language-registry.spec.js
 ```
 
-For the Task 034 local handoff, do not run `npm test`, a whole spec directory, or another aggregate. TensorBuzz owns clean aggregate discovery. Task 034 remains an unversioned single-module foundation with one fixed protected conformance binding; Task 035 owns canonical contract versions, facades, provider registries, negotiation, linking, and protected native provider artifacts.
+For the Task 034 local handoff, do not run `npm test`, a whole spec directory, or another aggregate. TensorBuzz owns clean aggregate discovery. Task 034 remains an unversioned single-module foundation with one fixed protected conformance binding; Task 035 owns canonical contract versions, provider registries, negotiation, linking, and protected native provider artifacts. Task 036 owns the source-language facade layer that consumes those contracts.
 
 ## Task 035 versioned standard-library contracts and provider linking
 
@@ -172,7 +172,33 @@ npx velocious-test spec/public-api.spec.js
 npx velocious-test spec/language-registry.spec.js
 ```
 
-Task 035 remains the provider foundation: compatibility facades and the concrete TCP slice belong to Tasks 036–037. Provider artifacts are compiler-owned synthetic provenance, and the protected native binding is invisible to source and ordinary portable module resolution.
+Task 035 remains the delivered provider foundation from PR #45: compatibility facades and the concrete TCP slice belong to Tasks 036–037. Provider artifacts are compiler-owned synthetic provenance, and the protected native binding is invisible to source and ordinary portable module resolution.
+
+## Task 036 language compatibility stdlib facades
+
+Task 036 adds four dedicated focused specs plus the changed public API and affected Task 010/035 boundaries. The registry spec covers detached immutable versioned executable definitions, matching public declarations, exact native module/symbol lookup, highest compatible selection, canonical-only dependencies, malformed definitions, and unused fixture registration. Resolution coverage runs each original-five parser, proves native identity substitution and transitive-only facade compilation, preserves import/symbol provenance, and rejects same-spelling user code, unsupported members/forms, dynamic imports/requires, reflection, shadowing/mutation, reopening, native extensions, forged authority, and compiler-owned module collisions.
+
+The linking spec checks collision-safe compatibility paths, facade `support` roles, mapped facade provenance, complete `SemantifoldStdlibLink` facade metadata, target syntax conversion, unused elimination, deterministic complete artifacts, and transactional rejection of forged versions. The runtime spec invokes real `php`, `ruby`, `node`, local `tsc`, `javac`, and `java`; missing commands fail. It executes all 25 original-five source-to-target combinations and the five same-language lanes, proving executable facade behavior and isolation from the protected provider binding.
+
+Run every file individually and sequentially; do not replace the real-tool coverage with snapshots or source-only assertions:
+
+```sh
+npx velocious-test spec/stdlib-facade-registry.spec.js
+npx velocious-test spec/stdlib-facade-resolution.spec.js
+npx velocious-test spec/stdlib-facade-linking-artifacts.spec.js
+LANG=C.UTF-8 LC_ALL=C.UTF-8 npx velocious-test spec/stdlib-facade-runtime-execution.spec.js
+npx velocious-test spec/stdlib-contract-registry.spec.js
+npx velocious-test spec/stdlib-capability-negotiation.spec.js
+npx velocious-test spec/stdlib-provider-registry.spec.js
+npx velocious-test spec/stdlib-canonical-calls.spec.js
+npx velocious-test spec/stdlib-linking-artifacts.spec.js
+LANG=C.UTF-8 LC_ALL=C.UTF-8 npx velocious-test spec/stdlib-provider-runtime-execution.spec.js
+npx velocious-test spec/multifile-program.spec.js
+npx velocious-test spec/multifile-profile-diagnostics.spec.js
+npx velocious-test spec/public-api.spec.js
+```
+
+This is a bounded neutral qualification corpus, not the Task 037 network slice. It adds no `TCPSocket`, `fsockopen`, file, console, or other concrete public host facade.
 
 ## Task 025 core expanded-language acceptance
 

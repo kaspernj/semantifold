@@ -4,6 +4,7 @@ import {isDenseArray} from "../array.js"
 import {isSafeArtifactPath} from "../artifact-path.js"
 import {createGeneratedArtifactSet} from "../artifacts.js"
 import {SemantifoldDiagnostic, unsupportedCapability, unsupportedRole} from "../diagnostic.js"
+import {parseProgramSource} from "../frontends/program.js"
 import {languageRegistry} from "../language-registry.js"
 import {finalizeMapping, toSourceMapV3} from "../mapping.js"
 import {createCoordinateIndex, indexedPointAt, moduleLocation} from "../semantic/location.js"
@@ -11,6 +12,7 @@ import {semanticEntries} from "../semantic/provenance.js"
 import {listStdlibModules, parseStdlibVersionRange} from "../semantic/stdlib.js"
 import {moduleUncheckedErrorEffects} from "../semantic/validate.js"
 import {negotiateStdlibProviders} from "../stdlib-negotiation.js"
+import {stdlibFacadeProgramDescriptor, stdlibFacadeRegistry} from "../stdlib-facades.js"
 import {stdlibProviderRegistry} from "../stdlib-providers.js"
 import {preflightEffectCapabilities} from "./effects.js"
 import {validateTargetBindingIdentifier, validateTargetIdentifier, validateTargetTypeIdentifier} from "./identifiers.js"
@@ -116,13 +118,14 @@ export function generateProgramArtifacts(input) {
         sourceMap: toSourceMapV3(mapping),
         sourceMapFilename: `${filename}.map`
       },
-      role: /** @type {import("../semantic/types.js").GeneratedArtifactRole} */ (moduleId == program.entryModule ? "entry" : "source")
+      role: /** @type {import("../semantic/types.js").GeneratedArtifactRole} */ (
+        moduleId == program.entryModule ? "entry" : Reflect.get(emissionModule, "stdlibFacade") ? "support" : "source")
     })
   }
 
   return createGeneratedArtifactSet({
     artifacts,
-    ...(linking ? {metadata: stdlibLinkMetadata(linking, paths)} : {}),
+    ...(linking || program.stdlibFacades ? {metadata: stdlibLinkMetadata(linking, paths, program.stdlibFacades)} : {}),
     target: input.language
   })
 }
@@ -342,25 +345,26 @@ function collectProviderImports(program, negotiation, usedOperationsByModule, la
 /**
  * Builds the truthful generated stdlib link metadata for one negotiated closure.
  * Java reports the owner module file as the provider carrier instead of a separate artifact.
- * @param {StdlibProgramLinking} linking - Linking plan.
+ * @param {StdlibProgramLinking | null} linking - Linking plan.
  * @param {Map<string, string>} paths - Planned artifact path by module identity.
+ * @param {import("../semantic/types.js").StdlibFacadeProgramDescriptor | undefined} facades - Selected source facade closure.
  * @returns {Record<string, unknown>} Plain JSON metadata.
  */
-function stdlibLinkMetadata(linking, paths) {
-  const {negotiation, record} = linking
-  const artifactPath = linking.ownerModuleId !== null
+function stdlibLinkMetadata(linking, paths, facades) {
+  const artifactPath = linking?.ownerModuleId !== null && linking?.ownerModuleId !== undefined
     ? /** @type {string} */ (paths.get(linking.ownerModuleId))
-    : record.artifact.path
+    : linking?.record.artifact.path
 
   return {
-    modules: negotiation.modules.map((item) => ({
+    ...(facades ? {facades} : {}),
+    modules: (linking?.negotiation.modules ?? []).map((item) => ({
       identity: item.identity,
       operations: [...item.operations],
       version: item.version
     })),
-    providers: negotiation.providers.map((item) => ({
-      artifact: {mediaType: record.artifact.mediaType, path: artifactPath},
-      dependencies: record.dependencies.map((dependency) => ({module: dependency.module, range: dependency.range})),
+    providers: (linking?.negotiation.providers ?? []).map((item) => ({
+      artifact: {mediaType: linking?.record.artifact.mediaType, path: artifactPath},
+      dependencies: (linking?.record.dependencies ?? []).map((dependency) => ({module: dependency.module, range: dependency.range})),
       identity: item.identity,
       module: item.module,
       nativeEntries: {...item.nativeEntries},
@@ -698,8 +702,206 @@ function validateProgram(candidate, language) {
   }
 
   validateProgramStdlibContract(program, language, capabilityModules)
+  validateProgramStdlibFacades(program, language)
 
   return program
+}
+
+/**
+ * Validates compiler-selected facade descriptors, executable sources, module markers, and native identity evidence.
+ * @param {import("../semantic/types.js").SemanticProgram} program - Candidate program.
+ * @param {import("../semantic/types.js").SemanticLanguage} language - Target language for diagnostics.
+ * @returns {void}
+ */
+function validateProgramStdlibFacades(program, language) {
+  const descriptor = Reflect.get(program, "stdlibFacades")
+  const markedModules = program.modules.filter((module) => Reflect.get(module, "stdlibFacade") !== undefined)
+  const facadeSources = program.sources.filter((source) => Reflect.get(source, "ownership") == "facade")
+  const evidencedImports = program.modules.flatMap((module) => module.imports.filter((item) => Reflect.get(item, "stdlibFacade") !== undefined))
+
+  if (descriptor === undefined) {
+    if (markedModules.length > 0 || facadeSources.length > 0 || evidencedImports.length > 0) {
+      invalidFacadeDescriptor(language, "Facade modules, sources, or import evidence require a complete program facade descriptor.")
+    }
+    return
+  }
+  if (!isPlainObject(descriptor) || descriptor.schema != "SemantifoldStdlibFacades" || descriptor.version != 1 ||
+    typeof descriptor.language != "string" || !programTargets.has(descriptor.language) || !isDenseArray(descriptor.modules) ||
+    descriptor.modules.length == 0) {
+    invalidFacadeDescriptor(language, "The program facade descriptor is malformed.")
+  }
+  const facadeLanguage = /** @type {import("../semantic/types.js").SemanticLanguage} */ (descriptor.language)
+  const records = descriptor.modules.map((item) => {
+    if (!isPlainObject(item) || typeof item.identity != "string" || typeof item.version != "string") {
+      invalidFacadeDescriptor(language, "The program facade module descriptor is malformed.")
+    }
+    return stdlibFacadeRegistry.resolveIdentity(item.identity, facadeLanguage, item.version)
+  })
+  const expected = stdlibFacadeProgramDescriptor(facadeLanguage, records)
+
+  if (!equalPlainData(descriptor, expected)) {
+    invalidFacadeDescriptor(language, "The program facade descriptor does not match the registered versioned facade closure.")
+  }
+  const selectedRecords = new Map()
+
+  for (const record of records) {
+    if (selectedRecords.has(record.identity)) {
+      invalidFacadeDescriptor(language, `Facade '${record.identity}' is selected more than once.`)
+    }
+    for (const dependency of record.dependencies) {
+      const resolved = stdlibFacadeRegistry.resolveIdentity(dependency.identity, facadeLanguage, dependency.range)
+      const selected = selectedRecords.get(resolved.identity)
+
+      if (!selected || selected.version != resolved.version) {
+        invalidFacadeDescriptor(language, `Facade '${record.identity}' dependency '${resolved.identity}@${resolved.version}' is missing or out of order.`)
+      }
+    }
+    selectedRecords.set(record.identity, record)
+  }
+  if (markedModules.length != records.length) {
+    invalidFacadeDescriptor(language, "The program facade descriptor does not match its executable semantic modules.")
+  }
+  if (program.sources.some((source) => source.language != facadeLanguage ||
+    !["application", "facade"].includes(String(Reflect.get(source, "ownership"))))) {
+    invalidFacadeDescriptor(language, "Facade programs require one source language and explicit application/facade ownership.")
+  }
+  const selectedIdentities = new Set(records.map(({identity}) => identity))
+  const usedOperationsByModule = collectUsedEffectOperations(program).usedOperationsByModule
+  const registeredModules = reparseRegisteredFacadeModules(program, facadeLanguage, language)
+
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index]
+    const module = markedModules[index]
+    const marker = Reflect.get(module, "stdlibFacade")
+
+    if (!isPlainObject(marker) || Object.keys(marker).sort().join(",") != "identity,version" ||
+      marker.identity != record.identity || marker.version != record.version || module.id != record.source.id ||
+      module.sourceFilename != record.source.filename) {
+      invalidFacadeDescriptor(language, `Facade '${record.identity}' semantic module identity is not canonical.`)
+    }
+    const source = program.sources.find(({filename}) => filename == record.source.filename)
+
+    if (!source || source.content != record.source.content || Reflect.get(source, "ownership") != "facade") {
+      invalidFacadeDescriptor(language, `Facade '${record.identity}' executable source does not match its registered definition.`)
+    }
+    const registeredModule = registeredModules.get(record.identity)
+
+    if (!registeredModule || !equalPlainData(module, registeredModule)) {
+      invalidFacadeAuthority(language,
+        `Facade '${record.identity}' semantic module does not match its registered executable source.`, module.location)
+    }
+    const allowedOperations = new Set(record.requirements.flatMap(({operations}) => operations))
+    const usedOperations = new Set(usedOperationsByModule.get(module.id) ?? [])
+
+    if (allowedOperations.size != usedOperations.size || [...allowedOperations].some((operation) => !usedOperations.has(operation))) {
+      invalidFacadeAuthority(language, `Facade '${record.identity}' semantic body does not match its declared canonical requirements.`, module.location)
+    }
+  }
+  if (facadeSources.length != records.length) {
+    invalidFacadeDescriptor(language, "The program contains an unselected compiler-owned facade source.")
+  }
+  if (evidencedImports.length == 0) {
+    invalidFacadeDescriptor(language, "The selected facade closure has no parser-proved native import evidence.")
+  }
+  for (const imported of evidencedImports) {
+    const evidence = Reflect.get(imported, "stdlibFacade")
+
+    if (!isPlainObject(evidence) || Object.keys(evidence).sort().join(",") !=
+      "facadeIdentity,facadeVersion,nativeModule,nativeSymbol,schema,version" ||
+      evidence.schema != "SemantifoldStdlibFacadeResolution" || evidence.version != 1 ||
+      typeof evidence.facadeIdentity != "string" || typeof evidence.facadeVersion != "string" ||
+      typeof evidence.nativeModule != "string" || typeof evidence.nativeSymbol != "string") {
+      invalidFacadeDescriptor(language, "A facade import has malformed native identity evidence.")
+    }
+    const record = stdlibFacadeRegistry.resolveFacade(facadeLanguage, evidence.nativeModule, evidence.nativeSymbol,
+      evidence.facadeVersion)
+
+    if (record.identity != evidence.facadeIdentity || !selectedIdentities.has(record.identity) || imported.moduleId != record.source.id ||
+      imported.importedName != evidence.nativeSymbol) {
+      invalidFacadeDescriptor(language, "A facade import does not match its registered native module and symbol identity.")
+    }
+  }
+}
+
+/**
+ * Recompiles the registry-selected facade closure from retained caller inputs and registered facade source.
+ * This parser-backed reference graph is created during validation, before provider planning or writer allocation.
+ * @param {import("../semantic/types.js").SemanticProgram} program - Untrusted mutable semantic program.
+ * @param {import("../semantic/types.js").SemanticLanguage} facadeLanguage - Selected source-language facade profile.
+ * @param {import("../semantic/types.js").SemanticLanguage} diagnosticLanguage - Target language for boundary diagnostics.
+ * @returns {Map<string, import("../semantic/types.js").SemanticProgramModule>} Canonical semantic modules by facade identity.
+ */
+function reparseRegisteredFacadeModules(program, facadeLanguage, diagnosticLanguage) {
+  const applicationModules = program.modules.filter((module) => Reflect.get(module, "stdlibFacade") === undefined)
+  const modulesByFilename = new Map(applicationModules.map((module) => [module.sourceFilename, module]))
+  const applicationSources = program.sources.filter((source) => Reflect.get(source, "ownership") == "application").map((source) => {
+    const module = modulesByFilename.get(source.filename)
+
+    if (!module) invalidFacadeDescriptor(diagnosticLanguage,
+      `Application source '${source.filename}' has no matching semantic module for facade verification.`)
+    return {
+      filename: source.filename,
+      id: /** @type {import("../semantic/types.js").SemanticProgramModule} */ (module).id,
+      language: facadeLanguage,
+      source: /** @type {string} */ (source.content)
+    }
+  })
+
+  if (applicationSources.length != applicationModules.length) {
+    invalidFacadeDescriptor(diagnosticLanguage, "Facade verification requires one retained application source per semantic module.")
+  }
+  const reparsed = parseProgramSource({entryModule: program.entryModule, sources: applicationSources})
+  const modules = new Map()
+
+  for (const module of reparsed.modules) {
+    if (!module.stdlibFacade) continue
+    if (modules.has(module.stdlibFacade.identity)) {
+      invalidFacadeDescriptor(diagnosticLanguage, `Registered facade '${module.stdlibFacade.identity}' reparsed more than once.`)
+    }
+    modules.set(module.stdlibFacade.identity, module)
+  }
+  return modules
+}
+
+/**
+ * Compares closed plain JSON-shaped data without coercion or key-order assumptions.
+ * @param {unknown} left - Candidate value.
+ * @param {unknown} right - Expected value.
+ * @returns {boolean} Exact recursive equivalence.
+ */
+function equalPlainData(left, right) {
+  if (left === right) return true
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left) && Array.isArray(right) && isDenseArray(left) && isDenseArray(right) &&
+      left.length == right.length && left.every((value, index) => equalPlainData(value, right[index]))
+  }
+  if (!isPlainObject(left) || !isPlainObject(right)) return false
+  const leftKeys = Object.keys(left).sort()
+  const rightKeys = Object.keys(right).sort()
+
+  return leftKeys.length == rightKeys.length && leftKeys.every((key, index) =>
+    key == rightKeys[index] && equalPlainData(left[key], right[key]))
+}
+
+/**
+ * Throws one stable facade artifact-boundary diagnostic.
+ * @param {import("../semantic/types.js").SemanticLanguage} language - Target language.
+ * @param {string} message - Diagnostic detail.
+ * @returns {never} Always throws.
+ */
+function invalidFacadeDescriptor(language, message) {
+  throw new SemantifoldDiagnostic({code: "STDLIB_FACADE_DESCRIPTOR_INVALID", language, message})
+}
+
+/**
+ * Throws when a facade semantic body exceeds or omits its registry-declared authority.
+ * @param {import("../semantic/types.js").SemanticLanguage} language - Target language.
+ * @param {string} message - Diagnostic detail.
+ * @param {import("../semantic/types.js").SourceLocation} location - Facade source location.
+ * @returns {never} Always throws.
+ */
+function invalidFacadeAuthority(language, message, location) {
+  throw new SemantifoldDiagnostic({code: "STDLIB_FACADE_AUTHORITY_FORGED", language, location, message})
 }
 
 /**

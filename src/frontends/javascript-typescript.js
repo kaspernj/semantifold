@@ -2,7 +2,7 @@
 
 import {parse as parseBabel} from "@babel/parser"
 import {parse as parseComment} from "comment-parser"
-import {missingType, parseFailure, unsupportedSyntax} from "../diagnostic.js"
+import {missingType, parseFailure, SemantifoldDiagnostic, unsupportedSyntax} from "../diagnostic.js"
 import {blockReferencesProtectedEntry} from "../semantic/effects.js"
 import {locationFromOffsets, moduleLocation} from "../semantic/location.js"
 import {withAdaptedOperation} from "../semantic/operators.js"
@@ -2394,7 +2394,7 @@ function parseBabelSource({filename, language, source, sourceType}) {
  * @param {string} input.filename - Source filename.
  * @param {"javascript" | "typescript"} input.language - Frontend language.
  * @param {string} input.source - Source text.
- * @returns {{imports: {importedName: string, localName: string, location: import("../semantic/types.js").SourceLocation, pathLocation: import("../semantic/types.js").SourceLocation, specifier: string, typeOnly: boolean}[], exports: {exportedName: string, localName: string, location: import("../semantic/types.js").SourceLocation, typeOnly: boolean}[]}} Parser-owned ESM module header.
+ * @returns {{imports: {declarationLocation: import("../semantic/types.js").SourceLocation, importedName: string, importedNameLocation: import("../semantic/types.js").SourceLocation, localName: string, localNameLocation: import("../semantic/types.js").SourceLocation, location: import("../semantic/types.js").SourceLocation, pathLocation: import("../semantic/types.js").SourceLocation, specifier: string, stdlibCandidate?: true, typeOnly: boolean}[], exports: {declarationLocation?: import("../semantic/types.js").SourceLocation, exportedName: string, exportedNameLocation?: import("../semantic/types.js").SourceLocation, localName: string, localNameLocation?: import("../semantic/types.js").SourceLocation, location: import("../semantic/types.js").SourceLocation, typeOnly: boolean}[]}} Parser-owned ESM module header.
  */
 export function inspectJavaScriptTypeScriptModule({filename, language, source}) {
   const file = parseBabelSource({filename, language, source, sourceType: "module"})
@@ -2409,7 +2409,10 @@ export function inspectJavaScriptTypeScriptModule({filename, language, source}) 
 
   for (const node of file.program.body) {
     if (node.type == "ImportDeclaration") {
-      if (!node.source.value.startsWith("./") && !node.source.value.startsWith("../")) {
+      const relative = node.source.value.startsWith("./") || node.source.value.startsWith("../")
+      const stdlibCandidate = node.source.value.startsWith("semantifold:") || node.source.value.startsWith("node:")
+
+      if (!relative && !stdlibCandidate) {
         unsupportedSyntax(language, "bare package import", nodeLocation(node.source, filename, source))
       }
       if (node.specifiers.length == 0) unsupportedSyntax(language, "side-effect-only import", nodeLocation(node, filename, source))
@@ -2429,6 +2432,7 @@ export function inspectJavaScriptTypeScriptModule({filename, language, source}) 
           location: nodeLocation(specifier, filename, source),
           pathLocation: nodeLocation(node.source, filename, source),
           specifier: node.source.value,
+          ...(!relative ? {stdlibCandidate: /** @type {const} */ (true)} : {}),
           typeOnly: node.importKind == "type" || specifier.importKind == "type"
         })
       }
@@ -2475,7 +2479,101 @@ export function inspectJavaScriptTypeScriptModule({filename, language, source}) 
     }
   }
 
+  const dynamic = findFacadeUnsafeJavaScriptNode(file.program, "dynamic", new Set())
+
+  if (dynamic) facadeFrontendFailure(language, "STDLIB_FACADE_DYNAMIC_REFERENCE",
+    "Dynamic import cannot prove a standard-library facade identity.", nodeLocation(dynamic, filename, source))
+  const stdlibBindings = new Set(imports.filter(({stdlibCandidate}) => stdlibCandidate).map(({localName}) => localName))
+
+  if (stdlibBindings.size > 0) {
+    const mutation = findFacadeUnsafeJavaScriptNode(file.program, "mutation", stdlibBindings)
+
+    if (mutation) facadeFrontendFailure(language, "STDLIB_FACADE_SHADOWED",
+      "A parser-proved standard-library facade binding cannot be reassigned or shadowed.", nodeLocation(mutation, filename, source))
+    const reflection = findFacadeUnsafeJavaScriptNode(file.program, "reflection", stdlibBindings)
+
+    if (reflection) facadeFrontendFailure(language, "STDLIB_FACADE_REFLECTION_UNSUPPORTED",
+      "Reflective lookup cannot preserve a proved standard-library facade symbol identity.", nodeLocation(reflection, filename, source))
+  }
+
   return {exports, imports}
+}
+
+/**
+ * Finds parser-owned dynamic, mutating, or reflective constructs relevant to facade identity.
+ * @param {unknown} value - Babel subtree.
+ * @param {"dynamic" | "mutation" | "reflection"} mode - Rejected construct class.
+ * @param {Set<string>} bindings - Parser-proved native facade bindings.
+ * @param {WeakSet<object>} [seen] - Cycle guard.
+ * @returns {import("@babel/types").Node | undefined} First rejected parser node.
+ */
+function findFacadeUnsafeJavaScriptNode(value, mode, bindings, seen = new WeakSet()) {
+  if (!value || typeof value != "object" || seen.has(value)) return undefined
+  seen.add(value)
+  const node = /** @type {Record<string, unknown>} */ (value)
+
+  if (mode == "dynamic" && node.type == "ImportExpression") {
+    const sourceNode = node.source
+
+    if (isFacadeModuleStringNode(sourceNode)) return /** @type {import("@babel/types").Node} */ (value)
+  }
+  if (mode == "dynamic" && node.type == "CallExpression" && node.callee && typeof node.callee == "object" &&
+    Reflect.get(node.callee, "type") == "Import") {
+    const arguments_ = Array.isArray(node.arguments) ? node.arguments : []
+
+    if (isFacadeModuleStringNode(arguments_[0])) return /** @type {import("@babel/types").Node} */ (value)
+  }
+  if (mode == "reflection" && node.type == "CallExpression" && node.callee && typeof node.callee == "object" &&
+    Reflect.get(node.callee, "type") == "Identifier" && Reflect.get(node.callee, "name") == "eval") {
+    return /** @type {import("@babel/types").Node} */ (value)
+  }
+  if (mode == "mutation" && (node.type == "AssignmentExpression" || node.type == "UpdateExpression")) {
+    const target = node.type == "AssignmentExpression" ? node.left : node.argument
+
+    if (target && typeof target == "object" && Reflect.get(target, "type") == "Identifier" &&
+      bindings.has(String(Reflect.get(target, "name")))) return /** @type {import("@babel/types").Node} */ (value)
+  }
+  for (const [key, child] of Object.entries(node)) {
+    if (["extra", "innerComments", "leadingComments", "loc", "trailingComments"].includes(key)) continue
+    if (Array.isArray(child)) {
+      for (const item of child) {
+        const found = findFacadeUnsafeJavaScriptNode(item, mode, bindings, seen)
+
+        if (found) return found
+      }
+    } else {
+      const found = findFacadeUnsafeJavaScriptNode(child, mode, bindings, seen)
+
+      if (found) return found
+    }
+  }
+  return undefined
+}
+
+/**
+ * Checks a Babel string literal for one catalog-style stdlib module identity.
+ * @param {unknown} value - Babel import argument/source node.
+ * @returns {boolean} Whether the exact literal is a facade module candidate.
+ */
+function isFacadeModuleStringNode(value) {
+  if (!value || typeof value != "object") return false
+  const node = /** @type {Record<string, unknown>} */ (value)
+  const literal = node.value
+
+  return node.type == "StringLiteral" && typeof literal == "string" &&
+    (literal.startsWith("semantifold:") || literal.startsWith("node:"))
+}
+
+/**
+ * Throws one stable located facade frontend diagnostic.
+ * @param {"javascript" | "typescript"} language - Source language.
+ * @param {string} code - Stable diagnostic code.
+ * @param {string} message - Diagnostic detail.
+ * @param {import("../semantic/types.js").SourceLocation} location - Parser-owned location.
+ * @returns {never} Always throws.
+ */
+function facadeFrontendFailure(language, code, message, location) {
+  throw new SemantifoldDiagnostic({code, language, location, message})
 }
 
 /**
