@@ -115,6 +115,79 @@ export function preflightIosApplication(input) {
  */
 export function generateIosApplication(input) {
   const prepared = preflightIosApplication(input)
+  const semanticArtifacts = renderSemanticArtifacts(prepared)
+  const applicationPaths = applicationArtifactPaths(prepared)
+  const project = renderPbxProject(prepared, applicationPaths)
+  const configuration = prepared.configuration
+  const entryNamespace = `SemantifoldModule${moduleName(prepared.program.entryModule)}`
+  const app = `import SwiftUI
+
+@main
+struct SemantifoldApplication: App {
+  var body: some Scene {
+    WindowGroup {
+      SemantifoldOutputView(lines: SemantifoldBridge.run())
+    }
+  }
+}
+`
+  const bridge = `enum SemantifoldBridge {
+  static func run() -> [String] {
+    return ${entryNamespace}.semantifoldEntry()
+  }
+}
+`
+  const view = `import SwiftUI
+
+struct SemantifoldOutputView: View {
+  let lines: [String]
+
+  var body: some View {
+    Text(lines.joined(separator: "\\n"))
+      .accessibilityIdentifier("semantifold-output")
+  }
+}
+`
+  const product = configuration.productName
+  const artifacts = [
+    syntheticText(`${product}.xcodeproj/project.pbxproj`, "manifest", project,
+      "Canonical deterministic Xcode project structure."),
+    syntheticText(`${product}.xcodeproj/xcshareddata/xcschemes/${product}.xcscheme`, "support",
+      renderSharedScheme(prepared), "Canonical shared Xcode application/test scheme."),
+    syntheticText("Configuration/Base.xcconfig", "support", renderBaseConfiguration(configuration),
+      "Closed unsigned iOS build configuration."),
+    syntheticText("Configuration/Info.plist", "support", renderInfoPlist(configuration),
+      "Allowlisted iOS application property list."),
+    ...semanticArtifacts,
+    syntheticText("Sources/Application/App.swift", "entry", app, "Synthetic SwiftUI application lifecycle."),
+    syntheticText("Sources/Application/SemantifoldBridge.swift", "support", bridge,
+      "Synthetic bridge from SwiftUI to the semantic entry."),
+    syntheticText("Sources/Application/SemantifoldOutputView.swift", "support", view,
+      "Synthetic stable text output view and accessibility identifier."),
+    syntheticText("Assets.xcassets/Contents.json", "resource", stringifyCanonicalJson({
+      info: {author: "semantifold", version: 1}
+    }), "Base asset-catalog metadata; no application icon is synthesized."),
+    ...prepared.assets.map(assetArtifact),
+    syntheticText(`Tests/${product}Tests.swift`, "support", renderUnitTests(configuration),
+      "Synthetic pure-logic determinism XCTest source."),
+    syntheticText(`UITests/${product}UITests.swift`, "support", renderUiTests(configuration),
+      "Synthetic XCUI accessibility-route test source."),
+    syntheticText("semantifold-project.json", "manifest", stringifyCanonicalJson({
+      platformProof: "deferred",
+      schema: "SemantifoldIosProject",
+      version: 1
+    }), "Versioned Semantifold iOS project manifest placeholder." )
+  ]
+
+  return {artifacts, target: "ios"}
+}
+
+/**
+ * Renders the shared capture runtime and mapped per-module semantic Swift.
+ * @param {ReturnType<typeof preflightIosApplication>} prepared - Fully preflighted application.
+ * @returns {import("../semantic/types.js").GeneratedSetArtifact[]} Ordered semantic artifacts.
+ */
+function renderSemanticArtifacts(prepared) {
   const paths = prepared.modulePaths
   const declarations = new Map()
 
@@ -161,13 +234,453 @@ export function generateIosApplication(input) {
       ownership: "generated",
       path: filename,
       provenance: {kind: "text", mapping, sourceMap: toSourceMapV3(mapping), sourceMapFilename: `${filename}.map`},
-      role: moduleId == prepared.program.entryModule ? "entry" : "source"
+      role: "source"
     })
   }
 
-  for (const asset of prepared.assets) artifacts.push(assetArtifact(asset))
+  return artifacts
+}
 
-  return {artifacts, target: "ios"}
+/**
+ * Produces all project paths referenced by the Xcode model.
+ * @param {ReturnType<typeof preflightIosApplication>} prepared - Prepared application.
+ * @returns {{appSources: string[], assets: string[], infoPlist: string, unitTest: string, uiTest: string, xcconfig: string}} Paths.
+ */
+function applicationArtifactPaths(prepared) {
+  const product = prepared.configuration.productName
+
+  return {
+    appSources: [
+      "Sources/Generated/SemantifoldRuntime.swift",
+      ...prepared.modulePaths.values(),
+      "Sources/Application/App.swift",
+      "Sources/Application/SemantifoldBridge.swift",
+      "Sources/Application/SemantifoldOutputView.swift"
+    ],
+    assets: ["Assets.xcassets", ...prepared.assets.map(({path}) => path)],
+    infoPlist: "Configuration/Info.plist",
+    unitTest: `Tests/${product}Tests.swift`,
+    uiTest: `UITests/${product}UITests.swift`,
+    xcconfig: "Configuration/Base.xcconfig"
+  }
+}
+
+/**
+ * Derives collision-checked uppercase 24-hex Xcode object IDs from normalized identities.
+ * @param {readonly string[]} identities - Complete ordered object identities.
+ * @param {(identity: string) => string} [digest] - Test-only digest seam; production uses built-in SHA-256.
+ * @returns {Map<string, string>} Object ID by full input identity.
+ */
+export function allocateXcodeObjectIds(identities, digest = identity => createHash("sha256").update(identity).digest("hex")) {
+  const result = new Map()
+  const fullIdentities = new Map()
+
+  for (const identity of identities) {
+    if (typeof identity != "string" || identity.length == 0 || result.has(identity)) {
+      throw new SemantifoldDiagnostic({code: "XCODE_ID_COLLISION", language: "ios",
+        message: "Xcode object identities must be unique non-empty strings."})
+    }
+    const normalized = identity.normalize("NFC")
+    const fullDigest = digest(normalized)
+
+    if (!/^[0-9a-fA-F]{64}$/u.test(fullDigest)) {
+      throw new SemantifoldDiagnostic({code: "XCODE_ID_COLLISION", language: "ios",
+        message: `Xcode object identity '${identity}' did not produce a full SHA-256 digest.`})
+    }
+    const objectId = fullDigest.slice(0, 24).toUpperCase()
+    const previous = fullIdentities.get(objectId)
+
+    if (previous !== undefined && previous != normalized) {
+      throw new SemantifoldDiagnostic({code: "XCODE_ID_COLLISION", language: "ios",
+        message: `Xcode object identities '${previous}' and '${normalized}' collide at '${objectId}'.`})
+    }
+    fullIdentities.set(objectId, normalized)
+    result.set(identity, objectId)
+  }
+
+  return result
+}
+
+/**
+ * Renders the smallest deterministic Xcode application/unit/UI-test project model.
+ * Platform execution remains deferred until the repository has a qualified Apple lane.
+ * @param {ReturnType<typeof preflightIosApplication>} prepared - Prepared application.
+ * @param {ReturnType<typeof applicationArtifactPaths>} paths - Complete owned paths.
+ * @returns {string} Canonical LF project file.
+ */
+function renderPbxProject(prepared, paths) {
+  const configuration = prepared.configuration
+  const product = configuration.productName
+  const identities = [
+    "project", "group:main", "group:sources", "group:generated", "group:application", "group:configuration",
+    "group:tests", "group:uitests", "group:products", "target:app", "target:tests", "target:uitests",
+    "phase:app:sources", "phase:app:resources", "phase:app:frameworks", "phase:tests:sources", "phase:tests:resources",
+    "phase:tests:frameworks", "phase:uitests:sources", "phase:uitests:resources", "phase:uitests:frameworks",
+    "product:app", "product:tests", "product:uitests", "proxy:tests:app", "proxy:uitests:app",
+    "dependency:tests:app", "dependency:uitests:app",
+    "config-list:project", "config-list:app", "config-list:tests", "config-list:uitests",
+    "config:project:debug", "config:project:release", "config:app:debug", "config:app:release",
+    "config:tests:debug", "config:tests:release", "config:uitests:debug", "config:uitests:release",
+    `file:${paths.xcconfig}`, `file:${paths.infoPlist}`, "file:Assets.xcassets",
+    `file:${paths.unitTest}`, `file:${paths.uiTest}`,
+    ...paths.appSources.flatMap(path => [`file:${path}`, `build:app:${path}`]),
+    "build:app:Assets.xcassets", `build:tests:${paths.unitTest}`, `build:uitests:${paths.uiTest}`
+  ]
+  const ids = allocateXcodeObjectIds(identities)
+  const id = identity => {
+    const value = ids.get(identity)
+
+    if (!value) throw new TypeError(`Missing planned Xcode identity '${identity}'.`)
+
+    return value
+  }
+  /** @type {Map<string, {identity: string, body: string[]}[]>} */
+  const sections = new Map()
+  const add = (section, identity, body) => {
+    const entries = sections.get(section) ?? []
+
+    entries.push({body, identity})
+    sections.set(section, entries)
+  }
+  const list = values => values.map(value => `\t\t\t\t${value},`).join("\n")
+  const sorted = values => [...values].sort((left, right) => left < right ? -1 : left > right ? 1 : 0)
+
+  for (const path of paths.appSources) {
+    add("PBXBuildFile", `build:app:${path}`, ["isa = PBXBuildFile;", `fileRef = ${id(`file:${path}`)};`])
+    add("PBXFileReference", `file:${path}`, ["isa = PBXFileReference;", "lastKnownFileType = sourcecode.swift;",
+      `path = ${pbxString(path)};`, "sourceTree = SOURCE_ROOT;"])
+  }
+  add("PBXBuildFile", "build:app:Assets.xcassets", ["isa = PBXBuildFile;", `fileRef = ${id("file:Assets.xcassets")};`])
+  add("PBXBuildFile", `build:tests:${paths.unitTest}`, ["isa = PBXBuildFile;", `fileRef = ${id(`file:${paths.unitTest}`)};`])
+  add("PBXBuildFile", `build:uitests:${paths.uiTest}`, ["isa = PBXBuildFile;", `fileRef = ${id(`file:${paths.uiTest}`)};`])
+  add("PBXContainerItemProxy", "proxy:tests:app", ["isa = PBXContainerItemProxy;", `containerPortal = ${id("project")};`,
+    "proxyType = 1;", `remoteGlobalIDString = ${id("target:app")};`, `remoteInfo = ${pbxString(product)};`])
+  add("PBXContainerItemProxy", "proxy:uitests:app", ["isa = PBXContainerItemProxy;", `containerPortal = ${id("project")};`,
+    "proxyType = 1;", `remoteGlobalIDString = ${id("target:app")};`, `remoteInfo = ${pbxString(product)};`])
+  add("PBXFileReference", `file:${paths.xcconfig}`, ["isa = PBXFileReference;", "lastKnownFileType = text.xcconfig;",
+    `path = ${pbxString(paths.xcconfig)};`, "sourceTree = SOURCE_ROOT;"])
+  add("PBXFileReference", `file:${paths.infoPlist}`, ["isa = PBXFileReference;", "lastKnownFileType = text.plist.xml;",
+    `path = ${pbxString(paths.infoPlist)};`, "sourceTree = SOURCE_ROOT;"])
+  add("PBXFileReference", "file:Assets.xcassets", ["isa = PBXFileReference;", "lastKnownFileType = folder.assetcatalog;",
+    "path = Assets.xcassets;", "sourceTree = SOURCE_ROOT;"])
+  add("PBXFileReference", `file:${paths.unitTest}`, ["isa = PBXFileReference;", "lastKnownFileType = sourcecode.swift;",
+    `path = ${pbxString(paths.unitTest)};`, "sourceTree = SOURCE_ROOT;"])
+  add("PBXFileReference", `file:${paths.uiTest}`, ["isa = PBXFileReference;", "lastKnownFileType = sourcecode.swift;",
+    `path = ${pbxString(paths.uiTest)};`, "sourceTree = SOURCE_ROOT;"])
+  add("PBXFileReference", "product:app", ["isa = PBXFileReference;", "explicitFileType = wrapper.application;", "includeInIndex = 0;",
+    `path = ${pbxString(`${product}.app`)};`, "sourceTree = BUILT_PRODUCTS_DIR;"])
+  add("PBXFileReference", "product:tests", ["isa = PBXFileReference;", "explicitFileType = wrapper.cfbundle;", "includeInIndex = 0;",
+    `path = ${pbxString(`${product}Tests.xctest`)};`, "sourceTree = BUILT_PRODUCTS_DIR;"])
+  add("PBXFileReference", "product:uitests", ["isa = PBXFileReference;", "explicitFileType = wrapper.cfbundle;", "includeInIndex = 0;",
+    `path = ${pbxString(`${product}UITests.xctest`)};`, "sourceTree = BUILT_PRODUCTS_DIR;"])
+
+  const generatedRefs = sorted(paths.appSources.filter(path => path.startsWith("Sources/Generated/"))).map(path => id(`file:${path}`))
+  const applicationRefs = sorted(paths.appSources.filter(path => path.startsWith("Sources/Application/"))).map(path => id(`file:${path}`))
+
+  add("PBXGroup", "group:main", ["isa = PBXGroup;", `children = (\n${list([
+    id("group:configuration"), id("group:sources"), id("file:Assets.xcassets"), id("group:tests"), id("group:uitests"),
+    id("group:products")
+  ])}\n\t\t\t);`, "sourceTree = \"<group>\";"])
+  add("PBXGroup", "group:sources", ["isa = PBXGroup;", `children = (\n${list([id("group:application"), id("group:generated")])}\n\t\t\t);`,
+    "name = Sources;", "sourceTree = \"<group>\";"])
+  add("PBXGroup", "group:generated", ["isa = PBXGroup;", `children = (\n${list(generatedRefs)}\n\t\t\t);`,
+    "name = Generated;", "sourceTree = \"<group>\";"])
+  add("PBXGroup", "group:application", ["isa = PBXGroup;", `children = (\n${list(applicationRefs)}\n\t\t\t);`,
+    "name = Application;", "sourceTree = \"<group>\";"])
+  add("PBXGroup", "group:configuration", ["isa = PBXGroup;", `children = (\n${list([id(`file:${paths.xcconfig}`), id(`file:${paths.infoPlist}`)])}\n\t\t\t);`,
+    "name = Configuration;", "sourceTree = \"<group>\";"])
+  add("PBXGroup", "group:tests", ["isa = PBXGroup;", `children = (\n${list([id(`file:${paths.unitTest}`)])}\n\t\t\t);`,
+    "name = Tests;", "sourceTree = \"<group>\";"])
+  add("PBXGroup", "group:uitests", ["isa = PBXGroup;", `children = (\n${list([id(`file:${paths.uiTest}`)])}\n\t\t\t);`,
+    "name = UITests;", "sourceTree = \"<group>\";"])
+  add("PBXGroup", "group:products", ["isa = PBXGroup;", `children = (\n${list([id("product:app"), id("product:tests"), id("product:uitests")])}\n\t\t\t);`,
+    "name = Products;", "sourceTree = \"<group>\";"])
+
+  addNativeTarget(add, id, "target:app", product, "com.apple.product-type.application", "product:app",
+    "config-list:app", ["phase:app:sources", "phase:app:frameworks", "phase:app:resources"], [])
+  addNativeTarget(add, id, "target:tests", `${product}Tests`, "com.apple.product-type.bundle.unit-test", "product:tests",
+    "config-list:tests", ["phase:tests:sources", "phase:tests:frameworks", "phase:tests:resources"], ["dependency:tests:app"])
+  addNativeTarget(add, id, "target:uitests", `${product}UITests`, "com.apple.product-type.bundle.ui-testing", "product:uitests",
+    "config-list:uitests", ["phase:uitests:sources", "phase:uitests:frameworks", "phase:uitests:resources"], ["dependency:uitests:app"])
+  add("PBXProject", "project", ["isa = PBXProject;", "attributes = { BuildIndependentTargetsInParallel = YES; };",
+    `buildConfigurationList = ${id("config-list:project")};`, "developmentRegion = en;", "hasScannedForEncodings = 0;",
+    "knownRegions = ( en, Base, );", `mainGroup = ${id("group:main")};`, `productRefGroup = ${id("group:products")};`,
+    "projectDirPath = \"\";", "projectRoot = \"\";",
+    `targets = (\n${list([id("target:app"), id("target:tests"), id("target:uitests")])}\n\t\t\t);`])
+
+  addBuildPhase(add, id, "PBXFrameworksBuildPhase", "phase:app:frameworks", [])
+  addBuildPhase(add, id, "PBXResourcesBuildPhase", "phase:app:resources", ["build:app:Assets.xcassets"])
+  addBuildPhase(add, id, "PBXSourcesBuildPhase", "phase:app:sources", sorted(paths.appSources).map(path => `build:app:${path}`))
+  for (const target of ["tests", "uitests"]) {
+    addBuildPhase(add, id, "PBXFrameworksBuildPhase", `phase:${target}:frameworks`, [])
+    addBuildPhase(add, id, "PBXResourcesBuildPhase", `phase:${target}:resources`, [])
+  }
+  addBuildPhase(add, id, "PBXSourcesBuildPhase", "phase:tests:sources", [`build:tests:${paths.unitTest}`])
+  addBuildPhase(add, id, "PBXSourcesBuildPhase", "phase:uitests:sources", [`build:uitests:${paths.uiTest}`])
+  add("PBXTargetDependency", "dependency:tests:app", ["isa = PBXTargetDependency;", `target = ${id("target:app")};`,
+    `targetProxy = ${id("proxy:tests:app")};`])
+  add("PBXTargetDependency", "dependency:uitests:app", ["isa = PBXTargetDependency;", `target = ${id("target:app")};`,
+    `targetProxy = ${id("proxy:uitests:app")};`])
+
+  for (const owner of ["project", "app", "tests", "uitests"]) {
+    for (const variant of ["debug", "release"]) {
+      const settings = buildSettings(owner, variant, configuration, paths)
+
+      add("XCBuildConfiguration", `config:${owner}:${variant}`, ["isa = XCBuildConfiguration;",
+        `baseConfigurationReference = ${id(`file:${paths.xcconfig}`)};`, `buildSettings = {\n${settings}\n\t\t\t};`,
+        `name = ${variant == "debug" ? "Debug" : "Release"};`])
+    }
+    add("XCConfigurationList", `config-list:${owner}`, ["isa = XCConfigurationList;",
+      `buildConfigurations = (\n${list([id(`config:${owner}:debug`), id(`config:${owner}:release`)])}\n\t\t\t);`,
+      "defaultConfigurationIsVisible = 0;", "defaultConfigurationName = Release;"])
+  }
+
+  const order = ["PBXBuildFile", "PBXContainerItemProxy", "PBXFileReference", "PBXFrameworksBuildPhase", "PBXGroup",
+    "PBXNativeTarget", "PBXProject", "PBXResourcesBuildPhase", "PBXSourcesBuildPhase", "PBXTargetDependency",
+    "XCBuildConfiguration", "XCConfigurationList"]
+  let output = "// !$*UTF8*$!\n{\n\tarchiveVersion = 1;\n\tclasses = {};\n\tobjectVersion = 56;\n\tobjects = {\n"
+
+  for (const section of order) {
+    const entries = (sections.get(section) ?? []).sort((left, right) => left.identity < right.identity ? -1 : 1)
+
+    output += `\n/* Begin ${section} section */\n`
+    for (const entry of entries) {
+      output += `\t\t${id(entry.identity)} = {\n`
+      for (const line of entry.body) output += `\t\t\t${line}\n`
+      output += "\t\t};\n"
+    }
+    output += `/* End ${section} section */\n`
+  }
+  output += `\t};\n\trootObject = ${id("project")};\n}\n`
+
+  return output
+}
+
+/** @param {(section: string, identity: string, body: string[]) => void} add - Object sink. @param {(identity: string) => string} id - ID lookup. @param {string} identity - Target identity. @param {string} name - Product name. @param {string} productType - Product type. @param {string} productReference - Product reference identity. @param {string} configurationList - Configuration list identity. @param {string[]} phases - Phase identities. @param {string[]} dependencies - Dependency identities. */
+function addNativeTarget(add, id, identity, name, productType, productReference, configurationList, phases, dependencies) {
+  const lines = values => values.map(value => `\t\t\t\t${id(value)},`).join("\n")
+
+  add("PBXNativeTarget", identity, ["isa = PBXNativeTarget;", `buildConfigurationList = ${id(configurationList)};`,
+    `buildPhases = (\n${lines(phases)}\n\t\t\t);`, "buildRules = ();", `dependencies = (\n${lines(dependencies)}\n\t\t\t);`,
+    `name = ${pbxString(name)};`, `productName = ${pbxString(name)};`, `productReference = ${id(productReference)};`,
+    `productType = ${pbxString(productType)};`])
+}
+
+/** @param {(section: string, identity: string, body: string[]) => void} add - Object sink. @param {(identity: string) => string} id - ID lookup. @param {string} section - Phase ISA. @param {string} identity - Phase identity. @param {string[]} files - Build-file identities. */
+function addBuildPhase(add, id, section, identity, files) {
+  const lines = files.map(file => `\t\t\t\t${id(file)},`).join("\n")
+
+  add(section, identity, [`isa = ${section};`, "buildActionMask = 2147483647;", `files = (\n${lines}\n\t\t\t);`,
+    "runOnlyForDeploymentPostprocessing = 0;"])
+}
+
+/** @param {string} owner - Configuration owner. @param {string} variant - debug/release. @param {import("../semantic/types.js").IosApplicationConfiguration} configuration - App config. @param {ReturnType<typeof applicationArtifactPaths>} paths - Paths. @returns {string} Sorted PBX build settings. */
+function buildSettings(owner, variant, configuration, paths) {
+  /** @type {Record<string, string>} */
+  const values = owner == "project" ? {
+    CODE_SIGNING_ALLOWED: "NO",
+    CODE_SIGNING_REQUIRED: "NO"
+  } : owner == "app" ? {
+    GENERATE_INFOPLIST_FILE: "NO",
+    INFOPLIST_FILE: pbxString(paths.infoPlist),
+    IPHONEOS_DEPLOYMENT_TARGET: configuration.deploymentTarget,
+    PRODUCT_BUNDLE_IDENTIFIER: configuration.bundleIdentifier,
+    PRODUCT_MODULE_NAME: configuration.moduleName,
+    PRODUCT_NAME: configuration.productName,
+    SDKROOT: "iphoneos",
+    SUPPORTED_PLATFORMS: pbxString("iphoneos iphonesimulator"),
+    TARGETED_DEVICE_FAMILY: "1"
+  } : owner == "tests" ? {
+    BUNDLE_LOADER: pbxString("$(TEST_HOST)"),
+    PRODUCT_BUNDLE_IDENTIFIER: `${configuration.bundleIdentifier}.tests`,
+    PRODUCT_MODULE_NAME: `${configuration.moduleName}Tests`,
+    PRODUCT_NAME: "$(TARGET_NAME)",
+    TEST_HOST: pbxString(`$(BUILT_PRODUCTS_DIR)/${configuration.productName}.app/${configuration.productName}`)
+  } : {
+    PRODUCT_BUNDLE_IDENTIFIER: `${configuration.bundleIdentifier}.uitests`,
+    PRODUCT_MODULE_NAME: `${configuration.moduleName}UITests`,
+    PRODUCT_NAME: "$(TARGET_NAME)",
+    TEST_TARGET_NAME: configuration.productName
+  }
+
+  if (variant == "release") values.SWIFT_OPTIMIZATION_LEVEL = pbxString("-O")
+
+  return Object.keys(values).sort().map(key => `\t\t\t\t${key} = ${values[key]};`).join("\n")
+}
+
+/** @param {string} value - PBX scalar. @returns {string} Safely quoted PBX scalar. */
+function pbxString(value) {
+  return JSON.stringify(value)
+}
+
+/** @param {ReturnType<typeof preflightIosApplication>} prepared - Prepared application. @returns {string} Shared scheme XML. */
+function renderSharedScheme(prepared) {
+  const product = prepared.configuration.productName
+  const appId = allocateXcodeObjectIds(["target:app"]).get("target:app")
+  const testId = allocateXcodeObjectIds(["target:tests"]).get("target:tests")
+  const uiTestId = allocateXcodeObjectIds(["target:uitests"]).get("target:uitests")
+  const reference = (name, buildable, id) => `<BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "${id}"
+               BuildableName = "${xmlEscape(buildable)}"
+               BlueprintName = "${xmlEscape(name)}"
+               ReferencedContainer = "container:${xmlEscape(product)}.xcodeproj">
+            </BuildableReference>`
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<Scheme version="1.7">
+   <BuildAction parallelizeBuildables="YES" buildImplicitDependencies="YES">
+      <BuildActionEntries>
+         <BuildActionEntry buildForTesting="YES" buildForRunning="YES" buildForProfiling="YES" buildForArchiving="YES" buildForAnalyzing="YES">
+            ${reference(product, `${product}.app`, appId)}
+         </BuildActionEntry>
+      </BuildActionEntries>
+   </BuildAction>
+   <TestAction buildConfiguration="Debug" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.DebuggerFoundation.Launcher.LLDB" shouldUseLaunchSchemeArgsEnv="YES">
+      <Testables>
+         <TestableReference skipped="NO">
+            ${reference(`${product}Tests`, `${product}Tests.xctest`, testId)}
+         </TestableReference>
+         <TestableReference skipped="NO">
+            ${reference(`${product}UITests`, `${product}UITests.xctest`, uiTestId)}
+         </TestableReference>
+      </Testables>
+   </TestAction>
+   <LaunchAction buildConfiguration="Debug" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.DebuggerFoundation.Launcher.LLDB" launchStyle="0" useCustomWorkingDirectory="NO" ignoresPersistentStateOnLaunch="NO" debugDocumentVersioning="YES" debugServiceExtension="internal" allowLocationSimulation="YES">
+      <BuildableProductRunnable runnableDebuggingMode="0">
+         ${reference(product, `${product}.app`, appId)}
+      </BuildableProductRunnable>
+   </LaunchAction>
+   <ProfileAction buildConfiguration="Release" shouldUseLaunchSchemeArgsEnv="YES" savedToolIdentifier="" useCustomWorkingDirectory="NO" debugDocumentVersioning="YES">
+      <BuildableProductRunnable runnableDebuggingMode="0">
+         ${reference(product, `${product}.app`, appId)}
+      </BuildableProductRunnable>
+   </ProfileAction>
+   <AnalyzeAction buildConfiguration="Debug"/>
+   <ArchiveAction buildConfiguration="Release" revealArchiveInOrganizer="YES"/>
+</Scheme>
+`
+}
+
+/** @param {import("../semantic/types.js").IosApplicationConfiguration} configuration - Config. @returns {string} xcconfig. */
+function renderBaseConfiguration(configuration) {
+  return `CODE_SIGNING_ALLOWED = NO
+CODE_SIGNING_REQUIRED = NO
+GENERATE_INFOPLIST_FILE = NO
+IPHONEOS_DEPLOYMENT_TARGET = ${configuration.deploymentTarget}
+PRODUCT_BUNDLE_IDENTIFIER = ${configuration.bundleIdentifier}
+PRODUCT_MODULE_NAME = ${configuration.moduleName}
+PRODUCT_NAME = ${configuration.productName}
+SDKROOT = iphoneos
+SUPPORTED_PLATFORMS = iphoneos iphonesimulator
+TARGETED_DEVICE_FAMILY = 1
+`
+}
+
+/** @param {import("../semantic/types.js").IosApplicationConfiguration} configuration - Config. @returns {string} plist XML. */
+function renderInfoPlist(configuration) {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDisplayName</key>
+  <string>${xmlEscape(configuration.displayName)}</string>
+  <key>CFBundleExecutable</key>
+  <string>$(EXECUTABLE_NAME)</string>
+  <key>CFBundleIdentifier</key>
+  <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+  <key>CFBundleName</key>
+  <string>$(PRODUCT_NAME)</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleShortVersionString</key>
+  <string>1.0</string>
+  <key>CFBundleVersion</key>
+  <string>1</string>
+  <key>LSRequiresIPhoneOS</key>
+  <true/>
+  <key>UILaunchScreen</key>
+  <dict/>
+</dict>
+</plist>
+`
+}
+
+/** @param {import("../semantic/types.js").IosApplicationConfiguration} configuration - Config. @returns {string} XCTest source. */
+function renderUnitTests(configuration) {
+  return `import XCTest
+@testable import ${configuration.moduleName}
+
+final class ${configuration.productName}Tests: XCTestCase {
+  func testSemanticOutputIsDeterministic() {
+    XCTAssertEqual(SemantifoldBridge.run(), SemantifoldBridge.run())
+  }
+
+  func testOutputSinkPreservesScalarLines() {
+    let output = SemantifoldOutputSink()
+    output.write(Int64(7))
+    output.write(true)
+    output.write("é😀")
+    XCTAssertEqual(output.lines, ["7", "true", "é😀"])
+  }
+}
+`
+}
+
+/** @param {import("../semantic/types.js").IosApplicationConfiguration} configuration - Config. @returns {string} XCUI source. */
+function renderUiTests(configuration) {
+  return `import XCTest
+
+final class ${configuration.productName}UITests: XCTestCase {
+  func testOutputViewIsAccessible() {
+    let application = XCUIApplication()
+    application.launch()
+    XCTAssertTrue(application.staticTexts["semantifold-output"].waitForExistence(timeout: 5))
+  }
+}
+`
+}
+
+/** @param {string} value - XML text/attribute value. @returns {string} Escaped value. */
+function xmlEscape(value) {
+  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
+    .replaceAll("\"", "&quot;").replaceAll("'", "&apos;")
+}
+
+/**
+ * Creates one synthetic text artifact candidate.
+ * @param {string} path - Artifact path.
+ * @param {import("../semantic/types.js").GeneratedArtifactRole} role - Artifact role.
+ * @param {string} content - Exact LF content.
+ * @param {string} reason - Provenance reason.
+ * @returns {import("../semantic/types.js").GeneratedSetArtifact} Artifact candidate.
+ */
+function syntheticText(path, role, content, reason) {
+  return {
+    content,
+    contentKind: "text",
+    mediaType: path.endsWith(".swift") ? "text/x-swift" : path.endsWith(".json") ? "application/json" :
+      path.endsWith(".plist") || path.endsWith(".xcscheme") ? "application/xml" : "text/plain",
+    ownership: "generated",
+    path,
+    provenance: {kind: "synthetic", reason, relatedOrigins: []},
+    role
+  }
+}
+
+/** @param {unknown} value - JSON value. @returns {string} Canonical JSON with LF. */
+function stringifyCanonicalJson(value) {
+  return `${JSON.stringify(sortJson(value), null, 2)}\n`
+}
+
+/** @param {unknown} value - JSON value. @returns {unknown} Recursively key-sorted JSON. */
+function sortJson(value) {
+  if (Array.isArray(value)) return value.map(sortJson)
+  if (!isPlainObject(value)) return value
+
+  return Object.fromEntries(Object.keys(value).sort().map(key => [key, sortJson(value[key])]))
 }
 
 /**
