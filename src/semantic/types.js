@@ -1110,8 +1110,8 @@
  * @typedef StdlibFacadeProgramModuleDescriptor
  * @property {{identity: string, range: string}[]} dependencies - Versioned facade dependencies.
  * @property {string} identity - Facade identity.
- * @property {{identity: string, symbols: string[]}[]} nativeModules - Exact native source identities.
- * @property {{effects: string[], failures: string[], forms: ["direct-call"], kind: "function", name: string, ownership: "not-applicable", parameters: {name: string, type: string}[], returnType: string}[]} publicDeclarations - Public source declarations.
+ * @property {({identity: string, kind: "module", symbols: string[]} | {forms: ("unqualified-call" | "receiver-call")[], identity: string, kind: "builtin", symbols: string[]})[]} nativeModules - Exact native source identities.
+ * @property {({effects: string[], failures: string[], forms: ("direct-call" | "unqualified-call" | "receiver-call")[], kind: "function", name: string, ownership: "not-applicable", parameters: {name: string, type: string}[], returnType: string} | {constructor: {effects: string[], failures: string[], ownership: "acquired", parameters: {name: string, type: string}[]}, forms: ["constructor-call"], kind: "class", methods: {effects: string[], failures: string[], forms: ["receiver-call"], name: string, ownership: "borrowed" | "consumed", parameters: {name: string, type: string}[], returnType: string}[], name: string, ownership: "owned-reference"})[]} publicDeclarations - Public source declarations.
  * @property {{module: string, operations: string[], range: string}[]} requirements - Canonical capability requirements.
  * @property {string} runtimeProfile - Exact source runtime profile.
  * @property {string} sourceModule - Compiler-owned semantic module identity.
@@ -1134,6 +1134,7 @@
  * @property {string} entryModule - Stable identity of the sole entry module.
  * @property {RegisteredSource[]} sources - Caller-order complete source registry.
  * @property {{contractVersion?: string, identity: string}} [stdlibContract] - Declared standard-library contract; plain, never frozen.
+ * @property {{contractVersion?: string, identity: string}[]} [stdlibContracts] - Ordered declared standard-library contracts; plain, never frozen.
  * @property {StdlibFacadeProgramDescriptor} [stdlibFacades] - Complete selected source-language facade closure.
  */
 

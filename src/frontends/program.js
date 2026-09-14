@@ -22,7 +22,7 @@ const moduleIdPattern = /^[a-z][a-z0-9_]*(?:[.-][a-z][a-z0-9_]*)*$/u
 /** @typedef {{facade?: import("../stdlib-facades.js").StdlibFacadeRecord, filename: string, id: string, language: import("../semantic/types.js").SemanticLanguage, ownership: "application" | "facade", source: string}} ProgramSource */
 /** @typedef {{declarationLocation?: import("../semantic/types.js").SourceLocation, facade?: import("../stdlib-facades.js").StdlibFacadeRecord, importedName: string, importedNameLocation?: import("../semantic/types.js").SourceLocation, localName: string, localNameLocation?: import("../semantic/types.js").SourceLocation, location: import("../semantic/types.js").SourceLocation, namespace?: boolean, pathLocation: import("../semantic/types.js").SourceLocation, specifier: string, stdlibCandidate?: true, typeOnly: boolean}} ProgramImportRequest */
 /** @typedef {{importedName: string, localName: string, location: import("../semantic/types.js").SourceLocation, nativeName: string, symbolKind: import("../semantic/types.js").SemanticDeclarationKind, typeOnly: boolean}} ProgramNativeBinding */
-/** @typedef {{imports: ProgramImportRequest[], exports: {declarationLocation?: import("../semantic/types.js").SourceLocation, exportedName: string, exportedNameLocation?: import("../semantic/types.js").SourceLocation, localName: string, localNameLocation?: import("../semantic/types.js").SourceLocation, location: import("../semantic/types.js").SourceLocation, typeOnly: boolean}[], bindings?: ProgramNativeBinding[], nativeName?: string}} ProgramHeader */
+/** @typedef {{imports: ProgramImportRequest[], exports: {declarationLocation?: import("../semantic/types.js").SourceLocation, exportedName: string, exportedNameLocation?: import("../semantic/types.js").SourceLocation, localName: string, localNameLocation?: import("../semantic/types.js").SourceLocation, location: import("../semantic/types.js").SourceLocation, typeOnly: boolean}[], bindings?: ProgramNativeBinding[], nativeName?: string, nativeReferences?: {form: "constructor-call" | "receiver-call" | "unqualified-call", location: import("../semantic/types.js").SourceLocation, nativeModule: string, symbol: string}[]}} ProgramHeader */
 
 /**
  * Parses an explicit caller-supplied multi-source program without filesystem discovery.
@@ -338,7 +338,8 @@ export function parseProgramSource(input) {
         identity: requestedAuthority.id,
         ...(requestedAuthority.contractVersion !== undefined ? {contractVersion: requestedAuthority.contractVersion} : {})
       }
-    } : facadeAuthority ? {stdlibContract: facadeAuthority.contract} : {}),
+    } : facadeAuthority && "contracts" in facadeAuthority ? {stdlibContracts: facadeAuthority.contracts}
+      : facadeAuthority ? {stdlibContract: facadeAuthority.contract} : {}),
     ...(facadeRecords.length > 0 ? {stdlibFacades: stdlibFacadeProgramDescriptor(applicationSources[0].language, facadeRecords)} : {}),
     sources: registeredSources
   }
@@ -357,6 +358,8 @@ function resolveFacadeImports(sources, headers) {
 
   for (const source of sources) {
     const header = requiredMapValue(headers, source.id)
+
+    if (source.language == "ruby") resolveRubyTask037Facades(source, header, roots)
 
     if (source.language == "php") {
       for (const binding of header.bindings ?? []) {
@@ -410,6 +413,45 @@ function resolveFacadeImports(sources, headers) {
   }
 
   return roots
+}
+
+/**
+ * Resolves exact Task 037 Ruby references under a literal socket activation edge.
+ * @param {ProgramSource} source - Importing Ruby source.
+ * @param {ProgramHeader} header - Parser-owned Ruby header.
+ * @param {import("../stdlib-facades.js").StdlibFacadeRecord[]} roots - Selected facade roots.
+ * @returns {void}
+ */
+function resolveRubyTask037Facades(source, header, roots) {
+  const activationIndex = header.imports.findIndex(({specifier, stdlibCandidate}) => stdlibCandidate && specifier == "socket")
+
+  if (activationIndex < 0) return
+  const activation = /** @type {ProgramImportRequest} */ (header.imports.splice(activationIndex, 1)[0])
+  const bindings = new Set()
+
+  for (const reference of header.nativeReferences ?? []) {
+    if (reference.nativeModule != "socket" && reference.nativeModule != "ruby:Kernel") continue
+    const localName = reference.form == "receiver-call" ? "Kernel.puts" : reference.symbol
+
+    if (bindings.has(localName)) continue
+    bindings.add(localName)
+    const facade = resolveFacadeAt(source, reference.nativeModule, reference.symbol, reference.location)
+
+    header.imports.push({
+      declarationLocation: reference.location,
+      facade,
+      importedName: reference.symbol,
+      importedNameLocation: reference.location,
+      localName,
+      localNameLocation: reference.location,
+      location: reference.location,
+      pathLocation: activation.pathLocation,
+      specifier: reference.nativeModule,
+      stdlibCandidate: true,
+      typeOnly: false
+    })
+    roots.push(facade)
+  }
 }
 
 /**
@@ -489,6 +531,7 @@ function validateParsedFacade(facade, module) {
   const exported = new Map(module.exports.map((item) => [item.exportedName, item]))
 
   for (const declaration of facade.publicDeclarations) {
+    if (declaration.kind == "class") continue
     const exportedDeclaration = exported.get(declaration.name)
     const parsed = exportedDeclaration ? module.functions.find(({id}) => id == exportedDeclaration.declarationId) : undefined
     const signatureMatches = parsed && parsed.parameters.length == declaration.parameters.length &&

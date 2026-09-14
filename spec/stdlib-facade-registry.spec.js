@@ -13,7 +13,7 @@ describe("versioned language compatibility stdlib facade registry", () => {
   it("exposes immutable executable definitions and matching public declarations for the original five", () => {
     const facades = listStdlibFacades()
 
-    expect(facades).toHaveLength(15)
+    expect(facades).toHaveLength(17)
     expect(Object.isFrozen(facades)).toBe(true)
     for (const language of languages) {
       const publicFacade = resolveStdlibFacade(language, nativeProbeModule(language), publicProbeName(language), "1")
@@ -38,7 +38,7 @@ describe("versioned language compatibility stdlib facade registry", () => {
         version: "1.0.0",
         visibility: "public"
       })
-      expect(publicFacade.nativeModules).toEqual([{identity: nativeProbeModule(language), symbols: [publicProbeName(language)]}])
+      expect(publicFacade.nativeModules).toEqual([{identity: nativeProbeModule(language), kind: "module", symbols: [publicProbeName(language)]}])
       expect(typeof publicFacade.source.content).toBe("string")
       expect(publicFacade.source.content.length > 0).toBe(true)
       expect(Object.isFrozen(publicFacade)).toBe(true)
@@ -90,7 +90,7 @@ describe("versioned language compatibility stdlib facade registry", () => {
     for (const invalid of [
       {...record("1.0.0", "return value"), version: "01.0.0"},
       {...record("1.0.0", "return value"), requirements: [{module: probeContract, operations: ["missing"], range: "1"}]},
-      {...record("1.0.0", "return value"), nativeModules: [{identity: "node:example", symbols: ["missing"]}]},
+      {...record("1.0.0", "return value"), nativeModules: [{identity: "node:example", kind: "module", symbols: ["missing"]}]},
       {...record("1.0.0", "return value"), source: {...record("1.0.0", "return value").source, content: ""}}
     ]) {
       assert.throws(
@@ -129,7 +129,7 @@ function record(version, body) {
     dependencies: [],
     identity: "example.typescript.echo",
     language: "typescript",
-    nativeModules: [{identity: "node:example", symbols: ["echo"]}],
+    nativeModules: [{identity: "node:example", kind: "module", symbols: ["echo"]}],
     publicDeclarations: [{
       effects: [], failures: [], forms: ["direct-call"], kind: "function", name: "echo",
       ownership: "not-applicable", parameters: [{name: "value", type: "string"}], returnType: "string"
@@ -150,7 +150,7 @@ function identifiedRecord(identity, suffix) {
   const candidate = record("1.0.0", "return value")
 
   candidate.identity = identity
-  candidate.nativeModules = [{identity: `node:${suffix}`, symbols: ["echo"]}]
+  candidate.nativeModules = [{identity: `node:${suffix}`, kind: "module", symbols: ["echo"]}]
   candidate.source = {
     ...candidate.source,
     filename: `__semantifold_facades__/typescript/${suffix}.ts`,

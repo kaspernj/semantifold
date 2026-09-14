@@ -18,6 +18,7 @@ import {parseProtectedEntryName} from "./stdlib.js"
  */
 export function validateEffectGraph(module, language, functions, fail, normalize) {
   const capabilities = module.capabilities ?? []
+  const capabilityIds = new Set()
   const operationIds = new Set()
   const resourceIds = new Set()
   const failureIds = new Set()
@@ -25,11 +26,15 @@ export function validateEffectGraph(module, language, functions, fail, normalize
 
   if (!Array.isArray(capabilities)) fail("INVALID_CAPABILITY_AUTHORITY", "Capabilities must be an ordered array.", module.location)
   for (const [capabilityIndex, capability] of capabilities.entries()) {
-    if (!capability || capability.kind != "EffectCapabilityDeclaration" || capability.id != `capability:${capabilityIndex}` ||
+    const legacyId = `capability:${capabilityIndex}`
+
+    if (!capability || capability.kind != "EffectCapabilityDeclaration" ||
+      capability.id != legacyId && !/^module:\d+\/capability:\d+$/u.test(capability.id) || capabilityIds.has(capability.id) ||
       typeof capability.authorityId != "string" || typeof capability.name != "string" || !Array.isArray(capability.resources) ||
       !Array.isArray(capability.failures) || !Array.isArray(capability.operations)) {
       fail("INVALID_CAPABILITY_AUTHORITY", "Malformed capability declaration graph.", module.location)
     }
+    capabilityIds.add(capability.id)
     for (const [index, resource] of capability.resources.entries()) {
       if (resource.kind != "EffectResourceDeclaration" || resource.id != `${capability.id}/resource:${index}` ||
         resourceIds.has(resource.id)) fail("INVALID_CAPABILITY_AUTHORITY", "Malformed capability resource identity.", module.location)

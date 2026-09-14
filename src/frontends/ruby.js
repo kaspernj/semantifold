@@ -891,7 +891,7 @@ function convertStatement(node, comments, context, filename, source) {
   if (node instanceof CallNode) {
     if (!node.receiver && node.name == "raise") return convertRubyRaise(node, context, filename, source)
     if (node.block) return convertForEach(node, comments, context, filename, source)
-    if (!node.receiver && node.name == "puts") return convertPrint(node, filename, source, context)
+    if (!node.receiver && node.name == "puts" && !context.functions.has("puts")) return convertPrint(node, filename, source, context)
 
     return {
       expression: /** @type {import("../semantic/types.js").CallExpression} */ (convertExpression(node, filename, source, context)),
@@ -1178,16 +1178,19 @@ function convertType(sourceType, subject, location, source, typeLocation = locat
  * @param {string} source - Complete source.
  * @param {Map<string, import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").EffectResourceDeclaration>} recordNames - Nominal declarations by source name.
  * @param {string} ownerId - Stable function identity.
+ * @param {boolean} [allowBuiltinOutput] - Whether compiler authority admits the exact output facade function.
  * @returns {RubyFunctionSignature} Semantic signature.
  */
-function convertFunctionSignature(node, comments, filename, source, recordNames, ownerId) {
+function convertFunctionSignature(node, comments, filename, source, recordNames, ownerId, allowBuiltinOutput = false) {
   const location = nodeLocation(node, filename, source)
   const parameterList = node.parameters
 
   if (node.receiver) return unsupportedSyntax("ruby", "singleton method", nodeLocation(node.receiver, filename, source))
   const nameLocation = prismLocation(node.nameLoc, filename, source)
 
-  if (node.name == "puts") return unsupportedSyntax("ruby", "function 'puts' captures built-in printing", nameLocation)
+  if (node.name == "puts" && !allowBuiltinOutput) {
+    return unsupportedSyntax("ruby", "function 'puts' captures built-in printing", nameLocation)
+  }
   const unsupportedParameter = parameterList && [
     parameterList.optionals[0], parameterList.rest, parameterList.posts[0], parameterList.keywords[0],
     parameterList.keywordRest, parameterList.block,
@@ -1746,8 +1749,9 @@ export function parseRuby({capabilities = [], filename, source, program}) {
   const recordsById = new Map(recordDeclarations.map((declaration) => [/** @type {string} */ (declaration.id), declaration]))
   const classesById = new Map(classDeclarations.map((declaration) => [/** @type {string} */ (declaration.id), declaration]))
   const functionNodes = body.filter((node) => node instanceof DefNode)
+  const allowsBuiltinOutput = capabilities.some(({operations}) => operations.some(({name}) => name == "v1_write_line"))
   const signatures = functionNodes.map((node, index) =>
-    convertFunctionSignature(node, result.comments, filename, source, recordNames, `function:${index}`))
+    convertFunctionSignature(node, result.comments, filename, source, recordNames, `function:${index}`, allowsBuiltinOutput))
   const functionSignatures = new Map([...capabilityFunctionSignatures(capabilities, moduleLocation(filename, source)),
     ...(program?.functions ?? [])].map(([localName, declaration]) => [localName, {
     location: declaration.location,
@@ -1848,7 +1852,7 @@ function task034RubyBody(body, comments, capabilities, filename, source) {
  * @param {object} input - Parser input.
  * @param {string} input.filename - Source filename.
  * @param {string} input.source - Source text.
- * @returns {{imports: {importedName: string, localName: string, location: import("../semantic/types.js").SourceLocation, namespace: true, pathLocation: import("../semantic/types.js").SourceLocation, specifier: string, stdlibCandidate?: true, typeOnly: false}[], exports: {exportedName: string, localName: string, location: import("../semantic/types.js").SourceLocation, typeOnly: false}[], nativeName: string}} Parser-owned Ruby module header.
+ * @returns {{imports: {importedName: string, localName: string, location: import("../semantic/types.js").SourceLocation, namespace: true, pathLocation: import("../semantic/types.js").SourceLocation, specifier: string, stdlibCandidate?: true, typeOnly: false}[], exports: {exportedName: string, localName: string, location: import("../semantic/types.js").SourceLocation, typeOnly: false}[], nativeName: string, nativeReferences: {form: "constructor-call" | "receiver-call" | "unqualified-call", location: import("../semantic/types.js").SourceLocation, nativeModule: string, symbol: string}[]}} Parser-owned Ruby module header.
  */
 export function inspectRubyModule({filename, source}) {
   const result = parsePrism(source, {filepath: filename})
@@ -1931,8 +1935,48 @@ export function inspectRubyModule({filename, source}) {
     }
     return []
   })
+  const nativeReferences = rubyNativeReferences(modules[0], filename, source)
 
-  return {exports, imports, nativeName: modules[0].name}
+  return {exports, imports, nativeName: modules[0].name, nativeReferences}
+}
+
+/**
+ * Collects exact Task 037 native identities from Prism nodes in source order.
+ * @param {ModuleNode} module - Parsed application module.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @returns {{form: "constructor-call" | "receiver-call" | "unqualified-call", location: import("../semantic/types.js").SourceLocation, nativeModule: string, symbol: string}[]} Parser-proved native references.
+ */
+function rubyNativeReferences(module, filename, source) {
+  /** @type {{form: "constructor-call" | "receiver-call" | "unqualified-call", location: import("../semantic/types.js").SourceLocation, nativeModule: string, offset: number, symbol: string}[]} */
+  const references = []
+
+  /**
+   * Visits one parser node without interpreting source text.
+   * @param {import("@ruby/prism").Node} node - Parser node.
+   * @returns {void}
+   */
+  function visit(node) {
+    if (node instanceof CallNode && !node.block && node.arguments_?.arguments_.length == 1 &&
+      !node.receiver && node.name == "puts") {
+      references.push({form: "unqualified-call", location: nodeLocation(node, filename, source), nativeModule: "ruby:Kernel",
+        offset: node.location.startOffset, symbol: "puts"})
+    }
+    if (node instanceof CallNode && !node.block && node.arguments_?.arguments_.length == 1 && node.name == "puts" &&
+      node.callOperatorLoc && node.receiver instanceof ConstantReadNode && node.receiver.name == "Kernel") {
+      references.push({form: "receiver-call", location: nodeLocation(node, filename, source), nativeModule: "ruby:Kernel",
+        offset: node.location.startOffset, symbol: "puts"})
+    }
+    if (node instanceof CallNode && !node.block && node.arguments_?.arguments_.length == 2 && node.name == "new" &&
+      node.callOperatorLoc && node.receiver instanceof ConstantReadNode && node.receiver.name == "TCPSocket") {
+      references.push({form: "constructor-call", location: nodeLocation(node, filename, source), nativeModule: "socket",
+        offset: node.location.startOffset, symbol: "TCPSocket"})
+    }
+    for (const child of node.compactChildNodes()) visit(child)
+  }
+
+  visit(module)
+  return references.sort((left, right) => left.offset - right.offset).map(({offset: _offset, ...reference}) => reference)
 }
 
 /**
@@ -1954,21 +1998,19 @@ function isRequireRelative(node) {
 function isStdlibRequire(node) {
   return node instanceof CallNode && !node.receiver && !node.block && node.name == "require" &&
     node.arguments_?.arguments_.length == 1 && node.arguments_.arguments_[0] instanceof StringNode &&
-    node.arguments_.arguments_[0].unescaped.value.startsWith("semantifold/")
+    (node.arguments_.arguments_[0].unescaped.value == "socket" ||
+      node.arguments_.arguments_[0].unescaped.value.startsWith("semantifold/"))
 }
 
 /**
- * Reports whether a Ruby node dynamically constructs a catalog-style facade require.
+ * Reports whether a Ruby node dynamically constructs a facade require identity.
  * @param {import("@ruby/prism").Node} node - Candidate call.
- * @returns {boolean} Whether the parser exposes a Semantifold-prefixed interpolated require.
+ * @returns {boolean} Whether the parser exposes a nonliteral require.
  */
 function isDynamicStdlibRequire(node) {
   if (!(node instanceof CallNode) || node.receiver || node.block || node.name != "require" ||
     node.arguments_?.arguments_.length != 1) return false
-  const argument = node.arguments_.arguments_[0]
-
-  return argument instanceof InterpolatedStringNode && argument.parts[0] instanceof StringNode &&
-    argument.parts[0].unescaped.value.startsWith("semantifold/")
+  return !(node.arguments_.arguments_[0] instanceof StringNode)
 }
 
 /**
