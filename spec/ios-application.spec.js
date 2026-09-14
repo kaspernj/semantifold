@@ -2,7 +2,7 @@
 
 import assert from "node:assert/strict"
 import {describe, expect, it} from "@velocious/testing"
-import {generateArtifactSet, parse, parseProgram, SemantifoldDiagnostic} from "../index.js"
+import {generateArtifactSet, generateProgramArtifactSet, parse, parseProgram, SemantifoldDiagnostic} from "../index.js"
 import {preflightIosApplication} from "../src/backends/ios.js"
 
 const rubySources = () => [
@@ -13,7 +13,7 @@ const rubySources = () => [
     source: `require_relative "math_tools"
 
 module Main
-  puts MathTools.sum(4, 9)
+  puts MathTools.decorate(MathTools.decorate("hé😀", "!"), "?")
 end
 `
   },
@@ -24,21 +24,23 @@ end
     source: `module MathTools
   module_function
 
-  # @param left [Integer]
-  # @param right [Integer]
-  # @return [Integer]
-  def sum(left, right)
-    return left + right
+  # @param value [String]
+  # @param suffix [String]
+  # @return [String]
+  def decorate(value, suffix)
+    puts value
+    return value + suffix
   end
 end
 `
   }
 ]
 
-const swiftSource = `func sum(_ left: Int64, _ right: Int64) -> Int64 {
-  return left + right
+const swiftSource = `func decorate(_ value: String, _ suffix: String) -> String {
+  print(value)
+  return value + suffix
 }
-print(sum(4, 9))
+print(decorate(decorate("hé😀", "!"), "?"))
 `
 
 describe("iOS application project validation", () => {
@@ -88,5 +90,42 @@ puts values[0]
         error.code == "UNSUPPORTED_CAPABILITY" && error.language == "ios" &&
         error.location?.filename != undefined)
     }
+  })
+
+  it("lowers namespaced semantic Swift through one shared ordered output sink", () => {
+    const rubyProgram = parseProgram({entryModule: "main", sources: rubySources()})
+    const swiftModule = parse({filename: "program.swift", language: "swift", source: swiftSource})
+    const ruby = generateProgramArtifactSet({language: "ios", program: rubyProgram, role: "application"})
+    const swift = generateArtifactSet({language: "ios", module: swiftModule, role: "application"})
+
+    expect(ruby.artifacts.map(({path, role}) => ({path, role}))).toEqual([
+      {path: "Sources/Generated/SemantifoldRuntime.swift", role: "support"},
+      {path: "Sources/Generated/MathTools.swift", role: "source"},
+      {path: "Sources/Generated/Main.swift", role: "entry"}
+    ])
+    expect(swift.artifacts.map(({path}) => path)).toEqual([
+      "Sources/Generated/SemantifoldRuntime.swift",
+      "Sources/Generated/Main.swift"
+    ])
+    const runtime = String(ruby.artifacts[0].content)
+    const library = String(ruby.artifacts[1].content)
+    const entry = String(ruby.artifacts[2].content)
+
+    expect(runtime).toContain("final class SemantifoldOutputSink")
+    expect(runtime).toContain("private(set) var lines: [String] = []")
+    expect(library).toContain("enum SemantifoldModuleMathTools")
+    expect(library).toContain("_ semantifold_output: SemantifoldOutputSink")
+    expect(library).toContain("semantifold_output.write(value)")
+    expect(entry).toContain("static func semantifoldEntry() -> [String]")
+    expect(entry).toContain("SemantifoldModuleMathTools.decorate(SemantifoldModuleMathTools.decorate(\"hé😀\", \"!\",")
+    expect(entry).toContain("return semantifold_output.lines")
+    expect(entry).not.toContain("print(")
+    expect(swift.artifacts.map(({content}) => String(content)).join("\n")).toContain("\"hé😀\"")
+    expect(ruby.artifacts[1].provenance.kind).toEqual("text")
+    if (ruby.artifacts[1].provenance.kind == "text") {
+      expect(ruby.artifacts[1].provenance.mapping.sources.map(({filename}) => filename)).toContain("math_tools.rb")
+      expect(ruby.artifacts[1].provenance.mapping.spans.some(({mappingKind}) => mappingKind == "exact")).toBeTrue()
+    }
+    expect(ruby.artifacts[0].provenance.kind).toEqual("synthetic")
   })
 })
