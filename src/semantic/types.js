@@ -2,7 +2,7 @@
 
 /** @typedef {"php" | "ruby" | "javascript" | "typescript" | "java" | "kotlin" | "python" | "csharp" | "go" | "c" | "cpp" | "rust" | "swift"} SemanticLanguage */
 /** @typedef {SemanticLanguage} TextBackendLanguage */
-/** @typedef {TextBackendLanguage | "wasm"} BackendLanguage */
+/** @typedef {TextBackendLanguage | "wasm" | "ios"} BackendLanguage */
 /** @typedef {SemanticLanguage | "html"} GeneratedTextLanguage */
 /** @typedef {"integer" | "boolean" | "string"} SemanticTypeName */
 /** @typedef {SemanticTypeName | "void"} FunctionReturnTypeName */
@@ -13,6 +13,50 @@
 /** @typedef {"declaration" | "type" | "construct" | "member" | "read" | "write" | "call"} SemanticSymbolRole */
 /** @typedef {"parse" | "generate" | "restore" | "compile" | "link" | "validate" | "instantiate" | "execute"} AcceptanceStage */
 /** @typedef {"entry" | "source" | "manifest" | "support" | "mapping" | "resource" | "loader"} GeneratedArtifactRole */
+
+/**
+ * @typedef IosApplicationConfigurationInput
+ * @property {string} productName - Safe Xcode product/path identity.
+ * @property {string} moduleName - Safe Swift module identity.
+ * @property {string} organizationPrefix - Caller-supplied reverse-DNS organization prefix.
+ * @property {string} bundleIdentifier - Caller-supplied reverse-DNS application bundle identity.
+ * @property {string} deploymentTarget - Caller-supplied major.minor iOS deployment target; never inferred.
+ * @property {string} displayName - User-visible application name.
+ * @property {"Sources"} [sourceRoot] - Fixed generated-source root.
+ * @property {"Assets.xcassets"} [resourceRoot] - Fixed caller-resource root.
+ * @property {"swiftui"} [lifecycle] - Sole supported lifecycle.
+ * @property {Record<string, never>} [infoPlist] - Closed baseline caller plist extension; currently empty.
+ * @property {unknown[]} [permissions] - Validated as the closed empty baseline permissions.
+ * @property {unknown[]} [entitlements] - Validated as the closed empty baseline entitlements.
+ * @property {unknown[]} [privacyDeclarations] - Validated as the closed empty baseline privacy declarations.
+ * @property {unknown[]} [capabilities] - Validated as the closed empty baseline Apple capabilities.
+ */
+
+/**
+ * @typedef IosApplicationConfiguration
+ * @property {string} productName - Validated Xcode product/path identity.
+ * @property {string} moduleName - Validated Swift module identity.
+ * @property {string} organizationPrefix - Validated reverse-DNS organization prefix.
+ * @property {string} bundleIdentifier - Validated reverse-DNS application bundle identity.
+ * @property {string} deploymentTarget - Validated caller-supplied deployment target.
+ * @property {string} displayName - Validated display name.
+ * @property {"Sources"} sourceRoot - Generated-source root.
+ * @property {"Assets.xcassets"} resourceRoot - Caller-resource root.
+ * @property {"swiftui"} lifecycle - Sole supported lifecycle.
+ * @property {Readonly<Record<string, never>>} infoPlist - Empty caller plist extension.
+ * @property {readonly never[]} permissions - Empty baseline permissions.
+ * @property {readonly never[]} entitlements - Empty baseline entitlements.
+ * @property {readonly never[]} privacyDeclarations - Empty baseline privacy declarations.
+ * @property {readonly never[]} capabilities - Empty baseline Apple capabilities.
+ */
+
+/**
+ * @typedef IosApplicationAssetInput
+ * @property {string} path - Full safe destination below Assets.xcassets.
+ * @property {string | Uint8Array} content - Exact caller-provided text or bytes.
+ * @property {string} mediaType - Explicit artifact media type.
+ * @property {string} sha256 - Lowercase SHA-256 of exact UTF-8 text or bytes.
+ */
 
 /**
  * @typedef LanguageRoleCapabilities

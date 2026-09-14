@@ -1,7 +1,7 @@
 // @ts-check
 
 import {isDenseArray} from "../array.js"
-import {isSafeArtifactPath} from "../artifact-path.js"
+import {isSafeArtifactPath, isSafeSourcePath} from "../artifact-path.js"
 import {createGeneratedArtifactSet} from "../artifacts.js"
 import {SemantifoldDiagnostic, unsupportedCapability, unsupportedRole} from "../diagnostic.js"
 import {parseProgramSource} from "../frontends/program.js"
@@ -20,34 +20,89 @@ import {generateStdlibProviderContent} from "./stdlib-support.js"
 import {validateBackendModule} from "./shared.js"
 import {programImportName, SourceWriter} from "./writer.js"
 
+/** @type {Readonly<Set<import("../semantic/types.js").SemanticLanguage>>} */
 const programTargets = new Set(["php", "ruby", "javascript", "typescript", "java"])
+/** @type {Readonly<Set<import("../semantic/types.js").BackendLanguage>>} */
+const programApplicationTargets = new Set(["ios"])
+
+/**
+ * Validates and prepares a complete semantic program for a non-text backend without allocating a writer.
+ * @param {object} input - Backend preflight request.
+ * @param {import("../semantic/types.js").SemanticLanguage} input.backendLanguage - Existing semantic backend profile to enforce.
+ * @param {import("../semantic/types.js").BackendLanguage} input.diagnosticLanguage - Public target identity for capability failures.
+ * @param {import("../semantic/types.js").SemanticProgram} input.program - Complete candidate program.
+ * @param {Readonly<Set<import("../semantic/types.js").SemanticLanguage>>} [input.sourceLanguages] - Accepted source provenance languages.
+ * @returns {{modules: import("../semantic/types.js").SemanticModule[], program: import("../semantic/types.js").SemanticProgram, sources: {content: string, filename: string, language?: import("../semantic/types.js").SemanticLanguage}[]}} Prepared immutable-input views.
+ */
+export function preflightSemanticProgram({backendLanguage, diagnosticLanguage, program: candidate, sourceLanguages}) {
+  try {
+    const program = validateProgram(candidate, backendLanguage, sourceLanguages)
+    const modules = prepareEmissionModules(program, backendLanguage)
+
+    validateProgramSourceOwnership(program, backendLanguage)
+    const sources = program.sources.map((source) => {
+      if (source.content === null) invalidProgramGeneration(`Program source '${source.filename}' has no retained content.`)
+
+      return {content: source.content, filename: source.filename, ...(source.language ? {language: source.language} : {})}
+    })
+
+    return {modules, program, sources}
+  } catch (error) {
+    if (error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" &&
+      error.language != diagnosticLanguage) {
+      throw new SemantifoldDiagnostic({
+        cause: error,
+        code: error.code,
+        language: diagnosticLanguage,
+        location: error.location,
+        message: error.detail
+      })
+    }
+    throw error
+  }
+}
 
 /**
  * Generates a complete deterministic mapped artifact set for one semantic program.
  * @param {object} input - Program generation request.
- * @param {import("../semantic/types.js").SemanticLanguage} input.language - Original-five target language.
+ * @param {import("../semantic/types.js").BackendLanguage} input.language - Registered program target.
  * @param {import("../semantic/types.js").SemanticProgram} input.program - Complete semantic program.
+ * @param {"text" | "application"} [input.role] - Explicit artifact role; omitted preserves text generation.
+ * @param {import("../semantic/types.js").IosApplicationConfigurationInput} [input.configuration] - iOS application configuration.
+ * @param {import("../semantic/types.js").IosApplicationAssetInput[]} [input.assets] - Exact iOS caller assets.
  * @returns {import("../semantic/types.js").GeneratedArtifactSet} Transactionally validated artifact set.
  */
 export function generateProgramArtifacts(input) {
   if (!isPlainObject(input) || typeof input.language != "string") invalidProgramGeneration("Program generation requires a target language and program.")
+  const role = input.role ?? "text"
+
+  if (role != "text" && role != "application") invalidProgramGeneration("Program artifact role must be 'text' or 'application'.")
   languageRegistry.record(input.language)
-  if (!programTargets.has(input.language)) unsupportedRole(input.language, "multi-file text backend")
-  const program = validateProgram(input.program, input.language)
-  const linking = planStdlibLinking(program, input.language)
-  const emissionModules = prepareEmissionModules(program, input.language, linking)
-  validateProgramSourceOwnership(program, input.language)
-  const paths = planModulePaths(program, input.language, linking)
+  if (role == "application") {
+    if (!programApplicationTargets.has(input.language)) unsupportedRole(input.language, "multi-file application backend")
+    const backend = languageRegistry.resolve(input.language, "applicationBackend")
+
+    return createGeneratedArtifactSet(backend(input))
+  }
+  if (!programTargets.has(/** @type {import("../semantic/types.js").SemanticLanguage} */ (input.language))) {
+    unsupportedRole(input.language, "multi-file text backend")
+  }
+  const language = /** @type {import("../semantic/types.js").SemanticLanguage} */ (input.language)
+  const program = validateProgram(input.program, language)
+  const linking = planStdlibLinking(program, language)
+  const emissionModules = prepareEmissionModules(program, language, linking)
+  validateProgramSourceOwnership(program, language)
+  const paths = planModulePaths(program, language, linking)
   const sources = program.sources.map((source) => {
     if (source.content === null) invalidProgramGeneration(`Program source '${source.filename}' has no retained content.`)
 
     return {content: source.content, filename: source.filename, ...(source.language ? {language: source.language} : {})}
   })
   const backend = /** @type {typeof import("./javascript.js").generateJavaScript} */ (
-    languageRegistry.resolve(input.language, "textBackend"))
-  const mediaType = languageRegistry.record(input.language).mediaType
+    languageRegistry.resolve(language, "textBackend"))
+  const mediaType = languageRegistry.record(language).mediaType
   /** @type {import("../semantic/types.js").GeneratedSetArtifact[]} */
-  const artifacts = input.language == "javascript" || input.language == "typescript" ? [{
+  const artifacts = language == "javascript" || language == "typescript" ? [{
     content: "{\n  \"type\": \"module\"\n}\n",
     contentKind: /** @type {const} */ ("text"),
     mediaType: "application/json",
@@ -61,12 +116,12 @@ export function generateProgramArtifacts(input) {
     role: "manifest"
   }] : []
 
-  if (linking && input.language != "java") {
+  if (linking && language != "java") {
     for (const provider of linking.negotiation.providers) {
       const record = /** @type {import("../stdlib-providers.js").StdlibProviderRecord} */ (linking.records.get(provider.module))
 
       artifacts.push({
-        content: generateStdlibProviderContent(/** @type {"php" | "ruby" | "javascript" | "typescript"} */ (input.language),
+        content: generateStdlibProviderContent(/** @type {"php" | "ruby" | "javascript" | "typescript"} */ (language),
           [...provider.operations], provider.module),
         contentKind: /** @type {const} */ ("text"),
         mediaType: record.artifact.mediaType,
@@ -87,7 +142,7 @@ export function generateProgramArtifacts(input) {
     const filename = /** @type {string} */ (paths.get(moduleId))
     const writer = new SourceWriter({
       filename,
-      language: input.language,
+      language,
       module: emissionModule,
       program,
       programPaths: paths,
@@ -97,10 +152,10 @@ export function generateProgramArtifacts(input) {
           qualifiedOperationKey(module, operation),
           /** @type {string} */ (linking.records.get(module)?.nativeEntries[operation])
         ])),
-        stdlibProviderImports: input.language == "java" || input.language == "javascript" || input.language == "typescript" ?
+        stdlibProviderImports: language == "java" || language == "javascript" || language == "typescript" ?
           linking.providerImportsByModule.get(moduleId) : undefined,
         stdlibProviderPaths: linking.providerPathsByModule.get(moduleId),
-        ...(input.language == "java" ? {
+        ...(language == "java" ? {
           stdlibProviderOwnerModule: /** @type {string} */ (linking.ownerModuleId),
           stdlibProviderShims: moduleId == linking.ownerModuleId ? linking.usedOperations.map(({operation}) => operation) : undefined
         } : {})
@@ -130,7 +185,7 @@ export function generateProgramArtifacts(input) {
   return createGeneratedArtifactSet({
     artifacts,
     ...(linking || program.stdlibFacades ? {metadata: stdlibLinkMetadata(linking, paths, program.stdlibFacades)} : {}),
-    target: input.language
+    target: language
   })
 }
 
@@ -686,9 +741,10 @@ function prepareEmissionModules(program, language, linking = null) {
  * Validates the closed parser-neutral program graph before any target emission.
  * @param {unknown} candidate - Candidate semantic program.
  * @param {import("../semantic/types.js").SemanticLanguage} language - Target language.
+ * @param {Readonly<Set<import("../semantic/types.js").SemanticLanguage>>} [sourceLanguages] - Accepted source languages.
  * @returns {import("../semantic/types.js").SemanticProgram} Validated program.
  */
-function validateProgram(candidate, language) {
+function validateProgram(candidate, language, sourceLanguages = programTargets) {
   if (!isPlainObject(candidate) || candidate.kind != "Program" || typeof candidate.entryModule != "string" ||
     !isDenseArray(candidate.modules) || candidate.modules.length == 0 || !isDenseArray(candidate.sources) || candidate.sources.length == 0) {
     invalidProgramGeneration("Malformed semantic program.")
@@ -705,8 +761,8 @@ function validateProgram(candidate, language) {
 
   for (const source of program.sources) {
     if (!isPlainObject(source) || typeof source.id != "string" || sourceIds.has(source.id) ||
-      typeof source.filename != "string" || !isSafeArtifactPath(source.filename) || sourceFilenames.has(source.filename) ||
-      typeof source.content != "string" || typeof source.language != "string" || !programTargets.has(source.language)) {
+      typeof source.filename != "string" || !isSafeSourcePath(source.filename) || sourceFilenames.has(source.filename) ||
+      typeof source.content != "string" || typeof source.language != "string" || !sourceLanguages.has(source.language)) {
       invalidProgramGeneration("Malformed or duplicate semantic program source registry.")
     }
     sourceIds.add(source.id)

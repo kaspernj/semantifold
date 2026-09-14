@@ -5,6 +5,25 @@ import {describe, it} from "@velocious/testing"
 import {generateProgramArtifactSet, parseProgram, SemantifoldDiagnostic} from "../index.js"
 
 describe("multi-file backend diagnostics", () => {
+  it("rejects program application dispatch to a single-module application backend", () => {
+    const program = parseProgram({
+      entryModule: "main",
+      sources: [{
+        filename: "main.ts",
+        id: "main",
+        language: "typescript",
+        source: "console.log(1)\n"
+      }]
+    })
+
+    assert.throws(
+      () => generateProgramArtifactSet({language: "wasm", program, role: "application"}),
+      (error) => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_ROLE" &&
+        error.language == "wasm" &&
+        error.detail == "Registered language or target does not provide role 'multi-file application backend'."
+    )
+  })
+
   it("rejects unsupported target profiles and unavailable Java public-file layouts before generation", () => {
     const program = parseProgram({
       entryModule: "a",

@@ -3,6 +3,7 @@
 import {hasOnlyUnicodeScalars} from "./semantic/scalars.js"
 
 const lineTerminatorPattern = /[\n\r\u2028\u2029]/u
+const portableArtifactComponentPattern = /^[A-Za-z0-9._-]+$/u
 
 /**
  * Validates filename metadata without imposing artifact-set path semantics.
@@ -14,11 +15,11 @@ export function isValidFilenameMetadata(value) {
 }
 
 /**
- * Validates a safe relative POSIX artifact path.
+ * Validates a safe relative POSIX source path while retaining Unicode filename metadata.
  * @param {unknown} value - Candidate path.
  * @returns {value is string} Whether the value is safe.
  */
-export function isSafeArtifactPath(value) {
+export function isSafeSourcePath(value) {
   if (typeof value != "string" || value.length == 0 || value.includes("\\") || value.includes("\0") ||
     !hasOnlyUnicodeScalars(value)) return false
   if (value.startsWith("/") || /^[A-Za-z]:/u.test(value)) return false
@@ -31,4 +32,48 @@ export function isSafeArtifactPath(value) {
 
       return codePoint != undefined && codePoint > 31 && codePoint != 127
     }))
+}
+
+/**
+ * Validates a safe portable artifact/resource path in the closed ASCII comparison domain.
+ * @param {unknown} value - Candidate path.
+ * @returns {value is string} Whether the value is safe and portably comparable.
+ */
+export function isSafeArtifactPath(value) {
+  return isSafeSourcePath(value) && value.split("/").every(part => portableArtifactComponentPattern.test(part))
+}
+
+/**
+ * Produces a conservative portable comparison key for a validated artifact path.
+ * @param {string} value - Safe relative POSIX path.
+ * @returns {string} Complete ASCII case-fold key.
+ */
+export function portableArtifactPathKey(value) {
+  return value.toLowerCase()
+}
+
+/**
+ * Finds the first unsafe, duplicate, portable case-fold, or file/directory-prefix conflict.
+ * @param {readonly string[]} paths - Ordered candidate artifact paths.
+ * @returns {{kind: "case-fold" | "duplicate" | "prefix" | "unsafe", path: string, other?: string} | null} First conflict.
+ */
+export function findPortableArtifactPathConflict(paths) {
+  /** @type {{key: string, path: string}[]} */
+  const accepted = []
+
+  for (const path of paths) {
+    if (!isSafeArtifactPath(path)) return {kind: "unsafe", path: String(path)}
+    const key = portableArtifactPathKey(path)
+
+    for (const previous of accepted) {
+      if (path == previous.path) return {kind: "duplicate", other: previous.path, path}
+      if (key == previous.key) return {kind: "case-fold", other: previous.path, path}
+      if (key.startsWith(`${previous.key}/`) || previous.key.startsWith(`${key}/`)) {
+        return {kind: "prefix", other: previous.path, path}
+      }
+    }
+    accepted.push({key, path})
+  }
+
+  return null
 }

@@ -9,7 +9,7 @@ describe("closed record language registry capability", () => {
       "php", "ruby", "javascript", "typescript", "java"
     ])
     expect(languageCapabilities.filter(({features}) => !features.closedRecords).map(({id}) => id)).toEqual([
-      "kotlin", "python", "csharp", "go", "c", "cpp", "rust", "swift", "wasm"
+      "kotlin", "python", "csharp", "go", "c", "cpp", "rust", "swift", "wasm", "ios"
     ])
   })
 })

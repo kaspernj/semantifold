@@ -1,6 +1,7 @@
 // @ts-check
 
 import {describe, expect, it} from "@velocious/testing"
+import * as semantifold from "../index.js"
 import {
   canonicalToolchains,
   composeMappings,
@@ -89,5 +90,32 @@ describe("public API", () => {
       stringifyMapping,
       toSourceMapV3
     ]) expect(typeof api).toEqual("function")
+    expect(Object.keys(semantifold).filter(name => /materializ/iu.test(name))).toEqual([])
+  })
+
+  it("routes iOS application requests without changing default text program generation", () => {
+    const source = "function sum(left: number, right: number): number { return left + right; } console.log(sum(4, 9));"
+    const module = parse({filename: "source.ts", language: "typescript", source})
+    const program = parseProgram({
+      entryModule: "main",
+      sources: [{filename: "source.ts", id: "main", language: "typescript", source}]
+    })
+
+    expect(generateProgramArtifactSet({language: "typescript", program}).target).toEqual("typescript")
+    const configuration = {
+      bundleIdentifier: "com.example.semantifold",
+      deploymentTarget: "18.0",
+      displayName: "Semantifold",
+      moduleName: "SemantifoldApp",
+      organizationPrefix: "com.example",
+      productName: "SemantifoldApp"
+    }
+    const moduleSet = generateArtifactSet({configuration, language: "ios", module, role: "application"})
+    const programSet = generateProgramArtifactSet({configuration, language: "ios", program, role: "application"})
+
+    expect(moduleSet.target).toEqual("ios")
+    expect(programSet.target).toEqual("ios")
+    expect(moduleSet.artifacts.map(({path}) => path)).toContain("Sources/Generated/Main.swift")
+    expect(programSet.artifacts.map(({path}) => path)).toContain("Sources/Generated/Main.swift")
   })
 })

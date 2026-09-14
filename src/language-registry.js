@@ -14,6 +14,7 @@ import {generatePython} from "./backends/python.js"
 import {generateRuby} from "./backends/ruby.js"
 import {generateTypeScript} from "./backends/typescript.js"
 import {generateBrowserWasm} from "./backends/wasm.js"
+import {generateIosApplication} from "./backends/ios.js"
 import {parseJava} from "./frontends/java.js"
 import {parseKotlin} from "./frontends/kotlin.js"
 import {parseCSharp} from "./frontends/csharp.js"
@@ -230,11 +231,13 @@ export function createLanguageRegistry(candidateRecords) {
       invalidRegistry(`Registry record '${id}' declares an acceptance stage without its required role.`, id)
     }
 
-    if ((hasBackend || candidate.defaultFilename !== undefined) &&
+    const hasDefaultedBackend = hasTextBackend || hasBinaryBackend
+
+    if ((hasDefaultedBackend || candidate.defaultFilename !== undefined) &&
       (typeof candidate.defaultFilename != "string" || candidate.defaultFilename.length == 0)) {
       invalidRegistry(`Registry backend '${id}' requires a default filename.`, id)
     }
-    if ((hasBackend || candidate.mediaType !== undefined) &&
+    if ((hasDefaultedBackend || candidate.mediaType !== undefined) &&
       (typeof candidate.mediaType != "string" || candidate.mediaType.length == 0)) {
       invalidRegistry(`Registry backend '${id}' requires a media type.`, id)
     }
@@ -466,6 +469,15 @@ const records = [
     id: "wasm",
     mapping: {binaryRanges: true, richText: true, sourceMapV3: true},
     mediaType: "application/wasm",
+    roundTrip: false
+  },
+  {
+    acceptance: {stages: ["generate"], toolchains: []},
+    applicationBackend: generateIosApplication,
+    artifactMultiplicity: "multiple",
+    features: {closedRecords: false, conditionControlledLoops: false, effectfulCapabilitiesAndResources: false, generalFunctionsAndCalls: false, immutableCollections: false, optionalValues: false, orderedListIteration: false, orderedMapIteration: false, referenceClasses: false, typedErrors: false, typeParametersAndGenerics: false},
+    id: "ios",
+    mapping: {binaryRanges: true, richText: true, sourceMapV3: true},
     roundTrip: false
   }
 ]

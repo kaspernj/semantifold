@@ -2,7 +2,7 @@
 
 import {unsupportedCapability} from "../diagnostic.js"
 
-/** @type {Record<import("../semantic/types.js").BackendLanguage, RegExp>} */
+/** @type {Record<Exclude<import("../semantic/types.js").BackendLanguage, "ios">, RegExp>} */
 const identifierPatterns = {
   kotlin: /^(?:_|\p{L})(?:_|\p{L}|\p{Nd})*$/u,
   swift: /^(?:_|\p{XID_Start})(?:_|\p{XID_Continue})*$/u,
@@ -20,7 +20,7 @@ const identifierPatterns = {
   wasm: /^(?:[$_]|\p{XID_Start})(?:[$_]|\p{XID_Continue})*$/u
 }
 
-/** @type {Record<import("../semantic/types.js").BackendLanguage, Set<string>>} */
+/** @type {Record<Exclude<import("../semantic/types.js").BackendLanguage, "ios">, Set<string>>} */
 const reservedWords = {
   kotlin: new Set([
     "as", "break", "class", "continue", "do", "else", "false", "for", "fun", "if", "in", "interface", "is", "null",
@@ -207,8 +207,9 @@ export function validateTargetIdentifier(language, name, role, location) {
   if (typeof name != "string") unsupportedCapability(language, `${role} identifier`, location)
 
   const reservedName = language == "php" ? name.toLowerCase() : name
+  const syntaxLanguage = language == "ios" ? "swift" : language
 
-  if (!identifierPatterns[language].test(name) || reservedWords[language].has(reservedName) ||
+  if (!identifierPatterns[syntaxLanguage].test(name) || reservedWords[syntaxLanguage].has(reservedName) ||
     language == "python" && name.normalize("NFKC") != name ||
     language == "c" && !isCIdentifier(name) ||
     language == "rust" && !isRustIdentifier(name) ||
@@ -264,8 +265,9 @@ export function validateTargetTypeIdentifier(language, name, location) {
     unsupportedCapability(language, `record type identifier '${String(name)}'`, location)
   }
   const reservedName = language == "php" ? name.toLowerCase() : name
+  const syntaxLanguage = language == "ios" ? "swift" : language
 
-  if (reservedWords[language].has(reservedName) || reservedTypeNames[language]?.has(reservedName)) {
+  if (reservedWords[syntaxLanguage].has(reservedName) || reservedTypeNames[language]?.has(reservedName)) {
     unsupportedCapability(language, `record type identifier '${name}'`, location)
   }
 }

@@ -1,7 +1,7 @@
 // @ts-check
 
 import {isDenseArray} from "../array.js"
-import {isSafeArtifactPath} from "../artifact-path.js"
+import {isSafeSourcePath} from "../artifact-path.js"
 import {SemantifoldDiagnostic, semanticFailure, unsupportedCapability, unsupportedRole} from "../diagnostic.js"
 import {languageRegistry} from "../language-registry.js"
 import {normalizeCapabilityAuthority} from "../semantic/capabilities.js"
@@ -742,7 +742,7 @@ function validateSource(candidate, index) {
     return invalidProgram(`Program source ${index} requires a stable module ID, safe filename, language, and source text.`)
   }
   if (!isPlainObject(candidate) || typeof candidate.id != "string" || !moduleIdPattern.test(candidate.id) ||
-    typeof candidate.filename != "string" || !isSafeArtifactPath(candidate.filename) ||
+    typeof candidate.filename != "string" || !isSafeSourcePath(candidate.filename) ||
     typeof candidate.source != "string" || typeof candidate.language != "string") {
     invalidProgram(`Program source ${index} requires a stable module ID, safe filename, language, and source text.`)
   }

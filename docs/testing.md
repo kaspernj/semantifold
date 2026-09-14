@@ -452,6 +452,23 @@ The packed-consumer test installs the single root tarball, retains only plain fr
 
 Required local gates remain runtime consistency, focused named specs, lint, root/workspace strict typecheck and build, high-severity audit, production/all dependency listings, pack dry-run and diff check. TensorBuzz alone owns full/native aggregate discovery for the exact candidate head. Review, external package boundary, CI, merge and post-merge evidence remain coordinator-owned.
 
+## Task026 iOS application generation acceptance
+
+Task 026's implemented Linux generation/provenance scope is kept in two focused files. Run them individually and sequentially; do not replace them with local spec-directory discovery or a broad suite:
+
+```sh
+npx velocious-test spec/ios-application.spec.js
+npx velocious-test spec/ios-packed-consumer.spec.js
+```
+
+`ios-application.spec.js` validates the complete Task 010 graph, closed configuration/assets, the portable ASCII artifact/resource path boundary, deterministic project/SwiftUI artifacts, renderer-owned configuration ranges, stable semantic-program manifest identities/linkage, Xcode-ID collision handling, and byte-identical double generation. Its Linux execution case discovers the real canonical Ruby and Swift 6.3.3 commands, runs the original Ruby modules, combines only the generated semantic Swift/runtime with a test harness, then typechecks, compiles, and executes debug and `-O` binaries. Exact Unicode `[String]` output/order must match; an absent Ruby or Swift command fails.
+
+`ios-packed-consumer.spec.js` runs the real root packing lifecycle, proves the package contains no materializer implementation or declarations, then uses empty user/global npm configurations, an explicit public registry, default `install-links=false`, and case-insensitive removal of inherited npm config/token variables. Separate fresh caches cover ordinary `npm install` and clean `npm ci`; each phase runs production/all dependency listings, deterministic public iOS generation with manifest identity checks, and strict TypeScript consumption.
+
+Transactional create-only directory materialization is deferred. Node's public filesystem API cannot provide both genuine atomic no-replace publication of a complete directory and descriptor-relative no-follow staging/publication/cleanup. No best-effort materializer test or package surface substitutes for a separately authorized native boundary.
+
+These are not Apple platform acceptance. Per the 2026-09-14 owner direction to defer OSX work, no local or TensorBuzz command runs `xcodebuild`, downloads an Apple runtime, boots/installs/launches an iOS Simulator, configures signing, or executes XCTest/XCUIAutomation. AC07 and AC12–AC14 remain deferred, missing prerequisites may not be skipped to green, and no fake acceptance spec or manufactured TensorBuzz lane is permitted. The [iOS application target](ios.md) records the precise partial status.
+
 ## Task022 Swift acceptance
 
 Swift generation returns exactly one mapped `program.swift`. Focused frontend/backend specs cover all five Tasks001–004 fixtures, parser recovery, excluded syntax, malformed IR, target identifiers, compile-time-known signed-64-bit overflow, deterministic artifacts, rich/V3 provenance, exact helper validation, generated reparse, every Swift-to-original-five runtime route, and one original-five-to-Swift route per profile. Original-five execution invokes real PHP, Ruby, Node, TypeScript/Node, and Java compiler/runtime commands; unavailable tools fail.
