@@ -97,6 +97,24 @@ describe("iOS application project validation", () => {
     expect(swiftModule).toEqual(before)
   })
 
+  it("normalizes Tasks 001-004 modules from every registered source cohort without source discovery", () => {
+    const python = parse({
+      filename: "program.py",
+      language: "python",
+      source: `def difference(left: int, right: int) -> int:
+    if left > right:
+        return left - right
+    else:
+        return right - left
+
+print(difference(4, 9))
+`
+    })
+    const set = generateArtifactSet({configuration: configuration(), language: "ios", module: python, role: "application"})
+
+    expect(set.artifacts.find(({path}) => path == "Sources/Generated/Main.swift")?.provenance.kind).toEqual("text")
+  })
+
   it("rejects unsupported semantics across the whole graph as located iOS capabilities", () => {
     const collectionSource = `# @param left [Array[Integer]]
 # @param right [Array[Integer]]
