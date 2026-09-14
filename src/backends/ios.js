@@ -11,7 +11,7 @@ import {preflightSemanticProgram} from "./program.js"
 import {emitScalarType, emitStringLiteral} from "./scalars.js"
 import {SourceWriter} from "./writer.js"
 
-/** @type {ReadonlySet<import("../semantic/types.js").SemanticLanguage>} */
+/** @type {Readonly<Set<import("../semantic/types.js").SemanticLanguage>>} */
 const iosSourceLanguages = new Set(["php", "ruby", "javascript", "typescript", "java", "swift"])
 const configurationFields = new Set([
   "bundleIdentifier", "capabilities", "deploymentTarget", "displayName", "entitlements", "infoPlist", "lifecycle",
@@ -280,13 +280,14 @@ function configurationOutputCitations(artifacts, value) {
 
   for (const artifact of artifacts) {
     if (artifact.contentKind != "text") continue
+    const content = /** @type {string} */ (artifact.content)
     /** @type {{end: number, start: number}[]} */
     const ranges = []
-    let start = artifact.content.indexOf(value)
+    let start = content.indexOf(value)
 
     while (start >= 0) {
       ranges.push({end: start + value.length, start})
-      start = artifact.content.indexOf(value, start + value.length)
+      start = content.indexOf(value, start + value.length)
     }
     if (ranges.length > 0) outputs.push({path: artifact.path, ranges})
   }
@@ -439,6 +440,11 @@ function renderPbxProject(prepared, paths) {
     "build:app:Assets.xcassets", `build:tests:${paths.unitTest}`, `build:uitests:${paths.uiTest}`
   ]
   const ids = allocateXcodeObjectIds(identities)
+  /**
+   * Looks up one planned Xcode identity.
+   * @param {string} identity - Planned identity.
+   * @returns {string} Allocated object ID.
+   */
   const id = identity => {
     const value = ids.get(identity)
 
@@ -448,13 +454,29 @@ function renderPbxProject(prepared, paths) {
   }
   /** @type {Map<string, {identity: string, body: string[]}[]>} */
   const sections = new Map()
+  /**
+   * Adds an object to one PBX section.
+   * @param {string} section - PBX section.
+   * @param {string} identity - Object identity.
+   * @param {string[]} body - Object fields.
+   */
   const add = (section, identity, body) => {
     const entries = sections.get(section) ?? []
 
     entries.push({body, identity})
     sections.set(section, entries)
   }
+  /**
+   * Renders PBX list values.
+   * @param {string[]} values - PBX list values.
+   * @returns {string} Rendered list body.
+   */
   const list = values => values.map(value => `\t\t\t\t${value},`).join("\n")
+  /**
+   * Produces a stable sorted copy.
+   * @param {string[]} values - Values to sort.
+   * @returns {string[]} Stable sorted copy.
+   */
   const sorted = values => [...values].sort((left, right) => left < right ? -1 : left > right ? 1 : 0)
 
   for (const path of paths.appSources) {
@@ -568,8 +590,24 @@ function renderPbxProject(prepared, paths) {
   return output
 }
 
-/** @param {(section: string, identity: string, body: string[]) => void} add - Object sink. @param {(identity: string) => string} id - ID lookup. @param {string} identity - Target identity. @param {string} name - Product name. @param {string} productType - Product type. @param {string} productReference - Product reference identity. @param {string} configurationList - Configuration list identity. @param {string[]} phases - Phase identities. @param {string[]} dependencies - Dependency identities. */
+/**
+ * Adds one native target object to the project model.
+ * @param {(section: string, identity: string, body: string[]) => void} add - Object sink.
+ * @param {(identity: string) => string} id - ID lookup.
+ * @param {string} identity - Target identity.
+ * @param {string} name - Product name.
+ * @param {string} productType - Product type.
+ * @param {string} productReference - Product reference identity.
+ * @param {string} configurationList - Configuration list identity.
+ * @param {string[]} phases - Phase identities.
+ * @param {string[]} dependencies - Dependency identities.
+ */
 function addNativeTarget(add, id, identity, name, productType, productReference, configurationList, phases, dependencies) {
+  /**
+   * Renders target identity values.
+   * @param {string[]} values - Target identity values.
+   * @returns {string} Rendered target list.
+   */
   const lines = values => values.map(value => `\t\t\t\t${id(value)},`).join("\n")
 
   add("PBXNativeTarget", identity, ["isa = PBXNativeTarget;", `buildConfigurationList = ${id(configurationList)};`,
@@ -578,7 +616,14 @@ function addNativeTarget(add, id, identity, name, productType, productReference,
     `productType = ${pbxString(productType)};`])
 }
 
-/** @param {(section: string, identity: string, body: string[]) => void} add - Object sink. @param {(identity: string) => string} id - ID lookup. @param {string} section - Phase ISA. @param {string} identity - Phase identity. @param {string[]} files - Build-file identities. */
+/**
+ * Adds one build phase to the project model.
+ * @param {(section: string, identity: string, body: string[]) => void} add - Object sink.
+ * @param {(identity: string) => string} id - ID lookup.
+ * @param {string} section - Phase ISA.
+ * @param {string} identity - Phase identity.
+ * @param {string[]} files - Build-file identities.
+ */
 function addBuildPhase(add, id, section, identity, files) {
   const lines = files.map(file => `\t\t\t\t${id(file)},`).join("\n")
 
@@ -586,7 +631,14 @@ function addBuildPhase(add, id, section, identity, files) {
     "runOnlyForDeploymentPostprocessing = 0;"])
 }
 
-/** @param {string} owner - Configuration owner. @param {string} variant - debug/release. @param {import("../semantic/types.js").IosApplicationConfiguration} configuration - App config. @param {ReturnType<typeof applicationArtifactPaths>} paths - Paths. @returns {string} Sorted PBX build settings. */
+/**
+ * Renders sorted PBX build settings for one owner and variant.
+ * @param {string} owner - Configuration owner.
+ * @param {string} variant - Debug or release.
+ * @param {import("../semantic/types.js").IosApplicationConfiguration} configuration - Application configuration.
+ * @param {ReturnType<typeof applicationArtifactPaths>} paths - Planned paths.
+ * @returns {string} Sorted PBX build settings.
+ */
 function buildSettings(owner, variant, configuration, paths) {
   /** @type {Record<string, string>} */
   const values = owner == "project" ? {
@@ -620,17 +672,32 @@ function buildSettings(owner, variant, configuration, paths) {
   return Object.keys(values).sort().map(key => `\t\t\t\t${key} = ${values[key]};`).join("\n")
 }
 
-/** @param {string} value - PBX scalar. @returns {string} Safely quoted PBX scalar. */
+/**
+ * Quotes one PBX scalar.
+ * @param {string} value - PBX scalar.
+ * @returns {string} Safely quoted PBX scalar.
+ */
 function pbxString(value) {
   return JSON.stringify(value)
 }
 
-/** @param {ReturnType<typeof preflightIosApplication>} prepared - Prepared application. @returns {string} Shared scheme XML. */
+/**
+ * Renders the shared scheme XML.
+ * @param {ReturnType<typeof preflightIosApplication>} prepared - Prepared application.
+ * @returns {string} Shared scheme XML.
+ */
 function renderSharedScheme(prepared) {
   const product = prepared.configuration.productName
   const appId = allocateXcodeObjectIds(["target:app"]).get("target:app")
   const testId = allocateXcodeObjectIds(["target:tests"]).get("target:tests")
   const uiTestId = allocateXcodeObjectIds(["target:uitests"]).get("target:uitests")
+  /**
+   * Renders one scheme buildable reference.
+   * @param {string} name - Blueprint name.
+   * @param {string} buildable - Product filename.
+   * @param {string | undefined} id - Object ID.
+   * @returns {string} XML reference.
+   */
   const reference = (name, buildable, id) => `<BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "${id}"
@@ -674,7 +741,11 @@ function renderSharedScheme(prepared) {
 `
 }
 
-/** @param {import("../semantic/types.js").IosApplicationConfiguration} configuration - Config. @returns {string} xcconfig. */
+/**
+ * Renders the closed unsigned base configuration.
+ * @param {import("../semantic/types.js").IosApplicationConfiguration} configuration - Application configuration.
+ * @returns {string} Base xcconfig.
+ */
 function renderBaseConfiguration(configuration) {
   return `CODE_SIGNING_ALLOWED = NO
 CODE_SIGNING_REQUIRED = NO
@@ -689,7 +760,11 @@ TARGETED_DEVICE_FAMILY = 1
 `
 }
 
-/** @param {import("../semantic/types.js").IosApplicationConfiguration} configuration - Config. @returns {string} plist XML. */
+/**
+ * Renders the allowlisted application property list.
+ * @param {import("../semantic/types.js").IosApplicationConfiguration} configuration - Application configuration.
+ * @returns {string} Property-list XML.
+ */
 function renderInfoPlist(configuration) {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -720,7 +795,11 @@ function renderInfoPlist(configuration) {
 `
 }
 
-/** @param {import("../semantic/types.js").IosApplicationConfiguration} configuration - Config. @returns {string} XCTest source. */
+/**
+ * Renders pure-logic XCTest source.
+ * @param {import("../semantic/types.js").IosApplicationConfiguration} configuration - Application configuration.
+ * @returns {string} XCTest source.
+ */
 function renderUnitTests(configuration) {
   return `import XCTest
 @testable import ${configuration.moduleName}
@@ -741,7 +820,11 @@ final class ${configuration.productName}Tests: XCTestCase {
 `
 }
 
-/** @param {import("../semantic/types.js").IosApplicationConfiguration} configuration - Config. @returns {string} XCUI source. */
+/**
+ * Renders the accessibility-route XCUI source.
+ * @param {import("../semantic/types.js").IosApplicationConfiguration} configuration - Application configuration.
+ * @returns {string} XCUI source.
+ */
 function renderUiTests(configuration) {
   return `import XCTest
 
@@ -755,7 +838,11 @@ final class ${configuration.productName}UITests: XCTestCase {
 `
 }
 
-/** @param {string} value - XML text/attribute value. @returns {string} Escaped value. */
+/**
+ * Escapes XML text and attribute content.
+ * @param {string} value - XML text or attribute value.
+ * @returns {string} Escaped value.
+ */
 function xmlEscape(value) {
   return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
     .replaceAll("\"", "&quot;").replaceAll("'", "&apos;")
@@ -782,12 +869,20 @@ function syntheticText(path, role, content, reason) {
   }
 }
 
-/** @param {unknown} value - JSON value. @returns {string} Canonical JSON with LF. */
+/**
+ * Serializes recursively sorted canonical JSON with an LF.
+ * @param {unknown} value - JSON value.
+ * @returns {string} Canonical JSON with LF.
+ */
 function stringifyCanonicalJson(value) {
   return `${JSON.stringify(sortJson(value), null, 2)}\n`
 }
 
-/** @param {unknown} value - JSON value. @returns {unknown} Recursively key-sorted JSON. */
+/**
+ * Recursively sorts JSON object keys without reordering arrays.
+ * @param {unknown} value - JSON value.
+ * @returns {unknown} Recursively key-sorted JSON.
+ */
 function sortJson(value) {
   if (Array.isArray(value)) return value.map(sortJson)
   if (!isPlainObject(value)) return value
@@ -829,7 +924,7 @@ function normalizeConfiguration(candidate) {
     invalidConfiguration("Deployment target must be a caller-supplied canonical major.minor version.")
   }
   if (typeof displayName != "string" || displayName.length == 0 || displayName.trim() != displayName ||
-    [...displayName].length > 64 || !hasOnlyUnicodeScalars(displayName) || /[\u0000-\u001f\u007f-\u009f]/u.test(displayName)) {
+    [...displayName].length > 64 || !hasOnlyUnicodeScalars(displayName) || /\p{Cc}/u.test(displayName)) {
     invalidConfiguration("Display name must be a non-empty single-line Unicode scalar string of at most 64 characters.")
   }
   const sourceRoot = candidate.sourceRoot ?? "Sources"
@@ -858,18 +953,23 @@ function normalizeConfiguration(candidate) {
     displayName,
     entitlements,
     infoPlist: {},
-    lifecycle,
+    lifecycle: "swiftui",
     moduleName,
     organizationPrefix,
     permissions,
     privacyDeclarations,
     productName,
-    resourceRoot,
-    sourceRoot
+    resourceRoot: "Assets.xcassets",
+    sourceRoot: "Sources"
   }
 }
 
-/** @param {unknown} candidate - Optional closed set. @param {string} label - Diagnostic label. @returns {never[]} Empty snapshot. */
+/**
+ * Validates one optional closed empty configuration set.
+ * @param {unknown} candidate - Optional closed set.
+ * @param {string} label - Diagnostic label.
+ * @returns {never[]} Empty snapshot.
+ */
 function emptyConfigurationSet(candidate, label) {
   if (candidate === undefined) return []
   if (!isDenseArray(candidate) || candidate.length != 0) invalidConfiguration(`The baseline ${label} set must be empty.`)
@@ -877,7 +977,12 @@ function emptyConfigurationSet(candidate, label) {
   return []
 }
 
-/** @param {string} value - Candidate identity. @param {number} segments - Minimum segments. @returns {boolean} Validity. */
+/**
+ * Tests one canonical lowercase reverse-DNS identity.
+ * @param {string} value - Candidate identity.
+ * @param {number} segments - Minimum segments.
+ * @returns {boolean} Validity.
+ */
 function isReverseDns(value, segments) {
   const parts = value.split(".")
 
@@ -928,7 +1033,11 @@ function normalizeAssets(candidate, resourceRoot) {
   return assets
 }
 
-/** @param {import("../semantic/types.js").IosApplicationAssetInput} asset - Validated asset. @returns {import("../semantic/types.js").GeneratedSetArtifact} Artifact candidate. */
+/**
+ * Creates an exact text or binary asset artifact.
+ * @param {import("../semantic/types.js").IosApplicationAssetInput} asset - Validated asset.
+ * @returns {import("../semantic/types.js").GeneratedSetArtifact} Artifact candidate.
+ */
 function assetArtifact(asset) {
   if (typeof asset.content == "string") return {
     content: asset.content,
@@ -960,17 +1069,29 @@ function assetArtifact(asset) {
   }
 }
 
-/** @param {string} message - Failure detail. @returns {never} Always throws. */
+/**
+ * Throws a configuration diagnostic.
+ * @param {string} message - Failure detail.
+ * @returns {never} Always throws.
+ */
 function invalidConfiguration(message) {
   throw new SemantifoldDiagnostic({code: "INVALID_APPLICATION_CONFIGURATION", language: "ios", message})
 }
 
-/** @param {string} message - Failure detail. @returns {never} Always throws. */
+/**
+ * Throws an asset diagnostic.
+ * @param {string} message - Failure detail.
+ * @returns {never} Always throws.
+ */
 function invalidAsset(message) {
   throw new SemantifoldDiagnostic({code: "INVALID_APPLICATION_ASSET", language: "ios", message})
 }
 
-/** @param {string} message - Failure detail. @returns {never} Always throws. */
+/**
+ * Throws an application-path diagnostic.
+ * @param {string} message - Failure detail.
+ * @returns {never} Always throws.
+ */
 function invalidPath(message) {
   throw new SemantifoldDiagnostic({code: "INVALID_APPLICATION_PATH", language: "ios", message})
 }
@@ -1161,7 +1282,11 @@ function emitExpression(writer, expression, path, declarations) {
   writer.mapped(")", {mappingKind: "anchor", node: expression, path})
 }
 
-/** @param {string} id - Logical module identity. @returns {string} Deterministic Swift namespace suffix and filename. */
+/**
+ * Converts a validated logical module identity to its Swift namespace suffix.
+ * @param {string} id - Logical module identity.
+ * @returns {string} Deterministic Swift namespace suffix and filename.
+ */
 function moduleName(id) {
   return id.split(/[._-]+/u).map(part => `${part[0].toUpperCase()}${part.slice(1)}`).join("")
 }
@@ -1236,7 +1361,11 @@ function rekeyModuleDeclarations(module, moduleId) {
   }
   const seen = new Set()
   const identityFields = new Set(["classId", "declarationId", "field", "method", "parameterId"])
-  /** @param {unknown} value - Candidate semantic subtree. */
+  /**
+   * Rewrites declaration identities in one cloned semantic subtree.
+   * @param {unknown} value - Candidate semantic subtree.
+   * @returns {void}
+   */
   function visit(value) {
     if (!value || typeof value != "object" || seen.has(value)) return
     seen.add(value)
@@ -1251,7 +1380,11 @@ function rekeyModuleDeclarations(module, moduleId) {
   visit(module)
 }
 
-/** @param {unknown} value - Candidate request. @returns {value is Record<string, unknown>} Whether it is a plain object. */
+/**
+ * Tests for a plain request object.
+ * @param {unknown} value - Candidate request.
+ * @returns {value is Record<string, unknown>} Whether it is a plain object.
+ */
 function isPlainObject(value) {
   return Boolean(value) && typeof value == "object" && !Array.isArray(value) && Object.getPrototypeOf(value) == Object.prototype
 }

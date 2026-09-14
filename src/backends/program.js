@@ -20,6 +20,7 @@ import {generateStdlibProviderContent} from "./stdlib-support.js"
 import {validateBackendModule} from "./shared.js"
 import {programImportName, SourceWriter} from "./writer.js"
 
+/** @type {Readonly<Set<import("../semantic/types.js").SemanticLanguage>>} */
 const programTargets = new Set(["php", "ruby", "javascript", "typescript", "java"])
 
 /**
@@ -28,7 +29,7 @@ const programTargets = new Set(["php", "ruby", "javascript", "typescript", "java
  * @param {import("../semantic/types.js").SemanticLanguage} input.backendLanguage - Existing semantic backend profile to enforce.
  * @param {import("../semantic/types.js").BackendLanguage} input.diagnosticLanguage - Public target identity for capability failures.
  * @param {import("../semantic/types.js").SemanticProgram} input.program - Complete candidate program.
- * @param {ReadonlySet<import("../semantic/types.js").SemanticLanguage>} [input.sourceLanguages] - Accepted source provenance languages.
+ * @param {Readonly<Set<import("../semantic/types.js").SemanticLanguage>>} [input.sourceLanguages] - Accepted source provenance languages.
  * @returns {{modules: import("../semantic/types.js").SemanticModule[], program: import("../semantic/types.js").SemanticProgram, sources: {content: string, filename: string, language?: import("../semantic/types.js").SemanticLanguage}[]}} Prepared immutable-input views.
  */
 export function preflightSemanticProgram({backendLanguage, diagnosticLanguage, program: candidate, sourceLanguages}) {
@@ -80,7 +81,9 @@ export function generateProgramArtifacts(input) {
 
     return createGeneratedArtifactSet(backend(input))
   }
-  if (!programTargets.has(input.language)) unsupportedRole(input.language, "multi-file text backend")
+  if (!programTargets.has(/** @type {import("../semantic/types.js").SemanticLanguage} */ (input.language))) {
+    unsupportedRole(input.language, "multi-file text backend")
+  }
   const language = /** @type {import("../semantic/types.js").SemanticLanguage} */ (input.language)
   const program = validateProgram(input.program, language)
   const linking = planStdlibLinking(program, language)
@@ -735,7 +738,7 @@ function prepareEmissionModules(program, language, linking = null) {
  * Validates the closed parser-neutral program graph before any target emission.
  * @param {unknown} candidate - Candidate semantic program.
  * @param {import("../semantic/types.js").SemanticLanguage} language - Target language.
- * @param {ReadonlySet<import("../semantic/types.js").SemanticLanguage>} [sourceLanguages] - Accepted source languages.
+ * @param {Readonly<Set<import("../semantic/types.js").SemanticLanguage>>} [sourceLanguages] - Accepted source languages.
  * @returns {import("../semantic/types.js").SemanticProgram} Validated program.
  */
 function validateProgram(candidate, language, sourceLanguages = programTargets) {
