@@ -19,9 +19,10 @@ const seam = Object.freeze({
 /**
  * Executes one generated Task 037 provider scenario through the canonical real PHP runtime.
  * @param {string} script - PHP statements that emit one JSON document.
+ * @param {{nativeConnect?: boolean}} [options] - Protected selection of the genuine connect primitive.
  * @returns {Promise<Record<string, unknown>>} Parsed scenario result.
  */
-export async function executeTask037ProviderScenario(script) {
+export async function executeTask037ProviderScenario(script, options = {}) {
   const php = await discoverCanonicalToolchain("php82")
   const directory = await mkdtemp(join(tmpdir(), "semantifold-task037-provider-"))
 
@@ -34,8 +35,10 @@ export async function executeTask037ProviderScenario(script) {
     ]
 
     for (const [filename, module, operations] of providers) {
+      const providerSeam = options.nativeConnect && module == "semantifold.socket-client" ? {...seam, connect: undefined} : seam
+
       await writeFile(join(directory, /** @type {string} */ (filename)), generateTask037PhpProviderContent(
-        /** @type {string} */ (module), /** @type {string[]} */ (operations), seam), "utf8")
+        /** @type {string} */ (module), /** @type {string[]} */ (operations), providerSeam), "utf8")
     }
     await writeFile(join(directory, "scenario.php"), `<?php\ndeclare(strict_types=1);\n${nativeSeams}
 require __DIR__ . "/resource.php";

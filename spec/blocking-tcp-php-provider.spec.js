@@ -10,6 +10,19 @@ const close = protectedEntryName("php", "semantifold.resource", "v1_close")
 const writeLine = protectedEntryName("php", "semantifold.output", "v1_write_line")
 
 describe("blocking TCP protected PHP provider", () => {
+  it("rejects wrapper-style hosts before native PHP can select a non-TCP transport", async () => {
+    const result = await executeTask037ProviderScenario(`
+try {
+  $resource = ${connect}("udp://127.0.0.1", 9);
+  $category = "bad-success";
+  ${close}($resource);
+} catch (Throwable $error) { $category = task037_category($error); }
+echo json_encode(["category" => $category], JSON_THROW_ON_ERROR);
+`, {nativeConnect: true})
+
+    expect(result).toEqual({category: "InvalidHost"})
+  })
+
   it("validates inputs and normalizes every connect/setup failure without resource escape", async () => {
     const result = await executeTask037ProviderScenario(`
 $categories = [];

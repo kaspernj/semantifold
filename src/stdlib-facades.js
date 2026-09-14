@@ -970,10 +970,11 @@ function canonicalCapabilityName(identity) {
     "semantifold.output": "Output",
     "semantifold.resource": "Resource",
     "semantifold.socket-client": "SocketClient",
+    "semantifold.task034.resource-probe": "ResourceProbe",
     "semantifold.text-stream": "TextStream"
   }
 
-  return names[identity] ?? invalidFacade(`Task 037 facade names unknown canonical module '${identity}'.`)
+  return names[identity] ?? invalidFacade(`Facade requirements name unknown canonical module '${identity}'.`)
 }
 
 /**

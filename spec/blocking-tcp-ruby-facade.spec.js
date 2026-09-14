@@ -84,6 +84,48 @@ end
     }
   })
 
+  it("composes parser-proved Task 036 and Task 037 facades with their owning capability names", () => {
+    const program = parseProgram({
+      entryModule: "main",
+      sources: [{filename: "main.rb", id: "main", language: "ruby", source: `require "semantifold/task036/probe"
+require "socket"
+module Main
+  module_function
+  # @return [void]
+  def run()
+    puts SemantifoldTask036Probe.compatibility_probe("combined")
+    # @type [TCPSocket]
+    socket = TCPSocket.new("127.0.0.1", 1234)
+    socket.close
+    return
+  end
+
+  run()
+end
+`}]
+    })
+
+    expect(program.stdlibContracts).toEqual([
+      {contractVersion: "1", identity: "semantifold.output"},
+      {contractVersion: "1", identity: "semantifold.socket-client"},
+      {contractVersion: "1", identity: "semantifold.text-stream"},
+      {contractVersion: "1", identity: "semantifold.resource"},
+      {contractVersion: "1", identity: "semantifold.task034.resource-probe"}
+    ])
+    expect(program.modules.map(({id}) => id)).toEqual([
+      "semantifold.facade.ruby.probe_runner",
+      "semantifold.facade.ruby.probe",
+      "semantifold.facade.ruby.output",
+      "semantifold.facade.ruby.socket",
+      "main"
+    ])
+    expect(program.modules[0].capabilities?.map(({name}) => name)).toEqual(["ResourceProbe"])
+    expect(program.modules[2].capabilities?.map(({name}) => name)).toEqual(["Output"])
+    expect(program.modules[3].capabilities?.map(({name}) => name)).toEqual(["SocketClient", "TextStream", "Resource"])
+    expect(program.modules[1].capabilities).toBe(undefined)
+    expect(program.modules[4].capabilities).toBe(undefined)
+  })
+
   it("retains legacy PrintStatement behavior outside the exact socket profile", () => {
     const program = parseProgram({
       entryModule: "main",

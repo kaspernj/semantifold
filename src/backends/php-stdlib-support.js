@@ -102,7 +102,9 @@ function socketClientProvider(used, seam) {
 final class InvalidPort extends RuntimeException {}
 final class ConnectionFailure extends RuntimeException {}
 function ${entry}(string $host, int $port): ByteStream {
-  if ($host === "" || preg_match("//u", $host) !== 1) throw new InvalidHost("InvalidHost");
+  if ($host === "" || preg_match("//u", $host) !== 1 || str_contains($host, "://")) {
+    throw new InvalidHost("InvalidHost");
+  }
   if ($port < 1 || $port > 65535) throw new InvalidPort("InvalidPort");
   $errno = 0; $errorMessage = ""; $warning = null;
   set_error_handler(static function(int $severity, string $message) use (&$warning): bool {
