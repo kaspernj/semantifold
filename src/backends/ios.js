@@ -110,7 +110,10 @@ class ConfigurationTextWriter {
     }
   }
 
-  /** @returns {RenderedConfigurationText} Finished content and causal spans. */
+  /**
+   * Finishes renderer-owned text collection.
+   * @returns {RenderedConfigurationText} Finished content and causal spans.
+   */
   finish() {
     return {configurationSpans: this.configurationSpans, content: this.content}
   }
@@ -739,7 +742,7 @@ function addNativeTarget(add, id, configuration, identity, nameSuffix, productTy
    * @returns {string} Rendered target list.
    */
   const lines = values => values.map(value => `\t\t\t\t${id(value)},`).join("\n")
-  const name = ["\"", configurationFragment("productName", configuration.productName), `${nameSuffix}\"`]
+  const name = ["\"", configurationFragment("productName", configuration.productName), `${nameSuffix}"`]
 
   add("PBXNativeTarget", identity, ["isa = PBXNativeTarget;", `buildConfigurationList = ${id(configurationList)};`,
     `buildPhases = (\n${lines(phases)}\n\t\t\t);`, "buildRules = ();", `dependencies = (\n${lines(dependencies)}\n\t\t\t);`,
