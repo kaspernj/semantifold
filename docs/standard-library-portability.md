@@ -1,12 +1,12 @@
 # Standard-library portability
 
-Status: Task 034's single-module effect/lifetime foundation is delivered through PR #44, Task 035's versioned canonical contract/provider-linking hub is delivered through PR #45 and merge `a2aad9d4932bfc6087adc4ff8bca43678c92413c`, and Task 036 implements the bounded executable facade qualification layer on its topic branch. None is released in `semantifold@0.3.0`.
+Status: Task 034's single-module effect/lifetime foundation is delivered through PR #44, Task 035's versioned canonical contract/provider-linking hub is delivered through PR #45 and merge `a2aad9d4932bfc6087adc4ff8bca43678c92413c`, and Task 036's bounded executable facade qualification layer is delivered through PR #46 and merge `9aba48f9d48bcef4fd4c9275aec14bfcc4f0904c`. Task 037 implements the first concrete Ruby-to-PHP blocking TCP slice on its topic branch. None is released in `semantifold@0.3.0`.
 
 ## Purpose and boundary
 
 Semantifold will make a deliberately bounded set of familiar source-language standard-library APIs portable without building a library translator for every source/target pair. The architecture is hub-and-spoke: source-language API shape is normalized into versioned canonical capabilities, and target-language native behavior is reached only through providers for those capabilities.
 
-This is an incremental compatibility profile, not a promise to translate arbitrary applications or complete standard libraries. The published `semantifold@0.3.0` release does not resolve standard-library identities or provide compatibility facades, canonical capability calls, host providers, or provider linking. The current source tree has since added bounded project imports, optionals, typed errors, Task 032 condition-controlled loops, and Task 033 single-module bounded reference classes/methods. Task 034, delivered through PR #44, adds explicit unversioned compiler authority, host effects, owned resources, deterministic close, and typed host-failure normalization. Task 035, delivered through PR #45, adds the versioned canonical contract/provider registries, capability negotiation, protected provider linking with tree-shaken artifacts, and transactional link validation. Task 036 adds only the neutral qualification facades documented below; it does not add a public file, network, console, or other host API.
+This is an incremental compatibility profile, not a promise to translate arbitrary applications or complete standard libraries. The published `semantifold@0.3.0` release does not resolve standard-library identities or provide compatibility facades, canonical capability calls, host providers, or provider linking. The current source tree has since added bounded project imports, optionals, typed errors, Task 032 condition-controlled loops, and Task 033 single-module bounded reference classes/methods. Task 034, delivered through PR #44, adds explicit unversioned compiler authority, host effects, owned resources, deterministic close, and typed host-failure normalization. Task 035, delivered through PR #45, adds the versioned canonical contract/provider registries, capability negotiation, protected provider linking with tree-shaken artifacts, and transactional link validation. Task 036, delivered through PR #46, adds the neutral qualification facades documented below. Task 037 uses those foundations only for the bounded concrete Ruby-source-to-PHP-target profile documented here.
 
 Task 034 proves the fixed `semantifold.task034.resource-probe` conformance capability on PHP, Ruby, JavaScript/JSDoc, TypeScript, and Java. Its hard-coded compiler-owned native bindings exercise real local file handles so acquisition, clean EOF, read failure, close failure, terminal reuse, and exactly-once order can be tested. In single-module mode the probe is not a portable file API, a provider object, a provider registry, or a canonical standard-library version. Ordinary same-named source declarations do not gain authority. Task 035 now exposes that capability as the versioned canonical contract `semantifold.task034.resource-probe@1.0.0`: program-mode generation negotiates the adopted target's provider, materializes a tree-shaken provider artifact under a protected native binding, and links canonical calls through the generated artifact set.
 
@@ -51,11 +51,11 @@ The exact parser-proved native module identities are `Semantifold\Task036\Probe`
 
 Resolution rejects unproved modules, unsupported members/forms, local shadowing, reopened modules, assignment/monkey-patching, dynamic imports/requires, reflection, native extensions, caller-owned facade ID/path collisions, and forged capability or facade descriptors with stable located diagnostics. Parser failure is terminal and is never recovered by scanning source text. Before provider planning or writer allocation, generation recompiles the registered facade source through the ordinary parser and semantic pipeline and structurally compares the complete compiler-owned semantic modules; retaining valid source bytes, locations, markers, or requirement names cannot conceal mutated facade IR. Generation also validates the descriptor, identity evidence, canonical/provider versions, target names, and complete artifact paths transactionally. Same-language lanes keep compatibility aliases outside the Task 035 protected provider route, including Java's owner-module provider carrier, so the genuine provider operation executes once without facade recursion.
 
-This corpus is deliberately a neutral architecture fixture. It adds no file, console, socket, `TCPSocket`, `fsockopen`, or other concrete public host behavior; Task 037 remains responsible for the first TCP vertical slice.
+This corpus remains a neutral architecture fixture by itself: it adds no file, console, socket, `TCPSocket`, `fsockopen`, or other concrete public host behavior. Task 037 separately supplies the first TCP vertical slice.
 
 ## Ruby-to-PHP example
 
-Consider supported Ruby source that requires `socket`, creates `TCPSocket.new(host, port)`, reads lines with `gets`, calls `puts line`, and closes the socket. Once the necessary semantic tasks exist, Ruby stdlib resolution can prove that `TCPSocket` and the unqualified `puts(string)` or equivalent `Kernel.puts(string)` call refer to the supported native symbols and substitute their Ruby language compatibility stdlib/facades.
+Supported Ruby source requires exact literal `require "socket"`, creates `TCPSocket.new(host, port)`, reads lines with zero-argument receiver `gets`, calls `puts line` or `Kernel.puts(line)`, and explicitly calls zero-argument receiver `close`. Within that proved profile, Ruby stdlib resolution proves that `TCPSocket` and exactly one-string `puts` refer to the supported native symbols and selects their executable compiler-owned compatibility facades. The same `puts` spellings outside this profile retain legacy program-mode behavior.
 
 The portable facades can be expressed schematically as:
 
@@ -82,7 +82,7 @@ module Kernel
 end
 ```
 
-This is illustrative pseudocode, not syntax accepted by `0.2.0`. The real facades must use explicit types, optional/presence results, typed failures, and ownership rules from the selected contract versions. `TCPSocket#gets` preserves the supported Ruby behavior, including newline retention and an absent value at EOF, by composing canonical capabilities rather than by recognizing a source read loop. The bounded `puts` facade accepts exactly one string and calls `Output.v1_write_line(text)`, which outputs the string once and appends LF only when the string does not already end in LF. Multiple arguments, arrays or recursive output, implicit string conversion, custom output separators, and every other Ruby `puts` behavior are outside this profile.
+The sketch shows the source-visible shape. The compiler-owned facades use explicit types, optional/presence results, exact canonical failure declarations, and the selected contract ownership rules. `TCPSocket#gets` preserves newline retention and an absent value at EOF by composing canonical capabilities rather than by recognizing a source read loop. The bounded `puts` facade accepts exactly one string and calls `Output.v1_write_line(text)`, which outputs the string once and appends LF only when the string does not already end in LF. Multiple arguments, arrays or recursive output, implicit string conversion, custom output separators, and every other Ruby `puts` behavior are outside this profile.
 
 The PHP target host provider/native binding can be expressed schematically as:
 
@@ -136,7 +136,7 @@ The following never qualify by spelling alone:
 
 Such programs are rejected with a located diagnostic or remain explicitly outside the supported profile. A frontend must never scan source text as a fallback after its parser adapter or resolver rejects a construct.
 
-Facade selection records the proved source symbol identity, facade module/version, and canonical capability requirements in semantic project metadata. That evidence, not a raw source name, authorizes linking.
+Facade selection records the proved source symbol identity, facade module/version, and canonical capability requirements in semantic project metadata. That evidence, not a raw source name, authorizes linking. When a program selects more than one facade profile, each compiler-owned module receives authority under its requirement's owning canonical capability name; combining the Task 036 resource probe with the Task 037 socket/output facades neither renames nor propagates either profile's authority to public facade or application modules.
 
 ## Protected native boundary and recursion isolation
 
@@ -155,6 +155,19 @@ Every canonical capability version is a closed public contract. At minimum it de
 - ownership transfer or borrowing, allowed aliases, resource lifetime, deterministic explicit close, repeated-close behavior, and use-after-close rejection;
 - failure categories and the point at which native errors are normalized, without depending on target-specific messages or codes; and
 - provider dependencies, supported target/runtime versions, and any capability dependencies.
+
+Task 037's exact v1 contract set is normative:
+
+| Canonical module | Operation | Parameters | Result/resource flow | Dependencies | Declared failures |
+| --- | --- | --- | --- | --- | --- |
+| `semantifold.socket-client@1.0.0` | `v1_connect` | `host: string`, `port: integer` | acquired owned `semantifold.resource.ByteStream` | `semantifold.resource@1` | `InvalidHost`, `InvalidPort`, `ConnectionFailure` |
+| `semantifold.text-stream@1.0.0` | `v1_read_line` | borrowed `semantifold.resource.ByteStream` | `optional:string`; borrow remains with owner | `semantifold.resource@1` | `ReadFailure`, `DecodeFailure`, `semantifold.resource.ResourceClosed` |
+| `semantifold.output@1.0.0` | `v1_write_line` | `text: string` | `void`; no resource flow | none | `WriteFailure` |
+| `semantifold.resource@1.0.0` | `v1_close` | owned `ByteStream` | `void`; terminal consume | none | `CloseFailure`, `ResourceClosed` |
+
+All four operations are synchronous, host-effectful, and evaluate receiver, arguments, and effects left to right exactly once. `v1_connect` accepts a non-empty Unicode host without stream-wrapper scheme syntax and an integer port from 1 through 65535; the provider rejects wrapper-style hosts before native connection so the contract can select only TCP transport. It exposes no resource unless native connection succeeds and offers no timeout parameter. `v1_read_line` incrementally validates UTF-8, retains LF and a preceding CR, returns a final unterminated line once, uses absence only for clean EOF before bytes, and distinguishes non-EOF read failure. `v1_write_line` writes all canonical UTF-8 bytes and appends one LF only when the input does not already end in LF. Either success or failure of the first `v1_close` attempt is terminal; later reads or closes fail as `ResourceClosed` before another native operation.
+
+The only Task 037 provider profile is PHP 8.2 or newer with core streams, recorded as `php82-core-streams-v1`. Its separately tree-shaken protected artifacts are `providers/php/semantifold/socket-client.php`, `providers/php/semantifold/text-stream.php`, `providers/php/semantifold/output.php`, and `providers/php/semantifold/resource.php`. The PHP provider owns the native handle and captures warnings only within each native call before normalizing them to the typed categories above; native messages and errno values are not portable. The only compatibility artifacts are `semantifold/facade/ruby/socket.php` and `semantifold/facade/ruby/output.php`.
 
 Contracts do not inherit accidental behavior from the first facade or provider. A provider advertises exact versions and constraints. Capability negotiation succeeds only when one provider set satisfies every used canonical requirement without incompatible versions or semantics.
 
@@ -190,11 +203,11 @@ The executable facade plus canonical capability plus provider path is the correc
 
 Each facade publishes the exact source APIs and forms it supports. Each canonical module publishes exact capability versions. Each provider publishes its target/runtime constraints. Unsupported operations remain unsupported even when a target happens to expose a similarly named native function.
 
-Task 036's implemented qualification proof is intentionally neutral and original-five-only. The first planned concrete host API proof remains Task 037's blocking TCP client, Ruby `TCPSocket` and bounded one-string `puts` compatibility facades, and PHP native provider. Neither implies coverage for complete standard libraries, every language, every networking API, or general Ruby output behavior. The dependency sequence is maintained in the [implementation plan](plans/2026-09-05-standard-library-portability.md) and [roadmap](../todo/README.md).
+Task 036's delivered qualification proof remains intentionally neutral and original-five-only. Task 037 adds only the concrete blocking TCP client proof with Ruby `TCPSocket` and bounded one-string `puts` compatibility facades targeting the PHP native provider. Neither implies coverage for complete standard libraries, every language, every networking API, or general Ruby output behavior. The dependency sequence is maintained in the [implementation plan](plans/2026-09-05-standard-library-portability.md) and [roadmap](../todo/README.md).
 
 ## Acceptance strategy
 
-Every implementation slice requires deterministic parser, semantic, link, generation, and real-toolchain acceptance. The first vertical slice will:
+Every implementation slice requires deterministic parser, semantic, link, generation, and real-toolchain acceptance. Task 037's vertical slice does all of the following:
 
 1. start a real local ephemeral TCP server under test control, with no external network dependency;
 2. parse supported Ruby source and prove its `socket`/`TCPSocket` and `puts`/`Kernel.puts` identities;
@@ -203,4 +216,6 @@ Every implementation slice requires deterministic parser, semantic, link, genera
 5. run the generated artifacts with real `php` and assert exact output, retained input newlines, exactly one appended LF for a final unterminated string, no duplicate LF, distinct EOF absence, normalized connection failure, deterministic close, repeated-close policy, and use-after-close rejection; and
 6. cover unresolved, shadowed, monkey-patched, unsupported, provider-missing, collision, and transactional-failure cases.
 
-Same-language acceptance must additionally prove that the protected native binding bypasses the compatibility facade. Generated artifacts are reparsed where the target frontend supports their profile, generated twice for byte-for-byte determinism, inspected for unused module exclusion, and checked for complete provenance. Snapshots or source-only assertions cannot replace actual execution.
+The acceptance uses separate fresh loopback server instances for the source Ruby reference and generated PHP, explicit event/deadline coordination, and cleanup of tracked sockets, listeners, and child processes. Protected generator-only PHP seams deterministically exercise split multibyte reads, false/non-EOF reads, close warning/failure, and short/zero/false stdout writes with real PHP; a real refused connection and genuine successful `fclose` remain required. Generated portable PHP is reparsed where supported, protected provider PHP is checked with real `php -l` and execution, repeated generation is byte-for-byte deterministic across every artifact/mapping/provenance/metadata field, and snapshots or source-only assertions never replace execution.
+
+TCP servers/listeners, TLS, UDP, Unix sockets, nonblocking I/O, async/event loops, configurable timeouts, cancellation, concurrency, custom DNS policy, proxies, arbitrary socket options, binary framing, output beyond one-string `puts`, arbitrary encodings, other Ruby `Socket`/`IO` APIs, other source facades, other target providers, and direct idiomatic lowering remain explicit non-goals.

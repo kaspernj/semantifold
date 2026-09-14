@@ -492,7 +492,7 @@ export function semanticEntries(module) {
         node.imports.forEach((child, index) => visit(child, `/imports/${index}`, location))
       }
       ;(node.records ?? []).forEach((child, index) => visit(child, `/records/${index}`, location))
-      if (!("sourceFilename" in node)) {
+      if (!("sourceFilename" in node) || Reflect.get(node, "stdlibFacade") !== undefined) {
         ;(node.classes ?? []).forEach((child, index) => visit(child, `/classes/${index}`, location))
       }
       ;(node.errors ?? []).forEach((child, index) => visit(child, `/errors/${index}`, location))

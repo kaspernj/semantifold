@@ -22,10 +22,11 @@ describe("target host provider registry", () => {
   })
 
   it("registers one deterministic provider per adopted target for the probe contract", () => {
-    const providers = listStdlibProviders()
+    const allProviders = listStdlibProviders()
+    const providers = allProviders.filter(({provides}) => provides[0].module == probeIdentity)
 
     expect(providers.map(({target}) => target)).toEqual(originalFive)
-    expect(Object.isFrozen(providers)).toBe(true)
+    expect(Object.isFrozen(allProviders)).toBe(true)
 
     for (const provider of providers) {
       expect(provider.identity).toEqual(`semantifold.provider.${provider.target}.${probeIdentity}`)
@@ -38,6 +39,7 @@ describe("target host provider registry", () => {
       expect(record.target).toEqual(target)
       expect(record.provides).toEqual([{module: probeIdentity, operations: probeOperations, version: "1.0.0"}])
       expect(record.dependencies).toEqual([])
+      expect(typeof record.runtimeProfile).toEqual("string")
       expect(record.artifact.path).toEqual(
         `providers/${target}/semantifold/task034/resource-probe.${target == "php" ? "php" :
           target == "ruby" ? "rb" : target == "javascript" ? "js" : target == "typescript" ? "ts" : "java"}`)
@@ -127,6 +129,8 @@ function providerRecord(target) {
     identity: `semantifold.provider.${target}.${probeIdentity}`,
     nativeEntries: Object.fromEntries(["probeEffect"].map((operation) => [operation, protectedEntryName(target, operation)])),
     provides: [{module: probeIdentity, operations: ["probeEffect"], version: "1.0.0"}],
+    runtimeProfile: target == "php" ? "php82-core-v1" : target == "ruby" ? "ruby3-core-v1" :
+      target == "javascript" ? "node24-core-v1" : target == "typescript" ? "node24-typescript7-core-v1" : "java17-core-v1",
     target
   }
 }

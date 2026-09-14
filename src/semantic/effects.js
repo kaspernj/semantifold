@@ -14,10 +14,12 @@ import {parseProtectedEntryName} from "./stdlib.js"
  * @param {Map<string, import("./types.js").FunctionDeclaration>} functions - Visible ordinary functions.
  * @param {(code: string, detail: string, location: import("./types.js").SourceLocation) => never} fail - Located failure.
  * @param {boolean} normalize - Whether parser-authored operation intent may be normalized.
+ * @param {Map<string, import("./types.js").ClassDeclaration>} [visibleClasses] - Resolved reference classes.
  * @returns {void}
  */
-export function validateEffectGraph(module, language, functions, fail, normalize) {
+export function validateEffectGraph(module, language, functions, fail, normalize, visibleClasses = new Map()) {
   const capabilities = module.capabilities ?? []
+  const capabilityIds = new Set()
   const operationIds = new Set()
   const resourceIds = new Set()
   const failureIds = new Set()
@@ -25,11 +27,15 @@ export function validateEffectGraph(module, language, functions, fail, normalize
 
   if (!Array.isArray(capabilities)) fail("INVALID_CAPABILITY_AUTHORITY", "Capabilities must be an ordered array.", module.location)
   for (const [capabilityIndex, capability] of capabilities.entries()) {
-    if (!capability || capability.kind != "EffectCapabilityDeclaration" || capability.id != `capability:${capabilityIndex}` ||
+    const legacyId = `capability:${capabilityIndex}`
+
+    if (!capability || capability.kind != "EffectCapabilityDeclaration" ||
+      capability.id != legacyId && !/^module:\d+\/capability:\d+$/u.test(capability.id) || capabilityIds.has(capability.id) ||
       typeof capability.authorityId != "string" || typeof capability.name != "string" || !Array.isArray(capability.resources) ||
       !Array.isArray(capability.failures) || !Array.isArray(capability.operations)) {
       fail("INVALID_CAPABILITY_AUTHORITY", "Malformed capability declaration graph.", module.location)
     }
+    capabilityIds.add(capability.id)
     for (const [index, resource] of capability.resources.entries()) {
       if (resource.kind != "EffectResourceDeclaration" || resource.id != `${capability.id}/resource:${index}` ||
         resourceIds.has(resource.id)) fail("INVALID_CAPABILITY_AUTHORITY", "Malformed capability resource identity.", module.location)
@@ -40,6 +46,8 @@ export function validateEffectGraph(module, language, functions, fail, normalize
         failureIds.has(failure.id)) fail("INVALID_CAPABILITY_AUTHORITY", "Malformed capability failure identity.", module.location)
       failureIds.add(failure.id)
     }
+  }
+  for (const capability of capabilities) {
     for (const [index, operation] of capability.operations.entries()) {
       if (operation.kind != "EffectOperationDeclaration" || operation.id != `${capability.id}/operation:${index}` ||
         operationIds.has(operation.id) || operationNames.has(operation.name) || !Array.isArray(operation.parameters) ||
@@ -144,9 +152,18 @@ export function validateEffectGraph(module, language, functions, fail, normalize
     replacement.resolution = signature(capability, operation)
   })
 
-  const complete = completeEffectSummaries(module, failureIds)
+  const complete = completeEffectSummaries(module, failureIds, visibleClasses)
   const summaries = complete.functions
   const methodSummaries = complete.methods
+  const constructorSummaries = complete.constructors
+
+  for (const declaration of module.classes ?? []) {
+    applyDeclarationSummary(declaration.constructor,
+      constructorSummaries.get(/** @type {string} */ (declaration.constructor.id)), normalize, fail)
+    for (const method of declaration.methods) {
+      applyDeclarationSummary(method, methodSummaries.get(/** @type {string} */ (method.id)), normalize, fail)
+    }
+  }
   let site = 0
 
   forEachExpression(module, (expression) => {
@@ -188,8 +205,11 @@ export function validateEffectGraph(module, language, functions, fail, normalize
       site += 1
       return
     }
-    if (expression.kind == "MethodCallExpression") {
-      const summary = methodSummaries.get(expression.method)
+    if (expression.kind == "MethodCallExpression" || expression.kind == "ReferenceConstruction") {
+      const summary = expression.kind == "MethodCallExpression"
+        ? methodSummaries.get(expression.method)
+        : constructorSummaries.get(expression.resolution?.declarationId ?? `${expression.reference.declarationId}:constructor`)
+      const label = expression.kind == "MethodCallExpression" ? "method call" : "construction"
       if (!summary?.host) {
         if (normalize) {
           delete expression.effectSiteId
@@ -197,10 +217,10 @@ export function validateEffectGraph(module, language, functions, fail, normalize
           delete expression.failureIds
         }
         if (!normalize && Array.isArray(expression.failureIds) && expression.failureIds.length > 0) {
-          fail("UNDECLARED_FAILURE", "UNDECLARED_FAILURE: Pure method call carries a forged typed failure boundary.", expression.location)
+          fail("UNDECLARED_FAILURE", `UNDECLARED_FAILURE: Pure ${label} carries a forged typed failure boundary.`, expression.location)
         }
         if (!normalize && (expression.effectSiteId !== undefined || expression.effects !== undefined || expression.failureIds !== undefined)) {
-          fail("UNDECLARED_EFFECT", "Pure method call carries forged effect metadata.", expression.location)
+          fail("UNDECLARED_EFFECT", `Pure ${label} carries forged effect metadata.`, expression.location)
         }
         return
       }
@@ -211,10 +231,10 @@ export function validateEffectGraph(module, language, functions, fail, normalize
       } else {
         validateSite(expression, site, fail)
         if (!Array.isArray(expression.failureIds) || expression.failureIds.join(",") != [...summary.failureIds].join(",")) {
-          fail("UNDECLARED_FAILURE", "UNDECLARED_FAILURE: Method failure boundary does not match its resolved declaration.", expression.location)
+          fail("UNDECLARED_FAILURE", `UNDECLARED_FAILURE: ${label} failure boundary does not match its resolved declaration.`, expression.location)
         }
         if (expression.effects?.length != 1 || expression.effects[0] != "host") {
-          fail("UNDECLARED_EFFECT", "Method effect summary does not match its resolved declaration.", expression.location)
+          fail("UNDECLARED_EFFECT", `${label} effect summary does not match its resolved declaration.`, expression.location)
         }
       }
       site += 1
@@ -226,18 +246,21 @@ export function validateEffectGraph(module, language, functions, fail, normalize
  * Computes the joint finite fixed point across functions and resolved receiver methods.
  * @param {import("./types.js").SemanticModule} module - Resolved module.
  * @param {Set<string>} capabilityFailureIds - Declared capability failures.
- * @returns {{functions: Map<string, EffectSummary>, methods: Map<string, EffectSummary>}} Complete summaries.
+ * @param {Map<string, import("./types.js").ClassDeclaration>} visibleClasses - Resolved reference classes.
+ * @returns {{constructors: Map<string, EffectSummary>, functions: Map<string, EffectSummary>, methods: Map<string, EffectSummary>}} Complete summaries.
  */
-function completeEffectSummaries(module, capabilityFailureIds) {
+function completeEffectSummaries(module, capabilityFailureIds, visibleClasses) {
+  const importedMethods = declaredClassSummaries(visibleClasses, "methods")
   let functions = effectSummaries(module.functions, new Map(), capabilityFailureIds)
-  let methods = directMethodSummaries(module, functions, new Map(), capabilityFailureIds)
+  let methods = directMethodSummaries(module, functions, importedMethods, capabilityFailureIds, importedMethods)
 
   while (true) {
     const nextFunctions = effectSummaries(module.functions, methods, capabilityFailureIds)
-    const nextMethods = directMethodSummaries(module, nextFunctions, methods, capabilityFailureIds)
+    const nextMethods = directMethodSummaries(module, nextFunctions, methods, capabilityFailureIds, importedMethods)
 
     if (sameSummaries(functions, nextFunctions) && sameSummaries(methods, nextMethods)) {
-      return {functions: nextFunctions, methods: nextMethods}
+      return {constructors: directConstructorSummaries(module, nextFunctions, nextMethods, capabilityFailureIds,
+        declaredClassSummaries(visibleClasses, "constructors")), functions: nextFunctions, methods: nextMethods}
     }
     functions = nextFunctions
     methods = nextMethods
@@ -438,11 +461,12 @@ function addFailures(target, source) {
  * @param {Map<string, EffectSummary>} functionSummaries - Ordinary function summaries.
  * @param {Map<string, EffectSummary>} priorMethodSummaries - Receiver summaries from the previous fixed-point round.
  * @param {Set<string>} capabilityFailureIds - Declared capability failures.
+ * @param {Map<string, EffectSummary>} baseSummaries - Imported receiver summaries.
  * @returns {Map<string, EffectSummary>} Summaries by resolved method identity.
  */
-function directMethodSummaries(module, functionSummaries, priorMethodSummaries, capabilityFailureIds) {
+function directMethodSummaries(module, functionSummaries, priorMethodSummaries, capabilityFailureIds, baseSummaries = new Map()) {
   /** @type {Map<string, EffectSummary>} */
-  const summaries = new Map()
+  const summaries = new Map(baseSummaries)
 
   for (const declaration of module.classes ?? []) {
     for (const method of declaration.methods) {
@@ -482,8 +506,89 @@ function directMethodSummaries(module, functionSummaries, priorMethodSummaries, 
 }
 
 /**
+ * Reads checked summaries already proved on imported class declarations.
+ * @param {Map<string, import("./types.js").ClassDeclaration>} classes - Visible classes.
+ * @param {"constructors" | "methods"} kind - Declaration cohort.
+ * @returns {Map<string, EffectSummary>} Imported summaries by declaration identity.
+ */
+function declaredClassSummaries(classes, kind) {
+  /** @type {Map<string, EffectSummary>} */
+  const summaries = new Map()
+
+  for (const declaration of classes.values()) {
+    const members = kind == "constructors" ? [declaration.constructor] : declaration.methods
+
+    for (const member of members) {
+      if (member.effects?.length == 1 && member.effects[0] == "host" && Array.isArray(member.failureIds)) {
+        summaries.set(/** @type {string} */ (member.id), {failureIds: new Set(member.failureIds), host: true})
+      }
+    }
+  }
+  return summaries
+}
+
+/**
+ * Computes direct constructor effects after function and method fixed points stabilize.
+ * @param {import("./types.js").SemanticModule} module - Resolved module.
+ * @param {Map<string, EffectSummary>} functionSummaries - Stable function summaries.
+ * @param {Map<string, EffectSummary>} methodSummaries - Stable method summaries.
+ * @param {Set<string>} capabilityFailureIds - Declared capability failures.
+ * @param {Map<string, EffectSummary>} baseSummaries - Imported constructor summaries.
+ * @returns {Map<string, EffectSummary>} Constructor summaries by identity.
+ */
+function directConstructorSummaries(module, functionSummaries, methodSummaries, capabilityFailureIds, baseSummaries) {
+  const summaries = new Map(baseSummaries)
+
+  for (const declaration of module.classes ?? []) {
+    const constructor = declaration.constructor
+    /** @type {EffectSummary} */
+    const summary = {
+      failureIds: escapingBlockFailures(constructor.body, functionSummaries, methodSummaries, capabilityFailureIds),
+      host: false
+    }
+
+    forEachBlockExpression(constructor.body, (expression) => {
+      if (expression.kind == "EffectCallExpression") summary.host = true
+      else if (expression.kind == "CallExpression" && functionSummaries.get(expression.callee)?.host) summary.host = true
+      else if (expression.kind == "MethodCallExpression" && methodSummaries.get(expression.method)?.host) summary.host = true
+    }, false)
+    summaries.set(/** @type {string} */ (constructor.id), summary)
+  }
+  return summaries
+}
+
+/**
+ * Records or verifies one checked class-member summary.
+ * @param {import("./types.js").ConstructorDeclaration | import("./types.js").MethodDeclaration} declaration - Class member.
+ * @param {EffectSummary | undefined} summary - Computed summary.
+ * @param {boolean} normalize - Whether metadata may be written.
+ * @param {(code: string, detail: string, location: import("./types.js").SourceLocation) => never} fail - Located failure.
+ * @returns {void}
+ */
+function applyDeclarationSummary(declaration, summary, normalize, fail) {
+  if (!summary?.host) {
+    if (normalize) {
+      delete declaration.effects
+      delete declaration.failureIds
+    } else if (declaration.effects !== undefined || declaration.failureIds !== undefined) {
+      fail("UNDECLARED_EFFECT", "Pure class member carries forged effect metadata.", declaration.location)
+    }
+    return
+  }
+  const failureIds = [...summary.failureIds]
+
+  if (normalize) {
+    declaration.effects = ["host"]
+    declaration.failureIds = failureIds
+  } else if (declaration.effects?.length != 1 || declaration.effects[0] != "host" ||
+    !Array.isArray(declaration.failureIds) || declaration.failureIds.join(",") != failureIds.join(",")) {
+    fail("UNDECLARED_EFFECT", "Class member effect summary does not match its body.", declaration.location)
+  }
+}
+
+/**
  * Validates one deterministic effect-site identity.
- * @param {import("./types.js").CallExpression | import("./types.js").EffectCallExpression | import("./types.js").MethodCallExpression} expression - Effectful call.
+ * @param {import("./types.js").CallExpression | import("./types.js").EffectCallExpression | import("./types.js").MethodCallExpression | import("./types.js").ReferenceConstruction} expression - Effectful call.
  * @param {number} site - Expected traversal index.
  * @param {(code: string, detail: string, location: import("./types.js").SourceLocation) => never} fail - Located failure.
  * @returns {void}

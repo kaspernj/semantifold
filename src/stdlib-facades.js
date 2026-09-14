@@ -14,22 +14,32 @@ const supportedLanguages = new Set(["php", "ruby", "javascript", "typescript", "
 const canonicalTypes = new Set(["boolean", "integer", "string", "void"])
 
 /**
- * @typedef StdlibFacadePublicDeclaration
+ * @typedef StdlibFacadeFunctionDeclaration
  * @property {"function"} kind - Closed public declaration kind.
  * @property {string} name - Exact source-visible symbol.
  * @property {{name: string, type: string}[]} parameters - Ordered source signature.
  * @property {string} returnType - Canonical result type.
  * @property {string[]} effects - Closed public effects.
  * @property {string[]} failures - Escaping canonical failure names.
- * @property {["direct-call"]} forms - Accepted source call form.
+ * @property {("direct-call" | "unqualified-call" | "receiver-call")[]} forms - Accepted source call forms.
  * @property {"not-applicable"} ownership - Initial scalar qualification ownership.
  */
+/**
+ * @typedef StdlibFacadeClassDeclaration
+ * @property {"class"} kind - Closed public declaration kind.
+ * @property {string} name - Exact source-visible class symbol.
+ * @property {["constructor-call"]} forms - Accepted construction form.
+ * @property {"owned-reference"} ownership - Class instance ownership.
+ * @property {{effects: string[], failures: string[], ownership: "acquired", parameters: {name: string, type: string}[]}} constructor - Constructor contract.
+ * @property {{effects: string[], failures: string[], forms: ["receiver-call"], name: string, ownership: "borrowed" | "consumed", parameters: {name: string, type: string}[], returnType: string}[]} methods - Public instance methods.
+ */
+/** @typedef {StdlibFacadeFunctionDeclaration | StdlibFacadeClassDeclaration} StdlibFacadePublicDeclaration */
 /**
  * @typedef StdlibFacadeRecord
  * @property {{identity: string, range: string}[]} dependencies - Facade-module dependencies.
  * @property {string} identity - Versioned facade identity.
  * @property {import("./semantic/types.js").SemanticLanguage} language - Source language.
- * @property {{identity: string, symbols: string[]}[]} nativeModules - Exact source native identities.
+ * @property {({identity: string, kind: "module", symbols: string[]} | {forms: ("unqualified-call" | "receiver-call")[], identity: string, kind: "builtin", symbols: string[]})[]} nativeModules - Exact source native identities.
  * @property {StdlibFacadePublicDeclaration[]} publicDeclarations - Public source surface.
  * @property {{module: string, operations: string[], range: string}[]} requirements - Canonical-only requirements.
  * @property {string} runtimeProfile - Exact compatible source/runtime profile.
@@ -225,14 +235,9 @@ export function stdlibFacadeProgramDescriptor(language, facades) {
     modules: facades.map((facade) => ({
       dependencies: facade.dependencies.map((dependency) => ({...dependency})),
       identity: facade.identity,
-      nativeModules: facade.nativeModules.map((module) => ({identity: module.identity, symbols: [...module.symbols]})),
-      publicDeclarations: facade.publicDeclarations.map((declaration) => ({
-        ...declaration,
-        effects: [...declaration.effects],
-        failures: [...declaration.failures],
-        forms: [...declaration.forms],
-        parameters: declaration.parameters.map((parameter) => ({...parameter}))
-      })),
+      nativeModules: facade.nativeModules.map((module) => ({...module,
+        ...(module.kind == "builtin" ? {forms: [...module.forms]} : {}), symbols: [...module.symbols]})),
+      publicDeclarations: facade.publicDeclarations.map(detachPublicDeclaration),
       requirements: facade.requirements.map((requirement) => ({...requirement, operations: [...requirement.operations]})),
       runtimeProfile: facade.runtimeProfile,
       sourceModule: facade.source.id,
@@ -248,7 +253,7 @@ export function stdlibFacadeProgramDescriptor(language, facades) {
  * Derives compiler-owned semantic capability authority from selected facade requirements.
  * The initial executable qualification corpus intentionally targets one canonical module.
  * @param {StdlibFacadeRecord[]} records - Selected facade closure.
- * @returns {{contract: {contractVersion: string, identity: string}, input: import("./semantic/types.js").CapabilityAuthorityInput} | null} Authority input.
+ * @returns {{contract: {contractVersion: string, identity: string}, input: import("./semantic/types.js").CapabilityAuthorityInput} | {contracts: {contractVersion: string, identity: string}[], input: import("./semantic/types.js").CapabilityAuthorityInput} | null} Authority input.
  */
 export function facadeCapabilityAuthority(records) {
   const requirements = records.flatMap((record) => record.requirements)
@@ -257,6 +262,50 @@ export function facadeCapabilityAuthority(records) {
   const identities = new Set(requirements.map(({module}) => module))
   const ranges = new Set(requirements.map(({range}) => range))
 
+  const task037 = records.some(({identity}) => identity.startsWith("semantifold.task037."))
+
+  if (task037) {
+    const requirementByModule = new Map()
+
+    for (const requirement of requirements) {
+      const current = requirementByModule.get(requirement.module)
+
+      if (current && current.range != requirement.range) invalidFacade("Task 037 facade requirements disagree on a canonical range.")
+      const operations = new Set(current?.operations ?? [])
+
+      for (const operation of requirement.operations) operations.add(operation)
+      requirementByModule.set(requirement.module, {operations, range: requirement.range})
+    }
+    const modules = [...requirementByModule.entries()].map(([identity, requirement]) => {
+      const contract = resolveStdlibModule(identity, requirement.range)
+
+      return {
+        capabilities: [{
+          failures: contract.failures.map(({name}) => ({name})),
+          name: canonicalCapabilityName(identity),
+          operations: contract.operations.filter(({name}) => requirement.operations.has(name)).map((operation) => ({
+            effects: /** @type {["host"]} */ ([...operation.effects]),
+            failures: operation.failures.map(detachCanonicalReference),
+            name: operation.name,
+            parameters: operation.parameters.map((parameter) => ({
+              name: parameter.name,
+              type: canonicalCapabilityParameterType(parameter.type)
+            })),
+            resourceFlow: detachResourceFlow(operation.resourceFlow),
+            returnType: canonicalCapabilityType(operation.returnType)
+          })),
+          resources: contract.resources.map(({name}) => ({name}))
+        }],
+        contractVersion: requirement.range,
+        identity
+      }
+    })
+
+    return {
+      contracts: modules.map(({contractVersion, identity}) => ({contractVersion, identity})),
+      input: {id: "semantifold.task037.blocking-tcp", modules, schema: "SemantifoldCapabilityAuthority", schemaVersion: 2}
+    }
+  }
   if (identities.size != 1 || ranges.size != 1) {
     invalidFacade("The Task 036 qualification facade closure must resolve one canonical module and version range.")
   }
@@ -293,10 +342,11 @@ export function facadeCapabilityAuthority(records) {
 
 /**
  * Converts one registry contract type to a capability-authority input type.
- * @param {string} type - Canonical contract type.
- * @returns {import("./semantic/types.js").FunctionReturnTypeName | {kind: "OwnedResourceType", resource: string} | {kind: "OptionalType", valueType: import("./semantic/types.js").SemanticTypeName}} Semantic authority type.
+ * @param {string | import("./semantic/stdlib.js").CanonicalDeclarationReference} type - Canonical contract type.
+ * @returns {import("./semantic/types.js").FunctionReturnTypeName | {kind: "OwnedResourceType", resource: string | import("./semantic/types.js").CapabilityDeclarationReferenceInput} | {kind: "OptionalType", valueType: import("./semantic/types.js").SemanticTypeName}} Semantic authority type.
  */
 function canonicalCapabilityType(type) {
+  if (typeof type != "string") return {kind: "OwnedResourceType", resource: detachCanonicalReference(type)}
   if (type == "void" || type == "boolean" || type == "integer" || type == "string") return type
   if (type.startsWith("optional:")) return {kind: "OptionalType",
     valueType: /** @type {import("./semantic/types.js").SemanticTypeName} */ (type.slice("optional:".length))}
@@ -305,7 +355,7 @@ function canonicalCapabilityType(type) {
 
 /**
  * Converts a non-void registry parameter type to capability-authority input.
- * @param {string} type - Canonical parameter type.
+ * @param {string | import("./semantic/stdlib.js").CanonicalDeclarationReference} type - Canonical parameter type.
  * @returns {import("./semantic/types.js").SemanticTypeName | {kind: "OwnedResourceType", resource: string} | {kind: "OptionalType", valueType: import("./semantic/types.js").SemanticTypeName}} Semantic parameter type.
  */
 function canonicalCapabilityParameterType(type) {
@@ -465,38 +515,31 @@ function validatePublicDeclarations(candidate, identity) {
   const names = new Set()
   return candidate.map((value) => {
     if (!isPlainObject(value)) invalidFacade(`Facade '${identity}' public declarations must be plain objects.`)
-    requireKeys(value, ["effects", "failures", "forms", "kind", "name", "ownership", "parameters", "returnType"],
-      `facade '${identity}' public declaration`)
     const name = requireString(value.name, `Facade '${identity}' declaration name`)
 
-    if (value.kind != "function" || !declarationNamePattern.test(name) || names.has(name)) {
+    if (!declarationNamePattern.test(name) || names.has(name)) {
       invalidFacade(`Facade '${identity}' has an invalid or duplicate public declaration.`)
     }
     names.add(name)
+    if (value.kind == "class") return validatePublicClass(value, identity, name)
+    requireKeys(value, ["effects", "failures", "forms", "kind", "name", "ownership", "parameters", "returnType"],
+      `facade '${identity}' public declaration`)
+    if (value.kind != "function") invalidFacade(`Facade '${identity}' has an invalid public declaration kind.`)
     if (!isDenseArray(value.effects) || !value.effects.every((effect) => effect == "host") || new Set(value.effects).size != value.effects.length ||
       !isDenseArray(value.failures) || !value.failures.every((failure) => typeof failure == "string" && declarationNamePattern.test(failure)) ||
-      !isDenseArray(value.forms) || value.forms.length != 1 || value.forms[0] != "direct-call" || value.ownership != "not-applicable" ||
+      !isDenseArray(value.forms) || value.forms.length == 0 || !value.forms.every((form) =>
+        typeof form == "string" && ["direct-call", "unqualified-call", "receiver-call"].includes(form)) ||
+      new Set(value.forms).size != value.forms.length ||
+      value.ownership != "not-applicable" ||
       !isDenseArray(value.parameters)) invalidFacade(`Facade '${identity}' declaration '${name}' has an invalid public contract.`)
-    const parameterNames = new Set()
-    const parameters = value.parameters.map((parameter) => {
-      if (!isPlainObject(parameter)) invalidFacade(`Facade '${identity}' declaration '${name}' has an invalid parameter.`)
-      requireKeys(parameter, ["name", "type"], `facade '${identity}' declaration parameter`)
-      const parameterName = requireString(parameter.name, `Facade '${identity}' parameter name`)
-      const type = requireString(parameter.type, `Facade '${identity}' parameter type`)
-
-      if (!declarationNamePattern.test(parameterName) || parameterNames.has(parameterName) || !canonicalTypes.has(type) || type == "void") {
-        invalidFacade(`Facade '${identity}' declaration '${name}' has an invalid parameter.`)
-      }
-      parameterNames.add(parameterName)
-      return {name: parameterName, type}
-    })
+    const parameters = validateFacadeParameters(value.parameters, identity, name)
     const returnType = requireString(value.returnType, `Facade '${identity}' return type`)
 
-    if (!canonicalTypes.has(returnType)) invalidFacade(`Facade '${identity}' declaration '${name}' has an invalid return type.`)
+    if (!isFacadeType(returnType, true)) invalidFacade(`Facade '${identity}' declaration '${name}' has an invalid return type.`)
     return {
       effects: /** @type {string[]} */ ([...value.effects]),
       failures: /** @type {string[]} */ ([...value.failures]),
-      forms: /** @type {["direct-call"]} */ (["direct-call"]),
+      forms: /** @type {("direct-call" | "unqualified-call" | "receiver-call")[]} */ ([...value.forms]),
       kind: /** @type {const} */ ("function"),
       name,
       ownership: /** @type {const} */ ("not-applicable"),
@@ -511,7 +554,7 @@ function validatePublicDeclarations(candidate, identity) {
  * @param {unknown} candidate - Candidate native modules.
  * @param {string} identity - Owning facade identity.
  * @param {StdlibFacadePublicDeclaration[]} declarations - Validated public surface.
- * @returns {{identity: string, symbols: string[]}[]} Validated native identities.
+ * @returns {({identity: string, kind: "module", symbols: string[]} | {forms: ("unqualified-call" | "receiver-call")[], identity: string, kind: "builtin", symbols: string[]})[]} Validated native identities.
  */
 function validateNativeModules(candidate, identity, declarations) {
   if (!isDenseArray(candidate)) invalidFacade(`Facade '${identity}' native modules must be a dense array.`)
@@ -519,16 +562,26 @@ function validateNativeModules(candidate, identity, declarations) {
   const publicNames = new Set(declarations.map(({name}) => name))
   return candidate.map((value) => {
     if (!isPlainObject(value)) invalidFacade(`Facade '${identity}' native modules must be plain objects.`)
-    requireKeys(value, ["identity", "symbols"], `facade '${identity}' native module`)
+    const builtin = value.kind == "builtin"
+
+    requireKeys(value, builtin ? ["forms", "identity", "kind", "symbols"] : ["identity", "kind", "symbols"],
+      `facade '${identity}' native module`)
     const moduleIdentity = requireString(value.identity, `Facade '${identity}' native module identity`)
 
-    if (modules.has(moduleIdentity) || !isDenseArray(value.symbols) || value.symbols.length == 0 ||
+    if (value.kind != "module" && value.kind != "builtin" || modules.has(moduleIdentity) ||
+      !isDenseArray(value.symbols) || value.symbols.length == 0 ||
       !value.symbols.every((symbol) => typeof symbol == "string" && publicNames.has(symbol)) ||
       new Set(value.symbols).size != value.symbols.length) {
       invalidFacade(`Facade '${identity}' has an invalid native module declaration.`)
     }
+    if (builtin && (!isDenseArray(value.forms) || value.forms.length == 0 ||
+      !value.forms.every((form) => form == "unqualified-call" || form == "receiver-call") ||
+      new Set(value.forms).size != value.forms.length)) invalidFacade(`Facade '${identity}' has invalid builtin forms.`)
     modules.add(moduleIdentity)
-    return {identity: moduleIdentity, symbols: /** @type {string[]} */ ([...value.symbols])}
+    return builtin
+      ? {forms: /** @type {("unqualified-call" | "receiver-call")[]} */ ([.../** @type {unknown[]} */ (value.forms)]), identity: moduleIdentity,
+        kind: /** @type {const} */ ("builtin"), symbols: /** @type {string[]} */ ([...value.symbols])}
+      : {identity: moduleIdentity, kind: /** @type {const} */ ("module"), symbols: /** @type {string[]} */ ([...value.symbols])}
   })
 }
 
@@ -589,6 +642,7 @@ function validateDependencies(candidate, identity) {
  */
 function builtinFacadeRecords() {
   return ["php", "ruby", "javascript", "typescript", "java"].flatMap((language) => builtinLanguageFacades(language))
+    .concat(builtinTask037RubyFacades())
 }
 
 /**
@@ -612,7 +666,7 @@ function builtinLanguageFacades(language) {
     dependencies: [{identity: `${base}.probe-runner`, range: "1"}],
     identity: `${base}.probe`,
     language,
-    nativeModules: [{identity: names.nativeModule, symbols: [names.publicName]}],
+    nativeModules: [{identity: names.nativeModule, kind: "module", symbols: [names.publicName]}],
     publicDeclarations: [publicDeclaration(names.publicName)],
     requirements: [],
     runtimeProfile: `${language}-task036-v1`,
@@ -634,7 +688,7 @@ function builtinLanguageFacades(language) {
     dependencies: [],
     identity: `${base}.unused`,
     language,
-    nativeModules: [{identity: names.unusedNativeModule, symbols: [names.unusedName]}],
+    nativeModules: [{identity: names.unusedNativeModule, kind: "module", symbols: [names.unusedName]}],
     publicDeclarations: [publicDeclaration(names.unusedName)],
     requirements: [{module: "semantifold.task034.resource-probe", operations: ["probeTrace"], range: "1"}],
     runtimeProfile: `${language}-task036-v1`,
@@ -654,6 +708,273 @@ function publicDeclaration(name) {
     effects: ["host"], failures: [], forms: ["direct-call"], kind: "function", name,
     ownership: "not-applicable", parameters: [{name: "label", type: "string"}], returnType: "string"
   }
+}
+
+/**
+ * Builds the exact Ruby Task 037 socket and output compatibility facades.
+ * @returns {unknown[]} Unvalidated facade records.
+ */
+function builtinTask037RubyFacades() {
+  return [{
+    dependencies: [],
+    identity: "semantifold.task037.ruby.socket",
+    language: "ruby",
+    nativeModules: [{identity: "socket", kind: "module", symbols: ["TCPSocket"]}],
+    publicDeclarations: [{
+      constructor: {
+        effects: ["host"], failures: ["InvalidHost", "InvalidPort", "ConnectionFailure"], ownership: "acquired",
+        parameters: [{name: "host", type: "string"}, {name: "port", type: "integer"}]
+      },
+      forms: ["constructor-call"],
+      kind: "class",
+      methods: [{
+        effects: ["host"], failures: ["ReadFailure", "DecodeFailure", "ResourceClosed"], forms: ["receiver-call"],
+        name: "gets", ownership: "borrowed", parameters: [], returnType: "optional:string"
+      }, {
+        effects: ["host"], failures: ["CloseFailure", "ResourceClosed"], forms: ["receiver-call"],
+        name: "close", ownership: "consumed", parameters: [], returnType: "void"
+      }],
+      name: "TCPSocket",
+      ownership: "owned-reference"
+    }],
+    requirements: [
+      {module: "semantifold.socket-client", operations: ["v1_connect"], range: "1"},
+      {module: "semantifold.text-stream", operations: ["v1_read_line"], range: "1"},
+      {module: "semantifold.resource", operations: ["v1_close"], range: "1"}
+    ],
+    runtimeProfile: "ruby-task037-socket-v1",
+    source: {
+      content: `module SemantifoldTask037Socket
+  class TCPSocket
+    # @param host [String]
+    # @param port [Integer]
+    def initialize(host, port)
+      @resource = v1_connect(host, port)
+    end
+
+    # @return [String?]
+    def gets
+      return v1_read_line(@resource)
+    end
+
+    # @return [void]
+    def close
+      v1_close(@resource)
+    end
+  end
+end
+`,
+      filename: "__semantifold_facades__/ruby/socket.rb",
+      id: "semantifold.facade.ruby.socket"
+    },
+    version: "1.0.0",
+    visibility: "public"
+  }, {
+    dependencies: [],
+    identity: "semantifold.task037.ruby.output",
+    language: "ruby",
+    nativeModules: [{forms: ["unqualified-call", "receiver-call"], identity: "ruby:Kernel", kind: "builtin", symbols: ["puts"]}],
+    publicDeclarations: [{
+      effects: ["host"], failures: ["WriteFailure"], forms: ["unqualified-call", "receiver-call"], kind: "function",
+      name: "puts", ownership: "not-applicable", parameters: [{name: "text", type: "string"}], returnType: "void"
+    }],
+    requirements: [{module: "semantifold.output", operations: ["v1_write_line"], range: "1"}],
+    runtimeProfile: "ruby-task037-output-v1",
+    source: {
+      content: `module SemantifoldTask037Output
+  module_function
+  # @param text [String]
+  # @return [void]
+  def puts(text)
+    v1_write_line(text)
+    return
+  end
+end
+`,
+      filename: "__semantifold_facades__/ruby/output.rb",
+      id: "semantifold.facade.ruby.output"
+    },
+    version: "1.0.0",
+    visibility: "public"
+  }]
+}
+
+/**
+ * Validates one public facade class descriptor.
+ * @param {Record<string, unknown>} value - Candidate class.
+ * @param {string} identity - Owning facade.
+ * @param {string} name - Validated class name.
+ * @returns {StdlibFacadeClassDeclaration} Detached class descriptor.
+ */
+function validatePublicClass(value, identity, name) {
+  requireKeys(value, ["constructor", "forms", "kind", "methods", "name", "ownership"],
+    `facade '${identity}' public class`)
+  if (!isDenseArray(value.forms) || value.forms.length != 1 || value.forms[0] != "constructor-call" ||
+    value.ownership != "owned-reference" || !isPlainObject(value.constructor) || !isDenseArray(value.methods)) {
+    invalidFacade(`Facade '${identity}' class '${name}' has an invalid public contract.`)
+  }
+  const constructor = /** @type {Record<string, unknown>} */ (value.constructor)
+
+  requireKeys(constructor, ["effects", "failures", "ownership", "parameters"], `facade '${identity}' constructor`)
+  if (constructor.ownership != "acquired" || !validFacadeEffects(constructor.effects) ||
+    !validFacadeFailures(constructor.failures)) invalidFacade(`Facade '${identity}' class '${name}' has an invalid constructor.`)
+  const parameters = validateFacadeParameters(constructor.parameters, identity, `${name}.new`)
+  const methodNames = new Set()
+  const methods = value.methods.map((method) => {
+    if (!isPlainObject(method)) invalidFacade(`Facade '${identity}' class '${name}' has an invalid method.`)
+    requireKeys(method, ["effects", "failures", "forms", "name", "ownership", "parameters", "returnType"],
+      `facade '${identity}' class method`)
+    const methodName = requireString(method.name, `Facade '${identity}' method name`)
+    const returnType = requireString(method.returnType, `Facade '${identity}' method return type`)
+
+    if (!declarationNamePattern.test(methodName) || methodNames.has(methodName) || !validFacadeEffects(method.effects) ||
+      !validFacadeFailures(method.failures) || !isDenseArray(method.forms) || method.forms.length != 1 ||
+      method.forms[0] != "receiver-call" || method.ownership != "borrowed" && method.ownership != "consumed" ||
+      !isFacadeType(returnType, true)) invalidFacade(`Facade '${identity}' class '${name}' has an invalid method.`)
+    methodNames.add(methodName)
+    return {
+      effects: /** @type {string[]} */ ([.../** @type {unknown[]} */ (method.effects)]),
+      failures: /** @type {string[]} */ ([.../** @type {unknown[]} */ (method.failures)]),
+      forms: /** @type {["receiver-call"]} */ (["receiver-call"]),
+      name: methodName,
+      ownership: /** @type {"borrowed" | "consumed"} */ (method.ownership),
+      parameters: validateFacadeParameters(method.parameters, identity, `${name}.${methodName}`),
+      returnType
+    }
+  })
+
+  return {
+    constructor: {
+      effects: /** @type {string[]} */ ([.../** @type {unknown[]} */ (constructor.effects)]),
+      failures: /** @type {string[]} */ ([.../** @type {unknown[]} */ (constructor.failures)]),
+      ownership: "acquired",
+      parameters
+    },
+    forms: ["constructor-call"],
+    kind: "class",
+    methods,
+    name,
+    ownership: "owned-reference"
+  }
+}
+
+/**
+ * Validates facade parameters shared by functions, constructors, and methods.
+ * @param {unknown} candidate - Candidate parameters.
+ * @param {string} identity - Owning facade.
+ * @param {string} callable - Callable name.
+ * @returns {{name: string, type: string}[]} Detached parameters.
+ */
+function validateFacadeParameters(candidate, identity, callable) {
+  if (!isDenseArray(candidate)) invalidFacade(`Facade '${identity}' declaration '${callable}' has invalid parameters.`)
+  const names = new Set()
+
+  return candidate.map((parameter) => {
+    if (!isPlainObject(parameter)) invalidFacade(`Facade '${identity}' declaration '${callable}' has an invalid parameter.`)
+    requireKeys(parameter, ["name", "type"], `facade '${identity}' declaration parameter`)
+    const name = requireString(parameter.name, `Facade '${identity}' parameter name`)
+    const type = requireString(parameter.type, `Facade '${identity}' parameter type`)
+
+    if (!declarationNamePattern.test(name) || names.has(name) || !isFacadeType(type, false)) {
+      invalidFacade(`Facade '${identity}' declaration '${callable}' has an invalid parameter.`)
+    }
+    names.add(name)
+    return {name, type}
+  })
+}
+
+/**
+ * Checks one facade effect list.
+ * @param {unknown} candidate - Candidate effects.
+ * @returns {boolean} Whether effects are exact.
+ */
+function validFacadeEffects(candidate) {
+  return isDenseArray(candidate) && candidate.every((effect) => effect == "host") && new Set(candidate).size == candidate.length
+}
+
+/**
+ * Checks one facade failure list.
+ * @param {unknown} candidate - Candidate failures.
+ * @returns {candidate is string[]} Whether failures are exact.
+ */
+function validFacadeFailures(candidate) {
+  return isDenseArray(candidate) && candidate.every((failure) => typeof failure == "string" && declarationNamePattern.test(failure)) &&
+    new Set(candidate).size == candidate.length
+}
+
+/**
+ * Checks one facade type spelling.
+ * @param {string} type - Candidate type.
+ * @param {boolean} allowVoid - Whether void is valid in this position.
+ * @returns {boolean} Whether the type is canonical.
+ */
+function isFacadeType(type, allowVoid) {
+  if (canonicalTypes.has(type)) return allowVoid || type != "void"
+  const optional = /^optional:(boolean|integer|string)$/u.exec(type)
+
+  return optional !== null
+}
+
+/**
+ * Detaches one descriptor for the public program record.
+ * @param {StdlibFacadePublicDeclaration} declaration - Registry declaration.
+ * @returns {StdlibFacadePublicDeclaration} Detached declaration.
+ */
+function detachPublicDeclaration(declaration) {
+  if (declaration.kind == "function") return {...declaration, effects: [...declaration.effects], failures: [...declaration.failures],
+    forms: [...declaration.forms], parameters: declaration.parameters.map((parameter) => ({...parameter}))}
+  return {...declaration,
+    constructor: {...declaration.constructor, effects: [...declaration.constructor.effects], failures: [...declaration.constructor.failures],
+      parameters: declaration.constructor.parameters.map((parameter) => ({...parameter}))},
+    forms: [...declaration.forms],
+    methods: declaration.methods.map((method) => ({...method, effects: [...method.effects], failures: [...method.failures],
+      forms: [...method.forms], parameters: method.parameters.map((parameter) => ({...parameter}))}))}
+}
+
+/**
+ * Detaches a local or dependency-qualified contract reference.
+ * @param {string | import("./semantic/stdlib.js").CanonicalDeclarationReference} reference - Contract reference.
+ * @returns {string | import("./semantic/types.js").CapabilityDeclarationReferenceInput} Detached reference.
+ */
+function detachCanonicalReference(reference) {
+  return typeof reference == "string" ? reference : {module: reference.module, name: reference.name}
+}
+
+/**
+ * Detaches a canonical resource flow for authority construction.
+ * @param {object} flow - Canonical resource flow.
+ * @returns {import("./semantic/types.js").CapabilityResourceFlowInput} Detached flow.
+ */
+function detachResourceFlow(flow) {
+  const candidate = /** @type {Record<string, unknown>} */ (flow)
+
+  if (candidate.kind == "none") return {kind: "none"}
+  if (candidate.kind == "acquire") return {kind: "acquire", resource: detachCanonicalReference(
+    /** @type {string | import("./semantic/stdlib.js").CanonicalDeclarationReference} */ (candidate.resource))}
+  return {
+    kind: /** @type {"borrow" | "close"} */ (candidate.kind),
+    parameterIndex: /** @type {number} */ (candidate.parameterIndex),
+    terminalFailure: detachCanonicalReference(
+      /** @type {string | import("./semantic/stdlib.js").CanonicalDeclarationReference} */ (candidate.terminalFailure))
+  }
+}
+
+/**
+ * Maps one canonical module identity to its closed capability name.
+ * @param {string} identity - Canonical identity.
+ * @returns {string} Capability name.
+ */
+function canonicalCapabilityName(identity) {
+  /** @type {Readonly<Record<string, string>>} */
+  const names = {
+    "semantifold.output": "Output",
+    "semantifold.resource": "Resource",
+    "semantifold.socket-client": "SocketClient",
+    "semantifold.task034.resource-probe": "ResourceProbe",
+    "semantifold.text-stream": "TextStream"
+  }
+
+  return names[identity] ?? invalidFacade(`Facade requirements name unknown canonical module '${identity}'.`)
 }
 
 /**

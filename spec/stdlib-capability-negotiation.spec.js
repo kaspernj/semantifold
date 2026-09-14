@@ -192,7 +192,7 @@ describe("stdlib capability negotiation", () => {
     expect(result.providers.map(({identity, operations, nativeEntries}) => ({identity, operations, nativeEntries}))).toEqual([
       {identity: "semantifold.provider.php.example.alpha", operations: [], nativeEntries: {}},
       {identity: "semantifold.provider.php.example.beta", operations: ["bOne"],
-        nativeEntries: {bOne: protectedEntryName("php", "bOne")}}
+        nativeEntries: {bOne: protectedEntryName("php", "example.beta", "bOne")}}
     ])
   })
 
@@ -281,7 +281,7 @@ describe("stdlib capability negotiation", () => {
 })
 
 function contract(identity, version, operations) {
-  return {failures: [], identity, operations, resources: [], version}
+  return {dependencies: [], failures: [], identity, operations, resources: [], version}
 }
 
 function operation(name, module = undefined, range = undefined, dependencyOperation = undefined) {
@@ -311,8 +311,10 @@ function providerRecord(target, identity, module, operations, dependencies = [])
     artifact: {mediaType: "application/x-httpd-php", path: `providers/${target}/example/${module.split(".")[1]}.php`},
     dependencies,
     identity,
-    nativeEntries: Object.fromEntries(operations.map((name) => [name, protectedEntryName(target, name)])),
+    nativeEntries: Object.fromEntries(operations.map((name) => [name,
+      module == probeIdentity ? protectedEntryName(target, name) : protectedEntryName(target, module, name)])),
     provides: [{module, operations, version: "1.0.0"}],
+    runtimeProfile: module == probeIdentity ? "php82-core-v1" : "php82-core-streams-v1",
     target
   }
 }

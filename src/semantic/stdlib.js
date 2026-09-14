@@ -13,27 +13,29 @@ const semanticsValues = {
   close: new Set(["not-applicable", "use-after-close-fails", "repeated-close-fails"]),
   eof: new Set(["not-applicable", "absent-value"]),
   encoding: new Set(["not-applicable", "utf-8"]),
-  newline: new Set(["not-applicable", "strip-line-terminator"]),
+  newline: new Set(["not-applicable", "strip-line-terminator", "retain-line-terminator", "append-lf-if-missing"]),
   ownership: new Set(["not-applicable", "acquired", "borrowed", "consumed"]),
   timeout: new Set(["none"])
 }
 
 /** @typedef {[number, number, number]} VersionTuple */
 /** @typedef {{lower: VersionTuple, upper: VersionTuple | null}} VersionRange */
+/** @typedef {{module: string, name: string}} CanonicalDeclarationReference */
 /**
  * @typedef StdlibContractOperation
  * @property {{module: string, operation: string, range: VersionRange}[]} dependencies - Canonical operation dependencies.
  * @property {["host"]} effects - Closed effect declaration.
  * @property {"left-to-right"} evaluationOrder - Canonical argument evaluation order.
- * @property {string[]} failures - Declared failure names.
+ * @property {(string | CanonicalDeclarationReference)[]} failures - Declared failure names.
  * @property {string} name - Operation name.
- * @property {{name: string, type: string}[]} parameters - Ordered parameters.
+ * @property {{name: string, type: string | CanonicalDeclarationReference}[]} parameters - Ordered parameters.
  * @property {object} resourceFlow - Closed resource transition.
- * @property {string} returnType - Closed return type spelling.
+ * @property {string | CanonicalDeclarationReference} returnType - Closed return type spelling.
  * @property {Record<string, string>} semantics - Closed canonical semantics fields.
  */
 /**
  * @typedef StdlibContractModule
+ * @property {{module: string, range: VersionRange}[]} dependencies - Versioned declaration dependencies.
  * @property {{name: string}[]} failures - Ordered failure declarations.
  * @property {string} identity - Canonical module identity.
  * @property {StdlibContractOperation[]} operations - Ordered operation declarations.
@@ -42,6 +44,7 @@ const semanticsValues = {
  */
 /**
  * @typedef StdlibContract
+ * @property {{module: string, range: VersionRange}[]} dependencies - Versioned declaration dependencies.
  * @property {{name: string}[]} failures - Ordered failure declarations.
  * @property {string} identity - Canonical module identity.
  * @property {StdlibContractOperation[]} operations - Ordered operation declarations.
@@ -100,19 +103,43 @@ export function compareStdlibVersions(left, right) {
 /**
  * Derives one protected native provider entry name.
  * @param {string} target - Adopted provider target language.
- * @param {string} operation - Canonical operation name.
+ * @param {string} module - Legacy operation name or canonical module identity.
+ * @param {string} [operation] - Qualified canonical operation name.
  * @returns {string} Protected native entry name.
  */
-export function protectedEntryName(target, operation) {
-  return `__semantifold_provider_${target}_${operation}`
+export function protectedEntryName(target, module, operation) {
+  if (typeof target != "string" || !/^[a-z][a-z0-9-]*$/u.test(target) ||
+    typeof module != "string" || (operation !== undefined && (typeof operation != "string" ||
+      !declarationNamePattern.test(operation)))) invalidContract("Protected provider entry components are invalid.")
+  if (operation === undefined) {
+    if (!declarationNamePattern.test(module)) invalidContract("Protected provider operation name is invalid.")
+    return `__semantifold_provider_${target}_${module}`
+  }
+  if (!identityPattern.test(module)) invalidContract("Protected provider module identity is invalid.")
+  const encodedModule = [...module].map((character) => character.charCodeAt(0).toString(16).padStart(2, "0")).join("")
+
+  return `__semantifold_provider_${target}_m${encodedModule.length}_${encodedModule}_${operation}`
 }
 
 /**
  * Parses one protected native provider entry name.
  * @param {string} name - Candidate protected entry name.
- * @returns {{target: string, operation: string} | null} Parsed binding or null when unparseable.
+ * @returns {{target: string, module?: string, operation: string} | null} Parsed binding or null when unparseable.
  */
 export function parseProtectedEntryName(name) {
+  const qualified = /^__semantifold_provider_([a-z][a-z0-9-]*)_m([0-9]+)_([0-9a-f]+)_([A-Za-z_][A-Za-z0-9_]*)$/u.exec(name)
+
+  if (qualified) {
+    const encodedLength = Number(qualified[2])
+    const encoded = qualified[3]
+
+    if (!Number.isSafeInteger(encodedLength) || encodedLength != encoded.length || encoded.length % 2 != 0) return null
+    let module = ""
+
+    for (let index = 0; index < encoded.length; index += 2) module += String.fromCharCode(Number.parseInt(encoded.slice(index, index + 2), 16))
+    if (!identityPattern.test(module) || protectedEntryName(qualified[1], module, qualified[4]) != name) return null
+    return {module, operation: qualified[4], target: qualified[1]}
+  }
   const match = /^__semantifold_provider_([a-z][a-z0-9-]*)_(.+)$/u.exec(name)
   if (!match) return null
   return {operation: match[2], target: match[1]}
@@ -149,12 +176,11 @@ export function stdlibVersionSatisfies(version, range) {
  * @param {unknown} records - Optional override record set; built-in probe contract by default.
  * @returns {Readonly<StdlibContractRegistry>} Frozen registry.
  */
-export function createStdlibContractRegistry(records = [builtinProbeContract()]) {
+export function createStdlibContractRegistry(records = builtinContracts()) {
   if (!isDenseArray(records)) invalidContract("Canonical contract records must be an ordered dense array.")
 
   /** @type {Map<string, Map<string, StdlibContractModule>>} */
   const modules = new Map()
-  const identities = new Set()
 
   for (const candidate of records) {
     const record = validateContractRecord(candidate)
@@ -163,10 +189,9 @@ export function createStdlibContractRegistry(records = [builtinProbeContract()])
     if (versions.has(record.version)) invalidContract(`Duplicate canonical contract '${record.identity}' version '${record.version}'.`)
     versions.set(record.version, record)
     modules.set(record.identity, versions)
-    identities.add(record.identity)
   }
   for (const record of modules.values()) {
-    for (const module of record.values()) validateContractDependencies(module, identities)
+    for (const module of record.values()) validateContractDependencies(module, modules)
   }
   const frozenModules = [...modules.entries()]
     .map(([identity, versions]) => ({
@@ -215,6 +240,7 @@ function resolveRegistryModule(store, identity, range) {
   const record = /** @type {Readonly<StdlibContractModule>} */ (versions.get(`${resolved[0]}.${resolved[1]}.${resolved[2]}`))
 
   return deepFreeze({
+    dependencies: record.dependencies,
     failures: record.failures,
     identity: record.identity,
     operations: record.operations,
@@ -249,6 +275,7 @@ export function resolveStdlibModule(identity, range) {
  */
 function builtinProbeContract() {
   return {
+    dependencies: [],
     failures: [
       {name: "ProbeOperationFailure"},
       {name: "ProbeAcquireFailure"},
@@ -326,6 +353,98 @@ function builtinProbeContract() {
 }
 
 /**
+ * Declares the complete built-in canonical registry input.
+ * @returns {unknown[]} Unvalidated built-in records.
+ */
+function builtinContracts() {
+  return [builtinProbeContract(), builtinSocketClientContract(), builtinTextStreamContract(),
+    builtinOutputContract(), builtinResourceContract()]
+}
+
+/**
+ * Declares the built-in SocketClient v1 contract.
+ * @returns {unknown} Unvalidated SocketClient v1 record.
+ */
+function builtinSocketClientContract() {
+  const byteStream = {module: "semantifold.resource", name: "ByteStream"}
+
+  return {
+    dependencies: [{module: "semantifold.resource", range: "1"}],
+    failures: [{name: "InvalidHost"}, {name: "InvalidPort"}, {name: "ConnectionFailure"}],
+    identity: "semantifold.socket-client",
+    operations: [{
+      dependencies: [], effects: ["host"], evaluationOrder: "left-to-right",
+      failures: ["InvalidHost", "InvalidPort", "ConnectionFailure"], name: "v1_connect",
+      parameters: [{name: "host", type: "string"}, {name: "port", type: "integer"}],
+      resourceFlow: {kind: "acquire", resource: byteStream}, returnType: byteStream,
+      semantics: canonicalSemantics({ownership: "acquired"})
+    }],
+    resources: [],
+    version: "1.0.0"
+  }
+}
+
+/**
+ * Declares the built-in TextStream v1 contract.
+ * @returns {unknown} Unvalidated TextStream v1 record.
+ */
+function builtinTextStreamContract() {
+  const byteStream = {module: "semantifold.resource", name: "ByteStream"}
+  const resourceClosed = {module: "semantifold.resource", name: "ResourceClosed"}
+
+  return {
+    dependencies: [{module: "semantifold.resource", range: "1"}],
+    failures: [{name: "ReadFailure"}, {name: "DecodeFailure"}],
+    identity: "semantifold.text-stream",
+    operations: [{
+      dependencies: [], effects: ["host"], evaluationOrder: "left-to-right",
+      failures: ["ReadFailure", "DecodeFailure", resourceClosed], name: "v1_read_line",
+      parameters: [{name: "resource", type: byteStream}],
+      resourceFlow: {kind: "borrow", parameterIndex: 0, terminalFailure: resourceClosed},
+      returnType: "optional:string",
+      semantics: canonicalSemantics({close: "use-after-close-fails", eof: "absent-value", encoding: "utf-8",
+        newline: "retain-line-terminator", ownership: "borrowed"})
+    }],
+    resources: [],
+    version: "1.0.0"
+  }
+}
+
+/**
+ * Declares the built-in Output v1 contract.
+ * @returns {unknown} Unvalidated Output v1 record.
+ */
+function builtinOutputContract() {
+  return {
+    dependencies: [], failures: [{name: "WriteFailure"}], identity: "semantifold.output",
+    operations: [{
+      dependencies: [], effects: ["host"], evaluationOrder: "left-to-right", failures: ["WriteFailure"],
+      name: "v1_write_line", parameters: [{name: "text", type: "string"}], resourceFlow: {kind: "none"},
+      returnType: "void", semantics: canonicalSemantics({encoding: "utf-8", newline: "append-lf-if-missing"})
+    }],
+    resources: [], version: "1.0.0"
+  }
+}
+
+/**
+ * Declares the built-in Resource v1 contract.
+ * @returns {unknown} Unvalidated Resource v1 record.
+ */
+function builtinResourceContract() {
+  return {
+    dependencies: [], failures: [{name: "CloseFailure"}, {name: "ResourceClosed"}], identity: "semantifold.resource",
+    operations: [{
+      dependencies: [], effects: ["host"], evaluationOrder: "left-to-right",
+      failures: ["CloseFailure", "ResourceClosed"], name: "v1_close",
+      parameters: [{name: "resource", type: "ByteStream"}],
+      resourceFlow: {kind: "close", parameterIndex: 0, terminalFailure: "ResourceClosed"}, returnType: "void",
+      semantics: canonicalSemantics({close: "repeated-close-fails", ownership: "consumed"})
+    }],
+    resources: [{name: "ByteStream"}], version: "1.0.0"
+  }
+}
+
+/**
  * Builds one closed semantics declaration with canonical defaults.
  * @param {Partial<Record<keyof typeof semanticsValues, string>>} [overrides] - Non-default closed values.
  * @returns {Record<string, string>} Closed semantics fields.
@@ -350,7 +469,7 @@ function canonicalSemantics(overrides = {}) {
  */
 function validateContractRecord(candidate) {
   if (!isPlainObject(candidate)) invalidContract("Every canonical contract record must be a plain object.")
-  requireKeys(candidate, ["failures", "identity", "operations", "resources", "version"], "contract record")
+  requireKeys(candidate, ["dependencies", "failures", "identity", "operations", "resources", "version"], "contract record")
   const identity = /** @type {string} */ (candidate.identity)
 
   if (typeof identity != "string" || !identityPattern.test(identity)) invalidContract("Canonical contract identity is invalid.")
@@ -362,12 +481,14 @@ function validateContractRecord(candidate) {
   const resourceNames = new Set(resources.map(({name}) => name))
   const failureNames = new Set(failures.map(({name}) => name))
   const operationNames = new Set()
+  const dependencies = validateModuleDependencies(candidate.dependencies, identity)
 
   if (!isDenseArray(candidate.operations)) invalidContract("Canonical contract operations must be a dense array.")
   const operations = /** @type {unknown[]} */ (candidate.operations).map((operation) =>
     validateContractOperation(operation, resourceNames, failureNames, operationNames))
 
   return deepFreeze({
+    dependencies,
     failures,
     identity,
     operations,
@@ -397,13 +518,13 @@ function validateContractOperation(candidate, resourceNames, failureNames, opera
     invalidContract(`Operation '${name}' requires the single host effect declaration.`)
   }
   if (candidate.evaluationOrder != "left-to-right") invalidContract(`Operation '${name}' requires left-to-right evaluation.`)
-  if (!isDenseArray(candidate.failures) || !candidate.failures.every((failure) =>
-    typeof failure == "string" && failureNames.has(failure)) || new Set(candidate.failures).size != candidate.failures.length) {
+  if (!isDenseArray(candidate.failures)) {
     invalidContract(`Operation '${name}' declares unknown or duplicate failures.`)
   }
-  const failures = /** @type {string[]} */ (candidate.failures)
+  const failures = candidate.failures.map((failure) => normalizeDeclarationReference(failure, failureNames, `Operation '${name}' failure`))
+  if (new Set(failures.map(referenceKey)).size != failures.length) invalidContract(`Operation '${name}' repeats a declared failure.`)
   const parameterNames = new Set()
-  /** @type {{name: string, type: string}[]} */
+  /** @type {{name: string, type: string | CanonicalDeclarationReference}[]} */
   const parameters = []
 
   if (!isDenseArray(candidate.parameters)) invalidContract(`Operation '${name}' parameters must be a dense array.`)
@@ -416,16 +537,16 @@ function validateContractOperation(candidate, resourceNames, failureNames, opera
       invalidContract(`Operation '${name}' parameter name is invalid or duplicate.`)
     }
     parameterNames.add(parameterName)
-    const parameterType = /** @type {string} */ (parameter.type)
+    const parameterType = normalizeCanonicalValueType(parameter.type, resourceNames, `operation '${name}' parameter '${parameterName}'`)
 
-    if (!isCanonicalValueType(parameterType, resourceNames, `operation '${name}' parameter '${parameterName}'`)) {
+    if (parameterType === null) {
       invalidContract(`Operation '${name}' parameter '${parameterName}' type is outside the closed canonical value set.`)
     }
     parameters.push({name: parameterName, type: parameterType})
   }
-  const returnType = /** @type {string} */ (candidate.returnType)
+  const returnType = candidate.returnType == "void" ? "void" : normalizeCanonicalValueType(candidate.returnType, resourceNames, `operation '${name}' return type`)
 
-  if (!isCanonicalValueType(returnType, resourceNames, `operation '${name}' return type`, true)) {
+  if (returnType === null) {
     invalidContract(`Operation '${name}' return type is outside the closed canonical value set.`)
   }
   const resourceFlow = validateContractResourceFlow(candidate.resourceFlow, parameters, failures, name)
@@ -449,43 +570,46 @@ function validateContractOperation(candidate, resourceNames, failureNames, opera
  * Validates one closed canonical value type spelling.
  * @param {unknown} candidate - Candidate type.
  * @param {Set<string>} resourceNames - Declared resource names.
- * @param {string} subject - Diagnostic subject.
- * @param {boolean} [allowVoid] - Whether void is admitted.
- * @returns {boolean} Whether the type is closed and declared.
+ * @param {string} _subject - Diagnostic subject reserved for caller context.
+ * @returns {string | CanonicalDeclarationReference | null} Detached type or null.
  */
-function isCanonicalValueType(candidate, resourceNames, subject, allowVoid = false) {
-  if (typeof candidate != "string") return false
-  if (allowVoid && candidate == "void") return true
-  if (scalarNames.has(candidate)) return true
-  if (resourceNames.has(candidate)) return true
-  const optional = /^optional:([a-z]+)$/u.exec(candidate)
+function normalizeCanonicalValueType(candidate, resourceNames, _subject) {
+  if (typeof candidate == "string") {
+    if (scalarNames.has(candidate) || resourceNames.has(candidate)) return candidate
+    const optional = /^optional:([a-z]+)$/u.exec(candidate)
 
-  if (optional) return scalarNames.has(optional[1])
-  return false
+    return optional && scalarNames.has(optional[1]) ? candidate : null
+  }
+  if (isPlainObject(candidate) && Object.keys(candidate).sort().join(",") == "module,name" &&
+    typeof candidate.module == "string" && identityPattern.test(candidate.module) && typeof candidate.name == "string" &&
+    declarationNamePattern.test(candidate.name)) return {module: candidate.module, name: candidate.name}
+  return null
 }
 
 /**
  * Validates one closed resource transition against its parameters and failures.
  * @param {unknown} candidate - Candidate transition.
- * @param {{name: string, type: string}[]} parameters - Validated parameters.
- * @param {string[]} failures - Validated failure names.
+ * @param {{name: string, type: string | CanonicalDeclarationReference}[]} parameters - Validated parameters.
+ * @param {(string | CanonicalDeclarationReference)[]} failures - Validated failure names.
  * @param {string} operation - Operation name.
  * @returns {object} Detached transition.
  */
 function validateContractResourceFlow(candidate, parameters, failures, operation) {
   if (!isPlainObject(candidate)) invalidContract(`Operation '${operation}' requires a resource flow declaration.`)
-  const ownedParameters = parameters.map((parameter, index) => scalarNames.has(parameter.type) ? -1 :
-    parameter.type.startsWith("optional:") ? -1 : [index]).flat().filter((index) => index >= 0)
+  const ownedParameters = parameters.flatMap((parameter, index) => isOwnedCanonicalType(parameter.type) ? [index] : [])
 
   if (Object.keys(candidate).sort().join(",") == "kind" && candidate.kind == "none") {
     if (ownedParameters.length > 0) invalidContract(`Operation '${operation}' owns a parameter without a transition.`)
     return deepFreeze({kind: /** @type {const} */ ("none")})
   }
   if (Object.keys(candidate).sort().join(",") == "kind,resource" && candidate.kind == "acquire") {
-    if (typeof candidate.resource != "string" || ownedParameters.length > 0) {
+    const resource = typeof candidate.resource == "string" && declarationNamePattern.test(candidate.resource)
+      ? candidate.resource
+      : normalizeCanonicalValueType(candidate.resource, new Set(), `operation '${operation}' acquisition`)
+    if (resource === null || ownedParameters.length > 0) {
       invalidContract(`Operation '${operation}' acquisition flow is incomplete.`)
     }
-    return deepFreeze({kind: /** @type {const} */ ("acquire"), resource: /** @type {string} */ (candidate.resource)})
+    return deepFreeze({kind: /** @type {const} */ ("acquire"), resource})
   }
   if (["borrow", "close"].includes(String(candidate.kind)) &&
     Object.keys(candidate).sort().join(",") == "kind,parameterIndex,terminalFailure") {
@@ -493,11 +617,11 @@ function validateContractResourceFlow(candidate, parameters, failures, operation
 
     if (!Number.isSafeInteger(parameterIndex) || parameterIndex < 0 || parameterIndex >= parameters.length ||
       ownedParameters.length != 1 || ownedParameters[0] != parameterIndex ||
-      typeof candidate.terminalFailure != "string" || !failures.includes(candidate.terminalFailure)) {
+      !failures.some((failure) => referenceKey(failure) == referenceKey(candidate.terminalFailure))) {
       invalidContract(`Operation '${operation}' ${String(candidate.kind)} flow is incomplete.`)
     }
     return deepFreeze({kind: /** @type {"borrow" | "close"} */ (candidate.kind), parameterIndex,
-      terminalFailure: /** @type {string} */ (candidate.terminalFailure)})
+      terminalFailure: normalizeFailureFlowReference(candidate.terminalFailure)})
   }
   return invalidContract(`Operation '${operation}' declares an unknown resource flow.`)
 }
@@ -531,13 +655,28 @@ function validateOperationDependencies(candidate) {
 /**
  * Validates canonical operation dependencies against the complete registry identity set.
  * @param {StdlibContractModule} record - Validated record.
- * @param {Set<string>} identities - All registered module identities.
+ * @param {Map<string, Map<string, StdlibContractModule>>} modules - All registered module versions.
  * @returns {void}
  */
-function validateContractDependencies(record, identities) {
+function validateContractDependencies(record, modules) {
+  const allowedDependencies = new Map(record.dependencies.map((dependency) => [dependency.module, dependency.range]))
+
+  for (const dependency of record.dependencies) {
+    const versions = modules.get(dependency.module)
+
+    if (!versions || ![...versions.keys()].some((version) => stdlibVersionSatisfies(/** @type {VersionTuple} */ (parseStdlibVersion(version)), dependency.range))) {
+      invalidContract(`Canonical module '${record.identity}' depends on missing or incompatible module '${dependency.module}'.`)
+    }
+  }
   for (const operation of record.operations) {
+    for (const reference of operation.parameters.map(({type}) => type).concat([operation.returnType]).filter(isDeclarationReference)) {
+      validateForeignDeclarationReference(record, reference, "resource", allowedDependencies, modules)
+    }
+    for (const reference of operation.failures.filter(isDeclarationReference)) {
+      validateForeignDeclarationReference(record, reference, "failure", allowedDependencies, modules)
+    }
     for (const dependency of operation.dependencies) {
-      if (!identities.has(dependency.module)) {
+      if (!modules.has(dependency.module)) {
         invalidContract(`Operation '${operation.name}' depends on unknown canonical module '${dependency.module}'.`)
       }
       if (dependency.module == record.identity && dependency.operation == operation.name) {
@@ -545,6 +684,108 @@ function validateContractDependencies(record, identities) {
       }
     }
   }
+}
+
+/**
+ * Validates declaration-only module dependencies.
+ * @param {unknown} candidate - Candidate dependency list.
+ * @param {string} identity - Owning module identity.
+ * @returns {{module: string, range: VersionRange}[]} Detached dependencies.
+ */
+function validateModuleDependencies(candidate, identity) {
+  if (!isDenseArray(candidate)) invalidContract("Canonical module dependencies must be a dense array.")
+  const names = new Set()
+
+  return candidate.map((dependency) => {
+    if (!isPlainObject(dependency)) invalidContract("Every canonical module dependency must be a plain object.")
+    requireKeys(dependency, ["module", "range"], "module dependency")
+    const module = /** @type {string} */ (dependency.module)
+    const range = parseStdlibVersionRange(dependency.range)
+
+    if (typeof module != "string" || !identityPattern.test(module) || module == identity || names.has(module) || range === null) {
+      invalidContract("Canonical module dependency is invalid, duplicate, self-referential, or malformed.")
+    }
+    names.add(module)
+    return {module, range}
+  })
+}
+
+/**
+ * Validates one dependency-qualified resource or failure reference.
+ * @param {StdlibContractModule} record - Owning module.
+ * @param {CanonicalDeclarationReference} reference - Qualified declaration.
+ * @param {"resource" | "failure"} kind - Declaration kind.
+ * @param {Map<string, VersionRange>} allowedDependencies - Direct dependency ranges.
+ * @param {Map<string, Map<string, StdlibContractModule>>} modules - Registry modules.
+ * @returns {void}
+ */
+function validateForeignDeclarationReference(record, reference, kind, allowedDependencies, modules) {
+  const range = allowedDependencies.get(reference.module)
+
+  if (!range) invalidContract(`Canonical module '${record.identity}' uses undeclared dependency '${reference.module}'.`)
+  const versions = /** @type {Map<string, StdlibContractModule>} */ (modules.get(reference.module))
+  const matches = [...versions.values()].filter((module) =>
+    stdlibVersionSatisfies(/** @type {VersionTuple} */ (parseStdlibVersion(module.version)), range))
+  const declarations = kind == "resource" ? matches.flatMap(({resources}) => resources) : matches.flatMap(({failures}) => failures)
+
+  if (!declarations.some(({name}) => name == reference.name)) {
+    invalidContract(`Canonical ${kind} '${reference.module}.${reference.name}' is not declared by a compatible dependency.`)
+  }
+}
+
+/**
+ * Normalizes one local or dependency-qualified declaration reference.
+ * @param {unknown} candidate - Candidate reference.
+ * @param {Set<string>} localNames - Declared local names.
+ * @param {string} subject - Diagnostic subject.
+ * @returns {string | CanonicalDeclarationReference} Detached reference.
+ */
+function normalizeDeclarationReference(candidate, localNames, subject) {
+  if (typeof candidate == "string" && localNames.has(candidate)) return candidate
+  if (isDeclarationReference(candidate)) return {module: candidate.module, name: candidate.name}
+  return invalidContract(`${subject} is not a declared local or qualified canonical declaration.`)
+}
+
+/**
+ * Normalizes a terminal failure reference after membership validation.
+ * @param {unknown} candidate - Candidate failure reference.
+ * @returns {string | CanonicalDeclarationReference} Detached reference.
+ */
+function normalizeFailureFlowReference(candidate) {
+  if (typeof candidate == "string") return candidate
+  if (isDeclarationReference(candidate)) return {module: candidate.module, name: candidate.name}
+  return invalidContract("Resource flow terminal failure is invalid.")
+}
+
+/**
+ * Checks one canonical qualified declaration reference.
+ * @param {unknown} candidate - Candidate reference.
+ * @returns {candidate is CanonicalDeclarationReference} Whether the reference is exact.
+ */
+function isDeclarationReference(candidate) {
+  return isPlainObject(candidate) && Object.keys(candidate).sort().join(",") == "module,name" &&
+    typeof candidate.module == "string" && identityPattern.test(candidate.module) &&
+    typeof candidate.name == "string" && declarationNamePattern.test(candidate.name)
+}
+
+/**
+ * Encodes one declaration reference for equality checks.
+ * @param {unknown} candidate - Local or qualified reference.
+ * @returns {string} Stable equality key.
+ */
+function referenceKey(candidate) {
+  return typeof candidate == "string" ? `local:${candidate}` : isDeclarationReference(candidate)
+    ? `${candidate.module}:${candidate.name}` : `invalid:${String(candidate)}`
+}
+
+/**
+ * Reports whether a canonical type denotes an owned resource.
+ * @param {string | CanonicalDeclarationReference} candidate - Canonical type.
+ * @returns {boolean} Whether the type is owned.
+ */
+function isOwnedCanonicalType(candidate) {
+  return isDeclarationReference(candidate) || (typeof candidate == "string" && !scalarNames.has(candidate) &&
+    !candidate.startsWith("optional:") && candidate != "void")
 }
 
 /**

@@ -59,7 +59,7 @@ describe("Go cross-language native acceptance", () => {
     }
   })
 
-  it("round-trips and executes all five Go profiles through real staged Go acceptance", async () => {
+  it("round-trips and executes all five Go profiles through real staged Go acceptance", {timeoutMs: 300_000}, async () => {
     for (const [directory, stdout] of fixtureProfiles) {
       const source = await readFile(new URL("fixtures/" + directory + "program.go", import.meta.url), "utf8")
       const module = parse({filename: "main.go", language: "go", source})

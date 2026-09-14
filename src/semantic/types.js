@@ -509,18 +509,21 @@
 /**
  * @typedef CapabilityAuthority
  * @property {"SemantifoldCapabilityAuthority"} schema - Authority schema discriminator.
- * @property {1} schemaVersion - Authority payload version, not a standard-library contract version.
+ * @property {1 | 2} schemaVersion - Authority payload version, not a standard-library contract version.
  * @property {string} id - Opaque caller-supplied authority identity.
  * @property {EffectCapabilityDeclaration[]} capabilities - Normalized declarations.
  * @property {string} [contractVersion] - Declared standard-library contract version, present only when the caller supplied one.
+ * @property {{identity: string, contractVersion: string, capabilities: EffectCapabilityDeclaration[]}[]} [modules] - Schema-v2 canonical module authorities.
  */
 
-/** @typedef {{name: string, type: SemanticTypeName | {kind: "OwnedResourceType", resource: string} | {kind: "OptionalType", valueType: SemanticTypeName}}} CapabilityParameterInput */
+/** @typedef {{module: string, name: string}} CapabilityDeclarationReferenceInput */
+/** @typedef {{name: string, type: SemanticTypeName | {kind: "OwnedResourceType", resource: string | CapabilityDeclarationReferenceInput} | {kind: "OptionalType", valueType: SemanticTypeName}}} CapabilityParameterInput */
 /** @typedef {{name: string}} CapabilityNamedInput */
-/** @typedef {{kind: "none"} | {kind: "acquire", resource: string} | {kind: "borrow" | "close", parameterIndex: number, terminalFailure: string}} CapabilityResourceFlowInput */
-/** @typedef {{name: string, parameters: CapabilityParameterInput[], returnType: FunctionReturnTypeName | {kind: "OwnedResourceType", resource: string} | {kind: "OptionalType", valueType: SemanticTypeName}, effects: ["host"], failures: string[], resourceFlow: CapabilityResourceFlowInput}} CapabilityOperationInput */
+/** @typedef {{kind: "none"} | {kind: "acquire", resource: string | CapabilityDeclarationReferenceInput} | {kind: "borrow" | "close", parameterIndex: number, terminalFailure: string | CapabilityDeclarationReferenceInput}} CapabilityResourceFlowInput */
+/** @typedef {{name: string, parameters: CapabilityParameterInput[], returnType: FunctionReturnTypeName | {kind: "OwnedResourceType", resource: string | CapabilityDeclarationReferenceInput} | {kind: "OptionalType", valueType: SemanticTypeName}, effects: ["host"], failures: (string | CapabilityDeclarationReferenceInput)[], resourceFlow: CapabilityResourceFlowInput}} CapabilityOperationInput */
 /** @typedef {{name: string, resources: CapabilityNamedInput[], failures: CapabilityNamedInput[], operations: CapabilityOperationInput[]}} CapabilityDeclarationInput */
-/** @typedef {{schema: "SemantifoldCapabilityAuthority", schemaVersion: 1, id: string, capabilities: CapabilityDeclarationInput[], contractVersion?: string}} CapabilityAuthorityInput */
+/** @typedef {{identity: string, contractVersion: string, capabilities: CapabilityDeclarationInput[]}} CapabilityAuthorityModuleInput */
+/** @typedef {{schema: "SemantifoldCapabilityAuthority", schemaVersion: 1, id: string, capabilities: CapabilityDeclarationInput[], contractVersion?: string} | {schema: "SemantifoldCapabilityAuthority", schemaVersion: 2, id: string, modules: CapabilityAuthorityModuleInput[]}} CapabilityAuthorityInput */
 
 /**
  * @typedef ListLiteral
@@ -983,6 +986,8 @@
  * @property {string} [id] - Stable class-scoped constructor identity, required after validation.
  * @property {Parameter[]} parameters - Exact positional constructor signature.
  * @property {Block} body - Field-order initialization body.
+ * @property {readonly ["host"]} [effects] - Inferred checked host-effect fact.
+ * @property {string[]} [failureIds] - Ordered capability failures reachable through construction.
  * @property {SourceLocation} location - Complete constructor location.
  * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned constructor range.
  */
@@ -995,6 +1000,8 @@
  * @property {Parameter[]} parameters - Exact positional method signature.
  * @property {SemanticFunctionReturnType} returnType - Exact return type.
  * @property {Block} body - Method body.
+ * @property {readonly ["host"]} [effects] - Inferred checked host-effect fact.
+ * @property {string[]} [failureIds] - Ordered capability failures reachable through the method.
  * @property {SourceLocation} location - Complete method location.
  * @property {SemanticNodeSourceProvenance} [sourceProvenance] - Parser-owned method-name range.
  */
@@ -1091,6 +1098,7 @@
  * @property {string} id - Stable caller-supplied logical module identity.
  * @property {string} sourceFilename - Explicit source filename; never an implicit read request.
  * @property {RecordDeclaration[]} [records] - Top-level nominal record declarations.
+ * @property {ClassDeclaration[]} [classes] - Compiler-owned facade reference classes.
  * @property {ErrorDeclaration[]} [errors] - Top-level nominal unchecked error declarations.
  * @property {FunctionDeclaration[]} functions - Top-level functions.
  * @property {SemanticImport[]} imports - Resolved imports in source order.
@@ -1107,8 +1115,8 @@
  * @typedef StdlibFacadeProgramModuleDescriptor
  * @property {{identity: string, range: string}[]} dependencies - Versioned facade dependencies.
  * @property {string} identity - Facade identity.
- * @property {{identity: string, symbols: string[]}[]} nativeModules - Exact native source identities.
- * @property {{effects: string[], failures: string[], forms: ["direct-call"], kind: "function", name: string, ownership: "not-applicable", parameters: {name: string, type: string}[], returnType: string}[]} publicDeclarations - Public source declarations.
+ * @property {({identity: string, kind: "module", symbols: string[]} | {forms: ("unqualified-call" | "receiver-call")[], identity: string, kind: "builtin", symbols: string[]})[]} nativeModules - Exact native source identities.
+ * @property {({effects: string[], failures: string[], forms: ("direct-call" | "unqualified-call" | "receiver-call")[], kind: "function", name: string, ownership: "not-applicable", parameters: {name: string, type: string}[], returnType: string} | {constructor: {effects: string[], failures: string[], ownership: "acquired", parameters: {name: string, type: string}[]}, forms: ["constructor-call"], kind: "class", methods: {effects: string[], failures: string[], forms: ["receiver-call"], name: string, ownership: "borrowed" | "consumed", parameters: {name: string, type: string}[], returnType: string}[], name: string, ownership: "owned-reference"})[]} publicDeclarations - Public source declarations.
  * @property {{module: string, operations: string[], range: string}[]} requirements - Canonical capability requirements.
  * @property {string} runtimeProfile - Exact source runtime profile.
  * @property {string} sourceModule - Compiler-owned semantic module identity.
@@ -1131,6 +1139,7 @@
  * @property {string} entryModule - Stable identity of the sole entry module.
  * @property {RegisteredSource[]} sources - Caller-order complete source registry.
  * @property {{contractVersion?: string, identity: string}} [stdlibContract] - Declared standard-library contract; plain, never frozen.
+ * @property {{contractVersion?: string, identity: string}[]} [stdlibContracts] - Ordered declared standard-library contracts; plain, never frozen.
  * @property {StdlibFacadeProgramDescriptor} [stdlibFacades] - Complete selected source-language facade closure.
  */
 

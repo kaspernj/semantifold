@@ -62,20 +62,24 @@ export function generateProgramArtifacts(input) {
   }] : []
 
   if (linking && input.language != "java") {
-    artifacts.push({
-      content: generateStdlibProviderContent(/** @type {"php" | "ruby" | "javascript" | "typescript"} */ (input.language),
-        [.../** @type {string[]} */ (linking.negotiation.providers[0].operations)]),
-      contentKind: /** @type {const} */ ("text"),
-      mediaType: linking.record.artifact.mediaType,
-      ownership: /** @type {const} */ ("generated"),
-      path: linking.record.artifact.path,
-      provenance: {
-        kind: /** @type {const} */ ("synthetic"),
-        reason: `semantifold-stdlib-provider:${linking.record.identity}`,
-        relatedOrigins: []
-      },
-      role: /** @type {const} */ ("support")
-    })
+    for (const provider of linking.negotiation.providers) {
+      const record = /** @type {import("../stdlib-providers.js").StdlibProviderRecord} */ (linking.records.get(provider.module))
+
+      artifacts.push({
+        content: generateStdlibProviderContent(/** @type {"php" | "ruby" | "javascript" | "typescript"} */ (input.language),
+          [...provider.operations], provider.module),
+        contentKind: /** @type {const} */ ("text"),
+        mediaType: record.artifact.mediaType,
+        ownership: /** @type {const} */ ("generated"),
+        path: record.artifact.path,
+        provenance: {
+          kind: /** @type {const} */ ("synthetic"),
+          reason: `semantifold-stdlib-provider:${record.identity}`,
+          relatedOrigins: []
+        },
+        role: /** @type {const} */ ("support")
+      })
+    }
   }
 
   for (const emissionModule of emissionModules) {
@@ -89,16 +93,16 @@ export function generateProgramArtifacts(input) {
       programPaths: paths,
       sources,
       ...(linking && emissionModule.capabilities !== undefined ? {
-        stdlibProviderEntries: Object.fromEntries((linking.usedOperationsByModule.get(moduleId) ?? []).map((name) => [
-          name,
-          /** @type {string} */ (linking.record.nativeEntries[name])
+        stdlibProviderEntries: Object.fromEntries((linking.usedOperationsByModule.get(moduleId) ?? []).map(({module, operation}) => [
+          qualifiedOperationKey(module, operation),
+          /** @type {string} */ (linking.records.get(module)?.nativeEntries[operation])
         ])),
         stdlibProviderImports: input.language == "java" || input.language == "javascript" || input.language == "typescript" ?
           linking.providerImportsByModule.get(moduleId) : undefined,
-        stdlibProviderPath: linking.record.artifact.path,
+        stdlibProviderPaths: linking.providerPathsByModule.get(moduleId),
         ...(input.language == "java" ? {
           stdlibProviderOwnerModule: /** @type {string} */ (linking.ownerModuleId),
-          stdlibProviderShims: moduleId == linking.ownerModuleId ? linking.usedOperations : undefined
+          stdlibProviderShims: moduleId == linking.ownerModuleId ? linking.usedOperations.map(({operation}) => operation) : undefined
         } : {})
       } : {})
     })
@@ -133,11 +137,18 @@ export function generateProgramArtifacts(input) {
 /**
  * @typedef StdlibProgramLinking
  * @property {import("../stdlib-negotiation.js").StdlibNegotiationResult} negotiation - Negotiated provider closure.
- * @property {import("../stdlib-providers.js").StdlibProviderRecord} record - Single materialized provider record.
- * @property {string[]} usedOperations - Program-wide used canonical operations in stable order.
- * @property {Map<string, string[]>} usedOperationsByModule - Used canonical operations by module identity.
+ * @property {Map<string, import("../stdlib-providers.js").StdlibProviderRecord>} records - Materialized provider records by canonical module.
+ * @property {QualifiedStdlibOperation[]} usedOperations - Program-wide used canonical operations in stable order.
+ * @property {Map<string, QualifiedStdlibOperation[]>} usedOperationsByModule - Used canonical operations by program module identity.
  * @property {Map<string, string[]>} providerImportsByModule - Ordered provider import names by module identity.
+ * @property {Map<string, string[]>} providerPathsByModule - Provider artifact closure by program module identity.
  * @property {string | null} ownerModuleId - Java target: first operation-using module identity hosting the shared support; null for artifact-materializing targets.
+ */
+
+/**
+ * @typedef QualifiedStdlibOperation
+ * @property {string} module - Canonical module identity.
+ * @property {string} operation - Canonical operation name.
  */
 
 /**
@@ -152,23 +163,43 @@ function planStdlibLinking(program, language) {
   const {programWide, usedOperationsByModule} = collectUsedEffectOperations(program)
 
   if (programWide.length == 0) return null
-  const contract = /** @type {{identity: string, contractVersion?: string}} */ (program.stdlibContract)
+  const contracts = program.stdlibContracts ?? [/** @type {{identity: string, contractVersion?: string}} */ (program.stdlibContract)]
+  const contractsByIdentity = new Map(contracts.map((contract) => [contract.identity, contract]))
+  const requirementsByModule = new Map()
+
+  for (const qualified of programWide) {
+    const requirement = requirementsByModule.get(qualified.module) ?? []
+
+    requirement.push(qualified.operation)
+    requirementsByModule.set(qualified.module, requirement)
+  }
   const negotiation = negotiateStdlibProviders({
-    requirements: [{
-      module: contract.identity,
-      operations: [...programWide],
-      ...(contract.contractVersion !== undefined ? {range: contract.contractVersion} : {})
-    }],
+    requirements: [...requirementsByModule].map(([module, operations]) => {
+      const contract = contractsByIdentity.get(module)
+
+      if (!contract) throw new SemantifoldDiagnostic({
+        code: "STDLIB_LINK_FAILURE",
+        language,
+        message: `Reachable canonical operation '${module}.${operations[0]}' has no declared standard-library contract.`
+      })
+      return {module, operations, ...(contract.contractVersion !== undefined ? {range: contract.contractVersion} : {})}
+    }),
     target: language
   })
-  const records = stdlibProviderRegistry.providersFor(language, contract.identity, negotiation.modules[0].version)
+  /** @type {Map<string, import("../stdlib-providers.js").StdlibProviderRecord>} */
+  const records = new Map()
 
-  if (records.length != 1) {
-    throw new SemantifoldDiagnostic({
-      code: "STDLIB_LINK_FAILURE",
-      language,
-      message: `Expected exactly one registered stdlib provider for '${contract.identity}' on '${language}'.`
-    })
+  for (const selected of negotiation.modules) {
+    const candidates = stdlibProviderRegistry.providersFor(language, selected.identity, selected.version)
+
+    if (candidates.length != 1) {
+      throw new SemantifoldDiagnostic({
+        code: "STDLIB_LINK_FAILURE",
+        language,
+        message: `Expected exactly one registered stdlib provider for '${selected.identity}' on '${language}'.`
+      })
+    }
+    records.set(selected.identity, /** @type {import("../stdlib-providers.js").StdlibProviderRecord} */ (candidates[0]))
   }
   const ownerModuleId = language == "java"
     ? program.modules.map((module) => module.id).find((id) => (usedOperationsByModule.get(id) ?? []).length > 0)
@@ -183,66 +214,140 @@ function planStdlibLinking(program, language) {
   return {
     negotiation,
     ownerModuleId,
-    providerImportsByModule: collectProviderImports(program, negotiation, usedOperationsByModule, language, ownerModuleId),
-    record: /** @type {import("../stdlib-providers.js").StdlibProviderRecord} */ (records[0]),
+    providerImportsByModule: collectProviderImports(program, negotiation, records, usedOperationsByModule, language, ownerModuleId),
+    providerPathsByModule: collectProviderPaths(negotiation, records, usedOperationsByModule),
+    records,
     usedOperations: [...programWide],
     usedOperationsByModule
   }
 }
 
 /**
+ * Selects the exact provider/type dependency closure required by each emitting program module.
+ * @param {import("../stdlib-negotiation.js").StdlibNegotiationResult} negotiation - Negotiated program closure.
+ * @param {Map<string, import("../stdlib-providers.js").StdlibProviderRecord>} records - Selected provider records.
+ * @param {Map<string, QualifiedStdlibOperation[]>} usedOperationsByModule - Reachable operations by program module.
+ * @returns {Map<string, string[]>} Ordered provider paths by program module.
+ */
+function collectProviderPaths(negotiation, records, usedOperationsByModule) {
+  const paths = new Map()
+
+  for (const [moduleId, operations] of usedOperationsByModule) {
+    const selected = new Set(operations.map(({module}) => module))
+    let changed = true
+
+    while (changed) {
+      changed = false
+      for (const module of [...selected]) {
+        for (const dependency of records.get(module)?.dependencies ?? []) {
+          if (!selected.has(dependency.module)) {
+            selected.add(dependency.module)
+            changed = true
+          }
+        }
+      }
+    }
+    paths.set(moduleId, negotiation.providers.filter(({module}) => selected.has(module)).map(({module}) =>
+      /** @type {import("../stdlib-providers.js").StdlibProviderRecord} */ (records.get(module)).artifact.path))
+  }
+  return paths
+}
+
+/**
  * Collects the canonical operations invoked by each program module in stable order.
  * @param {import("../semantic/types.js").SemanticProgram} program - Validated semantic program.
- * @returns {{programWide: string[], usedOperationsByModule: Map<string, string[]>}} Used operations.
+ * @returns {{programWide: QualifiedStdlibOperation[], usedOperationsByModule: Map<string, QualifiedStdlibOperation[]>}} Used operations.
  */
 function collectUsedEffectOperations(program) {
-  /** @type {Map<string, string[]>} */
+  /** @type {Map<string, QualifiedStdlibOperation[]>} */
   const usedOperationsByModule = new Map()
-  const programWide = new Set()
+  /** @type {Map<string, QualifiedStdlibOperation>} */
+  const programWide = new Map()
+  /** @type {Map<string, {body: unknown, module: import("../semantic/types.js").SemanticProgramModule}>} */
+  const bodies = new Map()
 
   for (const module of program.modules) {
-    /** @type {Map<string, string>} */
-    const operationNames = new Map()
-
-    for (const capability of module.capabilities ?? []) {
-      for (const operation of capability.operations) operationNames.set(operation.id, operation.name)
+    for (const declaration of module.functions) bodies.set(/** @type {string} */ (declaration.id), {body: declaration.body, module})
+    for (const declaration of module.classes ?? []) {
+      bodies.set(/** @type {string} */ (declaration.constructor.id), {body: declaration.constructor.body, module})
+      for (const method of declaration.methods) bodies.set(/** @type {string} */ (method.id), {body: method.body, module})
     }
-    const used = new Set()
+    usedOperationsByModule.set(module.id, [])
+  }
+  const entryModule = /** @type {import("../semantic/types.js").SemanticProgramModule} */ (
+    program.modules.find(({id}) => id == program.entryModule))
+  /** @type {{body: unknown, module: import("../semantic/types.js").SemanticProgramModule}[]} */
+  const pending = [{body: entryModule.entryPoint?.body, module: entryModule}]
+  const reachedDeclarations = new Set()
+
+  while (pending.length > 0) {
+    const current = /** @type {{body: unknown, module: import("../semantic/types.js").SemanticProgramModule}} */ (pending.shift())
+    const operationNames = new Map(current.module.capabilities?.flatMap((capability) =>
+      capability.operations.map((operation) => [operation.id, {module: capability.authorityId, operation: operation.name}])) ?? [])
     const seen = new Set()
 
     /**
-     * Visits one semantic value.
+     * Visits one reachable semantic subtree.
      * @param {unknown} value - Candidate semantic subtree.
-     * @returns {void}
      */
     const visit = (value) => {
       if (!value || typeof value != "object" || seen.has(value)) return
       seen.add(value)
 
       if (!Array.isArray(value)) {
-        if (Reflect.get(value, "kind") == "EffectCallExpression") {
+        const kind = Reflect.get(value, "kind")
+
+        if (kind == "EffectCallExpression") {
           const operation = Reflect.get(value, "operation")
 
           if (typeof operation == "string") {
-            const name = operationNames.get(operation)
+            const qualified = operationNames.get(operation)
 
-            if (name !== undefined) used.add(name)
+            if (qualified !== undefined) {
+              const key = qualifiedOperationKey(qualified.module, qualified.operation)
+              const moduleOperations = /** @type {QualifiedStdlibOperation[]} */ (usedOperationsByModule.get(current.module.id))
+
+              if (!moduleOperations.some((item) => qualifiedOperationKey(item.module, item.operation) == key)) moduleOperations.push(qualified)
+              programWide.set(key, qualified)
+            }
+          }
+        }
+        const declarationId = isPlainObject(Reflect.get(value, "resolution"))
+          ? Reflect.get(Reflect.get(value, "resolution"), "declarationId") : undefined
+
+        if (typeof declarationId == "string" && !reachedDeclarations.has(declarationId)) {
+          const declaration = bodies.get(declarationId)
+
+          if (declaration) {
+            reachedDeclarations.add(declarationId)
+            pending.push(declaration)
           }
         }
         for (const [key, child] of Object.entries(value)) {
-          if (key == "capabilities" || key == "location" || key == "sourceProvenance") continue
+          if (["capabilities", "location", "provenance", "resolution", "sourceProvenance"].includes(key)) continue
           visit(child)
         }
       } else for (const child of value) visit(child)
     }
 
-    visit(module)
-    const operations = [...used].sort()
-
-    usedOperationsByModule.set(module.id, operations)
-    for (const name of used) programWide.add(name)
+    visit(current.body)
   }
-  return {programWide: [...programWide].sort(), usedOperationsByModule}
+  for (const operations of usedOperationsByModule.values()) {
+    operations.sort((left, right) => qualifiedOperationKey(left.module, left.operation)
+      .localeCompare(qualifiedOperationKey(right.module, right.operation), "en"))
+  }
+  return {programWide: [...programWide.values()].sort((left, right) => qualifiedOperationKey(left.module, left.operation)
+    .localeCompare(qualifiedOperationKey(right.module, right.operation), "en")), usedOperationsByModule}
+}
+
+/**
+ * Builds an unambiguous internal key for one canonical operation authority.
+ * @param {string} module - Canonical module identity.
+ * @param {string} operation - Canonical operation name.
+ * @returns {string} Qualified internal key.
+ */
+function qualifiedOperationKey(module, operation) {
+  return `${module}\u0000${operation}`
 }
 
 /**
@@ -250,19 +355,20 @@ function collectUsedEffectOperations(program) {
  * Java modules list referenced capability type names only; the owner lists none.
  * @param {import("../semantic/types.js").SemanticProgram} program - Validated semantic program.
  * @param {import("../stdlib-negotiation.js").StdlibNegotiationResult} negotiation - Negotiated closure.
- * @param {Map<string, string[]>} usedOperationsByModule - Used canonical operations by module identity.
+ * @param {Map<string, import("../stdlib-providers.js").StdlibProviderRecord>} records - Provider records by canonical module.
+ * @param {Map<string, QualifiedStdlibOperation[]>} usedOperationsByModule - Used canonical operations by module identity.
  * @param {import("../semantic/types.js").SemanticLanguage} language - Target language.
  * @param {string | null} [ownerModuleId] - Java owner module identity.
  * @returns {Map<string, string[]>} Ordered provider import names by module identity.
  */
-function collectProviderImports(program, negotiation, usedOperationsByModule, language, ownerModuleId = null) {
-  const contractOperations = /** @type {string[]} */ (negotiation.providers[0].operations)
+function collectProviderImports(program, negotiation, records, usedOperationsByModule, language, ownerModuleId = null) {
   /** @type {Map<string, string[]>} */
   const providerImportsByModule = new Map()
 
   for (const module of program.modules) {
     if (module.capabilities === undefined) continue
-    const used = new Set(usedOperationsByModule.get(module.id) ?? [])
+    const used = new Set((usedOperationsByModule.get(module.id) ?? []).map(({module: owner, operation}) =>
+      qualifiedOperationKey(owner, operation)))
     /** @type {Set<string>} */
     const surface = new Set()
     /** @type {Map<string, string>} */
@@ -334,7 +440,15 @@ function collectProviderImports(program, negotiation, usedOperationsByModule, la
       }
     }
     if (language != "java") {
-      for (const operation of contractOperations) if (used.has(operation)) names.push(/** @type {string} */ (negotiation.providers[0].nativeEntries[operation]))
+      for (const provider of negotiation.providers) {
+        const record = records.get(provider.module)
+
+        for (const operation of provider.operations) {
+          if (used.has(qualifiedOperationKey(provider.module, operation))) {
+            names.push(/** @type {string} */ (record?.nativeEntries[operation]))
+          }
+        }
+      }
     }
 
     providerImportsByModule.set(module.id, names)
@@ -351,10 +465,6 @@ function collectProviderImports(program, negotiation, usedOperationsByModule, la
  * @returns {Record<string, unknown>} Plain JSON metadata.
  */
 function stdlibLinkMetadata(linking, paths, facades) {
-  const artifactPath = linking?.ownerModuleId !== null && linking?.ownerModuleId !== undefined
-    ? /** @type {string} */ (paths.get(linking.ownerModuleId))
-    : linking?.record.artifact.path
-
   return {
     ...(facades ? {facades} : {}),
     modules: (linking?.negotiation.modules ?? []).map((item) => ({
@@ -362,16 +472,23 @@ function stdlibLinkMetadata(linking, paths, facades) {
       operations: [...item.operations],
       version: item.version
     })),
-    providers: (linking?.negotiation.providers ?? []).map((item) => ({
-      artifact: {mediaType: linking?.record.artifact.mediaType, path: artifactPath},
-      dependencies: (linking?.record.dependencies ?? []).map((dependency) => ({module: dependency.module, range: dependency.range})),
-      identity: item.identity,
-      module: item.module,
-      nativeEntries: {...item.nativeEntries},
-      operations: [...item.operations],
-      target: item.target,
-      version: item.version
-    })),
+    providers: (linking?.negotiation.providers ?? []).map((item) => {
+      const record = linking?.records.get(item.module)
+      const artifactPath = linking?.ownerModuleId !== null && linking?.ownerModuleId !== undefined
+        ? /** @type {string} */ (paths.get(linking.ownerModuleId))
+        : record?.artifact.path
+
+      return {
+        artifact: {mediaType: record?.artifact.mediaType, path: artifactPath},
+        dependencies: (record?.dependencies ?? []).map((dependency) => ({module: dependency.module, range: dependency.range})),
+        identity: item.identity,
+        module: item.module,
+        nativeEntries: {...item.nativeEntries},
+        operations: [...item.operations],
+        target: item.target,
+        version: item.version
+      }
+    }),
     schema: "SemantifoldStdlibLink",
     version: 1
   }
@@ -444,6 +561,40 @@ function samePoint(candidate, expected) {
 }
 
 /**
+ * Collects nominal failure identities referenced by executable/type nodes outside the module's authority declarations.
+ * @param {import("../semantic/types.js").SemanticProgramModule} module - Program module.
+ * @returns {Set<string>} Referenced failure declaration identities.
+ */
+function collectReferencedFailureIds(module) {
+  /** @type {Set<string>} */
+  const ids = new Set()
+  const seen = new Set()
+  /**
+   * Visits one semantic subtree for referenced failures.
+   * @param {unknown} value - Candidate semantic subtree.
+   */
+  const visit = (value) => {
+    if (!value || typeof value != "object" || seen.has(value)) return
+    seen.add(value)
+    if (!Array.isArray(value)) {
+      if (Reflect.get(value, "kind") == "ErrorType" && typeof Reflect.get(value, "declarationId") == "string") {
+        ids.add(Reflect.get(value, "declarationId"))
+      }
+      const failureIds = Reflect.get(value, "failureIds")
+
+      if (Array.isArray(failureIds)) for (const id of failureIds) if (typeof id == "string") ids.add(id)
+      for (const [key, child] of Object.entries(value)) {
+        if (["capabilities", "location", "provenance", "sourceProvenance"].includes(key)) continue
+        visit(child)
+      }
+    } else for (const child of value) visit(child)
+  }
+
+  visit({classes: module.classes, entryPoint: module.entryPoint, functions: module.functions})
+  return ids
+}
+
+/**
  * Creates and validates every backend-shaped module before any writer is allocated.
  * @param {import("../semantic/types.js").SemanticProgram} program - Validated semantic program.
  * @param {import("../semantic/types.js").SemanticLanguage} language - Target language.
@@ -451,11 +602,12 @@ function samePoint(candidate, expected) {
  * @returns {import("../semantic/types.js").SemanticModule[]} Emission views in dependency order.
  */
 function prepareEmissionModules(program, language, linking = null) {
-  /** @type {Map<string, import("../semantic/types.js").FunctionDeclaration | import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ErrorDeclaration>} */
+  /** @type {Map<string, import("../semantic/types.js").FunctionDeclaration | import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").ErrorDeclaration>} */
   const declarations = new Map()
 
   for (const module of program.modules) {
     for (const declaration of module.records ?? []) declarations.set(/** @type {string} */ (declaration.id), declaration)
+    for (const declaration of module.classes ?? []) declarations.set(/** @type {string} */ (declaration.id), declaration)
     for (const declaration of module.errors ?? []) declarations.set(/** @type {string} */ (declaration.id), declaration)
     for (const declaration of module.functions) declarations.set(/** @type {string} */ (declaration.id), declaration)
   }
@@ -475,8 +627,21 @@ function prepareEmissionModules(program, language, linking = null) {
     const visibleFunctions = new Map()
     const visibleCallEffects = new Map()
     const visibleRecords = new Map()
+    const visibleClasses = new Map()
     const visibleErrors = new Map()
     const externalDeclarationIds = new Set()
+
+    const neededFailureIds = collectReferencedFailureIds(programModule)
+    const localFailureIds = new Set(programModule.capabilities?.flatMap(({failures}) => failures.map(({id}) => id)) ?? [])
+
+    for (const owner of program.modules) {
+      if (owner.id == programModule.id) continue
+      for (const capability of owner.capabilities ?? []) {
+        for (const failure of capability.failures) {
+          if (!localFailureIds.has(failure.id) && neededFailureIds.has(failure.id)) visibleErrors.set(failure.id, failure)
+        }
+      }
+    }
 
     for (const imported of programModule.imports) {
       const declaration = declarations.get(imported.declarationId)
@@ -488,15 +653,21 @@ function prepareEmissionModules(program, language, linking = null) {
         visibleCallEffects.set(imported.localName, new Set(callEffectsByDeclarationId.get(imported.declarationId) ?? []))
       } else if (imported.symbolKind == "record") {
         visibleRecords.set(imported.declarationId, /** @type {import("../semantic/types.js").RecordDeclaration} */ (declaration))
+      } else if (imported.symbolKind == "class") {
+        visibleClasses.set(imported.declarationId, /** @type {import("../semantic/types.js").ClassDeclaration} */ (declaration))
       } else {
         visibleErrors.set(imported.declarationId, /** @type {import("../semantic/types.js").ErrorDeclaration} */ (declaration))
       }
     }
-    preflightEffectCapabilities(module, language, linking ? {usedOperations: linking.usedOperations} : {})
+    if (module.capabilities !== undefined || !linking) {
+      preflightEffectCapabilities(module, language, linking ? {usedOperations: (linking.usedOperationsByModule.get(programModule.id) ?? [])
+        .map(({operation}) => operation)} : {})
+    }
     validateBackendModule(module, language, {
       externalDeclarationIds,
       program: true,
       visibleCallEffects,
+      visibleClasses,
       visibleErrors,
       visibleFunctions,
       visibleRecords
@@ -524,7 +695,7 @@ function validateProgram(candidate, language) {
   }
   const program = /** @type {import("../semantic/types.js").SemanticProgram} */ (candidate)
   const modules = new Map()
-  /** @type {Map<string, {declaration: import("../semantic/types.js").FunctionDeclaration | import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ErrorDeclaration, module: import("../semantic/types.js").SemanticProgramModule}>} */
+  /** @type {Map<string, {declaration: import("../semantic/types.js").FunctionDeclaration | import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").ErrorDeclaration, module: import("../semantic/types.js").SemanticProgramModule}>} */
   const declarations = new Map()
   /** @type {import("../semantic/types.js").SemanticProgramModule[]} */
   const capabilityModules = []
@@ -550,7 +721,8 @@ function validateProgram(candidate, language) {
       !isDenseArray(module.imports) || !isDenseArray(module.exports)) {
       unsupportedCapability(language, "malformed or duplicate semantic program module", module?.location)
     }
-    if (Reflect.get(module, "classes") !== undefined) {
+    if (Reflect.get(module, "classes") !== undefined && (!isDenseArray(module.classes) ||
+      Reflect.get(module, "stdlibFacade") === undefined)) {
       unsupportedCapability(language, "Task 033 reference classes are not supported by semantic program generation",
         Reflect.get(module, "classes")?.[0]?.location ?? module.location)
     }
@@ -567,7 +739,7 @@ function validateProgram(candidate, language) {
       entryCount++
       if (module.id != program.entryModule) unsupportedCapability(language, "entry point on an unselected module", module.entryPoint.location)
     }
-    for (const declaration of [...module.records ?? [], ...module.errors ?? [], ...module.functions]) {
+    for (const declaration of [...module.records ?? [], ...module.classes ?? [], ...module.errors ?? [], ...module.functions]) {
       if (!isPlainObject(declaration) || typeof declaration.id != "string" ||
         !declaration.id.startsWith(`${module.id}#`) || declarations.has(declaration.id)) {
         unsupportedCapability(language, "duplicate or unstable program declaration identity", declaration?.location ?? module.location)
@@ -577,14 +749,14 @@ function validateProgram(candidate, language) {
     for (const imported of module.imports) {
       if (!isPlainObject(imported) || imported.kind != "Import" || typeof imported.moduleId != "string" ||
         typeof imported.importedName != "string" || typeof imported.localName != "string" ||
-        typeof imported.declarationId != "string" || !["function", "record", "error"].includes(imported.symbolKind) ||
+        typeof imported.declarationId != "string" || !["function", "record", "class", "error"].includes(imported.symbolKind) ||
         typeof imported.typeOnly != "boolean") {
         unsupportedCapability(language, "malformed semantic program import", imported?.location ?? module.location)
       }
     }
     for (const exported of module.exports) {
       if (!isPlainObject(exported) || exported.kind != "Export" || typeof exported.exportedName != "string" ||
-        typeof exported.declarationId != "string" || !["function", "record", "error"].includes(exported.symbolKind)) {
+        typeof exported.declarationId != "string" || !["function", "record", "class", "error"].includes(exported.symbolKind)) {
         unsupportedCapability(language, "malformed semantic program export", exported?.location ?? module.location)
       }
     }
@@ -603,9 +775,10 @@ function validateProgram(candidate, language) {
   const earlier = new Set()
 
   for (const module of program.modules) {
-    const localTargetNames = new Set([...module.records ?? [], ...module.errors ?? [], ...module.functions].map(({name}) => targetName(language, name)))
+    const localTargetNames = new Set([...module.records ?? [], ...module.classes ?? [], ...module.errors ?? [], ...module.functions]
+      .map(({name}) => targetName(language, name)))
     const importedTargetNames = new Set()
-    const localJavaClass = module.records?.[0]?.name ?? module.errors?.[0]?.name ??
+    const localJavaClass = module.records?.[0]?.name ?? module.classes?.[0]?.name ?? module.errors?.[0]?.name ??
       (module.id == program.entryModule ? "Main" : moduleClassName(module.id))
     const javaImportClasses = new Map(language == "java" ? [[localJavaClass, module.id]] : [])
 
@@ -619,10 +792,11 @@ function validateProgram(candidate, language) {
         unsupportedCapability(language, "unresolved, private, cyclic, or out-of-order program import", imported.location ?? module.location)
       }
       const declarationKind = resolved.declaration.kind == "FunctionDeclaration" ? "function" :
-        resolved.declaration.kind == "RecordDeclaration" ? "record" : "error"
+        resolved.declaration.kind == "RecordDeclaration" ? "record" :
+          resolved.declaration.kind == "ClassDeclaration" ? "class" : "error"
 
       if (imported.symbolKind != remoteExport.symbolKind || imported.symbolKind != declarationKind ||
-        imported.typeOnly && declarationKind != "record") {
+        imported.typeOnly && declarationKind != "record" && declarationKind != "class") {
         unsupportedCapability(language, "program import declaration kind mismatch", imported.location ?? module.location)
       }
       const importName = programImportName(program, module, imported)
@@ -677,7 +851,8 @@ function validateProgram(candidate, language) {
         unsupportedCapability(language, `unresolved or colliding target export '${exported.exportedName}'`, exported.location ?? module.location)
       }
       const declarationKind = resolved.declaration.kind == "FunctionDeclaration" ? "function" :
-        resolved.declaration.kind == "RecordDeclaration" ? "record" : "error"
+        resolved.declaration.kind == "RecordDeclaration" ? "record" :
+          resolved.declaration.kind == "ClassDeclaration" ? "class" : "error"
 
       if (exported.symbolKind != declarationKind) {
         unsupportedCapability(language, "program export declaration kind mismatch", exported.location ?? module.location)
@@ -690,7 +865,7 @@ function validateProgram(candidate, language) {
     }
     if (language == "php") {
       const exportedDeclarationIds = new Set(module.exports.map(({declarationId}) => declarationId))
-      const privateDeclaration = [...module.records ?? [], ...module.errors ?? [], ...module.functions].find(({id}) =>
+      const privateDeclaration = [...module.records ?? [], ...module.classes ?? [], ...module.errors ?? [], ...module.functions].find(({id}) =>
         typeof id == "string" && !exportedDeclarationIds.has(id))
 
       if (privateDeclaration) {
@@ -766,7 +941,6 @@ function validateProgramStdlibFacades(program, language) {
     invalidFacadeDescriptor(language, "Facade programs require one source language and explicit application/facade ownership.")
   }
   const selectedIdentities = new Set(records.map(({identity}) => identity))
-  const usedOperationsByModule = collectUsedEffectOperations(program).usedOperationsByModule
   const registeredModules = reparseRegisteredFacadeModules(program, facadeLanguage, language)
 
   for (let index = 0; index < records.length; index += 1) {
@@ -791,7 +965,7 @@ function validateProgramStdlibFacades(program, language) {
         `Facade '${record.identity}' semantic module does not match its registered executable source.`, module.location)
     }
     const allowedOperations = new Set(record.requirements.flatMap(({operations}) => operations))
-    const usedOperations = new Set(usedOperationsByModule.get(module.id) ?? [])
+    const usedOperations = collectDeclaredEffectOperations(module)
 
     if (allowedOperations.size != usedOperations.size || [...allowedOperations].some((operation) => !usedOperations.has(operation))) {
       invalidFacadeAuthority(language, `Facade '${record.identity}' semantic body does not match its declared canonical requirements.`, module.location)
@@ -821,6 +995,39 @@ function validateProgramStdlibFacades(program, language) {
       invalidFacadeDescriptor(language, "A facade import does not match its registered native module and symbol identity.")
     }
   }
+}
+
+/**
+ * Collects every canonical operation present in one validated facade implementation.
+ * This checks the facade's complete declared authority independently from program reachability.
+ * @param {import("../semantic/types.js").SemanticProgramModule} module - Facade module.
+ * @returns {Set<string>} Used operation names.
+ */
+function collectDeclaredEffectOperations(module) {
+  const operationNames = new Map(module.capabilities?.flatMap(({operations}) =>
+    operations.map((operation) => [operation.id, operation.name])) ?? [])
+  const used = new Set()
+  const seen = new Set()
+  /**
+   * Visits one facade semantic subtree.
+   * @param {unknown} value - Candidate semantic subtree.
+   */
+  const visit = (value) => {
+    if (!value || typeof value != "object" || seen.has(value)) return
+    seen.add(value)
+    if (!Array.isArray(value)) {
+      const operation = Reflect.get(value, "kind") == "EffectCallExpression" ? Reflect.get(value, "operation") : undefined
+
+      if (typeof operation == "string" && operationNames.has(operation)) used.add(/** @type {string} */ (operationNames.get(operation)))
+      for (const [key, child] of Object.entries(value)) {
+        if (["capabilities", "location", "provenance", "resolution", "sourceProvenance"].includes(key)) continue
+        visit(child)
+      }
+    } else for (const child of value) visit(child)
+  }
+
+  visit({classes: module.classes, entryPoint: module.entryPoint, functions: module.functions})
+  return used
 }
 
 /**
@@ -913,9 +1120,10 @@ function invalidFacadeAuthority(language, message, location) {
  */
 function validateProgramStdlibContract(program, language, capabilityModules) {
   const contract = Reflect.get(program, "stdlibContract")
+  const contracts = Reflect.get(program, "stdlibContracts")
 
   if (capabilityModules.length == 0) {
-    if (contract !== undefined) {
+    if (contract !== undefined || contracts !== undefined) {
       throw new SemantifoldDiagnostic({
         code: "STDLIB_LINK_FAILURE",
         language,
@@ -924,41 +1132,62 @@ function validateProgramStdlibContract(program, language, capabilityModules) {
     }
     return
   }
-  if (contract === undefined) {
+  if (contract !== undefined && contracts !== undefined) {
+    throw new SemantifoldDiagnostic({
+      code: "STDLIB_LINK_FAILURE",
+      language,
+      message: "A program cannot declare both singular and plural standard-library contract descriptors."
+    })
+  }
+  if (contract === undefined && contracts === undefined) {
     unsupportedCapability(language, "program modules with capabilities require a declared standard-library contract",
       capabilityModules[0].location)
   }
-  if (!isPlainObject(contract) || Object.keys(contract).some((key) => key != "identity" && key != "contractVersion")) {
-    throw new SemantifoldDiagnostic({
-      code: "STDLIB_LINK_FAILURE",
-      language,
-      message: "The declared standard-library contract descriptor is malformed."
-    })
-  }
-  const identity = contract.identity
+  const declared = contracts === undefined ? [contract] : contracts
 
-  if (typeof identity != "string" || identity.length == 0 ||
-    !listStdlibModules().some(({identity: registered}) => registered == identity)) {
+  if (!isDenseArray(declared) || declared.length == 0) {
     throw new SemantifoldDiagnostic({
       code: "STDLIB_LINK_FAILURE",
       language,
-      message: `Declared standard-library contract '${String(identity)}' is not a registered canonical module.`
+      message: "The declared standard-library contract descriptor list is malformed or empty."
     })
   }
-  if (contract.contractVersion !== undefined && parseStdlibVersionRange(contract.contractVersion) === null) {
-    throw new SemantifoldDiagnostic({
-      code: "STDLIB_LINK_FAILURE",
-      language,
-      message: `Declared standard-library contract version '${String(contract.contractVersion)}' is not canonical.`
-    })
+  const identities = new Set()
+
+  for (const descriptor of declared) {
+    if (!isPlainObject(descriptor) || Object.keys(descriptor).some((key) => key != "identity" && key != "contractVersion")) {
+      throw new SemantifoldDiagnostic({
+        code: "STDLIB_LINK_FAILURE",
+        language,
+        message: "The declared standard-library contract descriptor is malformed."
+      })
+    }
+    const identity = descriptor.identity
+
+    if (typeof identity != "string" || identity.length == 0 || identities.has(identity) ||
+      !listStdlibModules().some(({identity: registered}) => registered == identity)) {
+      throw new SemantifoldDiagnostic({
+        code: "STDLIB_LINK_FAILURE",
+        language,
+        message: `Declared standard-library contract '${String(identity)}' is duplicate or not a registered canonical module.`
+      })
+    }
+    if (descriptor.contractVersion !== undefined && parseStdlibVersionRange(descriptor.contractVersion) === null) {
+      throw new SemantifoldDiagnostic({
+        code: "STDLIB_LINK_FAILURE",
+        language,
+        message: `Declared standard-library contract version '${String(descriptor.contractVersion)}' is not canonical.`
+      })
+    }
+    identities.add(identity)
   }
   for (const module of capabilityModules) {
     for (const capability of module.capabilities ?? []) {
-      if (!isPlainObject(capability) || typeof capability.authorityId != "string" || capability.authorityId != identity) {
+      if (!isPlainObject(capability) || typeof capability.authorityId != "string" || !identities.has(capability.authorityId)) {
         throw new SemantifoldDiagnostic({
           code: "STDLIB_LINK_FAILURE",
           language,
-          message: `Capability authority '${String(Reflect.get(capability, "authorityId"))}' does not match the declared standard-library contract '${identity}'.`
+          message: `Capability authority '${String(Reflect.get(capability, "authorityId"))}' does not match a declared standard-library contract.`
         })
       }
     }
@@ -1014,12 +1243,26 @@ function planModulePaths(program, language, linking = null) {
   const paths = new Map()
   const folded = new Set()
   const targetModuleNames = new Set()
-  const providerPath = linking ? linking.record.artifact.path : undefined
-  const foldedProvider = providerPath ? providerPath.toLocaleLowerCase("en-US").replaceAll(".", "/") : undefined
+  const providerPaths = linking ? linking.negotiation.providers.map(({module}) =>
+    /** @type {import("../stdlib-providers.js").StdlibProviderRecord} */ (linking.records.get(module)).artifact.path) : []
+  const foldedProviders = new Map()
+
+  for (const providerPath of providerPaths) {
+    const key = providerPath.toLocaleLowerCase("en-US")
+
+    if (!isSafeArtifactPath(providerPath) || folded.has(key)) {
+      throw new SemantifoldDiagnostic({code: "STDLIB_NAME_COLLISION", language,
+        message: `Stdlib provider artifact path '${providerPath}' is unsafe or colliding.`})
+    }
+    folded.add(key)
+    foldedProviders.set(providerPath.toLocaleLowerCase("en-US").replaceAll(".", "/"), providerPath)
+  }
 
   for (const module of program.modules) {
     let path = `${module.id.replaceAll(".", "/")}${extension}`
-    if (foldedProvider !== undefined && path.toLocaleLowerCase("en-US").replaceAll(".", "/") == foldedProvider) {
+    const providerPath = foldedProviders.get(path.toLocaleLowerCase("en-US").replaceAll(".", "/"))
+
+    if (providerPath !== undefined) {
       throw new SemantifoldDiagnostic({
         code: "STDLIB_NAME_COLLISION",
         language,
@@ -1045,13 +1288,13 @@ function planModulePaths(program, language, linking = null) {
 
     if (language == "java") {
       for (const segment of module.id.split(".")) validateTargetIdentifier(language, segment, "module", module.location)
-      const nominalCount = (module.records?.length ?? 0) + (module.errors?.length ?? 0)
+      const nominalCount = (module.records?.length ?? 0) + (module.classes?.length ?? 0) + (module.errors?.length ?? 0)
 
       if (module.id.includes("-") || nominalCount > 1 ||
         nominalCount > 0 && (module.functions.length > 0 || module.entryPoint)) {
         unsupportedCapability(language, "Java module layout requiring multiple public declarations in one semantic module", module.location)
       }
-      const className = module.records?.[0]?.name ?? module.errors?.[0]?.name ??
+      const className = module.records?.[0]?.name ?? module.classes?.[0]?.name ?? module.errors?.[0]?.name ??
         (module.id == program.entryModule ? "Main" : targetModuleName)
 
       if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/u.test(className)) {

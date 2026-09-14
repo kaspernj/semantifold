@@ -31,7 +31,7 @@ const builtinContracts = createStdlibContractRegistry()
  * @typedef StdlibNegotiationResult
  * @property {string} target - Negotiated target language.
  * @property {readonly {identity: string, operations: string[], version: string}[]} modules - Linked modules in identity order.
- * @property {readonly {identity: string, target: string, module: string, version: string, operations: string[], nativeEntries: Readonly<Record<string, string>>}[]} providers - Selected providers in identity order.
+ * @property {readonly {identity: string, target: string, module: string, version: string, operations: string[], nativeEntries: Readonly<Record<string, string>>, runtimeProfile: string}[]} providers - Selected providers in identity order.
  */
 
 /**
@@ -121,6 +121,15 @@ export function negotiateStdlibProviders({contracts = builtinContracts, provider
     for (const module of [...usedOperations.keys()].sort()) {
       const contract = resolveModuleVersion(contracts, module, ranges.get(module) ?? universalRange)
       const declared = new Map(contract.operations.map(({dependencies, name}) => [name, dependencies]))
+
+      for (const dependency of contract.dependencies) {
+        requireModule(dependency.module)
+        if (addRange(dependency.module, asVersionRange(dependency.range))) changed = true
+        if (!usedOperations.has(dependency.module)) {
+          usedOperations.set(dependency.module, new Set())
+          changed = true
+        }
+      }
 
       for (const operation of [.../** @type {Set<string>} */ (usedOperations.get(module))].sort()) {
         const dependencies = declared.get(operation)
@@ -214,7 +223,7 @@ export function negotiateStdlibProviders({contracts = builtinContracts, provider
       version: contract.version
     }
   })
-  /** @type {{identity: string, target: string, module: string, version: string, operations: string[], nativeEntries: Record<string, string>}[]} */
+  /** @type {{identity: string, target: string, module: string, version: string, operations: string[], nativeEntries: Record<string, string>, runtimeProfile: string}[]} */
   const providerResults = [...selectedProviders.values()].sort((left, right) =>
     left.identity < right.identity ? -1 : left.identity > right.identity ? 1 : 0).map((provider) => {
     const module = provider.provides[0].module
@@ -230,6 +239,7 @@ export function negotiateStdlibProviders({contracts = builtinContracts, provider
         /** @type {string} */ (provider.nativeEntries[operation])
       ])),
       operations,
+      runtimeProfile: provider.runtimeProfile,
       target: provider.target,
       version: provider.provides[0].version
     }
@@ -297,6 +307,11 @@ function assertAcyclic(contracts, ranges, usedOperations, selectedProviders) {
       }
       edges.set(nodeKey, targets.sort())
     }
+    const moduleNodeKey = `${module}\u0000\u0000`
+    const moduleTargets = /** @type {string[]} */ (edges.get(moduleNodeKey) ?? [])
+
+    for (const dependency of contract.dependencies) moduleTargets.push(`${dependency.module}\u0000\u0000`)
+    edges.set(moduleNodeKey, moduleTargets.sort())
   }
   for (const module of [...selectedProviders.keys()].sort()) {
     const provider = /** @type {StdlibProviderRecord} */ (selectedProviders.get(module))

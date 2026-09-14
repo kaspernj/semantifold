@@ -1,6 +1,6 @@
 # 037 — Blocking TCP client stdlib vertical slice
 
-- Status: `todo`
+- Status: `implemented on topic branch; independent review, exact-head TensorBuzz CI, and merge remain outstanding`
 - Phase/priority: Phase S / P1 proof
 - Dependencies: [032-condition-controlled-loops-and-break.md](032-condition-controlled-loops-and-break.md), [036-language-compatibility-stdlib-facades.md](036-language-compatibility-stdlib-facades.md)
 
@@ -12,7 +12,7 @@ This is one Ruby-source-to-PHP-target vertical slice. It does not promise all la
 
 ## Current evidence and gap
 
-`semantifold@0.2.0` rejects requires/imports, classes/methods, loops, optional EOF, typed errors, resources, and host APIs. Tasks 032–036 are planned to establish those meanings and the facade/canonical/provider link path. Until all direct and transitive dependencies are delivered, socket-shaped code must continue to fail; a backend shortcut or handwritten Ruby-on-PHP shim would not satisfy this task.
+The published `semantifold@0.3.0` package predates this work. Tasks 032–036 are delivered, culminating in Task 036 PR #46 and merge `9aba48f9d48bcef4fd4c9275aec14bfcc4f0904c`. The Task 037 topic branch implements the bounded socket slice through the facade/canonical/provider link path; review, exact-head TensorBuzz CI, and merge remain delivery gates. A backend shortcut or handwritten Ruby-on-PHP shim does not satisfy the task.
 
 ## Canonical v1 capabilities and precise semantics
 
@@ -69,3 +69,11 @@ TCP servers/listeners, TLS, UDP, Unix sockets, nonblocking I/O, async/event loop
 - Real ephemeral-server execution proves exact newline, final-line, EOF, connection-failure, output, and close semantics through native stdout plus `fsockopen`/`fgets`/`fclose`.
 - Unsupported source behavior, unavailable/incompatible capabilities, provider failures, and collisions fail loudly before partial artifacts or resources escape.
 - Only reachable modules are emitted; protected same-language/native boundaries, deterministic artifacts, provenance, focused docs/specs, real tools, and a behavior changelog fragment satisfy repository gates.
+
+## Implementation record — 2026-09-14
+
+The topic branch adds the four exact `1.0.0` canonical modules `semantifold.socket-client`, `semantifold.text-stream`, `semantifold.output`, and `semantifold.resource`, with their closed operations, dependencies, typed failures, evaluation order, UTF-8/newline/EOF rules, and owned `ByteStream` lifecycle. Provider negotiation now selects the distinct PHP `php82-core-streams-v1` modules required by the reachable closure and links them transactionally under `providers/php/semantifold/` with protected synthetic provenance.
+
+The Ruby program frontend recognizes only literal `require "socket"`, genuine two-argument `TCPSocket.new`, zero-argument receiver `gets`/`close`, and one-string unqualified `puts` or `Kernel.puts` under that proved profile. It selects executable compiler-owned socket and output facades under `semantifold/facade/ruby/`; those modules compile through semantic IR and call exact canonical operations directly. Application modules receive no operation authority, ordinary Task 010 class modules remain rejected, and source mutation/shadowing/reopening/dynamic or unsupported forms retain located fail-loud diagnostics. Task 037 `puts` is an Output canonical call, not a `PrintStatement`.
+
+The PHP provider hides native handles, validates host and port, captures native warnings within each call, normalizes connect/read/decode/write/close failures, distinguishes clean EOF, incrementally validates UTF-8, retains LF/CRLF and a final unterminated line once, completes short stdout writes, and makes the first close attempt terminal on either outcome. Real-tool acceptance uses separate event-driven loopback servers for Ruby reference and generated PHP runs, genuine `fsockopen`/`fgets`/`feof`/`fclose`/stdout behavior, a refused connection, and protected real-PHP seams for deterministic failure/chunk/write cases. Focused suites reached 52/52 static/link/artifact checks and 5/5 runtime checks before documentation reconciliation; aggregate/local/Compose and external delivery evidence are intentionally not claimed here before they exist.

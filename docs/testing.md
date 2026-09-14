@@ -198,7 +198,26 @@ npx velocious-test spec/multifile-profile-diagnostics.spec.js
 npx velocious-test spec/public-api.spec.js
 ```
 
-This is a bounded neutral qualification corpus, not the Task 037 network slice. It adds no `TCPSocket`, `fsockopen`, file, console, or other concrete public host facade.
+This remains a bounded neutral qualification corpus by itself; the Task 037 network slice has separate acceptance below.
+
+## Task 037 blocking TCP stdlib vertical slice
+
+Task 037 uses focused registry, Ruby facade, PHP provider/linking, artifact, diagnostic, and runtime specs. The source suite proves exact literal `require "socket"`, genuine `TCPSocket.new(host, port)`, receiver `gets`/`close`, and exactly one-string unqualified `puts` or `Kernel.puts`; it rejects shadowing, reopening, dynamic forms, unsupported members/options/arity/output shapes, protected access, capability/version gaps, path/namespace collisions, and late transactional failure. Existing Ruby program-mode `puts` outside the proved socket profile remains a legacy print statement.
+
+The runtime suite first discovers the canonical `php82` profile and then real `ruby`, `node`, local `tsc`, `javac`, and `java`; a missing declared command fails. It starts event-driven Node servers on `127.0.0.1` port `0`, runs the Ruby reference and generated PHP against separate fresh instances, and uses explicit deadlines plus `finally` cleanup instead of sleeps. Exact raw bytes cover LF, CRLF, a final unterminated Unicode line with one appended LF, and no output at subsequent EOF. A genuine refused connection and real successful `fclose` are required. Generator-only protected PHP seams execute with real PHP to force split UTF-8 chunks, false/non-EOF reads, close warnings/failures, and short/zero/false stdout writes. Generated portable PHP is reparsed where supported, every provider artifact passes real `php -l`, and two generations must match completely.
+
+Run the focused groups sequentially:
+
+```sh
+npx velocious-test spec/blocking-tcp-stdlib-contract.spec.js
+npx velocious-test spec/blocking-tcp-ruby-facade.spec.js
+npx velocious-test spec/blocking-tcp-stdlib-linking.spec.js
+npx velocious-test spec/blocking-tcp-php-provider.spec.js
+LANG=C.UTF-8 LC_ALL=C.UTF-8 npx velocious-test spec/blocking-tcp-runtime-execution.spec.js
+npx velocious-test spec/generated-artifact-set.spec.js spec/multifile-program-diagnostics.spec.js spec/multifile-roundtrip-and-provenance.spec.js spec/reference-class-provenance-and-mapping.spec.js
+```
+
+This acceptance authorizes no external network, server API, TLS, UDP, async I/O, configurable timeout, arbitrary Ruby socket/output behavior, other source facade, other target provider, publication, or deployment.
 
 ## Task 025 core expanded-language acceptance
 

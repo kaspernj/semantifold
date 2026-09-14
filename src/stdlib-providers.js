@@ -21,6 +21,7 @@ export {protectedEntryName} from "./semantic/stdlib.js"
  * @property {string} identity - Stable provider identity rooted at the target.
  * @property {Readonly<Record<string, string>>} nativeEntries - Operation to protected native entry name.
  * @property {readonly {module: string, operations: string[], version: string}[]} provides - Exactly one provided canonical module.
+ * @property {string} runtimeProfile - Closed target runtime/provider profile.
  * @property {string} target - Adopted target language identity.
  */
 
@@ -42,7 +43,21 @@ const targetExtensions = Object.freeze({
 const builtinProviderTargets = Object.freeze(["php", "ruby", "javascript", "typescript", "java"])
 const probeIdentity = "semantifold.task034.resource-probe"
 const probeOperations = Object.freeze(["probeEffect", "probeAcquire", "probeRead", "probeClose", "probeTrace"])
-const recordKeys = Object.freeze(["artifact", "dependencies", "identity", "nativeEntries", "provides", "target"])
+const recordKeys = Object.freeze(["artifact", "dependencies", "identity", "nativeEntries", "provides", "runtimeProfile", "target"])
+const task037ProviderModules = Object.freeze([
+  Object.freeze({dependencies: [], identity: "semantifold.resource", operations: ["v1_close"]}),
+  Object.freeze({dependencies: [{module: "semantifold.resource", range: "1"}], identity: "semantifold.socket-client", operations: ["v1_connect"]}),
+  Object.freeze({dependencies: [{module: "semantifold.resource", range: "1"}], identity: "semantifold.text-stream", operations: ["v1_read_line"]}),
+  Object.freeze({dependencies: [], identity: "semantifold.output", operations: ["v1_write_line"]})
+])
+/** @type {Readonly<Record<string, string>>} */
+const legacyRuntimeProfiles = Object.freeze({
+  javascript: "node24-core-v1",
+  java: "java17-core-v1",
+  php: "php82-core-v1",
+  ruby: "ruby3-core-v1",
+  typescript: "node24-typescript7-core-v1"
+})
 
 /**
  * Creates the versioned target host stdlib provider registry.
@@ -154,7 +169,11 @@ function validateProviderRecord(candidate) {
     invalidProvider(`Stdlib provider '${identity}' native entries must match its operations exactly.`)
   }
   for (const operation of operationList) {
-    if (/** @type {string} */ (nativeEntries[operation]) != protectedEntryName(target, operation)) {
+    const expectedEntry = module == probeIdentity
+      ? protectedEntryName(target, operation)
+      : protectedEntryName(target, module, operation)
+
+    if (/** @type {string} */ (nativeEntries[operation]) != expectedEntry) {
       invalidProvider(`Stdlib provider '${identity}' declares an invalid protected native entry.`)
     }
   }
@@ -194,6 +213,14 @@ function validateProviderRecord(candidate) {
     }
     validatedDependencies.push({module: dependencyModule, range: /** @type {string} */ (dependencyRange)})
   }
+  const runtimeProfile = /** @type {string} */ (candidate.runtimeProfile)
+
+  if (typeof runtimeProfile != "string" || !/^[a-z][a-z0-9-]*-v[1-9][0-9]*$/u.test(runtimeProfile)) {
+    invalidProvider(`Stdlib provider '${identity}' declares an invalid runtime profile.`)
+  }
+  if (module != probeIdentity && (target != "php" || runtimeProfile != "php82-core-streams-v1")) {
+    invalidProvider(`Stdlib provider '${identity}' does not use the Task 037 PHP 8.2 core-streams profile.`)
+  }
   return deepFreeze(/** @type {StdlibProviderRecord} */ ({
     artifact: {mediaType, path},
     dependencies: validatedDependencies,
@@ -203,6 +230,7 @@ function validateProviderRecord(candidate) {
       /** @type {string} */ (nativeEntries[operation])
     ]))),
     provides: [{module, operations: operationList, version: /** @type {string} */ (version)}],
+    runtimeProfile,
     target
   }))
 }
@@ -266,7 +294,7 @@ function moduleKnown(module) {
  * @returns {unknown[]} Unvalidated built-in records.
  */
 function builtinProviderRecords() {
-  return builtinProviderTargets.map((target) => ({
+  const probeProviders = builtinProviderTargets.map((target) => ({
     artifact: {
       mediaType: /** @type {string} */ (languageRegistry.record(target).mediaType),
       path: `providers/${target}/${probeIdentity.replaceAll(".", "/")}.${targetExtensions[target]}`
@@ -275,8 +303,26 @@ function builtinProviderRecords() {
     identity: `semantifold.provider.${target}.${probeIdentity}`,
     nativeEntries: Object.fromEntries(probeOperations.map((operation) => [operation, protectedEntryName(target, operation)])),
     provides: [{module: probeIdentity, operations: [...probeOperations], version: "1.0.0"}],
+    runtimeProfile: legacyRuntimeProfiles[target],
     target
   }))
+  const task037Providers = task037ProviderModules.map((module) => ({
+    artifact: {
+      mediaType: /** @type {string} */ (languageRegistry.record("php").mediaType),
+      path: `providers/php/${module.identity.replaceAll(".", "/")}.php`
+    },
+    dependencies: module.dependencies,
+    identity: `semantifold.provider.php.${module.identity}`,
+    nativeEntries: Object.fromEntries(module.operations.map((operation) => [
+      operation,
+      protectedEntryName("php", module.identity, operation)
+    ])),
+    provides: [{module: module.identity, operations: module.operations, version: "1.0.0"}],
+    runtimeProfile: "php82-core-streams-v1",
+    target: "php"
+  }))
+
+  return [...probeProviders, ...task037Providers]
 }
 
 /** @type {Readonly<StdlibProviderRegistry> | null} */

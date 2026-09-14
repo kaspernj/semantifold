@@ -775,10 +775,10 @@ export function validateMapping(value) {
         symbol.kind == "constructor" && /^(?:[a-z][a-z0-9._-]*#)?class:[0-9]+:constructor$/u.test(symbol.semanticDeclarationId) ||
         symbol.kind == "method" && /^(?:[a-z][a-z0-9._-]*#)?class:[0-9]+:method:[0-9]+$/u.test(symbol.semanticDeclarationId) ||
         symbol.kind == "typeParameter" && /^(?:[a-z][a-z0-9._-]*#)?(?:function|record):[0-9]+:type:[0-9]+$/u.test(symbol.semanticDeclarationId) ||
-        symbol.kind == "capability" && /^capability:[0-9]+$/u.test(symbol.semanticDeclarationId) ||
-        symbol.kind == "resource" && /^capability:[0-9]+\/resource:[0-9]+$/u.test(symbol.semanticDeclarationId) ||
-        symbol.kind == "failure" && /^capability:[0-9]+\/failure:[0-9]+$/u.test(symbol.semanticDeclarationId) ||
-        symbol.kind == "operation" && /^capability:[0-9]+\/operation:[0-9]+$/u.test(symbol.semanticDeclarationId)
+        symbol.kind == "capability" && /^(?:module:[0-9]+\/)?capability:[0-9]+$/u.test(symbol.semanticDeclarationId) ||
+        symbol.kind == "resource" && /^(?:module:[0-9]+\/)?capability:[0-9]+\/resource:[0-9]+$/u.test(symbol.semanticDeclarationId) ||
+        symbol.kind == "failure" && /^(?:module:[0-9]+\/)?capability:[0-9]+\/failure:[0-9]+$/u.test(symbol.semanticDeclarationId) ||
+        symbol.kind == "operation" && /^(?:module:[0-9]+\/)?capability:[0-9]+\/operation:[0-9]+$/u.test(symbol.semanticDeclarationId)
       ))) {
       throw new TypeError("Malformed or duplicate semantic symbol identity.")
     }

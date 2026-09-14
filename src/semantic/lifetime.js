@@ -492,13 +492,26 @@ function isOwned(type) {
 }
 
 /**
- * Checks whether any function signature contains an owned type.
+ * Checks whether the module contains any owned semantic type.
  * @param {import("./types.js").SemanticModule} module - Semantic module.
  * @returns {boolean} Whether lifetime analysis is required.
  */
 function moduleContainsOwnedType(module) {
-  for (const declaration of module.functions) {
-    if (declaration.parameters.some(({type}) => isOwned(type)) || isOwned(declaration.returnType)) return true
+  const pending = [/** @type {unknown} */ (module)]
+  const seen = new Set()
+
+  while (pending.length > 0) {
+    const value = pending.pop()
+
+    if (!value || typeof value != "object" || seen.has(value)) continue
+    seen.add(value)
+    if (!Array.isArray(value) && (Reflect.get(value, "kind") == "OwnedResourceType" ||
+      Reflect.get(value, "kind") == "OwnedReferenceType")) return true
+    for (const [key, child] of Object.entries(value)) {
+      if (["location", "provenance", "sourceProvenance"].includes(key)) continue
+      if (Array.isArray(child)) pending.push(...child)
+      else if (child && typeof child == "object") pending.push(child)
+    }
   }
   return false
 }

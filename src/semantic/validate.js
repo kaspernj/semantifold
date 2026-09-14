@@ -52,11 +52,11 @@ const resourceIdsByRecordRegistry = new WeakMap()
  * Enforces the coherent release-candidate semantic subset after adaptation.
  * @param {import("./types.js").SemanticModule} module - Adapted semantic module.
  * @param {import("./types.js").SemanticLanguage} language - Source language.
- * @param {{functions?: Map<string, import("./types.js").FunctionDeclaration>, records?: Map<string, import("./types.js").RecordDeclaration>, errors?: Map<string, import("./types.js").ErrorDeclaration>, callEffects?: Map<string, Set<string>>}} [visible] - Program imports visible during validation.
+ * @param {{classes?: Map<string, import("./types.js").ClassDeclaration>, functions?: Map<string, import("./types.js").FunctionDeclaration>, records?: Map<string, import("./types.js").RecordDeclaration>, errors?: Map<string, import("./types.js").ErrorDeclaration>, callEffects?: Map<string, Set<string>>}} [visible] - Program imports visible during validation.
  * @returns {import("./types.js").SemanticModule} Validated module.
  */
 export function validateParsedModule(module, language, visible = {}) {
-  normalizeParsedOwnedReferences(module)
+  normalizeParsedOwnedReferences(module, visible.classes)
   validateModuleShape(module, language, (detail, location) => unsupportedSyntax(language, detail, location))
   /**
    * Converts one parser failure into a located semantic diagnostic.
@@ -73,10 +73,12 @@ export function validateParsedModule(module, language, visible = {}) {
 /**
  * Promotes parser-authored class spellings after all private field types are known.
  * @param {import("./types.js").SemanticModule} module - Parser-authored module.
+ * @param {Map<string, import("./types.js").ClassDeclaration>} [visibleClasses] - Imported reference classes.
  * @returns {void}
  */
-function normalizeParsedOwnedReferences(module) {
-  const ownedClassIds = new Set()
+function normalizeParsedOwnedReferences(module, visibleClasses = new Map()) {
+  const ownedClassIds = new Set([...visibleClasses.values()].filter(({ownership}) => ownership?.kind == "ownedResource")
+    .map(({id}) => /** @type {string} */ (id)))
 
   for (const declaration of module.classes ?? []) {
     const fields = declaration.fields.filter(({type}) => type?.kind == "OwnedResourceType")
@@ -108,7 +110,7 @@ function normalizeParsedOwnedReferences(module) {
  * Validates scalar types and bindings for a caller-supplied semantic module before emission.
  * @param {import("./types.js").SemanticModule} module - Semantic module.
  * @param {import("./types.js").BackendLanguage} language - Backend language or binary target.
- * @param {{functions?: Map<string, import("./types.js").FunctionDeclaration>, records?: Map<string, import("./types.js").RecordDeclaration>, errors?: Map<string, import("./types.js").ErrorDeclaration>, callEffects?: Map<string, Set<string>>}} [visible] - Resolved program imports.
+ * @param {{classes?: Map<string, import("./types.js").ClassDeclaration>, functions?: Map<string, import("./types.js").FunctionDeclaration>, records?: Map<string, import("./types.js").RecordDeclaration>, errors?: Map<string, import("./types.js").ErrorDeclaration>, callEffects?: Map<string, Set<string>>}} [visible] - Resolved program imports.
  * @returns {void}
  */
 export function validateBackendTypes(module, language, visible = {}) {
@@ -181,11 +183,11 @@ function validateBlockShape(block, detail, fail) {
  * @param {string} language - Source or backend language identity.
  * @param {SemanticFail} fail - Diagnostic callback.
  * @param {boolean} normalizeOperations - Whether to replace transient frontend operation intent.
- * @param {{functions?: Map<string, import("./types.js").FunctionDeclaration>, records?: Map<string, import("./types.js").RecordDeclaration>, errors?: Map<string, import("./types.js").ErrorDeclaration>, callEffects?: Map<string, Set<string>>}} [visible] - Program imports visible during validation.
+ * @param {{classes?: Map<string, import("./types.js").ClassDeclaration>, functions?: Map<string, import("./types.js").FunctionDeclaration>, records?: Map<string, import("./types.js").RecordDeclaration>, errors?: Map<string, import("./types.js").ErrorDeclaration>, callEffects?: Map<string, Set<string>>}} [visible] - Program imports visible during validation.
  * @returns {void}
  */
 function validateModuleTypes(module, language, fail, normalizeOperations, visible = {}) {
-  const classes = registerClassDeclarations(module.classes ?? [], fail, normalizeOperations)
+  const classes = registerClassDeclarations(module.classes ?? [], fail, normalizeOperations, visible.classes)
   const records = validateRecordDeclarations(module.records ?? [], fail, normalizeOperations, visible.records, classes)
   const errors = validateErrorDeclarations(module.errors ?? [], fail, normalizeOperations, visible.errors)
   /** @type {Map<string, import("./types.js").FunctionDeclaration>} */
@@ -206,7 +208,7 @@ function validateModuleTypes(module, language, fail, normalizeOperations, visibl
     functions.set(functionDeclaration.name, functionDeclaration)
   }
 
-  validateEffectGraph(module, language, functions, fail, normalizeOperations)
+  validateEffectGraph(module, language, functions, fail, normalizeOperations, classes)
   const capabilityResources = (module.capabilities ?? []).flatMap(({resources}) => resources)
   const capabilityFailures = (module.capabilities ?? []).flatMap(({failures}) => failures)
 
@@ -260,7 +262,7 @@ function validateModuleTypes(module, language, fail, normalizeOperations, visibl
 
   validateBlock(module.entryPoint.body, entryScope, undefined, functions, records, errors, callEffects, fail,
     normalizeOperations, {owner: module.entryPoint, owners: loopOwners})
-  if (normalizeOperations) validateEffectGraph(module, language, functions, fail, true)
+  if (normalizeOperations) validateEffectGraph(module, language, functions, fail, true, classes)
 }
 
 /**
@@ -336,15 +338,16 @@ export function moduleUncheckedErrorEffects(module, visible = {}) {
  * @param {unknown} declarations - Candidate declarations.
  * @param {SemanticFail} fail - Diagnostic callback.
  * @param {boolean} normalizeOperations - Whether parser-authored identities are assigned.
+ * @param {Map<string, import("./types.js").ClassDeclaration>} [visibleClasses] - Imported classes by identity.
  * @returns {ClassRegistry} Classes by stable identity.
  */
-function registerClassDeclarations(declarations, fail, normalizeOperations) {
+function registerClassDeclarations(declarations, fail, normalizeOperations, visibleClasses = new Map()) {
   if (!Array.isArray(declarations)) {
     return fail("TYPE_MISMATCH", "Reference class declarations must be an ordered array.", /** @type {never} */ (undefined))
   }
   /** @type {ClassRegistry} */
-  const classes = new Map()
-  const names = new Set()
+  const classes = new Map(visibleClasses)
+  const names = new Set([...visibleClasses.values()].map(({name}) => name))
 
   for (let classIndex = 0; classIndex < declarations.length; classIndex += 1) {
     const declaration = /** @type {import("./types.js").ClassDeclaration} */ (declarations[classIndex])
@@ -451,12 +454,22 @@ function validateClassDeclaration(declaration, functions, records, errors, callE
   }
 
   const constructor = declaration.constructor
+  const acquisitionStatement = constructor.body.statements[0]
+  const acquisitionExpression = acquisitionStatement?.kind == "PrivateFieldWriteStatement"
+    ? acquisitionStatement.expression : undefined
+  const ownedAcquisition = declaration.ownership?.kind == "ownedResource" && declaration.fields.length == 1 &&
+    constructor.body.statements.length == 1 && acquisitionStatement?.kind == "PrivateFieldWriteStatement" &&
+    acquisitionStatement.field == declaration.ownership.fieldId && acquisitionStatement.receiver.kind == "ReceiverExpression" &&
+    acquisitionStatement.receiver.classId == declaration.id && acquisitionExpression?.kind == "EffectCallExpression" &&
+    acquisitionExpression.resolution.resourceFlow.kind == "acquire" &&
+    acquisitionExpression.resolution.resourceFlow.resourceId == declaration.ownership.resourceId
 
-  if (syntacticBlockEffects(constructor.body, callEffects).size > 0) {
+  if (syntacticBlockEffects(constructor.body, callEffects).size > 0 && !ownedAcquisition) {
     fail("UNSUPPORTED_STATEMENT", "Reference constructors cannot expose unchecked-error effects in Task 033.", constructor.location)
   }
 
-  if (constructor.parameters.length != declaration.fields.length || constructor.body.statements.length != declaration.fields.length) {
+  if (!ownedAcquisition &&
+    (constructor.parameters.length != declaration.fields.length || constructor.body.statements.length != declaration.fields.length)) {
     fail("INCOMPLETE_INITIALIZATION", `Constructor for '${declaration.name}' must initialize every private field exactly once in declaration order.`,
       constructor.location)
   }
@@ -467,10 +480,11 @@ function validateClassDeclaration(declaration, functions, records, errors, callE
     const field = declaration.fields[index]
     const type = validateValueTypeReference(parameter.type, parameter.location, fail, undefined, records)
 
-    if (!sameType(type, field.type)) {
+    if (!ownedAcquisition && !sameType(type, field.type)) {
       fail("TYPE_MISMATCH", `Constructor parameter '${parameter.name}' must exactly match private field '${field.name}'.`, parameter.location)
     }
     declareBinding(parameter.name, {knownValue: undefined, mutable: false, type}, roleLocation(parameter, "name"), constructorScope, fail)
+    if (ownedAcquisition) continue
     const statement = constructor.body.statements[index]
     const initializer = statement?.kind == "PrivateFieldWriteStatement"
       ? statement.expression.kind == "OwnedMoveExpression" ? statement.expression.expression : statement.expression
@@ -488,7 +502,7 @@ function validateClassDeclaration(declaration, functions, records, errors, callE
 
   for (const method of declaration.methods) {
     const unsupportedMethodEffects = [...syntacticBlockEffects(method.body, callEffects)]
-      .filter((id) => !/^capability:[0-9]+\/failure:[0-9]+$/u.test(id))
+      .filter((id) => !/^(?:module:[0-9]+\/)?capability:[0-9]+\/failure:[0-9]+$/u.test(id))
 
     if (declaration.ownership?.kind != "ownedResource" && unsupportedMethodEffects.length > 0) {
       fail("UNSUPPORTED_STATEMENT", `Reference method '${method.name}' cannot expose unchecked-error effects in Task 033.`, method.location)
@@ -1176,10 +1190,12 @@ function addExpressionEffects(target, expression, callEffects, methodEffects = n
     if (!value || typeof value != "object" || seen.has(value)) continue
     seen.add(value)
     if (Reflect.get(value, "kind") == "CallExpression") addAll(target, callEffects.get(Reflect.get(value, "callee")) ?? new Set())
-    if (Reflect.get(value, "kind") == "MethodCallExpression") {
+    if (Reflect.get(value, "kind") == "MethodCallExpression" || Reflect.get(value, "kind") == "ReferenceConstruction") {
       const failures = Reflect.get(value, "failureIds")
       if (Array.isArray(failures)) for (const failure of failures) if (typeof failure == "string") target.add(failure)
-      addAll(target, methodEffects.get(Reflect.get(value, "method")) ?? new Set())
+      if (Reflect.get(value, "kind") == "MethodCallExpression") {
+        addAll(target, methodEffects.get(Reflect.get(value, "method")) ?? new Set())
+      }
     }
     if (Reflect.get(value, "kind") == "EffectCallExpression") {
       const resolution = Reflect.get(value, "resolution")
@@ -2782,7 +2798,8 @@ function validTypeIdentity(type, allowVoid, seen = new Set()) {
     valid = typeof candidate.declarationId == "string" &&
       /^(?:[a-z][a-z0-9._-]*#)?class:[0-9]+$/u.test(candidate.declarationId)
   } else if (candidate.kind == "OwnedResourceType" && Object.keys(candidate).sort().join(",") == "kind,resourceId") {
-    valid = typeof candidate.resourceId == "string" && /^capability:[0-9]+\/resource:[0-9]+$/u.test(candidate.resourceId)
+    valid = typeof candidate.resourceId == "string" && /^(?:module:[0-9]+\/)?capability:[0-9]+\/resource:[0-9]+$/u
+      .test(candidate.resourceId)
   } else if (candidate.kind == "OwnedReferenceType" && Object.keys(candidate).sort().join(",") == "declarationId,kind") {
     valid = typeof candidate.declarationId == "string" && /^(?:[a-z][a-z0-9._-]*#)?class:[0-9]+$/u.test(candidate.declarationId)
   }

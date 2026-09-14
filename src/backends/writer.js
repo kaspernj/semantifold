@@ -40,7 +40,8 @@ function moduleClassName(id) {
  * @returns {string} Declaration name.
  */
 function declarationName(module, declarationId) {
-  const declaration = [...module.functions ?? [], ...module.records ?? [], ...module.errors ?? []].find(({id}) => id == declarationId)
+  const declaration = [...module.functions ?? [], ...module.records ?? [], ...module.classes ?? [], ...module.errors ?? []]
+    .find(({id}) => id == declarationId)
 
   if (!declaration) throw new RangeError(`Unknown program declaration '${declarationId}'.`)
 
@@ -75,11 +76,13 @@ export class SourceWriter {
    * @param {{filename: string, content: string, language?: import("../semantic/types.js").SemanticLanguage}[]} [options.sources] - Caller-provided sources.
    * @param {Record<string, string>} [options.stdlibProviderEntries] - Used operation to protected native entry for a linked stdlib provider.
    * @param {string} [options.stdlibProviderPath] - Planned stdlib provider artifact path.
+   * @param {string[]} [options.stdlibProviderPaths] - Planned stdlib provider artifact paths.
    * @param {string[]} [options.stdlibProviderImports] - Ordered provider names this module must import.
    * @param {string} [options.stdlibProviderOwnerModule] - Java owner module identity hosting the shared support block and shims.
    * @param {string[]} [options.stdlibProviderShims] - Java owner program-wide used operations exposed as public static shims.
    */
-  constructor({filename, language, module, program, programPaths, sources, stdlibProviderEntries, stdlibProviderPath, stdlibProviderImports, stdlibProviderOwnerModule, stdlibProviderShims}) {
+  constructor({filename, language, module, program, programPaths, sources, stdlibProviderEntries, stdlibProviderPath,
+    stdlibProviderPaths, stdlibProviderImports, stdlibProviderOwnerModule, stdlibProviderShims}) {
     const index = createGenerationIndex(module, sources)
 
     this.filename = filename
@@ -90,11 +93,12 @@ export class SourceWriter {
     this.index = index
     this.stdlibProviderEntries = stdlibProviderEntries
     this.stdlibProviderPath = stdlibProviderPath
+    this.stdlibProviderPaths = stdlibProviderPaths ?? (stdlibProviderPath ? [stdlibProviderPath] : undefined)
     this.stdlibProviderImports = stdlibProviderImports
     this.stdlibProviderOwnerModule = stdlibProviderOwnerModule
     this.stdlibProviderShims = stdlibProviderShims
     const programRecords = program?.modules.flatMap((programModule) => programModule.records ?? []) ?? module.records ?? []
-    const programClasses = program ? [] : module.classes ?? []
+    const programClasses = program?.modules.flatMap((programModule) => programModule.classes ?? []) ?? module.classes ?? []
     const capabilityFailures = module.capabilities?.flatMap(({failures}) => failures) ?? []
     const programErrors = program?.modules.flatMap((programModule) => [
       ...(programModule.errors ?? []),
@@ -107,6 +111,8 @@ export class SourceWriter {
     this.errors = new Map(programErrors.map((error) => [error.id, error]))
     this.resources = new Map((module.capabilities?.flatMap(({resources}) => resources) ?? []).map((resource) => [resource.id, resource]))
     this.effectOperations = new Map((module.capabilities?.flatMap(({operations}) => operations) ?? []).map((operation) => [operation.id, operation]))
+    this.effectOperationModules = new Map((module.capabilities?.flatMap((capability) =>
+      capability.operations.map((operation) => [operation.id, capability.authorityId])) ?? []))
     this.fields = new Map(programRecords.flatMap((record) => record.fields.map((field) => [field.id, field])))
     this.fieldRecords = new Map(programRecords.flatMap((record) => record.fields.map((field) => [field.id, record])))
     this.privateFields = new Map(programClasses.flatMap((declaration) => declaration.fields.map((field) => [field.id, field])))
@@ -117,6 +123,7 @@ export class SourceWriter {
     /** @type {Map<string, import("../semantic/types.js").SemanticProgramModule>} */
     this.declarationModules = new Map(program?.modules.flatMap((programModule) => [
       ...(programModule.records ?? []).map((declaration) => /** @type {const} */ ([/** @type {string} */ (declaration.id), programModule])),
+      ...(programModule.classes ?? []).map((declaration) => /** @type {const} */ ([/** @type {string} */ (declaration.id), programModule])),
       ...(programModule.errors ?? []).map((declaration) => /** @type {const} */ ([/** @type {string} */ (declaration.id), programModule])),
       ...programModule.functions.map((declaration) => /** @type {const} */ ([/** @type {string} */ (declaration.id), programModule]))
     ]) ?? [])
@@ -259,7 +266,13 @@ export class SourceWriter {
    * @returns {string} Target spelling.
    */
   classNameForId(declarationId) {
-    return this.classForId(declarationId).name
+    const declaration = this.classForId(declarationId)
+    const imported = this.#programModule()?.imports.find((item) => item.declarationId == declarationId)
+
+    if (imported && (this.language == "javascript" || this.language == "typescript" || this.language == "php")) {
+      return this.importNameFor(imported)
+    }
+    return declaration.name
   }
 
   /**
@@ -493,20 +506,23 @@ export class SourceWriter {
 
   /**
    * Returns the protected native entry for one used stdlib provider operation.
-   * @param {string} operationName - Canonical operation name.
+   * @param {import("../semantic/types.js").EffectOperationDeclaration} operation - Canonical operation declaration.
    * @returns {string | undefined} Linked protected entry, or undefined when the operation stays inlined.
    */
-  stdlibProviderEntryFor(operationName) {
-    return this.stdlibProviderEntries?.[operationName]
+  stdlibProviderEntryFor(operation) {
+    const module = this.effectOperationModules.get(operation.id)
+
+    return module === undefined ? undefined : this.stdlibProviderEntries?.[`${module}\u0000${operation.name}`]
   }
 
   /**
    * Returns a relative specifier for the planned stdlib provider artifact.
    * @param {string} [extension] - Optional replacement extension.
+   * @param {string} [providerPath] - One selected provider artifact path.
    * @returns {string} Relative POSIX specifier.
    */
-  stdlibProviderSpecifier(extension) {
-    const targetPath = this.stdlibProviderPath
+  stdlibProviderSpecifier(extension, providerPath) {
+    const targetPath = providerPath ?? this.stdlibProviderPath ?? this.stdlibProviderPaths?.[0]
 
     if (!targetPath) throw new RangeError("A stdlib provider specifier requires a planned provider path.")
     const adjustedTarget = extension ? targetPath.replace(/\.[^./]+$/u, extension) : targetPath

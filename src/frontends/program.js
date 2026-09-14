@@ -22,7 +22,7 @@ const moduleIdPattern = /^[a-z][a-z0-9_]*(?:[.-][a-z][a-z0-9_]*)*$/u
 /** @typedef {{facade?: import("../stdlib-facades.js").StdlibFacadeRecord, filename: string, id: string, language: import("../semantic/types.js").SemanticLanguage, ownership: "application" | "facade", source: string}} ProgramSource */
 /** @typedef {{declarationLocation?: import("../semantic/types.js").SourceLocation, facade?: import("../stdlib-facades.js").StdlibFacadeRecord, importedName: string, importedNameLocation?: import("../semantic/types.js").SourceLocation, localName: string, localNameLocation?: import("../semantic/types.js").SourceLocation, location: import("../semantic/types.js").SourceLocation, namespace?: boolean, pathLocation: import("../semantic/types.js").SourceLocation, specifier: string, stdlibCandidate?: true, typeOnly: boolean}} ProgramImportRequest */
 /** @typedef {{importedName: string, localName: string, location: import("../semantic/types.js").SourceLocation, nativeName: string, symbolKind: import("../semantic/types.js").SemanticDeclarationKind, typeOnly: boolean}} ProgramNativeBinding */
-/** @typedef {{imports: ProgramImportRequest[], exports: {declarationLocation?: import("../semantic/types.js").SourceLocation, exportedName: string, exportedNameLocation?: import("../semantic/types.js").SourceLocation, localName: string, localNameLocation?: import("../semantic/types.js").SourceLocation, location: import("../semantic/types.js").SourceLocation, typeOnly: boolean}[], bindings?: ProgramNativeBinding[], nativeName?: string}} ProgramHeader */
+/** @typedef {{imports: ProgramImportRequest[], exports: {declarationLocation?: import("../semantic/types.js").SourceLocation, exportedName: string, exportedNameLocation?: import("../semantic/types.js").SourceLocation, localName: string, localNameLocation?: import("../semantic/types.js").SourceLocation, location: import("../semantic/types.js").SourceLocation, symbolKind?: import("../semantic/types.js").SemanticDeclarationKind, typeOnly: boolean}[], bindings?: ProgramNativeBinding[], nativeName?: string, nativeReferences?: {form: "constructor-call" | "receiver-call" | "unqualified-call", location: import("../semantic/types.js").SourceLocation, nativeModule: string, symbol: string}[]}} ProgramHeader */
 
 /**
  * Parses an explicit caller-supplied multi-source program without filesystem discovery.
@@ -127,11 +127,28 @@ export function parseProgramSource(input) {
     const visibleRecordsByName = new Map()
     const visibleValueRecordsByName = new Map()
     const visibleRecordsById = new Map()
+    const visibleClassesByName = new Map()
+    const visibleClassesById = new Map()
     const visibleErrorsByName = new Map()
     const visibleErrorsById = new Map()
     const consumedBindings = new Set()
     /** @type {import("../semantic/types.js").SemanticImport[]} */
     const imports = []
+
+    if (!source.facade && authority) {
+      const failureNames = new Set(header.imports.filter(({facade}) => facade).flatMap(({facade}) =>
+        facade?.publicDeclarations.flatMap((declaration) => declaration.kind == "function"
+          ? declaration.failures
+          : [...declaration.constructor.failures, ...declaration.methods.flatMap(({failures}) => failures)]) ?? []))
+
+      for (const failure of authority.capabilities.flatMap(({failures}) => failures)) {
+        if (!failureNames.has(failure.name)) continue
+        const declaration = /** @type {import("../semantic/types.js").ErrorDeclaration} */ (/** @type {unknown} */ (failure))
+
+        visibleErrorsByName.set(failure.name, declaration)
+        visibleErrorsById.set(failure.id, declaration)
+      }
+    }
 
     for (const request of requests) {
       const dependency = parsed.get(request.moduleId)
@@ -189,6 +206,11 @@ export function parseProgramSource(input) {
           visibleRecordsByName.set(localName, record)
           if (!typeOnly) visibleValueRecordsByName.set(localName, record)
           visibleRecordsById.set(/** @type {string} */ (record.id), record)
+        } else if (exported.symbolKind == "class") {
+          const declaration = /** @type {import("../semantic/types.js").ClassDeclaration} */ (declarationFor(dependency, exported))
+
+          visibleClassesByName.set(localName, declaration)
+          visibleClassesById.set(/** @type {string} */ (declaration.id), declaration)
         } else {
           const error = /** @type {import("../semantic/types.js").ErrorDeclaration} */ (declaration)
 
@@ -235,13 +257,17 @@ export function parseProgramSource(input) {
 
     const frontend = /** @type {(input: object) => import("../semantic/types.js").SemanticModule} */ (
       languageRegistry.resolve(source.language, "frontend"))
-    const moduleCapabilities = requestedAuthority?.capabilities ??
-      (source.facade?.requirements.length ? authority?.capabilities : undefined)
+    const facadeModules = new Set(source.facade?.requirements.map(({module}) => module) ?? [])
+    const moduleCapabilities = requestedAuthority?.capabilities ?? (source.facade?.requirements.length
+      ? authority?.modules?.filter(({identity}) => facadeModules.has(identity)).flatMap(({capabilities}) => capabilities) ??
+        authority?.capabilities
+      : undefined)
     const raw = frontend({
       capabilities: moduleCapabilities,
       filename: source.filename,
       language: source.language,
       program: {
+        classes: visibleClassesByName,
         functions: visibleFunctions,
         isEntry: source.id == input.entryModule,
         errors: visibleErrorsByName,
@@ -252,7 +278,7 @@ export function parseProgramSource(input) {
     })
 
     if (moduleCapabilities) raw.capabilities = /** @type {import("../semantic/types.js").EffectCapabilityDeclaration[]} */ (moduleCapabilities)
-    if ((raw.classes?.length ?? 0) > 0) {
+    if ((raw.classes?.length ?? 0) > 0 && !source.facade?.publicDeclarations.some(({kind}) => kind == "class")) {
       semanticFailure(source.language, "UNSUPPORTED_SYNTAX",
         "Task 033 reference classes are not supported by the Task 010 semantic program profile.",
         raw.classes?.[0]?.location ?? raw.location)
@@ -261,12 +287,23 @@ export function parseProgramSource(input) {
     if (source.id == input.entryModule && raw.entryPoint.body.statements.length == 0) {
       semanticFailure(source.language, "INVALID_ENTRY_MODULE", `Selected entry module '${source.id}' has no executable statements.`, raw.entryPoint.location)
     }
-    validateParsedModule(raw, source.language, {
-      callEffects: visibleCallEffects,
-      errors: visibleErrorsById,
-      functions: visibleFunctions,
-      records: visibleRecordsById
-    })
+    try {
+      validateParsedModule(raw, source.language, {
+        callEffects: visibleCallEffects,
+        errors: visibleErrorsById,
+        functions: visibleFunctions,
+        records: visibleRecordsById,
+        classes: visibleClassesById
+      })
+    } catch (error) {
+      const task037 = source.language == "ruby" && header.imports.some(({facade}) => facade?.identity.startsWith("semantifold.task037."))
+
+      if (task037 && error instanceof SemantifoldDiagnostic && error.code == "UNKNOWN_METHOD" &&
+        error.detail.startsWith("Class 'TCPSocket'")) {
+        facadeFailure("ruby", "STDLIB_FACADE_MEMBER_UNSUPPORTED", error.detail, error.location)
+      }
+      throw error
+    }
     rekeyDeclarations(raw, source.id)
     const localCallEffects = moduleUncheckedErrorEffects(raw, {callEffects: visibleCallEffects, functions: visibleFunctions})
 
@@ -276,10 +313,11 @@ export function parseProgramSource(input) {
     annotateParsedModule(raw, source)
     rebaseParsedModuleProvenance(raw, registeredSources, sourceId)
 
-    /** @type {Map<string, {declaration: import("../semantic/types.js").FunctionDeclaration | import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ErrorDeclaration, symbolKind: import("../semantic/types.js").SemanticDeclarationKind}>} */
+    /** @type {Map<string, {declaration: import("../semantic/types.js").FunctionDeclaration | import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").ErrorDeclaration, symbolKind: import("../semantic/types.js").SemanticDeclarationKind}>} */
     const declarationsByName = new Map()
 
     for (const declaration of raw.records ?? []) declarationsByName.set(declaration.name, {declaration, symbolKind: "record"})
+    for (const declaration of raw.classes ?? []) declarationsByName.set(declaration.name, {declaration, symbolKind: "class"})
     for (const declaration of raw.errors ?? []) declarationsByName.set(declaration.name, {declaration, symbolKind: "error"})
     for (const declaration of raw.functions) declarationsByName.set(declaration.name, {declaration, symbolKind: "function"})
     /** @type {import("../semantic/types.js").SemanticExport[]} */
@@ -338,7 +376,8 @@ export function parseProgramSource(input) {
         identity: requestedAuthority.id,
         ...(requestedAuthority.contractVersion !== undefined ? {contractVersion: requestedAuthority.contractVersion} : {})
       }
-    } : facadeAuthority ? {stdlibContract: facadeAuthority.contract} : {}),
+    } : facadeAuthority && "contracts" in facadeAuthority ? {stdlibContracts: facadeAuthority.contracts}
+      : facadeAuthority ? {stdlibContract: facadeAuthority.contract} : {}),
     ...(facadeRecords.length > 0 ? {stdlibFacades: stdlibFacadeProgramDescriptor(applicationSources[0].language, facadeRecords)} : {}),
     sources: registeredSources
   }
@@ -357,6 +396,8 @@ function resolveFacadeImports(sources, headers) {
 
   for (const source of sources) {
     const header = requiredMapValue(headers, source.id)
+
+    if (source.language == "ruby") resolveRubyTask037Facades(source, header, roots)
 
     if (source.language == "php") {
       for (const binding of header.bindings ?? []) {
@@ -410,6 +451,45 @@ function resolveFacadeImports(sources, headers) {
   }
 
   return roots
+}
+
+/**
+ * Resolves exact Task 037 Ruby references under a literal socket activation edge.
+ * @param {ProgramSource} source - Importing Ruby source.
+ * @param {ProgramHeader} header - Parser-owned Ruby header.
+ * @param {import("../stdlib-facades.js").StdlibFacadeRecord[]} roots - Selected facade roots.
+ * @returns {void}
+ */
+function resolveRubyTask037Facades(source, header, roots) {
+  const activationIndex = header.imports.findIndex(({specifier, stdlibCandidate}) => stdlibCandidate && specifier == "socket")
+
+  if (activationIndex < 0) return
+  const activation = /** @type {ProgramImportRequest} */ (header.imports.splice(activationIndex, 1)[0])
+  const bindings = new Set()
+
+  for (const reference of header.nativeReferences ?? []) {
+    if (reference.nativeModule != "socket" && reference.nativeModule != "ruby:Kernel") continue
+    const localName = reference.form == "receiver-call" ? "Kernel.puts" : reference.symbol
+
+    if (bindings.has(localName)) continue
+    bindings.add(localName)
+    const facade = resolveFacadeAt(source, reference.nativeModule, reference.symbol, reference.location)
+
+    header.imports.push({
+      declarationLocation: reference.location,
+      facade,
+      importedName: reference.symbol,
+      importedNameLocation: reference.location,
+      localName,
+      localNameLocation: reference.location,
+      location: reference.location,
+      pathLocation: activation.pathLocation,
+      specifier: reference.nativeModule,
+      stdlibCandidate: true,
+      typeOnly: false
+    })
+    roots.push(facade)
+  }
 }
 
 /**
@@ -489,6 +569,10 @@ function validateParsedFacade(facade, module) {
   const exported = new Map(module.exports.map((item) => [item.exportedName, item]))
 
   for (const declaration of facade.publicDeclarations) {
+    if (declaration.kind == "class") {
+      validateParsedFacadeClass(facade, module, declaration, exported.get(declaration.name))
+      continue
+    }
     const exportedDeclaration = exported.get(declaration.name)
     const parsed = exportedDeclaration ? module.functions.find(({id}) => id == exportedDeclaration.declarationId) : undefined
     const signatureMatches = parsed && parsed.parameters.length == declaration.parameters.length &&
@@ -515,6 +599,52 @@ function validateParsedFacade(facade, module) {
     [...allowedOperations].some((operation) => !usedOperations.has(operation))) {
     facadeFailure(facade.language, "STDLIB_FACADE_AUTHORITY_FORGED",
       `Facade '${facade.identity}' canonical calls do not match its declared requirements.`, module.location)
+  }
+}
+
+/**
+ * Verifies one executable compiler-owned facade class against its closed descriptor.
+ * @param {import("../stdlib-facades.js").StdlibFacadeRecord} facade - Owning facade.
+ * @param {import("../semantic/types.js").SemanticProgramModule} module - Parsed facade module.
+ * @param {import("../stdlib-facades.js").StdlibFacadeClassDeclaration} descriptor - Registry descriptor.
+ * @param {import("../semantic/types.js").SemanticExport | undefined} exported - Matching export evidence.
+ * @returns {void}
+ */
+function validateParsedFacadeClass(facade, module, descriptor, exported) {
+  const parsed = exported?.symbolKind == "class"
+    ? module.classes?.find(({id}) => id == exported.declarationId) : undefined
+  const failureNames = new Map((module.capabilities ?? []).flatMap(({failures}) => failures.map(({id, name}) => [id, name])))
+  const constructorFailures = parsed?.constructor.failureIds?.map((id) => failureNames.get(id)) ?? []
+  const constructorMatches = parsed?.name == descriptor.name && parsed.ownership?.kind == "ownedResource" &&
+    parsed.constructor.effects?.join(",") == descriptor.constructor.effects.join(",") &&
+    constructorFailures.join(",") == descriptor.constructor.failures.join(",") &&
+    parsed.constructor.parameters.length == descriptor.constructor.parameters.length &&
+    parsed.constructor.parameters.every((parameter, index) => parameter.name == descriptor.constructor.parameters[index].name &&
+      semanticTypeName(parameter.type) == descriptor.constructor.parameters[index].type)
+  const methodsMatch = parsed?.methods.length == descriptor.methods.length && descriptor.methods.every((expected, index) => {
+    const method = parsed?.methods[index]
+    const actualFailures = method?.failureIds?.map((id) => failureNames.get(id)) ?? []
+    const operation = method?.body.statements.flatMap((statement) => {
+      const expression = statement.kind == "ExpressionStatement" || statement.kind == "ReturnStatement"
+        ? statement.expression : statement.kind == "LocalDeclaration" ? statement.initializer : undefined
+
+      return expression?.kind == "EffectCallExpression" ? [expression] : []
+    })[0]
+    const flow = operation?.resolution.resourceFlow
+    const terminalFailureId = flow?.kind == "borrow" || flow?.kind == "close" ? flow.terminalFailureId : undefined
+
+    if (terminalFailureId) actualFailures.push(failureNames.get(terminalFailureId))
+    return method?.name == expected.name && method.effects?.join(",") == expected.effects.join(",") &&
+      actualFailures.join(",") == expected.failures.join(",") && method.parameters.length == expected.parameters.length &&
+      method.parameters.every((parameter, parameterIndex) =>
+        parameter.name == expected.parameters[parameterIndex].name &&
+        semanticTypeName(parameter.type) == expected.parameters[parameterIndex].type) &&
+      semanticTypeName(method.returnType) == expected.returnType
+  })
+
+  if (!constructorMatches || !methodsMatch) {
+    facadeFailure(facade.language, "STDLIB_FACADE_DECLARATION_MISMATCH",
+      `Facade '${facade.identity}' executable source does not match public class '${descriptor.name}'.`, parsed?.location ?? module.location)
   }
 }
 
@@ -750,11 +880,11 @@ function topologicalOrder(sources, graph) {
  * Looks up one already-resolved exported declaration.
  * @param {import("../semantic/types.js").SemanticProgramModule} module - Exporting module.
  * @param {import("../semantic/types.js").SemanticExport} exported - Resolved export.
- * @returns {import("../semantic/types.js").FunctionDeclaration | import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ErrorDeclaration} Declaration.
+ * @returns {import("../semantic/types.js").FunctionDeclaration | import("../semantic/types.js").RecordDeclaration | import("../semantic/types.js").ClassDeclaration | import("../semantic/types.js").ErrorDeclaration} Declaration.
  */
 function declarationFor(module, exported) {
   const declarations = exported.symbolKind == "function" ? module.functions :
-    exported.symbolKind == "record" ? module.records ?? [] : module.errors ?? []
+    exported.symbolKind == "record" ? module.records ?? [] : exported.symbolKind == "class" ? module.classes ?? [] : module.errors ?? []
   const declaration = declarations.find(({id}) => id == exported.declarationId)
 
   if (!declaration) throw new Error(`Resolved export '${exported.declarationId}' has no declaration.`)
@@ -771,6 +901,12 @@ function declarationFor(module, exported) {
 function rekeyDeclarations(module, moduleId) {
   const replacements = new Map()
 
+  for (const declaration of module.classes ?? []) {
+    replacements.set(declaration.id, `${moduleId}#${declaration.id}`)
+    replacements.set(declaration.constructor.id, `${moduleId}#${declaration.constructor.id}`)
+    for (const field of declaration.fields) replacements.set(field.id, `${moduleId}#${field.id}`)
+    for (const method of declaration.methods) replacements.set(method.id, `${moduleId}#${method.id}`)
+  }
   for (const declaration of module.records ?? []) {
     replacements.set(declaration.id, `${moduleId}#${declaration.id}`)
     for (const parameter of declaration.typeParameters ?? []) {
@@ -794,6 +930,15 @@ function rekeyDeclarations(module, moduleId) {
     for (const field of declaration.fields) field.id = /** @type {string} */ (replacements.get(field.id))
   }
   for (const declaration of module.errors ?? []) declaration.id = replacements.get(declaration.id)
+  for (const declaration of module.classes ?? []) {
+    declaration.id = replacements.get(declaration.id)
+    declaration.constructor.id = replacements.get(declaration.constructor.id)
+    for (const field of declaration.fields) field.id = replacements.get(field.id)
+    for (const method of declaration.methods) method.id = replacements.get(method.id)
+    if (declaration.ownership?.kind == "ownedResource") {
+      declaration.ownership.fieldId = /** @type {string} */ (replacements.get(declaration.ownership.fieldId))
+    }
+  }
   for (const declaration of module.functions) {
     declaration.id = replacements.get(declaration.id)
     for (const parameter of declaration.typeParameters ?? []) {
@@ -811,12 +956,21 @@ function rekeyDeclarations(module, moduleId) {
     seen.add(value)
     const object = /** @type {Record<string, unknown>} */ (value)
 
-    if ((object.kind == "RecordType" || object.kind == "ErrorType" || object.kind == "ResolvedFunctionSignature") &&
+    if ((object.kind == "RecordType" || object.kind == "ReferenceType" || object.kind == "OwnedReferenceType" ||
+      object.kind == "ErrorType" || object.kind == "ResolvedFunctionSignature" ||
+      object.kind == "ResolvedConstructorSignature" || object.kind == "ResolvedMethodSignature") &&
       typeof object.declarationId == "string" && replacements.has(object.declarationId)) {
       object.declarationId = replacements.get(object.declarationId)
     }
-    if (object.kind == "MemberRead" && typeof object.field == "string" && replacements.has(object.field)) {
+    if ((object.kind == "MemberRead" || object.kind == "PrivateFieldRead" || object.kind == "PrivateFieldWriteStatement") &&
+      typeof object.field == "string" && replacements.has(object.field)) {
       object.field = replacements.get(object.field)
+    }
+    if (object.kind == "MethodCallExpression" && typeof object.method == "string" && replacements.has(object.method)) {
+      object.method = replacements.get(object.method)
+    }
+    if (object.kind == "ReceiverExpression" && typeof object.classId == "string" && replacements.has(object.classId)) {
+      object.classId = replacements.get(object.classId)
     }
     if (object.kind == "TypeVariableReference" && typeof object.parameterId == "string" && replacements.has(object.parameterId)) {
       object.parameterId = replacements.get(object.parameterId)
