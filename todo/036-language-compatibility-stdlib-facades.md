@@ -1,6 +1,6 @@
 # 036 — Language compatibility stdlib/facades
 
-- Status: `implemented on topic branch; pull-request review, TensorBuzz CI, merge, and publication remain outstanding`
+- Status: `delivered through PR #46; merged as 9aba48f9d48bcef4fd4c9275aec14bfcc4f0904c`
 - Phase/priority: Phase S / P1
 - Dependencies: [035-versioned-standard-library-contracts-and-provider-linking.md](035-versioned-standard-library-contracts-and-provider-linking.md)
 
@@ -76,3 +76,7 @@ Task 036 adds `createStdlibFacadeRegistry`, `listStdlibFacades`, and `resolveStd
 Program generation validates registry versions, descriptor bytes, semantic module markers, compiler-owned source, and native identity evidence before allocating a writer. Selected facades compile through every ordinary original-five backend under the reserved `semantifold/facade/<source-language>/...` artifact namespace, use collision-checked target identifiers, carry mapped source provenance and the `support` role, and extend `SemantifoldStdlibLink` metadata with the full facade closure. Task 035 provider selection and protected-role/version rules remain unchanged. Same-language PHP, Ruby, JavaScript, TypeScript, and Java lanes prove the provider carrier does not contain or resolve the public compatibility alias.
 
 Focused acceptance covers immutable registry definitions, exact and compatible lookup, public declarations, transitive selection, same-spelling non-substitution, negative resolution forms, collision and descriptor failures, unused elimination, complete deterministic artifacts, mappings/metadata, all 25 original-five source-to-target real-toolchain routes, and five same-language isolation routes. The fixture is deliberately neutral: no TCP, `TCPSocket`, `fsockopen`, networking, or other concrete Task 037 API is implemented.
+
+## Delivery record — 2026-09-14
+
+Task 036 was delivered through PR #46 and merged into `master` as `9aba48f9d48bcef4fd4c9275aec14bfcc4f0904c` (`Merge pull request #46 from kaspernj/codex/task-036-language-compatibility-stdlib-facades`). Its topic parent is `639d7931d6a084805ff13b60456c423c0bb552fd`. Publication was not part of that delivery.
