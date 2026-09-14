@@ -4,6 +4,9 @@ import {unsupportedCapability} from "../diagnostic.js"
 import {isTask034ResourceProbe} from "../semantic/capabilities.js"
 
 const adoptedTargets = new Set(["php", "ruby", "javascript", "typescript", "java"])
+const task037Authorities = new Set([
+  "semantifold.output", "semantifold.resource", "semantifold.socket-client", "semantifold.text-stream"
+])
 const protectedSupportNames = new Set([
   "ProbeOperationFailure", "ProbeAcquireFailure", "ProbeReadFailure", "ProbeCloseFailure", "ProbeResourceClosed", "ProbeResource",
   "probeEffect", "probeAcquire", "probeRead", "probeClose", "probeTrace"
@@ -39,7 +42,9 @@ export function preflightEffectCapabilities(module, language, options = {}) {
   if (!adoptedTargets.has(language)) {
     unsupportedCapability(language, "Task 034 effectful capabilities and owned resources", module.location)
   }
-  if (!isTask034ResourceProbe(capabilities)) {
+  const task037 = language == "php" && capabilities.every((capability) => task037Authorities.has(capability.authorityId))
+
+  if (!isTask034ResourceProbe(capabilities) && !task037) {
     unsupportedCapability(language, "unbound Task 034 capability authority", module.location)
   }
   if (!Array.isArray(module.functions) || !module.entryPoint || typeof module.entryPoint != "object" ||

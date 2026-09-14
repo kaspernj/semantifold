@@ -2796,7 +2796,8 @@ function validTypeIdentity(type, allowVoid, seen = new Set()) {
     valid = typeof candidate.declarationId == "string" &&
       /^(?:[a-z][a-z0-9._-]*#)?class:[0-9]+$/u.test(candidate.declarationId)
   } else if (candidate.kind == "OwnedResourceType" && Object.keys(candidate).sort().join(",") == "kind,resourceId") {
-    valid = typeof candidate.resourceId == "string" && /^capability:[0-9]+\/resource:[0-9]+$/u.test(candidate.resourceId)
+    valid = typeof candidate.resourceId == "string" && /^(?:module:[0-9]+\/)?capability:[0-9]+\/resource:[0-9]+$/u
+      .test(candidate.resourceId)
   } else if (candidate.kind == "OwnedReferenceType" && Object.keys(candidate).sort().join(",") == "declarationId,kind") {
     valid = typeof candidate.declarationId == "string" && /^(?:[a-z][a-z0-9._-]*#)?class:[0-9]+$/u.test(candidate.declarationId)
   }

@@ -55,7 +55,7 @@ const javaObjectInstanceMethodSignatures = new Set([
  * Checks the intentionally narrow backend contract.
  * @param {import("../semantic/types.js").SemanticModule} module - Semantic module.
  * @param {import("../semantic/types.js").BackendLanguage} language - Backend language or binary target.
- * @param {{externalDeclarationIds?: Set<string>, program?: boolean, visibleFunctions?: Map<string, import("../semantic/types.js").FunctionDeclaration>, visibleRecords?: Map<string, import("../semantic/types.js").RecordDeclaration>, visibleErrors?: Map<string, import("../semantic/types.js").ErrorDeclaration>, visibleCallEffects?: Map<string, Set<string>>}} [options] - Resolved program validation context.
+ * @param {{externalDeclarationIds?: Set<string>, program?: boolean, visibleFunctions?: Map<string, import("../semantic/types.js").FunctionDeclaration>, visibleRecords?: Map<string, import("../semantic/types.js").RecordDeclaration>, visibleClasses?: Map<string, import("../semantic/types.js").ClassDeclaration>, visibleErrors?: Map<string, import("../semantic/types.js").ErrorDeclaration>, visibleCallEffects?: Map<string, Set<string>>}} [options] - Resolved program validation context.
  * @returns {void}
  */
 export function validateBackendModule(module, language, options = {}) {
@@ -159,6 +159,7 @@ export function validateBackendModule(module, language, options = {}) {
   validateScaffoldingNames(module, language)
   validateBackendTypes(module, language, {
     callEffects: options.visibleCallEffects,
+    classes: options.visibleClasses,
     errors: options.visibleErrors,
     functions: options.visibleFunctions,
     records: options.visibleRecords
@@ -400,7 +401,7 @@ function validateReferenceClassTargets(classes, records, errors, functions, lang
     if (!declaration || declaration.kind != "ClassDeclaration" ||
       !["constructor,fields,id,kind,location,methods,name", "constructor,fields,id,kind,location,methods,name,ownership"].includes(keys) ||
       !isDenseArray(declaration.fields) || declaration.fields.length == 0 || !isDenseArray(declaration.methods) ||
-      declaration.id != `class:${classIndex}`) {
+      !new RegExp(`^(?:[a-z][a-z0-9._-]*#)?class:${classIndex}$`, "u").test(String(declaration.id))) {
       unsupportedCapability(language, "missing or invalid reference class declaration", location)
     }
     if (declaration.ownership !== undefined && declaration.ownership?.kind != "ordinary" &&
@@ -440,7 +441,8 @@ function validateReferenceClassTargets(classes, records, errors, functions, lang
     const constructorKeys = constructor && typeof constructor == "object" && !Array.isArray(constructor)
       ? Object.keys(constructor).filter((key) => key != "sourceProvenance").sort().join(",") : ""
 
-    if (!constructor || constructor.kind != "ConstructorDeclaration" || constructorKeys != "body,id,kind,location,parameters" ||
+    if (!constructor || constructor.kind != "ConstructorDeclaration" ||
+      !["body,id,kind,location,parameters", "body,effects,failureIds,id,kind,location,parameters"].includes(constructorKeys) ||
       constructor.id != `${declaration.id}:constructor` || !isDenseArray(constructor.parameters)) {
       unsupportedCapability(language, "missing or invalid constructor declaration", constructorLocation)
     }
@@ -455,7 +457,9 @@ function validateReferenceClassTargets(classes, records, errors, functions, lang
       const methodKeys = method && typeof method == "object" && !Array.isArray(method)
         ? Object.keys(method).filter((key) => key != "sourceProvenance").sort().join(",") : ""
 
-      if (!method || method.kind != "MethodDeclaration" || methodKeys != "body,id,kind,location,name,parameters,returnType" ||
+      if (!method || method.kind != "MethodDeclaration" ||
+        !["body,id,kind,location,name,parameters,returnType",
+          "body,effects,failureIds,id,kind,location,name,parameters,returnType"].includes(methodKeys) ||
         method.id != `${declaration.id}:method:${methodIndex}` || !isDenseArray(method.parameters)) {
         unsupportedCapability(language, "missing or invalid method declaration", methodLocation)
       }
@@ -1572,7 +1576,8 @@ function validateErrorTypeShape(/** @type {unknown} */ type,
     ? /** @type {Record<string, unknown>} */ (type) : {}
 
   if (candidate.kind != "ErrorType" || fields != "declarationId,kind" || typeof candidate.declarationId != "string" ||
-    !/^(?:(?:[a-z][a-z0-9._-]*#)?error:[0-9]+|capability:[0-9]+\/failure:[0-9]+)$/u.test(candidate.declarationId)) {
+    !/^(?:(?:[a-z][a-z0-9._-]*#)?error:[0-9]+|(?:module:[0-9]+\/)?capability:[0-9]+\/failure:[0-9]+)$/u
+      .test(candidate.declarationId)) {
     unsupportedCapability(language, "missing or invalid error type", ownerLocation)
   }
 }
@@ -1690,7 +1695,8 @@ function validateExpression(expression, language, ownerLocation, allowJavaNegate
   if (candidate.kind == "ReceiverExpression") {
     const fields = Object.keys(candidate).filter((key) => key != "sourceProvenance").sort().join(",")
 
-    if (fields != "classId,kind,location" || typeof candidate.classId != "string" || !/^class:[0-9]+$/u.test(candidate.classId)) {
+    if (fields != "classId,kind,location" || typeof candidate.classId != "string" ||
+      !/^(?:[a-z][a-z0-9._-]*#)?class:[0-9]+$/u.test(candidate.classId)) {
       unsupportedCapability(language, "malformed private field receiver", location)
     }
     return
@@ -1840,12 +1846,16 @@ function validateExpression(expression, language, ownerLocation, allowJavaNegate
   if (candidate.kind == "ReferenceConstruction") {
     const fields = Object.keys(candidate).filter((key) => key != "sourceProvenance").sort().join(",")
     const resolution = candidate.resolution
+    const effectfulFields = "arguments,effectSiteId,effects,failureIds,kind,location,reference,resolution"
+    const pureFields = "arguments,kind,location,reference,resolution"
 
-    if (fields != "arguments,kind,location,reference,resolution" ||
+    if (![pureFields, effectfulFields].includes(fields) ||
       candidate.reference?.kind != "ReferenceType" && candidate.reference?.kind != "OwnedReferenceType" ||
       typeof candidate.reference.declarationId != "string" || !isDenseArray(candidate.arguments) ||
       !resolution || resolution.kind != "ResolvedConstructorSignature" ||
-      resolution.declarationId != `${candidate.reference.declarationId}:constructor` || !isDenseArray(resolution.parameterTypes)) {
+      resolution.declarationId != `${candidate.reference.declarationId}:constructor` || !isDenseArray(resolution.parameterTypes) ||
+      fields == effectfulFields &&
+      (typeof candidate.effectSiteId != "string" || candidate.effects?.join(",") != "host" || !isDenseArray(candidate.failureIds))) {
       unsupportedCapability(language, "malformed reference construction or resolved constructor signature", location)
     }
     for (const argument of candidate.arguments) {
@@ -2241,7 +2251,7 @@ export function emitExpression(writer, expression, path, language, emitIdentifie
     if (language == "java" && writer.referenceClassEmissionDepth > 0) {
       writer.synthetic("Main.", "protected Task 034 host support owner", [expression], [path])
     }
-    writer.mapped(writer.stdlibProviderEntryFor(operation.name) ?? operation.name, {
+    writer.mapped(writer.stdlibProviderEntryFor(operation) ?? operation.name, {
       mappingKind: "exact", name: operation.name, node: expression, path, role: "callee"
     })
     writer.mapped("(", {mappingKind: "anchor", node: expression, path})

@@ -1,5 +1,7 @@
 // @ts-check
 
+import {generateTask037PhpProviderContent} from "./php-stdlib-support.js"
+
 /**
  * @typedef {"php" | "ruby" | "javascript" | "typescript"} StdlibProviderTarget
  * @typedef {{when: (operations: Set<string>) => boolean, text: string}} SupportSegment
@@ -199,9 +201,14 @@ function supportSegments(language) {
  * Generates the complete tree-shaken stdlib provider artifact content for one adopted target.
  * @param {StdlibProviderTarget} language - Adopted target host provider.
  * @param {readonly string[]} operations - Used canonical operations in contract order.
+ * @param {string} [module] - Qualified canonical module identity; omitted for the Task 034 probe.
  * @returns {string} Complete provider source text.
  */
-export function generateStdlibProviderContent(language, operations) {
+export function generateStdlibProviderContent(language, operations, module) {
+  if (module !== undefined && module != "semantifold.task034.resource-probe") {
+    if (language != "php") throw new RangeError(`Canonical module '${module}' has no '${language}' provider content.`)
+    return generateTask037PhpProviderContent(module, operations)
+  }
   const used = new Set(operations)
 
   if (used.size == 0) throw new Error("A stdlib provider requires at least one used operation.")
