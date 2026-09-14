@@ -100,8 +100,16 @@ describe("public API", () => {
     })
 
     expect(generateProgramArtifactSet({language: "typescript", program}).target).toEqual("typescript")
-    const moduleSet = generateArtifactSet({language: "ios", module, role: "application"})
-    const programSet = generateProgramArtifactSet({language: "ios", program, role: "application"})
+    const configuration = {
+      bundleIdentifier: "com.example.semantifold",
+      deploymentTarget: "18.0",
+      displayName: "Semantifold",
+      moduleName: "SemantifoldApp",
+      organizationPrefix: "com.example",
+      productName: "SemantifoldApp"
+    }
+    const moduleSet = generateArtifactSet({configuration, language: "ios", module, role: "application"})
+    const programSet = generateProgramArtifactSet({configuration, language: "ios", program, role: "application"})
 
     expect(moduleSet.target).toEqual("ios")
     expect(programSet.target).toEqual("ios")

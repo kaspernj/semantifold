@@ -1,13 +1,24 @@
 // @ts-check
 
+import {createHash} from "node:crypto"
+import {isDenseArray} from "../array.js"
+import {findPortableArtifactPathConflict, isSafeArtifactPath} from "../artifact-path.js"
+import {createByteMapping} from "../binary-mapping.js"
 import {SemantifoldDiagnostic, unsupportedCapability} from "../diagnostic.js"
 import {finalizeMapping, toSourceMapV3} from "../mapping.js"
+import {hasOnlyUnicodeScalars} from "../semantic/scalars.js"
 import {preflightSemanticProgram} from "./program.js"
 import {emitScalarType, emitStringLiteral} from "./scalars.js"
 import {SourceWriter} from "./writer.js"
 
 /** @type {ReadonlySet<import("../semantic/types.js").SemanticLanguage>} */
 const iosSourceLanguages = new Set(["php", "ruby", "javascript", "typescript", "java", "swift"])
+const configurationFields = new Set([
+  "bundleIdentifier", "capabilities", "deploymentTarget", "displayName", "entitlements", "infoPlist", "lifecycle",
+  "moduleName", "organizationPrefix", "permissions", "privacyDeclarations", "productName", "resourceRoot", "sourceRoot"
+])
+const assetFields = new Set(["content", "mediaType", "path", "sha256"])
+const mediaTypePattern = /^[A-Za-z0-9!#$&^_.+-]+\/[A-Za-z0-9!#$&^_.+-]+(?:;[\u0020-\u007e]+)?$/u
 const binaryOperations = Object.freeze({
   BooleanAnd: "&&",
   BooleanEqual: "==",
@@ -60,7 +71,9 @@ func semantifold_keep_mutable<T>(_ value: inout T) {
  * @param {object} input - iOS application generation input.
  * @param {import("../semantic/types.js").SemanticModule} [input.module] - Single module to normalize.
  * @param {import("../semantic/types.js").SemanticProgram} [input.program] - Caller-owned Task 010 project.
- * @returns {{modules: import("../semantic/types.js").SemanticModule[], program: import("../semantic/types.js").SemanticProgram, sources: {content: string, filename: string, language?: import("../semantic/types.js").SemanticLanguage}[]}} Prepared application program.
+ * @param {import("../semantic/types.js").IosApplicationConfigurationInput} [input.configuration] - Closed application configuration.
+ * @param {import("../semantic/types.js").IosApplicationAssetInput[]} [input.assets] - Exact caller-provided assets.
+ * @returns {{assets: import("../semantic/types.js").IosApplicationAssetInput[], configuration: import("../semantic/types.js").IosApplicationConfiguration, modulePaths: Map<string, string>, modules: import("../semantic/types.js").SemanticModule[], program: import("../semantic/types.js").SemanticProgram, sources: {content: string, filename: string, language?: import("../semantic/types.js").SemanticLanguage}[]}} Prepared application program.
  */
 export function preflightIosApplication(input) {
   if (!isPlainObject(input) || Boolean(input.module) == Boolean(input.program)) {
@@ -70,14 +83,29 @@ export function preflightIosApplication(input) {
       message: "iOS application generation requires exactly one semantic module or program."
     })
   }
+  const configuration = normalizeConfiguration(input.configuration)
   const program = input.program ?? normalizeSingleModule(input.module)
-
-  return preflightSemanticProgram({
+  const prepared = preflightSemanticProgram({
     backendLanguage: "swift",
     diagnosticLanguage: "ios",
     program,
     sourceLanguages: iosSourceLanguages
   })
+  const modulePaths = new Map(prepared.modules.map(module => [
+    /** @type {string} */ (Reflect.get(module, "id")),
+    `${configuration.sourceRoot}/Generated/${moduleName(/** @type {string} */ (Reflect.get(module, "id")))}.swift`
+  ]))
+  const assets = normalizeAssets(input.assets, configuration.resourceRoot)
+  const conflict = findPortableArtifactPathConflict([
+    `${configuration.sourceRoot}/Generated/SemantifoldRuntime.swift`,
+    ...modulePaths.values(),
+    `${configuration.resourceRoot}/Contents.json`,
+    ...assets.map(({path}) => path)
+  ])
+
+  if (conflict) invalidPath(`Application artifact path '${conflict.path}' has a ${conflict.kind} conflict${conflict.other ? ` with '${conflict.other}'` : ""}.`)
+
+  return {...prepared, assets, configuration, modulePaths}
 }
 
 /**
@@ -87,10 +115,7 @@ export function preflightIosApplication(input) {
  */
 export function generateIosApplication(input) {
   const prepared = preflightIosApplication(input)
-  const paths = new Map(prepared.modules.map(module => [
-    /** @type {string} */ (Reflect.get(module, "id")),
-    `Sources/Generated/${moduleName(/** @type {string} */ (Reflect.get(module, "id")))}.swift`
-  ]))
+  const paths = prepared.modulePaths
   const declarations = new Map()
 
   for (const module of prepared.modules) {
@@ -140,7 +165,189 @@ export function generateIosApplication(input) {
     })
   }
 
+  for (const asset of prepared.assets) artifacts.push(assetArtifact(asset))
+
   return {artifacts, target: "ios"}
+}
+
+/**
+ * Validates and snapshots the strict baseline application configuration.
+ * Identity and deployment fields intentionally have no defaults without Apple-lane evidence.
+ * @param {unknown} candidate - Candidate configuration.
+ * @returns {import("../semantic/types.js").IosApplicationConfiguration} Normalized configuration.
+ */
+function normalizeConfiguration(candidate) {
+  if (!isPlainObject(candidate) || Object.keys(candidate).some(key => !configurationFields.has(key))) {
+    invalidConfiguration("iOS application configuration must be a closed plain object.")
+  }
+  const productName = candidate.productName
+  const moduleName = candidate.moduleName
+  const organizationPrefix = candidate.organizationPrefix
+  const bundleIdentifier = candidate.bundleIdentifier
+  const deploymentTarget = candidate.deploymentTarget
+  const displayName = candidate.displayName
+
+  if (typeof productName != "string" || !/^[A-Z][A-Za-z0-9]*$/u.test(productName)) {
+    invalidConfiguration("Product name must be an ASCII upper-camel identifier.")
+  }
+  if (typeof moduleName != "string" || !/^[A-Z][A-Za-z0-9]*$/u.test(moduleName)) {
+    invalidConfiguration("Module name must be an ASCII upper-camel identifier.")
+  }
+  if (typeof organizationPrefix != "string" || !isReverseDns(organizationPrefix, 2)) {
+    invalidConfiguration("Organization prefix must be a lowercase reverse-DNS identity with at least two segments.")
+  }
+  if (typeof bundleIdentifier != "string" || !isReverseDns(bundleIdentifier, 3) ||
+    !bundleIdentifier.startsWith(`${organizationPrefix}.`)) {
+    invalidConfiguration("Bundle identifier must extend the exact organization prefix as lowercase reverse DNS.")
+  }
+  if (typeof deploymentTarget != "string" || !/^[1-9][0-9]*\.(?:0|[1-9][0-9]*)$/u.test(deploymentTarget)) {
+    invalidConfiguration("Deployment target must be a caller-supplied canonical major.minor version.")
+  }
+  if (typeof displayName != "string" || displayName.length == 0 || displayName.trim() != displayName ||
+    [...displayName].length > 64 || !hasOnlyUnicodeScalars(displayName) || /[\u0000-\u001f\u007f-\u009f]/u.test(displayName)) {
+    invalidConfiguration("Display name must be a non-empty single-line Unicode scalar string of at most 64 characters.")
+  }
+  const sourceRoot = candidate.sourceRoot ?? "Sources"
+  const resourceRoot = candidate.resourceRoot ?? "Assets.xcassets"
+  const lifecycle = candidate.lifecycle ?? "swiftui"
+
+  if (sourceRoot != "Sources" || !isSafeArtifactPath(sourceRoot)) invalidConfiguration("The supported source root is exactly 'Sources'.")
+  if (resourceRoot != "Assets.xcassets" || !isSafeArtifactPath(resourceRoot)) {
+    invalidConfiguration("The supported resource root is exactly 'Assets.xcassets'.")
+  }
+  if (lifecycle != "swiftui") invalidConfiguration("The supported application lifecycle is exactly 'swiftui'.")
+  const infoPlist = candidate.infoPlist ?? {}
+
+  if (!isPlainObject(infoPlist) || Object.keys(infoPlist).length > 0) {
+    invalidConfiguration("The baseline caller Info.plist extension allowlist is empty.")
+  }
+  const permissions = emptyConfigurationSet(candidate.permissions, "permissions")
+  const entitlements = emptyConfigurationSet(candidate.entitlements, "entitlements")
+  const privacyDeclarations = emptyConfigurationSet(candidate.privacyDeclarations, "privacy declarations")
+  const capabilities = emptyConfigurationSet(candidate.capabilities, "capabilities")
+
+  return {
+    bundleIdentifier,
+    capabilities,
+    deploymentTarget,
+    displayName,
+    entitlements,
+    infoPlist: {},
+    lifecycle,
+    moduleName,
+    organizationPrefix,
+    permissions,
+    privacyDeclarations,
+    productName,
+    resourceRoot,
+    sourceRoot
+  }
+}
+
+/** @param {unknown} candidate - Optional closed set. @param {string} label - Diagnostic label. @returns {never[]} Empty snapshot. */
+function emptyConfigurationSet(candidate, label) {
+  if (candidate === undefined) return []
+  if (!isDenseArray(candidate) || candidate.length != 0) invalidConfiguration(`The baseline ${label} set must be empty.`)
+
+  return []
+}
+
+/** @param {string} value - Candidate identity. @param {number} segments - Minimum segments. @returns {boolean} Validity. */
+function isReverseDns(value, segments) {
+  const parts = value.split(".")
+
+  return parts.length >= segments && parts.every(part => /^[a-z][a-z0-9-]*$/u.test(part) && !part.endsWith("-"))
+}
+
+/**
+ * Validates, hashes, snapshots, and canonically sorts caller assets.
+ * @param {unknown} candidate - Candidate asset array.
+ * @param {string} resourceRoot - Exact resource root.
+ * @returns {import("../semantic/types.js").IosApplicationAssetInput[]} Normalized assets.
+ */
+function normalizeAssets(candidate, resourceRoot) {
+  if (candidate === undefined) return []
+  if (!isDenseArray(candidate)) invalidAsset("Application assets must be a dense array.")
+  /** @type {import("../semantic/types.js").IosApplicationAssetInput[]} */
+  const assets = []
+
+  for (let index = 0; index < candidate.length; index += 1) {
+    const asset = candidate[index]
+
+    if (!isPlainObject(asset) || Object.keys(asset).some(key => !assetFields.has(key)) ||
+      Object.keys(asset).length != assetFields.size) invalidAsset(`Asset ${index} must use the closed asset schema.`)
+    const path = asset.path
+    const content = asset.content
+    const mediaType = asset.mediaType
+    const sha256 = asset.sha256
+
+    if (!isSafeArtifactPath(path) || !path.startsWith(`${resourceRoot}/`) || path == `${resourceRoot}/Contents.json`) {
+      invalidAsset(`Asset ${index} requires a safe path below '${resourceRoot}'.`)
+    }
+    if (typeof content != "string" && !(content instanceof Uint8Array) ||
+      typeof content == "string" && (content.length == 0 || !hasOnlyUnicodeScalars(content)) ||
+      content instanceof Uint8Array && content.byteLength == 0) invalidAsset(`Asset '${path}' requires non-empty exact content.`)
+    if (typeof mediaType != "string" || !mediaTypePattern.test(mediaType) || /[\r\n]/u.test(mediaType)) {
+      invalidAsset(`Asset '${path}' requires an explicit valid media type.`)
+    }
+    const snapshot = typeof content == "string" ? content : new Uint8Array(content)
+    const actualHash = createHash("sha256").update(snapshot).digest("hex")
+
+    if (typeof sha256 != "string" || !/^[0-9a-f]{64}$/u.test(sha256) || sha256 != actualHash) {
+      invalidAsset(`Asset '${path}' SHA-256 does not match its exact content.`)
+    }
+    assets.push({content: snapshot, mediaType, path, sha256})
+  }
+  assets.sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0)
+
+  return assets
+}
+
+/** @param {import("../semantic/types.js").IosApplicationAssetInput} asset - Validated asset. @returns {import("../semantic/types.js").GeneratedSetArtifact} Artifact candidate. */
+function assetArtifact(asset) {
+  if (typeof asset.content == "string") return {
+    content: asset.content,
+    contentKind: "text",
+    mediaType: asset.mediaType,
+    ownership: "generated",
+    path: asset.path,
+    provenance: {kind: "synthetic", reason: `Exact caller-provided iOS asset (sha256:${asset.sha256}).`, relatedOrigins: []},
+    role: "resource"
+  }
+  const content = new Uint8Array(asset.content)
+
+  return {
+    content,
+    contentKind: "binary",
+    mediaType: asset.mediaType,
+    ownership: "generated",
+    path: asset.path,
+    provenance: {kind: "bytes", mapping: createByteMapping({
+      byteLength: content.byteLength,
+      path: asset.path,
+      ranges: [{
+        generated: {end: content.byteLength, start: 0},
+        origin: {kind: "synthetic", reason: `Exact caller-provided iOS asset (sha256:${asset.sha256}).`, relatedOrigins: []},
+        role: "asset"
+      }]
+    })},
+    role: "resource"
+  }
+}
+
+/** @param {string} message - Failure detail. @returns {never} Always throws. */
+function invalidConfiguration(message) {
+  throw new SemantifoldDiagnostic({code: "INVALID_APPLICATION_CONFIGURATION", language: "ios", message})
+}
+
+/** @param {string} message - Failure detail. @returns {never} Always throws. */
+function invalidAsset(message) {
+  throw new SemantifoldDiagnostic({code: "INVALID_APPLICATION_ASSET", language: "ios", message})
+}
+
+/** @param {string} message - Failure detail. @returns {never} Always throws. */
+function invalidPath(message) {
+  throw new SemantifoldDiagnostic({code: "INVALID_APPLICATION_PATH", language: "ios", message})
 }
 
 /**

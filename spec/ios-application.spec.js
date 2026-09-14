@@ -1,6 +1,7 @@
 // @ts-check
 
 import assert from "node:assert/strict"
+import {createHash} from "node:crypto"
 import {describe, expect, it} from "@velocious/testing"
 import {generateArtifactSet, generateProgramArtifactSet, parse, parseProgram, SemantifoldDiagnostic} from "../index.js"
 import {preflightIosApplication} from "../src/backends/ios.js"
@@ -43,13 +44,24 @@ const swiftSource = `func decorate(_ value: String, _ suffix: String) -> String 
 print(decorate(decorate("hé😀", "!"), "?"))
 `
 
+const configuration = () => ({
+  bundleIdentifier: "com.example.semantifold",
+  deploymentTarget: "18.0",
+  displayName: "Semantifold",
+  moduleName: "SemantifoldApp",
+  organizationPrefix: "com.example",
+  productName: "SemantifoldApp"
+})
+
+const sha256 = content => createHash("sha256").update(content).digest("hex")
+
 describe("iOS application project validation", () => {
   it("preflights complete Ruby projects and normalizes one Swift module without mutation", () => {
     const rubyProgram = parseProgram({entryModule: "main", sources: rubySources()})
     const swiftModule = parse({filename: "program.swift", language: "swift", source: swiftSource})
     const before = structuredClone(swiftModule)
-    const ruby = preflightIosApplication({program: rubyProgram})
-    const swift = preflightIosApplication({module: swiftModule})
+    const ruby = preflightIosApplication({configuration: configuration(), program: rubyProgram})
+    const swift = preflightIosApplication({configuration: configuration(), module: swiftModule})
 
     expect(ruby.program.modules.map(({id}) => id)).toEqual(["math_tools", "main"])
     expect(ruby.modules.map(module => Reflect.get(module, "id"))).toEqual(["math_tools", "main"])
@@ -61,6 +73,17 @@ describe("iOS application project validation", () => {
     expect(swift.program.modules.map(({id, sourceFilename}) => ({id, sourceFilename})))
       .toEqual([{id: "main", sourceFilename: "program.swift"}])
     expect(swift.program.modules[0].functions[0].id).toEqual("main#function:0")
+    expect(swift.configuration).toEqual({
+      ...configuration(),
+      capabilities: [],
+      entitlements: [],
+      infoPlist: {},
+      lifecycle: "swiftui",
+      permissions: [],
+      privacyDeclarations: [],
+      resourceRoot: "Assets.xcassets",
+      sourceRoot: "Sources"
+    })
     expect(swiftModule).toEqual(before)
   })
 
@@ -82,9 +105,9 @@ puts values[0]
 
     malformedProgram.modules[0].functions[0].parameters = []
     for (const generate of [
-      () => preflightIosApplication({module: collectionModule}),
-      () => preflightIosApplication({program: malformedProgram}),
-      () => generateArtifactSet({language: "ios", module: collectionModule, role: "application"})
+      () => preflightIosApplication({configuration: configuration(), module: collectionModule}),
+      () => preflightIosApplication({configuration: configuration(), program: malformedProgram}),
+      () => generateArtifactSet({configuration: configuration(), language: "ios", module: collectionModule, role: "application"})
     ]) {
       assert.throws(generate, error => error instanceof SemantifoldDiagnostic &&
         error.code == "UNSUPPORTED_CAPABILITY" && error.language == "ios" &&
@@ -95,8 +118,8 @@ puts values[0]
   it("lowers namespaced semantic Swift through one shared ordered output sink", () => {
     const rubyProgram = parseProgram({entryModule: "main", sources: rubySources()})
     const swiftModule = parse({filename: "program.swift", language: "swift", source: swiftSource})
-    const ruby = generateProgramArtifactSet({language: "ios", program: rubyProgram, role: "application"})
-    const swift = generateArtifactSet({language: "ios", module: swiftModule, role: "application"})
+    const ruby = generateProgramArtifactSet({configuration: configuration(), language: "ios", program: rubyProgram, role: "application"})
+    const swift = generateArtifactSet({configuration: configuration(), language: "ios", module: swiftModule, role: "application"})
 
     expect(ruby.artifacts.map(({path, role}) => ({path, role}))).toEqual([
       {path: "Sources/Generated/SemantifoldRuntime.swift", role: "support"},
@@ -127,5 +150,66 @@ puts values[0]
       expect(ruby.artifacts[1].provenance.mapping.spans.some(({mappingKind}) => mappingKind == "exact")).toBeTrue()
     }
     expect(ruby.artifacts[0].provenance.kind).toEqual("synthetic")
+  })
+
+  it("preserves exact caller assets with validated paths and SHA-256", () => {
+    const module = parse({filename: "program.swift", language: "swift", source: swiftSource})
+    const text = "{\n  \"info\": \"exact\"\n}\n"
+    const bytes = new Uint8Array([0, 1, 2, 255])
+    const assets = [
+      {content: bytes, mediaType: "application/octet-stream", path: "Assets.xcassets/Data.dataset/payload.bin", sha256: sha256(bytes)},
+      {content: text, mediaType: "application/json", path: "Assets.xcassets/Data.dataset/Contents.json", sha256: sha256(text)}
+    ]
+    const set = generateArtifactSet({assets, configuration: configuration(), language: "ios", module, role: "application"})
+    const generatedAssets = set.artifacts.filter(({role}) => role == "resource")
+
+    expect(generatedAssets.map(({path}) => path)).toEqual([
+      "Assets.xcassets/Data.dataset/Contents.json",
+      "Assets.xcassets/Data.dataset/payload.bin"
+    ])
+    expect(generatedAssets[0].content).toEqual(text)
+    assert.deepEqual(generatedAssets[1].content, bytes)
+    bytes[0] = 99
+    assert.deepEqual(generatedAssets[1].content, new Uint8Array([0, 1, 2, 255]))
+  })
+
+  it("rejects unknown configuration, identity, lifecycle, capability, asset, and portable-path values", () => {
+    const module = parse({filename: "program.swift", language: "swift", source: swiftSource})
+    const validAsset = {content: "asset\n", mediaType: "text/plain", path: "Assets.xcassets/Data.dataset/value.txt",
+      sha256: sha256("asset\n")}
+    const invalid = [
+      {configuration: {...configuration(), platform: "macos"}},
+      {configuration: {...configuration(), productName: "Bad Name"}},
+      {configuration: {...configuration(), moduleName: "bad-name"}},
+      {configuration: {...configuration(), organizationPrefix: "example"}},
+      {configuration: {...configuration(), bundleIdentifier: "org.other.app"}},
+      {configuration: {...configuration(), deploymentTarget: "latest"}},
+      {configuration: {...configuration(), displayName: "bad\nname"}},
+      {configuration: {...configuration(), lifecycle: "uikit"}},
+      {configuration: {...configuration(), infoPlist: {NSCameraUsageDescription: "camera"}}},
+      {configuration: {...configuration(), permissions: ["camera"]}},
+      {configuration: {...configuration(), entitlements: ["network"]}},
+      {configuration: {...configuration(), privacyDeclarations: ["tracking"]}},
+      {configuration: {...configuration(), capabilities: ["icloud"]}},
+      {configuration: {...configuration(), sourceRoot: "../Sources"}},
+      {configuration: {...configuration(), resourceRoot: "Resources"}},
+      {assets: [{...validAsset, surprise: true}], configuration: configuration()},
+      {assets: [{...validAsset, path: "../value.txt"}], configuration: configuration()},
+      {assets: [{...validAsset, path: "Resources/value.txt"}], configuration: configuration()},
+      {assets: [{...validAsset, sha256: "0".repeat(64)}], configuration: configuration()},
+      {assets: [validAsset, {...validAsset}], configuration: configuration()},
+      {assets: [validAsset, {...validAsset, path: "Assets.xcassets/data.dataset/VALUE.TXT"}], configuration: configuration()},
+      {assets: [validAsset, {...validAsset, path: "Assets.xcassets/Data.dataset/valué.txt"},
+        {...validAsset, path: "Assets.xcassets/Data.dataset/valué.txt"}], configuration: configuration()},
+      {assets: [validAsset, {...validAsset, path: `${validAsset.path}/nested`}], configuration: configuration()}
+    ]
+
+    for (const candidate of invalid) {
+      assert.throws(
+        () => generateArtifactSet({...candidate, language: "ios", module, role: "application"}),
+        error => error instanceof SemantifoldDiagnostic && error.language == "ios" &&
+          ["INVALID_APPLICATION_ASSET", "INVALID_APPLICATION_CONFIGURATION", "INVALID_APPLICATION_PATH"].includes(error.code)
+      )
+    }
   })
 })

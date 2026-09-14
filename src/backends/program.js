@@ -65,6 +65,8 @@ export function preflightSemanticProgram({backendLanguage, diagnosticLanguage, p
  * @param {import("../semantic/types.js").BackendLanguage} input.language - Registered program target.
  * @param {import("../semantic/types.js").SemanticProgram} input.program - Complete semantic program.
  * @param {"text" | "application"} [input.role] - Explicit artifact role; omitted preserves text generation.
+ * @param {import("../semantic/types.js").IosApplicationConfigurationInput} [input.configuration] - iOS application configuration.
+ * @param {import("../semantic/types.js").IosApplicationAssetInput[]} [input.assets] - Exact iOS caller assets.
  * @returns {import("../semantic/types.js").GeneratedArtifactSet} Transactionally validated artifact set.
  */
 export function generateProgramArtifacts(input) {

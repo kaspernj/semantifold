@@ -32,3 +32,38 @@ export function isSafeArtifactPath(value) {
       return codePoint != undefined && codePoint > 31 && codePoint != 127
     }))
 }
+
+/**
+ * Produces a conservative portable comparison key for a validated artifact path.
+ * @param {string} value - Safe relative POSIX path.
+ * @returns {string} Compatibility-normalized case-fold key.
+ */
+export function portableArtifactPathKey(value) {
+  return value.split("/").map(part => part.normalize("NFKC").toLocaleLowerCase("en-US")).join("/")
+}
+
+/**
+ * Finds the first unsafe, duplicate, portable case-fold, or file/directory-prefix conflict.
+ * @param {readonly string[]} paths - Ordered candidate artifact paths.
+ * @returns {{kind: "case-fold" | "duplicate" | "prefix" | "unsafe", path: string, other?: string} | null} First conflict.
+ */
+export function findPortableArtifactPathConflict(paths) {
+  /** @type {{key: string, path: string}[]} */
+  const accepted = []
+
+  for (const path of paths) {
+    if (!isSafeArtifactPath(path)) return {kind: "unsafe", path: String(path)}
+    const key = portableArtifactPathKey(path)
+
+    for (const previous of accepted) {
+      if (path == previous.path) return {kind: "duplicate", other: previous.path, path}
+      if (key == previous.key) return {kind: "case-fold", other: previous.path, path}
+      if (key.startsWith(`${previous.key}/`) || previous.key.startsWith(`${key}/`)) {
+        return {kind: "prefix", other: previous.path, path}
+      }
+    }
+    accepted.push({key, path})
+  }
+
+  return null
+}
