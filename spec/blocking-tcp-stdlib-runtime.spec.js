@@ -28,6 +28,20 @@ describe("blocking TCP Ruby-to-PHP stdlib runtime slice", () => {
       const program = parseProgram({entryModule: "main", sources: [{
         filename: "main.rb", id: "main", language: "ruby", source: task037TcpProgram(port)
       }]})
+      const semanticKinds = new Set()
+      const pending = [program.modules.find(({id}) => id == "main")]
+
+      while (pending.length > 0) {
+        const value = pending.pop()
+
+        if (!value || typeof value != "object") continue
+        if (!Array.isArray(value) && typeof Reflect.get(value, "kind") == "string") semanticKinds.add(Reflect.get(value, "kind"))
+        for (const [key, child] of Object.entries(value)) {
+          if (!["location", "provenance", "sourceProvenance"].includes(key) && child && typeof child == "object") pending.push(child)
+        }
+      }
+      expect(semanticKinds.has("WhileStatement")).toBe(true)
+      expect([...semanticKinds].some((kind) => String(kind).toLowerCase().includes("tcp"))).toBe(false)
       const first = generateProgramArtifactSet({language: "php", program})
       const second = generateProgramArtifactSet({language: "php", program: parseProgram({entryModule: "main", sources: [{
         filename: "main.rb", id: "main", language: "ruby", source: task037TcpProgram(port)
@@ -72,5 +86,32 @@ describe("blocking TCP Ruby-to-PHP stdlib runtime slice", () => {
       accepted: 1,
       result: {stderr: "", stdout: `host\nport\n${task037ExpectedBytes}`}
     })
+  })
+
+  it("reports real invalid TCP bytes as DecodeFailure and emits no replacement output", async () => {
+    const tools = await discoverTask037Toolchains()
+    const execution = await withTask037TcpServer(Uint8Array.from([0xc3, 0x28]), async (port) => {
+      const source = task037TcpProgram(port)
+      const program = parseProgram({entryModule: "main", sources: [{filename: "main.rb", id: "main", language: "ruby", source}]})
+      const set = generateProgramArtifactSet({language: "php", program})
+
+      return executeTask037Client({entry: set.entry, executable: tools.php82.executable, set})
+    })
+
+    expect(execution).toEqual({accepted: 1, result: {stderr: "", stdout: ""}})
+  })
+
+  it("executes the exact Kernel.puts spelling through the same canonical Output provider", async () => {
+    const tools = await discoverTask037Toolchains()
+    const execution = await withTask037TcpServer(task037ServerBytes, async (port) => {
+      const source = task037TcpProgram(port, true)
+      const set = generateProgramArtifactSet({language: "php", program: parseProgram({entryModule: "main", sources: [{
+        filename: "main.rb", id: "main", language: "ruby", source
+      }]})})
+
+      return executeTask037Client({entry: set.entry, executable: tools.php82.executable, set})
+    })
+
+    expect(execution).toEqual({accepted: 1, result: {stderr: "", stdout: task037ExpectedBytes}})
   })
 })

@@ -31,6 +31,22 @@ describe("blocking TCP PHP stdlib linking", () => {
       {module: "semantifold.socket-client", path: "providers/php/semantifold/socket-client.php"},
       {module: "semantifold.text-stream", path: "providers/php/semantifold/text-stream.php"}
     ])
+    const socketFacade = first.artifacts.find(({path}) => path == "semantifold/facade/ruby/socket.php")
+    const outputFacade = first.artifacts.find(({path}) => path == "semantifold/facade/ruby/output.php")
+
+    expect(String(socketFacade?.content)).not.toContain("providers/php/semantifold/output.php")
+    expect(String(outputFacade?.content)).toContain("providers/php/semantifold/output.php")
+    expect(String(outputFacade?.content)).not.toContain("providers/php/semantifold/socket-client.php")
+    expect(String(outputFacade?.content)).not.toContain("providers/php/semantifold/text-stream.php")
+    expect(Object.isFrozen(first)).toBe(true)
+    expect(Object.isFrozen(first.artifacts)).toBe(true)
+    expect(Object.isFrozen(first.metadata)).toBe(true)
+    expect(first.artifacts.filter(({path}) => path.startsWith("providers/")).every(({provenance}) =>
+      provenance.kind == "synthetic" && provenance.reason.startsWith("semantifold-stdlib-provider:"))).toBe(true)
+    if (socketFacade?.provenance.kind == "text") {
+      expect(socketFacade.provenance.mapping.spans.some(({origin}) =>
+        origin.kind == "source" && origin.location.filename == "__semantifold_facades__/ruby/socket.rb")).toBe(true)
+    }
   })
 
   it("tree-shakes unused socket providers while retaining the exact selected type closure", () => {

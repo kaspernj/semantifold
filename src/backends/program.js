@@ -99,8 +99,7 @@ export function generateProgramArtifacts(input) {
         ])),
         stdlibProviderImports: input.language == "java" || input.language == "javascript" || input.language == "typescript" ?
           linking.providerImportsByModule.get(moduleId) : undefined,
-        stdlibProviderPaths: linking.negotiation.providers.map(({module}) =>
-          /** @type {import("../stdlib-providers.js").StdlibProviderRecord} */ (linking.records.get(module)).artifact.path),
+        stdlibProviderPaths: linking.providerPathsByModule.get(moduleId),
         ...(input.language == "java" ? {
           stdlibProviderOwnerModule: /** @type {string} */ (linking.ownerModuleId),
           stdlibProviderShims: moduleId == linking.ownerModuleId ? linking.usedOperations.map(({operation}) => operation) : undefined
@@ -142,6 +141,7 @@ export function generateProgramArtifacts(input) {
  * @property {QualifiedStdlibOperation[]} usedOperations - Program-wide used canonical operations in stable order.
  * @property {Map<string, QualifiedStdlibOperation[]>} usedOperationsByModule - Used canonical operations by program module identity.
  * @property {Map<string, string[]>} providerImportsByModule - Ordered provider import names by module identity.
+ * @property {Map<string, string[]>} providerPathsByModule - Provider artifact closure by program module identity.
  * @property {string | null} ownerModuleId - Java target: first operation-using module identity hosting the shared support; null for artifact-materializing targets.
  */
 
@@ -215,10 +215,42 @@ function planStdlibLinking(program, language) {
     negotiation,
     ownerModuleId,
     providerImportsByModule: collectProviderImports(program, negotiation, records, usedOperationsByModule, language, ownerModuleId),
+    providerPathsByModule: collectProviderPaths(negotiation, records, usedOperationsByModule),
     records,
     usedOperations: [...programWide],
     usedOperationsByModule
   }
+}
+
+/**
+ * Selects the exact provider/type dependency closure required by each emitting program module.
+ * @param {import("../stdlib-negotiation.js").StdlibNegotiationResult} negotiation - Negotiated program closure.
+ * @param {Map<string, import("../stdlib-providers.js").StdlibProviderRecord>} records - Selected provider records.
+ * @param {Map<string, QualifiedStdlibOperation[]>} usedOperationsByModule - Reachable operations by program module.
+ * @returns {Map<string, string[]>} Ordered provider paths by program module.
+ */
+function collectProviderPaths(negotiation, records, usedOperationsByModule) {
+  const paths = new Map()
+
+  for (const [moduleId, operations] of usedOperationsByModule) {
+    const selected = new Set(operations.map(({module}) => module))
+    let changed = true
+
+    while (changed) {
+      changed = false
+      for (const module of [...selected]) {
+        for (const dependency of records.get(module)?.dependencies ?? []) {
+          if (!selected.has(dependency.module)) {
+            selected.add(dependency.module)
+            changed = true
+          }
+        }
+      }
+    }
+    paths.set(moduleId, negotiation.providers.filter(({module}) => selected.has(module)).map(({module}) =>
+      /** @type {import("../stdlib-providers.js").StdlibProviderRecord} */ (records.get(module)).artifact.path))
+  }
+  return paths
 }
 
 /**

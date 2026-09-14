@@ -1903,6 +1903,7 @@ export function inspectRubyModule({filename, source}) {
       message: "Dynamic require cannot prove a standard-library facade identity."
     })
   }
+  validateTask037NativeAttempts(body, filename, source)
   const invalid = body.find((node) => !(node instanceof ModuleNode) && !isRequireRelative(node) && !isStdlibRequire(node))
 
   if (modules.length != 1 || !(modules[0].constantPath instanceof ConstantReadNode) || invalid) {
@@ -1967,6 +1968,69 @@ export function inspectRubyModule({filename, source}) {
   const nativeReferences = rubyNativeReferences(modules[0], filename, source)
 
   return {exports, imports, nativeName: modules[0].name, nativeReferences}
+}
+
+/**
+ * Rejects parser-proved attempts to use or mutate the bounded socket facade outside its exact surface.
+ * @param {import("@ruby/prism").Node[]} body - Prism program body.
+ * @param {string} filename - Source filename.
+ * @param {string} source - Complete source.
+ * @returns {void}
+ */
+function validateTask037NativeAttempts(body, filename, source) {
+  const active = body.some((node) => isStdlibRequire(node) && node instanceof CallNode &&
+    node.arguments_?.arguments_[0] instanceof StringNode && node.arguments_.arguments_[0].unescaped.value == "socket")
+  const reopened = body.find((node) => node instanceof ClassNode && node.name == "TCPSocket")
+
+  if (active && reopened) throw new SemantifoldDiagnostic({
+    code: "STDLIB_FACADE_REOPENED",
+    language: "ruby",
+    location: nodeLocation(reopened, filename, source),
+    message: "Caller source reopens the compiler-owned TCPSocket facade identity."
+  })
+  const modules = body.filter((node) => node instanceof ModuleNode)
+
+  /**
+   * Visits one parser node for bounded native attempts.
+   * @param {import("@ruby/prism").Node} node - Candidate Prism node.
+   */
+  function visit(node) {
+    if (node instanceof CallNode) {
+      const receiver = node.receiver
+      const tcpReceiver = receiver instanceof ConstantReadNode && receiver.name == "TCPSocket"
+
+      if (tcpReceiver) {
+        if (!active) throw new SemantifoldDiagnostic({
+          code: "STDLIB_FACADE_IDENTITY_UNPROVED",
+          language: "ruby",
+          location: nodeLocation(/** @type {ConstantReadNode} */ (receiver), filename, source),
+          message: "TCPSocket requires the exact parser-proved require \"socket\" identity."
+        })
+        if (node.name != "new" || node.block || node.arguments_?.arguments_.length != 2) {
+          throw new SemantifoldDiagnostic({
+            code: "STDLIB_FACADE_MEMBER_UNSUPPORTED",
+            language: "ruby",
+            location: nodeLocation(node, filename, source),
+            message: "TCPSocket supports only exact two-argument new without a block."
+          })
+        }
+      }
+      const kernelPuts = !node.receiver && node.name == "puts" ||
+        node.receiver instanceof ConstantReadNode && node.receiver.name == "Kernel" && node.name == "puts"
+
+      if (active && kernelPuts && (node.block || node.arguments_?.arguments_.length != 1)) {
+        throw new SemantifoldDiagnostic({
+          code: "STDLIB_FACADE_MEMBER_UNSUPPORTED",
+          language: "ruby",
+          location: nodeLocation(node, filename, source),
+          message: "The Task 037 Output facade supports exactly one string argument without a block."
+        })
+      }
+    }
+    for (const child of node.compactChildNodes()) visit(child)
+  }
+
+  for (const module of modules) visit(module)
 }
 
 /**

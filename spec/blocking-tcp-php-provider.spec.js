@@ -78,7 +78,7 @@ echo json_encode(["categories" => $categories, "closeCalls" => $task037["closeCa
 $task037["writes"] = [1, 2, 100]; ${writeLine}("é");
 $output = $task037["output"];
 $writeFailures = [];
-foreach ([[0], [false], ["warning"], ["throw"]] as $writes) {
+foreach ([[0], [false], ["warning"], ["throw"], [100]] as $writes) {
   $task037["writes"] = $writes;
   try { ${writeLine}("x"); $writeFailures[] = "bad-success"; }
   catch (Throwable $error) { $writeFailures[] = task037_category($error); }
@@ -98,7 +98,34 @@ echo json_encode(["output" => $output, "writeFailures" => $writeFailures, "first
       read: "ResourceClosed",
       readCalls: 0,
       second: "ResourceClosed",
-      writeFailures: ["WriteFailure", "WriteFailure", "WriteFailure", "WriteFailure"]
+      writeFailures: ["WriteFailure", "WriteFailure", "WriteFailure", "WriteFailure", "WriteFailure"]
+    })
+  })
+
+  it("normalizes read/eof and close warnings or exceptions while restoring handlers", async () => {
+    const result = await executeTask037ProviderScenario(`
+$reads = [];
+foreach ([["__warning__", true], ["__throw__", true], [false, "warning"]] as [$read, $eof]) {
+  $resource = ${connect}("host", 80); $task037["reads"] = [$read]; $task037["eof"] = $eof;
+  try { ${readLine}($resource); $reads[] = "bad-success"; }
+  catch (Throwable $error) { $reads[] = task037_category($error); }
+  finally { $task037["eof"] = true; ${close}($resource); }
+}
+$closes = [];
+foreach (["warning", "throw"] as $mode) {
+  $resource = ${connect}("host", 80); $task037["closeMode"] = $mode;
+  try { ${close}($resource); $closes[] = "bad-success"; }
+  catch (Throwable $error) { $closes[] = task037_category($error); }
+  try { ${close}($resource); $closes[] = "bad-success"; }
+  catch (Throwable $error) { $closes[] = task037_category($error); }
+}
+echo json_encode(["reads" => $reads, "closes" => $closes, "closeCalls" => $task037["closeCalls"]], JSON_THROW_ON_ERROR);
+`)
+
+    expect(result).toEqual({
+      closeCalls: 5,
+      closes: ["CloseFailure", "ResourceClosed", "CloseFailure", "ResourceClosed"],
+      reads: ["ReadFailure", "ReadFailure", "ReadFailure"]
     })
   })
 })

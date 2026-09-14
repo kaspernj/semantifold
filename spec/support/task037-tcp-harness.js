@@ -21,7 +21,7 @@ export async function discoverTask037Toolchains() {
 /**
  * Runs one callback against a fresh event-driven loopback TCP server.
  * @template Result
- * @param {string} bytes - Exact bytes sent before clean close.
+ * @param {string | Uint8Array} bytes - Exact bytes sent before clean close.
  * @param {(port: number) => Promise<Result>} run - Client invocation.
  * @returns {Promise<{accepted: number, result: Result}>} Client result and connection count.
  */
@@ -36,7 +36,7 @@ export async function withTask037TcpServer(bytes, run) {
     sockets.add(socket)
     socket.once("error", rejectClosed)
     socket.once("close", () => { sockets.delete(socket); resolveClosed() })
-    socket.end(Buffer.from(bytes, "utf8"))
+    socket.end(typeof bytes == "string" ? Buffer.from(bytes, "utf8") : Buffer.from(bytes))
   })
 
   try {

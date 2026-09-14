@@ -181,4 +181,30 @@ end
         error.location?.filename == "dynamic.rb"
     )
   })
+
+  it("reports exact identity, reopening, and member diagnostics for parser-proved socket attempts", () => {
+    const cases = [
+      ["identity.rb", "STDLIB_FACADE_IDENTITY_UNPROVED", `module Main\n  TCPSocket.new("host", 80)\nend\n`],
+      ["reopened.rb", "STDLIB_FACADE_REOPENED", `require "socket"\nclass TCPSocket\nend\nmodule Main\nend\n`],
+      ["constructor.rb", "STDLIB_FACADE_MEMBER_UNSUPPORTED", `require "socket"\nmodule Main\n  TCPSocket.new("host")\nend\n`],
+      ["class-member.rb", "STDLIB_FACADE_MEMBER_UNSUPPORTED", `require "socket"\nmodule Main\n  TCPSocket.open("host", 80)\nend\n`],
+      ["puts-arity.rb", "STDLIB_FACADE_MEMBER_UNSUPPORTED", `require "socket"\nmodule Main\n  puts "one", "two"\nend\n`],
+      ["instance-member.rb", "STDLIB_FACADE_MEMBER_UNSUPPORTED", `require "socket"
+module Main
+  # @type [TCPSocket]
+  socket = TCPSocket.new("host", 80)
+  socket.read
+  socket.close
+end
+`]
+    ]
+
+    for (const [filename, code, source] of cases) {
+      assert.throws(
+        () => parseProgram({entryModule: "main", sources: [{filename, id: "main", language: "ruby", source}]}),
+        (error) => error instanceof SemantifoldDiagnostic && error.code == code && error.location?.filename == filename &&
+          error.location.end.offset > error.location.start.offset
+      )
+    }
+  })
 })

@@ -287,13 +287,23 @@ export function parseProgramSource(input) {
     if (source.id == input.entryModule && raw.entryPoint.body.statements.length == 0) {
       semanticFailure(source.language, "INVALID_ENTRY_MODULE", `Selected entry module '${source.id}' has no executable statements.`, raw.entryPoint.location)
     }
-    validateParsedModule(raw, source.language, {
-      callEffects: visibleCallEffects,
-      errors: visibleErrorsById,
-      functions: visibleFunctions,
-      records: visibleRecordsById,
-      classes: visibleClassesById
-    })
+    try {
+      validateParsedModule(raw, source.language, {
+        callEffects: visibleCallEffects,
+        errors: visibleErrorsById,
+        functions: visibleFunctions,
+        records: visibleRecordsById,
+        classes: visibleClassesById
+      })
+    } catch (error) {
+      const task037 = source.language == "ruby" && header.imports.some(({facade}) => facade?.identity.startsWith("semantifold.task037."))
+
+      if (task037 && error instanceof SemantifoldDiagnostic && error.code == "UNKNOWN_METHOD" &&
+        error.detail.startsWith("Class 'TCPSocket'")) {
+        facadeFailure("ruby", "STDLIB_FACADE_MEMBER_UNSUPPORTED", error.detail, error.location)
+      }
+      throw error
+    }
     rekeyDeclarations(raw, source.id)
     const localCallEffects = moduleUncheckedErrorEffects(raw, {callEffects: visibleCallEffects, functions: visibleFunctions})
 
