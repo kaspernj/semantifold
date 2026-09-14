@@ -82,4 +82,47 @@ describe("stdlib facade artifact linking", () => {
       (error) => error instanceof SemantifoldDiagnostic && error.code == "STDLIB_FACADE_AUTHORITY_FORGED"
     )
   })
+
+  it("rejects source-preserving facade semantic-body mutation before writer allocation or artifact exposure", () => {
+    const program = parseProgram(task036FacadeProgram("typescript"))
+    const facade = program.modules.find(({stdlibFacade}) => stdlibFacade?.identity == "semantifold.task036.typescript.probe")
+
+    assert.ok(facade)
+    expect(facade.capabilities).toBe(undefined)
+    expect(program.stdlibFacades.modules.find(({identity}) => identity == facade.stdlibFacade?.identity)?.requirements).toEqual([])
+    const returned = facade.functions[0].body.statements[0]
+
+    assert.equal(returned.kind, "ReturnStatement")
+    if (returned.kind != "ReturnStatement" || !returned.expression) throw new Error("Expected qualification facade return expression.")
+    returned.expression = {
+      kind: "StringLiteral",
+      location: returned.expression.location,
+      sourceProvenance: returned.expression.sourceProvenance,
+      value: "forged facade result"
+    }
+    /** @type {import("../src/semantic/types.js").GeneratedArtifactSet | undefined} */
+    let artifactSet
+    /** @type {unknown[]} */
+    const failures = []
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        artifactSet = generateProgramArtifactSet({language: "php", program})
+      } catch (error) {
+        failures.push(error)
+      }
+    }
+
+    expect(artifactSet).toBe(undefined)
+    expect(failures).toHaveLength(2)
+    for (const error of failures) {
+      assert.ok(error instanceof SemantifoldDiagnostic)
+      expect(error.code).toBe("STDLIB_FACADE_AUTHORITY_FORGED")
+      expect(error.location).toEqual(facade.location)
+    }
+    expect(failures.map((error) => /** @type {SemantifoldDiagnostic} */ (error).detail)).toEqual([
+      "Facade 'semantifold.task036.typescript.probe' semantic module does not match its registered executable source.",
+      "Facade 'semantifold.task036.typescript.probe' semantic module does not match its registered executable source."
+    ])
+  })
 })

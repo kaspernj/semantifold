@@ -4,6 +4,7 @@ import {isDenseArray} from "../array.js"
 import {isSafeArtifactPath} from "../artifact-path.js"
 import {createGeneratedArtifactSet} from "../artifacts.js"
 import {SemantifoldDiagnostic, unsupportedCapability, unsupportedRole} from "../diagnostic.js"
+import {parseProgramSource} from "../frontends/program.js"
 import {languageRegistry} from "../language-registry.js"
 import {finalizeMapping, toSourceMapV3} from "../mapping.js"
 import {createCoordinateIndex, indexedPointAt, moduleLocation} from "../semantic/location.js"
@@ -760,8 +761,13 @@ function validateProgramStdlibFacades(program, language) {
   if (markedModules.length != records.length) {
     invalidFacadeDescriptor(language, "The program facade descriptor does not match its executable semantic modules.")
   }
+  if (program.sources.some((source) => source.language != facadeLanguage ||
+    !["application", "facade"].includes(String(Reflect.get(source, "ownership"))))) {
+    invalidFacadeDescriptor(language, "Facade programs require one source language and explicit application/facade ownership.")
+  }
   const selectedIdentities = new Set(records.map(({identity}) => identity))
   const usedOperationsByModule = collectUsedEffectOperations(program).usedOperationsByModule
+  const registeredModules = reparseRegisteredFacadeModules(program, facadeLanguage, language)
 
   for (let index = 0; index < records.length; index += 1) {
     const record = records[index]
@@ -778,6 +784,12 @@ function validateProgramStdlibFacades(program, language) {
     if (!source || source.content != record.source.content || Reflect.get(source, "ownership") != "facade") {
       invalidFacadeDescriptor(language, `Facade '${record.identity}' executable source does not match its registered definition.`)
     }
+    const registeredModule = registeredModules.get(record.identity)
+
+    if (!registeredModule || !equalPlainData(module, registeredModule)) {
+      invalidFacadeAuthority(language,
+        `Facade '${record.identity}' semantic module does not match its registered executable source.`, module.location)
+    }
     const allowedOperations = new Set(record.requirements.flatMap(({operations}) => operations))
     const usedOperations = new Set(usedOperationsByModule.get(module.id) ?? [])
 
@@ -790,10 +802,6 @@ function validateProgramStdlibFacades(program, language) {
   }
   if (evidencedImports.length == 0) {
     invalidFacadeDescriptor(language, "The selected facade closure has no parser-proved native import evidence.")
-  }
-  if (program.sources.some((source) => source.language != facadeLanguage ||
-    !["application", "facade"].includes(String(Reflect.get(source, "ownership"))))) {
-    invalidFacadeDescriptor(language, "Facade programs require one source language and explicit application/facade ownership.")
   }
   for (const imported of evidencedImports) {
     const evidence = Reflect.get(imported, "stdlibFacade")
@@ -813,6 +821,46 @@ function validateProgramStdlibFacades(program, language) {
       invalidFacadeDescriptor(language, "A facade import does not match its registered native module and symbol identity.")
     }
   }
+}
+
+/**
+ * Recompiles the registry-selected facade closure from retained caller inputs and registered facade source.
+ * This parser-backed reference graph is created during validation, before provider planning or writer allocation.
+ * @param {import("../semantic/types.js").SemanticProgram} program - Untrusted mutable semantic program.
+ * @param {import("../semantic/types.js").SemanticLanguage} facadeLanguage - Selected source-language facade profile.
+ * @param {import("../semantic/types.js").SemanticLanguage} diagnosticLanguage - Target language for boundary diagnostics.
+ * @returns {Map<string, import("../semantic/types.js").SemanticProgramModule>} Canonical semantic modules by facade identity.
+ */
+function reparseRegisteredFacadeModules(program, facadeLanguage, diagnosticLanguage) {
+  const applicationModules = program.modules.filter((module) => Reflect.get(module, "stdlibFacade") === undefined)
+  const modulesByFilename = new Map(applicationModules.map((module) => [module.sourceFilename, module]))
+  const applicationSources = program.sources.filter((source) => Reflect.get(source, "ownership") == "application").map((source) => {
+    const module = modulesByFilename.get(source.filename)
+
+    if (!module) invalidFacadeDescriptor(diagnosticLanguage,
+      `Application source '${source.filename}' has no matching semantic module for facade verification.`)
+    return {
+      filename: source.filename,
+      id: /** @type {import("../semantic/types.js").SemanticProgramModule} */ (module).id,
+      language: facadeLanguage,
+      source: /** @type {string} */ (source.content)
+    }
+  })
+
+  if (applicationSources.length != applicationModules.length) {
+    invalidFacadeDescriptor(diagnosticLanguage, "Facade verification requires one retained application source per semantic module.")
+  }
+  const reparsed = parseProgramSource({entryModule: program.entryModule, sources: applicationSources})
+  const modules = new Map()
+
+  for (const module of reparsed.modules) {
+    if (!module.stdlibFacade) continue
+    if (modules.has(module.stdlibFacade.identity)) {
+      invalidFacadeDescriptor(diagnosticLanguage, `Registered facade '${module.stdlibFacade.identity}' reparsed more than once.`)
+    }
+    modules.set(module.stdlibFacade.identity, module)
+  }
+  return modules
 }
 
 /**
