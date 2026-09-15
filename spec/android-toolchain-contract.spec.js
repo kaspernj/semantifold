@@ -69,6 +69,24 @@ describe("Android toolchain and TensorBuzz acceptance contract", () => {
     expect(acceptance).not.toMatch(/curl|wget/u)
   })
 
+  it("registers the pinned standalone emulator archive before creating the AVD", async () => {
+    const bootstrap = await readFile(new URL("../scripts/bootstrap-android.sh", import.meta.url), "utf8")
+    const installCommand = 'install -m 0644 scripts/android-emulator-package.xml "$ANDROID_HOME/emulator/package.xml"'
+
+    expect(bootstrap).toContain(installCommand)
+    const registration = await readFile(new URL("../scripts/android-emulator-package.xml", import.meta.url), "utf8")
+    const documentation = await readFile(new URL("../docs/android.md", import.meta.url), "utf8")
+    const installIndex = bootstrap.indexOf(installCommand)
+    const createIndex = bootstrap.indexOf('avdmanager" create avd')
+
+    assert.ok(installIndex >= 0 && createIndex > installIndex)
+    expect(registration).toContain('<localPackage path="emulator" obsolete="false">')
+    expect(registration).toContain('xsi:type="generic:genericDetailsType"')
+    expect(registration).toContain("<revision><major>35</major><minor>6</minor><micro>11</micro></revision>")
+    expect(registration).toContain("<display-name>Android Emulator</display-name>")
+    expect(documentation).toContain("checked-in exact local-package descriptor")
+  })
+
   it("propagates a verifier failure even when both APK paths already exist", {timeoutMs: 30_000}, async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "semantifold-android-status-"))
     const binaryDirectory = path.join(root, "bin")

@@ -98,6 +98,7 @@ sudo mv "$BOOTSTRAP_ROOT/build-tools/android-15" "$ANDROID_HOME/build-tools/35.0
 sudo mv "$BOOTSTRAP_ROOT/emulator/emulator" "$ANDROID_HOME/emulator"
 sudo mv "$BOOTSTRAP_ROOT/system-image/x86_64" "$ANDROID_HOME/system-images/android-35/google_apis/x86_64"
 sudo chown -R "$(id -u):$(id -g)" "$ANDROID_HOME"
+install -m 0644 scripts/android-emulator-package.xml "$ANDROID_HOME/emulator/package.xml"
 
 grep -Fqx 'Pkg.Revision=37.0.1' "$ANDROID_HOME/platform-tools/source.properties"
 grep -Fqx 'Pkg.Revision=2' "$ANDROID_HOME/platforms/android-35/source.properties"

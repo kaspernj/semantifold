@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- Manual archived-emulator installation contract: https://developer.android.com/studio/emulator_archive -->
+<common:repository xmlns:common="http://schemas.android.com/repository/android/common/02"
+  xmlns:generic="http://schemas.android.com/repository/android/generic/02">
+  <localPackage path="emulator" obsolete="false">
+    <type-details xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="generic:genericDetailsType"/>
+    <revision><major>35</major><minor>6</minor><micro>11</micro></revision>
+    <display-name>Android Emulator</display-name>
+  </localPackage>
+</common:repository>
