@@ -127,4 +127,14 @@ describe("Dart strict source profile", () => {
       "void main() { print(1) }"
     ]) expectRejected({source, code: "PARSE_ERROR"})
   })
+
+  it("keeps compiler-owned arithmetic and BigInt infrastructure unavailable to user source", () => {
+    for (const source of [
+      baseFunction("return _semantifoldIntegerAdd(value, 1);"),
+      baseFunction("return _semantifoldIntegerNegate(value);"),
+      baseFunction("return BigInt.from(value).toInt();"),
+      baseFunction("throw RangeError('bad');"),
+      "final BigInt limit = BigInt.from(1);\n" + baseFunction("return value;")
+    ]) expectRejected({source, code: "UNSUPPORTED_SYNTAX"})
+  })
 })

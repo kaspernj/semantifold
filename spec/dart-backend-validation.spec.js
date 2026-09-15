@@ -4,7 +4,11 @@ import assert from "node:assert/strict"
 import {readFile} from "node:fs/promises"
 import {describe, expect, it} from "@velocious/testing"
 import {generateDartPackage} from "../src/backends/dart.js"
+import {parseDart} from "../src/frontends/dart.js"
 import {parse} from "../index.js"
+
+const meaning = (value) => JSON.parse(JSON.stringify(value, (key, nested) =>
+  ["location", "provenance", "resolution", "sourceProvenance"].includes(key) ? undefined : nested))
 
 describe("Dart package backend", () => {
   it("generates one deterministic three-artifact Tasks 001-005 package", async () => {
@@ -24,5 +28,22 @@ describe("Dart package backend", () => {
     expect(first.artifacts[0].provenance.kind).toEqual("synthetic")
     expect(first.artifacts[1].provenance.kind).toEqual("synthetic")
     expect(first.artifacts[2].provenance.kind).toEqual("text")
+  })
+
+  it("reparses only its complete canonical checked-arithmetic prefix", async () => {
+    const source = await readFile(new URL("fixtures/operators/program.ts", import.meta.url), "utf8")
+    const module = parse({filename: "program.ts", language: "typescript", source})
+    const generated = generateDartPackage({module}).artifacts[2]
+    const code = /** @type {string} */ (generated.content)
+
+    expect(meaning(parseDart({filename: "bin/program.dart", source: code}))).toEqual(meaning(module))
+    for (const changed of [
+      code.replace(/^final BigInt[^\n]+\n/u, ""),
+      code.replace("_semantifoldIntegerAdd", "_semantifoldIntegerAddChanged"),
+      code.replace("9007199254740991", "9007199254740990"),
+      code.replace("final BigInt _semantifoldMaxSafeInteger", "final BigInt _semantifoldMinSafeInteger"),
+      code.replace("\nint _semantifoldIntegerAdd", "\n" + code.slice(0, code.indexOf("\nint _semantifoldIntegerAdd")) +
+        "\nint _semantifoldIntegerAdd")
+    ]) assert.throws(() => parseDart({filename: "forged.dart", source: changed}))
   })
 })

@@ -3,6 +3,7 @@
 import DartLanguage from "@driftlog/tree-sitter-dart"
 import Parser from "tree-sitter"
 import {isDartIdentifier} from "../backends/identifiers.js"
+import {dartRuntime} from "../backends/dart-runtime.js"
 import {missingType, SemantifoldDiagnostic, unsupportedSyntax} from "../diagnostic.js"
 import {locationFromOffsets, moduleLocation, utf8ByteOffsetToUtf16Offset} from "../semantic/location.js"
 import {withAdaptedOperation} from "../semantic/operators.js"
@@ -30,6 +31,11 @@ const binaryNodeOperators = new Map([
   ["logical_or_expression", ["logical_or_operator", new Set(["||"])]]
 ])
 const commentTypes = new Set(["comment", "documentation_comment"])
+/** @type {Map<string, import("../semantic/operators.js").AdaptedOperation>} */
+const helperOperations = new Map([
+  ["_semantifoldIntegerAdd", "Add"], ["_semantifoldIntegerSubtract", "Subtract"],
+  ["_semantifoldIntegerMultiply", "Multiply"], ["_semantifoldIntegerNegate", "Negate"]
+])
 
 /**
  * Verifies a binding-reported UTF-16 index through the shared UTF-8 converter.
@@ -75,6 +81,7 @@ class DartReader {
     this.source = source
     /** @type {Set<string>} */
     this.functionNames = new Set()
+    this.runtime = false
   }
 
   /**
@@ -346,21 +353,63 @@ class DartReader {
    * @param {import("tree-sitter").SyntaxNode[]} nodes Exact two-node call.
    * @param {import("tree-sitter").SyntaxNode} owner Expression owner.
    * @param {boolean} [allowPrint] Whether this is the print scaffold.
-   * @returns {import("../semantic/types.js").CallExpression} Semantic call.
+   * @returns {import("../semantic/types.js").Expression} Semantic call or private generated operation.
    */
   call(nodes, owner, allowPrint = false) {
     if (nodes.length != 2 || nodes[0].type != "identifier" || nodes[1].type != "selector") {
       this.fail(nodes[0] ?? owner, "direct call shape")
     }
-    const name = this.identifier(nodes[0], false, allowPrint)
+    const name = nodes[0].text
+    const helper = this.runtime ? helperOperations.get(name) : undefined
     const location = this.partsLocation(nodes, owner)
+    const argumentNodes = this.arguments(nodes[1])
+
+    if (helper) {
+      const count = helper == "Negate" ? 1 : 2
+
+      if (argumentNodes.length != count) this.fail(nodes[1], "Dart checked-integer helper shape")
+      if (helper == "Negate") {
+        return /** @type {import("../semantic/types.js").Expression} */ (/** @type {unknown} */ (
+          withAdaptedOperation(withParserRanges({
+            kind: /** @type {const} */ ("UnaryExpression"), location,
+            operand: this.expression(argumentNodes[0], owner)
+          }, {operator: this.location(nodes[0])}), helper)))
+      }
+      return /** @type {import("../semantic/types.js").Expression} */ (/** @type {unknown} */ (
+        withAdaptedOperation(withParserRanges({
+          kind: /** @type {const} */ ("BinaryExpression"), left: this.expression(argumentNodes[0], owner), location,
+          right: this.expression(argumentNodes[1], owner)
+        }, {operator: this.location(nodes[0])}), helper)))
+    }
+    this.identifier(nodes[0], false, allowPrint)
 
     return withParserRanges({
-      arguments: this.arguments(nodes[1]).map((argument) => this.expression(argument, owner)),
+      arguments: argumentNodes.map((argument) => this.expression(argument, owner)),
       callee: name,
       kind: /** @type {const} */ ("CallExpression"),
       location
     }, {callee: this.location(nodes[0])})
+  }
+
+  /**
+   * Recursively compares one source support subtree with the canonical runtime CST.
+   * @param {import("tree-sitter").SyntaxNode} actual Source node.
+   * @param {import("tree-sitter").SyntaxNode} expected Canonical node.
+   * @returns {void}
+   */
+  compareTree(actual, expected) {
+    if (actual.type != expected.type || actual.isNamed != expected.isNamed || actual.isExtra != expected.isExtra ||
+      actual.childCount != expected.childCount) this.fail(actual, "modified Dart support node")
+    if (actual.childCount == 0 && actual.text != expected.text) this.fail(actual, "modified Dart support token")
+    for (let index = 0; index < actual.childCount; index += 1) {
+      const left = actual.child(index)
+      const right = expected.child(index)
+
+      if (!left || !right || actual.fieldNameForChild(index) != expected.fieldNameForChild(index)) {
+        this.fail(left ?? actual, "modified Dart support field")
+      }
+      this.compareTree(left, right)
+    }
   }
 
   /**
@@ -580,9 +629,12 @@ class DartReader {
       const expression = this.call(callParts, node, print)
 
       if (print) {
-        if (expression.arguments.length != 1) this.fail(callParts[1], "print argument count")
+        if (expression.kind != "CallExpression" || expression.arguments.length != 1) {
+          this.fail(callParts[1], "print argument count")
+        }
         return {expression: expression.arguments[0], kind: /** @type {const} */ ("PrintStatement"), location: this.location(node)}
       }
+      if (expression.kind != "CallExpression") this.fail(callParts[0], "generated helper expression statement")
       return {expression, kind: /** @type {const} */ ("ExpressionStatement"), location: this.location(node)}
     }
     return this.fail(node)
@@ -749,17 +801,31 @@ class DartReader {
     this.validateTree(root)
     if (root.type != "program") this.fail(root, "program root")
     const parts = this.parts(root)
+    const supportTree = parser.parse(dartRuntime)
+    const support = this.parts(supportTree.rootNode)
+    let supportIndex = 0
 
-    if (parts.length == 0) this.fail(root, "program without main")
+    while (supportIndex < parts.length && supportIndex < support.length &&
+      parts[supportIndex].type == support[supportIndex].type) {
+      this.compareTree(parts[supportIndex], support[supportIndex])
+      supportIndex += 1
+    }
+    if (supportIndex > 0 && supportIndex != support.length) {
+      this.fail(parts[supportIndex - 1], "complete Dart support required")
+    }
+    this.runtime = supportIndex == support.length
+    const semanticParts = parts.slice(supportIndex)
+
+    if (semanticParts.length == 0) this.fail(root, "program without main")
     /** @type {{body: import("tree-sitter").SyntaxNode, signature: import("tree-sitter").SyntaxNode}[]} */
     const declarations = []
 
-    for (let index = 0; index < parts.length; index += 2) {
-      const signature = parts[index]
-      const body = parts[index + 1]
+    for (let index = 0; index < semanticParts.length; index += 2) {
+      const signature = semanticParts[index]
+      const body = semanticParts[index + 1]
 
       if (!signature || signature.type != "function_signature" || !body || body.type != "function_body") {
-        this.fail(signature ?? parts.at(-1) ?? root, "paired top-level function signature and body required")
+        this.fail(signature ?? semanticParts.at(-1) ?? root, "paired top-level function signature and body required")
       }
       declarations.push({body, signature})
     }
