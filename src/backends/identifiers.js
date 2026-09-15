@@ -4,6 +4,7 @@ import {unsupportedCapability} from "../diagnostic.js"
 
 /** @type {Record<Exclude<import("../semantic/types.js").BackendLanguage, "ios">, RegExp>} */
 const identifierPatterns = {
+  android: /^(?:_|\p{L})(?:_|\p{L}|\p{Nd})*$/u,
   dart: /^(?:_|\p{L})(?:_|\p{L}|\p{Nd})*$/u,
   kotlin: /^(?:_|\p{L})(?:_|\p{L}|\p{Nd})*$/u,
   swift: /^(?:_|\p{XID_Start})(?:_|\p{XID_Continue})*$/u,
@@ -23,6 +24,11 @@ const identifierPatterns = {
 
 /** @type {Record<Exclude<import("../semantic/types.js").BackendLanguage, "ios">, Set<string>>} */
 const reservedWords = {
+  android: new Set([
+    "as", "break", "class", "continue", "do", "else", "false", "for", "fun", "if", "in", "interface", "is", "null",
+    "object", "package", "return", "super", "this", "throw", "true", "try", "typealias", "typeof", "val", "var", "when",
+    "while", "_", "main", "println", "Long", "Boolean", "String", "Math", "ArithmeticException"
+  ]),
   dart: new Set([
     "Function", "Never", "Object", "RangeError", "String", "abstract", "as", "assert", "async", "await", "base",
     "bool", "break", "case", "catch", "class", "const", "continue", "covariant", "default", "deferred", "do",

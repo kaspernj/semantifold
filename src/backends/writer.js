@@ -80,9 +80,13 @@ export class SourceWriter {
    * @param {string[]} [options.stdlibProviderImports] - Ordered provider names this module must import.
    * @param {string} [options.stdlibProviderOwnerModule] - Java owner module identity hosting the shared support block and shims.
    * @param {string[]} [options.stdlibProviderShims] - Java owner program-wide used operations exposed as public static shims.
+   * @param {(expression: import("../semantic/types.js").CallExpression) => string} [options.callNameResolver] - Target-container call spelling override.
+   * @param {string} [options.callArgumentSuffix] - Synthetic trailing argument for every semantic function call.
+   * @param {boolean} [options.methodStringEquality] - Emit string equality through the platform String method.
    */
-  constructor({filename, language, module, program, programPaths, sources, stdlibProviderEntries, stdlibProviderPath,
-    stdlibProviderPaths, stdlibProviderImports, stdlibProviderOwnerModule, stdlibProviderShims}) {
+  constructor({callArgumentSuffix, callNameResolver, filename, language, methodStringEquality, module, program, programPaths, sources,
+    stdlibProviderEntries, stdlibProviderPath, stdlibProviderPaths, stdlibProviderImports, stdlibProviderOwnerModule,
+    stdlibProviderShims}) {
     const index = createGenerationIndex(module, sources)
 
     this.filename = filename
@@ -90,6 +94,9 @@ export class SourceWriter {
     this.module = module
     this.program = program
     this.programPaths = programPaths
+    this.callArgumentSuffix = callArgumentSuffix
+    this.callNameResolver = callNameResolver
+    this.methodStringEquality = methodStringEquality ?? false
     this.index = index
     this.stdlibProviderEntries = stdlibProviderEntries
     this.stdlibProviderPath = stdlibProviderPath
@@ -386,6 +393,7 @@ export class SourceWriter {
    * @returns {string} Target call name.
    */
   callNameFor(expression) {
+    if (this.callNameResolver) return this.callNameResolver(expression)
     const declarationId = expression.resolution?.declarationId
     const owner = declarationId ? this.declarationModules.get(declarationId) : undefined
     const imported = declarationId ? this.#programModule()?.imports.find((item) => item.declarationId == declarationId) : undefined
@@ -396,6 +404,23 @@ export class SourceWriter {
     if (imported) return this.importNameFor(imported)
 
     return declarationName(owner, declarationId)
+  }
+
+  /**
+   * Returns a target-container trailing argument for a semantic call.
+   * @param {import("../semantic/types.js").CallExpression} _expression - Resolved semantic call.
+   * @returns {string | undefined} Synthetic argument spelling, when configured.
+   */
+  callArgumentSuffixFor(_expression) {
+    return this.callArgumentSuffix
+  }
+
+  /**
+   * Reports whether string equality must avoid a target runtime helper.
+   * @returns {boolean} Whether to emit the platform String method.
+   */
+  usesMethodStringEquality() {
+    return this.methodStringEquality
   }
 
   /** Marks emission as occurring inside one top-level reference class. */

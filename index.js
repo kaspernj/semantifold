@@ -97,8 +97,9 @@ export function generateArtifact(input) {
  * @param {import("./src/semantic/types.js").BackendLanguage} input.language - Registered program target.
  * @param {import("./src/semantic/types.js").SemanticProgram} input.program - Complete resolved program.
  * @param {"text" | "application"} [input.role] - Explicit role; omitted preserves text generation.
- * @param {import("./src/semantic/types.js").IosApplicationConfigurationInput} [input.configuration] - iOS application configuration.
- * @param {import("./src/semantic/types.js").IosApplicationAssetInput[]} [input.assets] - Exact iOS caller assets.
+ * @param {import("./src/semantic/types.js").IosApplicationConfigurationInput | import("./src/semantic/types.js").AndroidApplicationConfigurationInput} [input.configuration] - Application configuration.
+ * @param {import("./src/semantic/types.js").IosApplicationAssetInput[] | import("./src/semantic/types.js").AndroidApplicationInputFile[]} [input.assets] - Exact caller assets.
+ * @param {import("./src/semantic/types.js").AndroidApplicationInputFile[]} [input.resources] - Exact Android caller resources.
  * @returns {import("./src/semantic/types.js").GeneratedArtifactSet} Complete generated set.
  */
 export function generateProgramArtifactSet(input) {
@@ -115,8 +116,9 @@ export function generateProgramArtifactSet(input) {
  * @param {"none" | "external" | "inline"} [input.mapDirective] - JavaScript-family map directive.
  * @param {string} [input.sourceMapFilename] - External map filename.
  * @param {{filename: string, content: string, language?: import("./src/semantic/types.js").SemanticLanguage}[]} [input.sources] - Original sources.
- * @param {import("./src/semantic/types.js").IosApplicationConfigurationInput} [input.configuration] - iOS application configuration.
- * @param {import("./src/semantic/types.js").IosApplicationAssetInput[]} [input.assets] - Exact iOS caller assets.
+ * @param {import("./src/semantic/types.js").IosApplicationConfigurationInput | import("./src/semantic/types.js").AndroidApplicationConfigurationInput} [input.configuration] - Application configuration.
+ * @param {import("./src/semantic/types.js").IosApplicationAssetInput[] | import("./src/semantic/types.js").AndroidApplicationInputFile[]} [input.assets] - Exact caller assets.
+ * @param {import("./src/semantic/types.js").AndroidApplicationInputFile[]} [input.resources] - Exact Android caller resources.
  * @returns {import("./src/semantic/types.js").GeneratedArtifactSet} Complete generated set.
  */
 export function generateArtifactSet(input) {
@@ -127,7 +129,7 @@ export function generateArtifactSet(input) {
       message: "Artifact-set generation requires a request object."
     })
   }
-  const {assets, configuration, filename, language, mapDirective, module, role = "text", sourceMapFilename, sources} = input
+  const {assets, configuration, filename, language, mapDirective, module, resources, role = "text", sourceMapFilename, sources} = input
 
   if (typeof language != "string" || language.length == 0) {
     throw new SemantifoldDiagnostic({
@@ -219,5 +221,6 @@ export function generateArtifactSet(input) {
   const registryRole = role == "binary" ? "binaryBackend" : "applicationBackend"
   const backend = languageRegistry.resolve(language, registryRole, module?.location)
 
-  return constructArtifactSet(backend({assets, configuration, filename, language, mapDirective, module, sourceMapFilename, sources}))
+  return constructArtifactSet(backend(language == "android" ? input :
+    {assets, configuration, filename, language, mapDirective, module, resources, sourceMapFilename, sources}))
 }

@@ -16,6 +16,7 @@ import {generateRuby} from "./backends/ruby.js"
 import {generateTypeScript} from "./backends/typescript.js"
 import {generateBrowserWasm} from "./backends/wasm.js"
 import {generateIosApplication} from "./backends/ios.js"
+import {generateAndroidApplication} from "./backends/android.js"
 import {parseJava} from "./frontends/java.js"
 import {parseKotlin} from "./frontends/kotlin.js"
 import {parseCSharp} from "./frontends/csharp.js"
@@ -499,6 +500,15 @@ const records = [
     id: "wasm",
     mapping: {binaryRanges: true, richText: true, sourceMapV3: true},
     mediaType: "application/wasm",
+    roundTrip: false
+  },
+  {
+    acceptance: {stages: ["generate", "compile", "validate", "instantiate", "execute"], toolchains: ["android"]},
+    applicationBackend: generateAndroidApplication,
+    artifactMultiplicity: "multiple",
+    features: {closedRecords: false, conditionControlledLoops: false, effectfulCapabilitiesAndResources: false, generalFunctionsAndCalls: false, immutableCollections: false, optionalValues: false, orderedListIteration: false, orderedMapIteration: false, referenceClasses: false, typedErrors: false, typeParametersAndGenerics: false},
+    id: "android",
+    mapping: {binaryRanges: true, richText: true, sourceMapV3: true},
     roundTrip: false
   },
   {

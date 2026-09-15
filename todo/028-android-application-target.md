@@ -1,6 +1,6 @@
 # 028 — Kotlin/Android application artifact target
 
-- Status: `todo`
+- Status: `implemented locally — TensorBuzz offline build/KVM emulator acceptance and merge pending`
 - Phase/priority: Phase P / P1
 - Dependencies: [010-multifile-modules-and-names.md](010-multifile-modules-and-names.md), [023-kotlin-source-and-target.md](023-kotlin-source-and-target.md)
 
@@ -44,6 +44,14 @@ Document project ownership/layout, version pins and offline caches, application 
 - No platform permission, credential, dependency, runtime behavior, or semantic approximation is silently introduced.
 - Artifact safety, emulator/toolchain tests, diagnostics, provenance, docs/changelog, and repository gates pass.
 
+## Implementation record — 2026-09-15
+
+The topic implementation registers application-only target `android` through the existing artifact APIs. Complete configuration/program/resource/path preflight precedes mapped Kotlin rendering; the fixed `generated/android-app` set contains pinned Gradle scripts, a closed manifest, resettable semantic output capture, one native Activity/TextView, tests, and `SemantifoldAndroidProject` ownership/toolchain/provenance metadata. No public filesystem materializer is exported.
+
+The qualified matrix is Gradle 8.13, Android Gradle Plugin 8.11.1, Kotlin plugin 2.2.10, Temurin JDK 21.0.8, compile/target API 35, minimum API 23, Build Tools 35.0.0, command-line tools 11076708, emulator 35.6.12, and `system-images;android-35;google_apis;x86_64`. Online bootstrap is separate from the actual offline lint/unit/assemble/dependency/APK checks. The sole library exception is non-transitive `testImplementation("junit:junit:4.13.2")`, with runtime-classpath and APK leakage rejection.
+
+TensorBuzz owns the real acceptance route with exactly `/dev/kvm:/dev/kvm`: it requires hardware acceleration, boots a clean fixed-port emulator, installs/launches/asserts exact accessible Unicode output, captures UI diagnostics, stops it, then repeats on a second fresh emulator. Local environments without KVM do not substitute software emulation. Final delivered status remains coordinator-owned after exact-head CI and merge.
+
 ## Non-goals
 
-General Android API modeling, Compose parity, fragments/navigation, services/background work, permissions, network/storage, NDK/JNI, third-party Gradle dependencies, release/device signing, Play Store delivery, or Kotlin multiplatform.
+General Android API modeling, Compose parity, fragments/navigation, services/background work, permissions, network/storage, NDK/JNI, third-party Gradle dependencies beyond the approved non-transitive test-scope JUnit exception, release/device signing, Play Store delivery, or Kotlin multiplatform.
