@@ -39,6 +39,8 @@ Run one focused behavior spec with `npx velocious-test spec/repository-contract.
 
 TensorBuzz is the only CI topology. Do not add GitHub Actions. Before handing off changes, run:
 
+Task 028 Android acceptance uses the sole TensorBuzz `android` build with exactly `/dev/kvm:/dev/kvm`. Online `scripts/bootstrap-android.sh` may fetch only its checksum-pinned official JDK/Gradle/Kotlin/Android artifacts and warm the declared cache; `scripts/accept-android.sh` must run lint, unit, assembly, dependency, and APK checks offline before `scripts/android-emulator-acceptance.sh` performs two fresh hardware-accelerated API-35 boots. Never run software-emulated local acceptance, use `adb root`, broaden KVM permissions, or add another CI topology. Generated Android projects may declare only non-transitive test-scope `junit:junit:4.13.2`, proven absent from runtime/APK outputs; their disabled implicit stdlib dependency may use only the checksum-pinned Kotlin compiler distribution's stdlib as an un-packaged compile-task input.
+
 1. `LANG=C.UTF-8 LC_ALL=C.UTF-8 npm test`
 2. `npm run lint`
 3. `npm run typecheck`

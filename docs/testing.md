@@ -469,6 +469,21 @@ Transactional create-only directory materialization is deferred. Node's public f
 
 These are not Apple platform acceptance. Per the 2026-09-14 owner direction to defer OSX work, no local or TensorBuzz command runs `xcodebuild`, downloads an Apple runtime, boots/installs/launches an iOS Simulator, configures signing, or executes XCTest/XCUIAutomation. AC07 and AC12–AC14 remain deferred, missing prerequisites may not be skipped to green, and no fake acceptance spec or manufactured TensorBuzz lane is permitted. The [iOS application target](ios.md) records the precise partial status.
 
+## Task028 Android application acceptance
+
+Run the Android generation, private materialization, toolchain contract, and packed-consumer specs individually. The first three are local and do not install or invoke an emulator:
+
+```sh
+npx velocious-test spec/android-application.spec.js
+npx velocious-test spec/android-materialization.spec.js
+npx velocious-test spec/android-toolchain-contract.spec.js
+npx velocious-test spec/android-packed-consumer.spec.js
+```
+
+Generation coverage validates multi-module/Unicode capture, mappings, configuration causality, deterministic fixed-root ownership, manifest/UI/dependency shape, resources/assets, collisions, and preflight diagnostics. Materialization is repository-private acceptance support: it requires an empty mode-0700 non-symlink directory, creates files exclusively, verifies checksum readback, and is neither exported nor packed. The packed proof uses clean public-registry npm install/ci and strict TypeScript consumption.
+
+TensorBuzz's Android lane runs `scripts/bootstrap-android.sh` online to checksum and prefetch only the qualified official toolchain/cache, including the exact Kotlin 2.2.10 compiler distribution used as a compile-only tool input while the Gradle stdlib dependency stays disabled. `scripts/accept-android.sh` then creates a fresh project and runs lint, JUnit, application/instrumentation assembly, dependency inspection, and APK leakage checks with `--offline`. It requires an empty application runtime graph, exact non-transitive JUnit alone in the unit-test graph, and no JUnit/Hamcrest or Kotlin runtime implementation namespaces in the app APK. `scripts/android-emulator-acceptance.sh` requires usable `/dev/kvm`, forces acceleration, installs/launches/asserts exact base64-encoded UTF-8 output through platform instrumentation, captures UI XML/screenshots, destroys the emulator, and repeats on a fresh boot. Missing tools/cache/KVM are infrastructure failures, never skips. Do not run this emulator script locally without KVM or substitute software emulation.
+
 ## Task022 Swift acceptance
 
 Swift generation returns exactly one mapped `program.swift`. Focused frontend/backend specs cover all five Tasks001–004 fixtures, parser recovery, excluded syntax, malformed IR, target identifiers, compile-time-known signed-64-bit overflow, deterministic artifacts, rich/V3 provenance, exact helper validation, generated reparse, every Swift-to-original-five runtime route, and one original-five-to-Swift route per profile. Original-five execution invokes real PHP, Ruby, Node, TypeScript/Node, and Java compiler/runtime commands; unavailable tools fail.

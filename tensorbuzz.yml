@@ -168,6 +168,12 @@ environment:
   SEMANTIFOLD_CARGO: /usr/local/bin/cargo
   SEMANTIFOLD_WASM_VALIDATE: /usr/bin/wasm-validate
   SEMANTIFOLD_CHROMIUM: /usr/local/bin/chromium
+  SEMANTIFOLD_ANDROID_HOME: /opt/semantifold-android-sdk
+  SEMANTIFOLD_GRADLE_HOME: /opt/gradle-8.13
+  SEMANTIFOLD_GRADLE_USER_HOME: /opt/semantifold-gradle-cache
+  SEMANTIFOLD_JAVA_HOME: /opt/semantifold-jdk-21.0.8
+  SEMANTIFOLD_KOTLIN_HOME: /opt/kotlinc-2.2.10
+  SEMANTIFOLD_ANDROID_AVD: semantifold-api35
 builds:
   quality:
     name: Quality and package
@@ -183,3 +189,11 @@ builds:
     name: Fourteen-language tests with Dart VM/native, Kotlin/JVM, Rust debug/release and C/CPP O0/O2 sanitizers
     script:
       - LANG=C.UTF-8 LC_ALL=C.UTF-8 npm test
+  android:
+    name: Android API 35 offline build and KVM emulator acceptance
+    devices:
+      - /dev/kvm:/dev/kvm
+    script:
+      - scripts/bootstrap-android.sh
+      - scripts/accept-android.sh
+      - scripts/android-emulator-acceptance.sh
