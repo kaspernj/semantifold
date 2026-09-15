@@ -117,7 +117,7 @@ function emitDartString(value) {
       emitted += `\\u{${codePoint.toString(16)}}`
     } else emitted += character
   }
-  return `${emitted}\"`
+  return `${emitted}"`
 }
 
 /**

@@ -366,7 +366,10 @@ const csharpFrontend = ({filename, source}) => parseCSharp({filename, source})
  */
 const goFrontend = ({filename, source}) => parseGo({filename, source})
 
-/** @type {Frontend} */
+/**
+ * Dart registry frontend wrapper.
+ * @type {Frontend}
+ */
 const dartFrontend = ({filename, source}) => parseDart({filename, source})
 
 const records = [

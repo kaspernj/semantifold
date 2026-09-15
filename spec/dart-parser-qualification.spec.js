@@ -4,8 +4,8 @@ import assert from "node:assert/strict"
 import {createHash} from "node:crypto"
 import {readFile} from "node:fs/promises"
 import {describe, expect, it} from "@velocious/testing"
-import DartLanguage from "@driftlog/tree-sitter-dart"
 import Parser from "tree-sitter"
+import DartLanguage from "tree-sitter-dart-orchard/bindings/node/index.js"
 import {utf8ByteOffsetToUtf16Offset} from "../src/semantic/location.js"
 import {hasOnlyUnicodeScalars} from "../src/semantic/scalars.js"
 
@@ -54,38 +54,39 @@ function descendants(root) {
   return {fields, nodes}
 }
 
-describe("qualified scoped Tree-sitter Dart route", () => {
-  it("pins exact registry provenance, ABI 15, typed metadata, and local native source", async () => {
+describe("qualified Tree-sitter Dart Orchard route", () => {
+  it("pins exact registry provenance, ABI 14, typed metadata, and local native source", async () => {
     const [binding, grammar, manifest, lockfile, parserSource, scannerSource, declarations, loader, license] =
       await Promise.all([
         readFile(new URL("../node_modules/tree-sitter/package.json", import.meta.url), "utf8").then(JSON.parse),
-        readFile(new URL("../node_modules/@driftlog/tree-sitter-dart/package.json", import.meta.url), "utf8").then(JSON.parse),
+        readFile(new URL("../node_modules/tree-sitter-dart-orchard/package.json", import.meta.url), "utf8").then(JSON.parse),
         readFile(new URL("../package.json", import.meta.url), "utf8").then(JSON.parse),
         readFile(new URL("../package-lock.json", import.meta.url), "utf8").then(JSON.parse),
-        readFile(new URL("../node_modules/@driftlog/tree-sitter-dart/src/parser.c", import.meta.url), "utf8"),
-        readFile(new URL("../node_modules/@driftlog/tree-sitter-dart/src/scanner.c", import.meta.url), "utf8"),
-        readFile(new URL("../node_modules/@driftlog/tree-sitter-dart/bindings/node/index.d.ts", import.meta.url), "utf8"),
-        readFile(new URL("../node_modules/@driftlog/tree-sitter-dart/index.js", import.meta.url), "utf8"),
-        readFile(new URL("../node_modules/@driftlog/tree-sitter-dart/LICENSE", import.meta.url), "utf8")
+        readFile(new URL("../node_modules/tree-sitter-dart-orchard/src/parser.c", import.meta.url), "utf8"),
+        readFile(new URL("../node_modules/tree-sitter-dart-orchard/src/scanner.c", import.meta.url), "utf8"),
+        readFile(new URL("../node_modules/tree-sitter-dart-orchard/bindings/node/index.d.ts", import.meta.url), "utf8"),
+        readFile(new URL("../node_modules/tree-sitter-dart-orchard/bindings/node/index.js", import.meta.url), "utf8"),
+        readFile(new URL("../node_modules/tree-sitter-dart-orchard/LICENSE", import.meta.url), "utf8")
       ])
-    const locked = lockfile.packages["node_modules/@driftlog/tree-sitter-dart"]
+    const locked = lockfile.packages["node_modules/tree-sitter-dart-orchard"]
 
     expect(process.versions.node.split(".")[0]).toEqual("24")
     expect(binding.version).toEqual("0.25.1")
     expect({engines: grammar.engines, license: grammar.license, repository: grammar.repository, version: grammar.version})
       .toEqual({
-        engines: {node: ">=18"},
-        license: "ISC",
-        repository: {type: "git", url: "git+https://github.com/herocodess/tree-sitter-dart.git"},
-        version: "1.0.4"
+        engines: undefined,
+        license: "MIT",
+        repository: {type: "git", url: "git+https://codeberg.org/grammar-orchard/tree-sitter-dart-orchard.git"},
+        version: "0.7.0"
       })
-    expect(grammar.peerDependencies).toEqual({"node-addon-api": "^7.1.0", "tree-sitter": ">=0.22.0"})
+    expect(grammar.dependencies).toEqual({"node-addon-api": "^8.5.0", "node-gyp-build": "^4.8.4"})
+    expect(grammar.peerDependencies).toEqual({"tree-sitter": "^0.25.0"})
     expect(grammar.scripts.install).toEqual("node-gyp-build")
     expect(JSON.stringify(grammar.scripts)).not.toMatch(/https?:|curl|wget|fetch/u)
-    expect(manifest.dependencies["@driftlog/tree-sitter-dart"]).toEqual("1.0.4")
-    expect(locked.resolved).toEqual("https://registry.npmjs.org/@driftlog/tree-sitter-dart/-/tree-sitter-dart-1.0.4.tgz")
-    expect(locked.integrity).toEqual("sha512-QaTUyrcXZtiOtdvfcJWH41mCQi82Ri5QLYXFsaK34gpny6ZdhCCiW+sSMMxgIe62eFtrchGfEY/nBJkm7eC+Ew==")
-    expect(parserSource).toMatch(/#define LANGUAGE_VERSION 15/u)
+    expect(manifest.dependencies["tree-sitter-dart-orchard"]).toEqual("0.7.0")
+    expect(locked.resolved).toEqual("https://registry.npmjs.org/tree-sitter-dart-orchard/-/tree-sitter-dart-orchard-0.7.0.tgz")
+    expect(locked.integrity).toEqual("sha512-dO4hyC6eCz7tnXNWk7ZZ/CVzorvWQKRhxRYUT/uwAnA50m+4Jbogd1Oh33lPcj1/bP9wG1pS3TWQEfs1W3LFbg==")
+    expect(parserSource).toMatch(/#define LANGUAGE_VERSION 14/u)
     expect(scannerSource).toContain("tree_sitter/parser.h")
     expect(declarations).toContain("nodeTypeInfo: NodeInfo[]")
     expect(loader).toContain("node-gyp-build")
@@ -93,7 +94,7 @@ describe("qualified scoped Tree-sitter Dart route", () => {
     expect(createHash("sha256").update(license).digest("hex"))
       .toEqual("d270cb3a4985d75033bd77d875ccebff1d66e32788a3f727891e28d76132dd46")
     expect(license).toContain("Permission is hereby granted, free of charge")
-    expect(DartLanguage.nodeTypeInfo.length).toEqual(351)
+    expect(DartLanguage.nodeTypeInfo.length).toEqual(359)
   })
 
   it("loads beside Tree-sitter 0.25.1 and traverses the complete Tasks 001-005 corpus", async () => {
@@ -125,13 +126,13 @@ describe("qualified scoped Tree-sitter Dart route", () => {
     for (const kind of [
       "function_signature", "function_body", "formal_parameter_list", "formal_parameter", "type_identifier",
       "void_type", "block", "local_variable_declaration", "initialized_variable_definition",
-      "assignment_expression", "if_statement", "return_statement", "expression_statement", "selector", "arguments",
+      "assignment_expression", "if_statement", "return_statement", "expression_statement", "method_invocation", "arguments",
       "decimal_integer_literal", "string_literal", "true", "false", "parenthesized_expression", "unary_expression",
       "additive_expression", "multiplicative_expression", "relational_expression", "equality_expression",
       "logical_and_expression", "logical_or_expression"
     ]) expect(kinds.has(kind)).toBeTrue()
     expect(fields.has("function_signature.name->identifier")).toBeTrue()
-    expect(fields.has("initialized_variable_definition.value->selector")).toBeTrue()
+    expect(fields.has("initialized_variable_definition.value->method_invocation")).toBeTrue()
     expect(fields.has("if_statement.alternative->if_statement")).toBeTrue()
   })
 

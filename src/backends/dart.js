@@ -236,7 +236,11 @@ function relatedRootOrigins(root) {
   return origins.map((origin) => ({...origin, nodeId: origin.nodeId ?? root.id, role: origin.role ?? "module"}))
 }
 
-/** @param {string} name Validated identifier. */
+/**
+ * Returns one prevalidated Dart identifier unchanged.
+ * @param {string} name Validated identifier.
+ * @returns {string} Same identifier.
+ */
 function identity(name) {
   return name
 }

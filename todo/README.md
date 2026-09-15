@@ -249,7 +249,7 @@ Dependencies in task files are authoritative. Existing IDs remain stable; numeri
 | [026](026-apple-ios-application-target.md) | in progress (P; Apple proof deferred) | P1 | Swift/Xcode iOS application artifacts | 010, 022 |
 | [027](027-objective-c-interoperability.md) | P | P2 | Objective-C legacy-host bridge | 005, 026 |
 | [028](028-android-application-target.md) | P | P1 | Kotlin Android application artifacts | 010, 023 |
-| [029](029-dart-source-and-target.md) | blocked (P; parser route) | P1 | Dart frontend/backend/package | 005, 015 |
+| [029](029-dart-source-and-target.md) | in progress (P; Dart rebuild pending) | P1 | Dart frontend/backend/package | 005, 015 |
 | [030](030-flutter-application-target.md) | P | P2 | Flutter application artifacts | 010, 028, 029 |
 | [031](031-zig-source-and-target.md) | P | P2 | Zig frontend/backend/project | 005, 015, 018, 020 |
 | [032](032-condition-controlled-loops-and-break.md) | delivered (S) | P1 | Strict-Boolean loops and resolved break/continue; delivered through PR #42 at `8ad60e381f14ab5dab85d6d1996e58de7e3f84bc`, merge `e6889212a57d4d0820b9c5cd3ad21b0ef8cc2c9e` | 004, 005 |

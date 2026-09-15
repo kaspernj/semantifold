@@ -1,7 +1,7 @@
 // @ts-check
 
-import DartLanguage from "@driftlog/tree-sitter-dart"
 import Parser from "tree-sitter"
+import DartLanguage from "tree-sitter-dart-orchard/bindings/node/index.js"
 import {isDartIdentifier} from "../backends/identifiers.js"
 import {dartRuntime} from "../backends/dart-runtime.js"
 import {missingType, SemantifoldDiagnostic, unsupportedSyntax} from "../diagnostic.js"
@@ -21,7 +21,7 @@ const binaryOperations = new Map([
   ["<", "LessThan"], ["<=", "LessThanOrEqual"], [">", "GreaterThan"], [">=", "GreaterThanOrEqual"],
   ["&&", "And"], ["||", "Or"]
 ])
-/** @type {Map<string, readonly [string, ReadonlySet<string>]>} */
+/** @type {Map<string, readonly [string, Set<string>]>} */
 const binaryNodeOperators = new Map([
   ["additive_expression", ["additive_operator", new Set(["+", "-"])]],
   ["multiplicative_expression", ["multiplicative_operator", new Set(["*"])]],
@@ -73,6 +73,7 @@ function firstLoneSurrogateOffset(source) {
 /** Consumes exact qualified Dart CST shapes without retaining parser values. */
 class DartReader {
   /**
+   * Creates a reader bound to one exact Dart source unit.
    * @param {string} filename Original filename.
    * @param {string} source Complete source.
    */
@@ -85,6 +86,7 @@ class DartReader {
   }
 
   /**
+   * Builds a semantic source location from one parser node.
    * @param {import("tree-sitter").SyntaxNode} node Parser node.
    * @returns {import("../semantic/types.js").SourceLocation} Exact location.
    */
@@ -94,21 +96,7 @@ class DartReader {
   }
 
   /**
-   * @param {import("tree-sitter").SyntaxNode[]} nodes Ordered expression nodes.
-   * @param {import("tree-sitter").SyntaxNode} fallback Owning node.
-   * @returns {import("../semantic/types.js").SourceLocation} Combined range.
-   */
-  partsLocation(nodes, fallback) {
-    const first = nodes[0]
-    const last = nodes.at(-1)
-
-    return first && last
-      ? locationFromOffsets(this.filename, this.source, bindingIndexToUtf16Offset(this.source, first.startIndex),
-        bindingIndexToUtf16Offset(this.source, last.endIndex))
-      : this.location(fallback)
-  }
-
-  /**
+   * Rejects one parser node with a located unsupported-syntax diagnostic.
    * @param {import("tree-sitter").SyntaxNode} node Violating node.
    * @param {string} [detail] Profile detail.
    * @returns {never} Always throws.
@@ -170,6 +158,7 @@ class DartReader {
   }
 
   /**
+   * Verifies an exact structural child sequence.
    * @param {import("tree-sitter").SyntaxNode} node Shape owner.
    * @param {(import("tree-sitter").SyntaxNode | string)[]} expected Exact child sequence.
    * @returns {void}
@@ -188,6 +177,21 @@ class DartReader {
   }
 
   /**
+   * Consumes an Orchard operator wrapper whether its token is aliased into the wrapper or exposed anonymously.
+   * @param {import("tree-sitter").SyntaxNode} node Operator node.
+   * @returns {void}
+   */
+  operatorShape(node) {
+    const parts = this.parts(node)
+
+    if (parts.length > 1 || parts.length == 1 && (parts[0].isNamed || parts[0].text != node.text)) {
+      this.fail(node, `${node.type} child shape`)
+    }
+    this.shape(node, parts.length == 0 ? [] : [node.text])
+  }
+
+  /**
+   * Returns exactly one parser child carrying a requested field name.
    * @param {import("tree-sitter").SyntaxNode} node Field owner.
    * @param {string} name Field name.
    * @returns {import("tree-sitter").SyntaxNode} Sole field node.
@@ -206,6 +210,7 @@ class DartReader {
   }
 
   /**
+   * Validates and returns a source identifier.
    * @param {import("tree-sitter").SyntaxNode} node Identifier token.
    * @param {boolean} [allowMain] Whether fixed main is expected.
    * @param {boolean} [allowPrint] Whether fixed print is expected.
@@ -220,6 +225,7 @@ class DartReader {
   }
 
   /**
+   * Converts one explicitly named scalar type.
    * @param {import("tree-sitter").SyntaxNode} node Type node.
    * @returns {import("../semantic/types.js").TypeReference} Scalar type.
    */
@@ -232,6 +238,7 @@ class DartReader {
   }
 
   /**
+   * Converts one explicit scalar or void result type.
    * @param {import("tree-sitter").SyntaxNode} node Return type node.
    * @returns {import("../semantic/types.js").SemanticFunctionReturnType} Function return type.
    */
@@ -315,20 +322,15 @@ class DartReader {
 
   /**
    * Extracts exact required positional arguments.
-   * @param {import("tree-sitter").SyntaxNode} selector Call selector.
+   * @param {import("tree-sitter").SyntaxNode} part Call argument part.
    * @returns {import("tree-sitter").SyntaxNode[][]} Argument expression edges.
    */
-  arguments(selector) {
-    const selectorParts = this.parts(selector)
-
-    if (selector.type != "selector" || selectorParts.length != 1 || selectorParts[0].type != "argument_part") {
-      return this.fail(selector, "direct call selector shape")
-    }
-    this.shape(selector, [selectorParts[0]])
-    const part = selectorParts[0]
+  arguments(part) {
     const partChildren = this.parts(part)
 
-    if (partChildren.length != 1 || partChildren[0].type != "arguments") this.fail(part, "call argument part shape")
+    if (part.type != "argument_part" || partChildren.length != 1 || partChildren[0].type != "arguments") {
+      this.fail(part, "call argument part shape")
+    }
     this.shape(part, [partChildren[0]])
     const list = partChildren[0]
     const listParts = this.parts(list)
@@ -349,46 +351,54 @@ class DartReader {
   }
 
   /**
-   * Converts one direct call represented by adjacent identifier and selector nodes.
-   * @param {import("tree-sitter").SyntaxNode[]} nodes Exact two-node call.
+   * Converts one direct method-invocation node whose function is a plain identifier.
+   * @param {import("tree-sitter").SyntaxNode[]} nodes Exact one-node call.
    * @param {import("tree-sitter").SyntaxNode} owner Expression owner.
    * @param {boolean} [allowPrint] Whether this is the print scaffold.
    * @returns {import("../semantic/types.js").Expression} Semantic call or private generated operation.
    */
   call(nodes, owner, allowPrint = false) {
-    if (nodes.length != 2 || nodes[0].type != "identifier" || nodes[1].type != "selector") {
+    if (nodes.length != 1 || nodes[0].type != "method_invocation") {
       this.fail(nodes[0] ?? owner, "direct call shape")
     }
-    const name = nodes[0].text
+    const invocation = nodes[0]
+    const parts = this.parts(invocation)
+    const functionNode = this.field(invocation, "function")
+    const argumentPart = this.field(invocation, "arguments")
+
+    if (parts.length != 2 || parts[0].id != functionNode.id || functionNode.type != "identifier" ||
+      parts[1].id != argumentPart.id || argumentPart.type != "argument_part") this.fail(invocation, "direct call shape")
+    this.shape(invocation, [functionNode, argumentPart])
+    const name = functionNode.text
     const helper = this.runtime ? helperOperations.get(name) : undefined
-    const location = this.partsLocation(nodes, owner)
-    const argumentNodes = this.arguments(nodes[1])
+    const location = this.location(invocation)
+    const argumentNodes = this.arguments(argumentPart)
 
     if (helper) {
       const count = helper == "Negate" ? 1 : 2
 
-      if (argumentNodes.length != count) this.fail(nodes[1], "Dart checked-integer helper shape")
+      if (argumentNodes.length != count) this.fail(argumentPart, "Dart checked-integer helper shape")
       if (helper == "Negate") {
         return /** @type {import("../semantic/types.js").Expression} */ (/** @type {unknown} */ (
           withAdaptedOperation(withParserRanges({
             kind: /** @type {const} */ ("UnaryExpression"), location,
             operand: this.expression(argumentNodes[0], owner)
-          }, {operator: this.location(nodes[0])}), helper)))
+          }, {operator: this.location(functionNode)}), helper)))
       }
       return /** @type {import("../semantic/types.js").Expression} */ (/** @type {unknown} */ (
         withAdaptedOperation(withParserRanges({
           kind: /** @type {const} */ ("BinaryExpression"), left: this.expression(argumentNodes[0], owner), location,
           right: this.expression(argumentNodes[1], owner)
-        }, {operator: this.location(nodes[0])}), helper)))
+        }, {operator: this.location(functionNode)}), helper)))
     }
-    this.identifier(nodes[0], false, allowPrint)
+    this.identifier(functionNode, false, allowPrint)
 
     return withParserRanges({
       arguments: argumentNodes.map((argument) => this.expression(argument, owner)),
       callee: name,
       kind: /** @type {const} */ ("CallExpression"),
       location
-    }, {callee: this.location(nodes[0])})
+    }, {callee: this.location(functionNode)})
   }
 
   /**
@@ -419,7 +429,7 @@ class DartReader {
    * @returns {import("../semantic/types.js").Expression} Semantic expression.
    */
   expression(nodes, owner) {
-    if (nodes.length == 2 && nodes[0].type == "identifier" && nodes[1].type == "selector") return this.call(nodes, owner)
+    if (nodes.length == 1 && nodes[0].type == "method_invocation") return this.call(nodes, owner)
     if (nodes.length != 1) return this.fail(nodes[0] ?? owner, "scalar expression shape")
     const node = nodes[0]
     const location = this.location(node)
@@ -462,6 +472,7 @@ class DartReader {
 
       if (operatorParts.length != 1 || operatorParts[0].text != operator.text ||
         !["minus_operator", "negation_operator"].includes(operatorParts[0].type)) this.fail(operator, "unary operator shape")
+      this.operatorShape(operatorParts[0])
       this.shape(node, [operator, ...parts.slice(1)])
       return /** @type {import("../semantic/types.js").Expression} */ (/** @type {unknown} */ (withAdaptedOperation(withParserRanges({
         kind: /** @type {const} */ ("UnaryExpression"),
@@ -474,6 +485,7 @@ class DartReader {
   }
 
   /**
+   * Converts a bounded binary expression tree.
    * @param {import("tree-sitter").SyntaxNode} node Binary expression node.
    * @returns {import("../semantic/types.js").Expression} Semantic binary expression.
    */
@@ -497,6 +509,7 @@ class DartReader {
 
       if (operatorIndex == 0 || operatorIndex == parts.length - 1 || !accepted?.has(operator.text) ||
         !binaryOperations.has(operator.text)) this.fail(operator, "unsupported binary operator")
+      this.operatorShape(operator)
       this.shape(current, parts)
       operands.push(parts.slice(0, operatorIndex))
       operators.push(operator)
@@ -529,6 +542,7 @@ class DartReader {
   }
 
   /**
+   * Converts one explicitly typed initialized local declaration.
    * @param {import("tree-sitter").SyntaxNode} node Local declaration.
    * @returns {import("../semantic/types.js").LocalDeclaration} Semantic local.
    */
@@ -572,6 +586,7 @@ class DartReader {
   }
 
   /**
+   * Converts one simple identifier assignment.
    * @param {import("tree-sitter").SyntaxNode} node Assignment expression.
    * @returns {import("../semantic/types.js").AssignmentStatement} Semantic assignment.
    */
@@ -581,11 +596,12 @@ class DartReader {
     const operator = parts[1]
 
     if (node.type != "assignment_expression" || parts.length < 3 || target?.type != "assignable_expression" ||
-      operator?.text != "=") this.fail(node, "simple assignment shape")
+      operator?.type != "assignment_operator" || operator.text != "=") this.fail(node, "simple assignment shape")
     const targetParts = this.parts(target)
 
     if (targetParts.length != 1 || targetParts[0].type != "identifier") this.fail(target, "simple assignment target")
     this.shape(target, [targetParts[0]])
+    this.operatorShape(operator)
     this.shape(node, [target, "=", ...parts.slice(2)])
     const name = this.identifier(targetParts[0])
     const targetLocation = this.location(targetParts[0])
@@ -599,6 +615,7 @@ class DartReader {
   }
 
   /**
+   * Converts one supported Dart statement.
    * @param {import("tree-sitter").SyntaxNode} node Source statement.
    * @returns {import("../semantic/types.js").Statement} Semantic statement.
    */
@@ -625,12 +642,14 @@ class DartReader {
       this.shape(node, [...parts.slice(0, -1), ";"])
       if (parts.length == 2 && parts[0].type == "assignment_expression") return this.assignment(parts[0])
       const callParts = parts.slice(0, -1)
-      const print = callParts[0]?.type == "identifier" && callParts[0].text == "print"
+      const callChildren = callParts.length == 1 && callParts[0].type == "method_invocation"
+        ? this.parts(callParts[0]) : []
+      const print = callChildren[0]?.type == "identifier" && callChildren[0].text == "print"
       const expression = this.call(callParts, node, print)
 
       if (print) {
         if (expression.kind != "CallExpression" || expression.arguments.length != 1) {
-          this.fail(callParts[1], "print argument count")
+          this.fail(callParts[0], "print argument count")
         }
         return {expression: expression.arguments[0], kind: /** @type {const} */ ("PrintStatement"), location: this.location(node)}
       }
@@ -641,6 +660,7 @@ class DartReader {
   }
 
   /**
+   * Converts a braced Dart block.
    * @param {import("tree-sitter").SyntaxNode} node Braced block.
    * @returns {import("../semantic/types.js").Block} Semantic block.
    */
@@ -659,6 +679,7 @@ class DartReader {
   }
 
   /**
+   * Unwraps a synchronous braced function body.
    * @param {import("tree-sitter").SyntaxNode} body Function body wrapper.
    * @returns {import("../semantic/types.js").Block} Semantic body.
    */
@@ -673,6 +694,7 @@ class DartReader {
   }
 
   /**
+   * Converts one strict-Boolean conditional.
    * @param {import("tree-sitter").SyntaxNode} node Strict Boolean conditional.
    * @returns {import("../semantic/types.js").IfStatement} Semantic conditional.
    */
@@ -711,6 +733,7 @@ class DartReader {
   }
 
   /**
+   * Converts one required explicitly typed positional parameter.
    * @param {import("tree-sitter").SyntaxNode} node Required positional parameter.
    * @returns {import("../semantic/types.js").Parameter} Semantic parameter.
    */
@@ -730,6 +753,7 @@ class DartReader {
   }
 
   /**
+   * Converts a required positional parameter list.
    * @param {import("tree-sitter").SyntaxNode} node Parameter list.
    * @returns {import("../semantic/types.js").Parameter[]} Semantic parameters.
    */
@@ -746,6 +770,7 @@ class DartReader {
   }
 
   /**
+   * Converts one ordinary top-level function declaration.
    * @param {import("tree-sitter").SyntaxNode} signature Function signature.
    * @param {import("tree-sitter").SyntaxNode} body Function body.
    * @returns {import("../semantic/types.js").FunctionDeclaration} Semantic function.
@@ -774,6 +799,7 @@ class DartReader {
   }
 
   /**
+   * Converts the exact void main entry shell.
    * @param {import("tree-sitter").SyntaxNode} signature Main signature.
    * @param {import("tree-sitter").SyntaxNode} body Main body.
    * @returns {import("../semantic/types.js").EntryPoint} Semantic entry point.
@@ -794,6 +820,7 @@ class DartReader {
   }
 
   /**
+   * Converts one complete Dart compilation unit.
    * @param {import("tree-sitter").SyntaxNode} root Complete Dart program.
    * @returns {import("../semantic/types.js").SemanticModule} Semantic module.
    */
@@ -820,13 +847,17 @@ class DartReader {
     /** @type {{body: import("tree-sitter").SyntaxNode, signature: import("tree-sitter").SyntaxNode}[]} */
     const declarations = []
 
-    for (let index = 0; index < semanticParts.length; index += 2) {
-      const signature = semanticParts[index]
-      const body = semanticParts[index + 1]
+    for (const declaration of semanticParts) {
+      if (declaration.type != "function_declaration") this.fail(declaration, "top-level function declaration required")
+      const signature = this.field(declaration, "signature")
+      const body = this.field(declaration, "body")
+      const declarationParts = this.parts(declaration)
 
-      if (!signature || signature.type != "function_signature" || !body || body.type != "function_body") {
-        this.fail(signature ?? semanticParts.at(-1) ?? root, "paired top-level function signature and body required")
+      if (declarationParts.length != 2 || declarationParts[0].id != signature.id || signature.type != "function_signature" ||
+        declarationParts[1].id != body.id || body.type != "function_body") {
+        this.fail(declaration, "paired top-level function signature and body required")
       }
+      this.shape(declaration, [signature, body])
       declarations.push({body, signature})
     }
     const mainIndexes = declarations.flatMap(({signature}, index) => this.parts(signature)[1]?.text == "main" ? [index] : [])

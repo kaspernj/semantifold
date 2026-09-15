@@ -1,6 +1,6 @@
 # 029 — Dart source and target support
 
-- Status: `blocked — parser route amendment required`
+- Status: `in progress — parser route qualified; Dart SDK rebuild acceptance pending`
 - Phase/priority: Phase P / P1
 - Dependencies: [005-general-function-signatures-and-calls.md](005-general-function-signatures-and-calls.md), [015-language-expansion-foundation.md](015-language-expansion-foundation.md)
 
@@ -8,11 +8,11 @@
 
 Add Dart as a first-class frontend and Dart VM/native textual package backend for Tasks 001–005. This supplies the typed language basis for Task 030 without making Flutter widgets, browsers, or mobile lifecycle part of Dart language semantics.
 
-## Current qualification blocker
+## Amended parser route
 
-The attempted exact registry route `@driftlog/tree-sitter-dart@1.0.4` passes Node 24 loading, Tree-sitter ABI, CST coverage, recovery, coordinate, integrity, and provenance checks, but fails the required clean-install contract. Both an isolated credential-free exact install and Semantifold's packed-consumer proof make `npm ls --all --json` report an undeclared `@driftlog/node-addon-api` directory containing four generated node-addon-api Makefiles. The published tarball does not contain that directory, so it is installation residue rather than an intentionally declared package.
+The first attempted registry route, `@driftlog/tree-sitter-dart@1.0.4`, passes Node 24 loading and CST checks but fails the required clean-install contract because `npm ls --all --json` reports generated extraneous `@driftlog/node-addon-api` residue. Kasper authorized research and qualification of a different immutable public package on 2026-09-15.
 
-Implementation stopped at this gate before the Dart SDK rebuild/differential, final documentation, or acceptance claim. Resolving it requires an explicit parser-route/source amendment; a cleanup hook, source-text fallback, vendored parser, copied build, or silent package substitution is not permitted.
+Exact registry `tree-sitter-dart-orchard@0.7.0` is the amended route. Its immutable annotated `v0.7.0` tag peels to npm `gitHead` `9322cd5e1266c60983ae0ff921fbb4e77e903781`; its MIT source/release workflow, ABI 14 parser, typed Node binding, Task 001–005 CST, recovery and coordinate behavior, clean isolated install/`npm ci` dependency trees, and credential-free packed-consumer behavior pass locally. Exact Dart 3.13.3 compiler/VM/native differential acceptance remains pending the canonical image rebuild. No gate was relaxed and no cleanup hook, source-text fallback, vendored parser, copied build, Git/archive dependency, or private package was introduced.
 
 ## Semantic and source profile
 

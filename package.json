@@ -50,7 +50,6 @@
   "dependencies": {
     "@babel/parser": "^7.28.4",
     "@babel/types": "^7.28.4",
-    "@driftlog/tree-sitter-dart": "1.0.4",
     "@jridgewell/gen-mapping": "^0.3.13",
     "@jridgewell/trace-mapping": "^0.3.31",
     "@lezer/common": "^1.2.3",
@@ -61,6 +60,7 @@
     "semantifold-tree-sitter-legacy-internal": "file:packages/tree-sitter-legacy/runtime",
     "tree-sitter": "0.25.1",
     "tree-sitter-c-sharp": "0.23.5",
+    "tree-sitter-dart-orchard": "0.7.0",
     "tree-sitter-go": "0.25.0",
     "tree-sitter-kotlin": "https://github.com/kaspernj/tree-sitter-kotlin/archive/57c35ad1a80ccd2a0ebd8fffe852f0d13a20acd0.tar.gz",
     "tree-sitter-python": "0.25.0",
