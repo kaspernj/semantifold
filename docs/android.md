@@ -49,7 +49,7 @@ Generation itself is byte-identical and has no filesystem state, so stale files 
 
 The qualified application lane is independent of the generic Kotlin/JVM compiler lane:
 
-- Gradle `8.13`, distribution SHA-256 `20f1b1176237254a6fc204d8434196fa11a4cfb387567519c61556e8710aed789`
+- Gradle `8.13`, distribution SHA-256 `20f1b1176237254a6fc204d8434196fa11a4cfb387567519c61556e8710aed78`
 - Android Gradle Plugin `8.11.1`
 - Kotlin Gradle plugin and command-line compiler `2.2.10`, compiler ZIP SHA-256 `302d1d8e671e5c3207e6ed62ff11fb555462a628e22a1158254dcaaf7e7394bc`
 - Eclipse Temurin JDK `21.0.8+9`, archive SHA-256 `f2dc5418092c43003db8f9005c4a286e1c0104fea96ccdd49e8ebd037cac9219`

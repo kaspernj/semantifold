@@ -40,7 +40,7 @@ test "$(JAVA_HOME="$JAVA_HOME" "$KOTLIN_HOME/bin/kotlinc" -version 2>&1 | sed -n
 
 curl --fail --silent --show-error --location --retry 5 --retry-delay 5 --retry-all-errors \
   https://services.gradle.org/distributions/gradle-8.13-bin.zip --output "$BOOTSTRAP_ROOT/gradle-8.13-bin.zip"
-printf '%s  %s\n' '20f1b1176237254a6fc204d8434196fa11a4cfb387567519c61556e8710aed789' \
+printf '%s  %s\n' '20f1b1176237254a6fc204d8434196fa11a4cfb387567519c61556e8710aed78' \
   "$BOOTSTRAP_ROOT/gradle-8.13-bin.zip" | sha256sum --check -
 sudo rm -rf "$GRADLE_HOME"
 sudo unzip -q "$BOOTSTRAP_ROOT/gradle-8.13-bin.zip" -d /opt

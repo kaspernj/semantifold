@@ -21,7 +21,7 @@ describe("Android toolchain and TensorBuzz acceptance contract", () => {
     ])
 
     expect(bootstrap).toContain("gradle-8.13-bin.zip")
-    expect(bootstrap).toContain("20f1b1176237254a6fc204d8434196fa11a4cfb387567519c61556e8710aed789")
+    expect(bootstrap).toContain("20f1b1176237254a6fc204d8434196fa11a4cfb387567519c61556e8710aed78")
     expect(bootstrap).toContain("commandlinetools-linux-11076708_latest.zip")
     expect(bootstrap).toContain("2d2d50857e4eb553af5a6dc3ad507a17adf43d115264b1afc116f95c92e5e258")
     expect(bootstrap).toContain("kotlin-compiler-2.2.10.zip")
@@ -38,6 +38,16 @@ describe("Android toolchain and TensorBuzz acceptance contract", () => {
       expect(bootstrap).toContain(archive)
       expect(bootstrap).toContain(hash)
     }
+    const directChecksums = [...bootstrap.matchAll(
+      /printf '%s {2}%s\\n' '([0-9a-f]+)' \\\n\s+"\$BOOTSTRAP_ROOT\/[^"]+" \| sha256sum --check -/gu
+    )].map(match => match[1])
+    const helperChecksums = [...bootstrap.matchAll(
+      /download_android_archive [^\n]+ \\\n\s+([0-9a-f]+) \\\n\s+https:\/\//gu
+    )].map(match => match[1])
+    const archiveChecksums = [...directChecksums, ...helperChecksums]
+
+    expect(archiveChecksums.length).toEqual(9)
+    for (const checksum of archiveChecksums) expect(checksum).toMatch(/^[0-9a-f]{64}$/u)
     expect(bootstrap).not.toMatch(/\bsdkmanager\b/u)
     expect(bootstrap).toContain("Pkg.Revision=35.6.11")
     expect(bootstrap).toContain("SEMANTIFOLD_ANDROID_MODE=prepare")
@@ -127,6 +137,7 @@ exit 23
 
     assert.ok(androidRow)
     expect(androidRow.split("|")[7].trim()).toEqual("no")
+    expect(android).toContain("distribution SHA-256 `20f1b1176237254a6fc204d8434196fa11a4cfb387567519c61556e8710aed78`")
     expect(android).toContain("https://dl.google.com/android/repository/repository2-3.xml")
     expect(android).toContain("https://dl.google.com/android/repository/sys-img/google_apis/sys-img2-3.xml")
     expect(android).toContain("https://developer.android.com/studio/emulator_archive")
