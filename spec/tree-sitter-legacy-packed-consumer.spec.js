@@ -36,6 +36,9 @@ const internalPackageName = "semantifold-tree-sitter-legacy-internal"
 const retiredPackageName = "@kaspernj/semantifold-tree-sitter-legacy"
 const modernTreeSitterRoot = "node_modules/tree-sitter"
 const kotlinGrammarRoot = "node_modules/tree-sitter-kotlin"
+const dartGrammarRoot = "node_modules/@driftlog/tree-sitter-dart"
+const dartGrammarTarball = "https://registry.npmjs.org/@driftlog/tree-sitter-dart/-/tree-sitter-dart-1.0.4.tgz"
+const dartGrammarIntegrity = "sha512-QaTUyrcXZtiOtdvfcJWH41mCQi82Ri5QLYXFsaK34gpny6ZdhCCiW+sSMMxgIe62eFtrchGfEY/nBJkm7eC+Ew=="
 const kotlinGrammarCommit = "57c35ad1a80ccd2a0ebd8fffe852f0d13a20acd0"
 const kotlinGrammarSource = `https://github.com/kaspernj/tree-sitter-kotlin/archive/${kotlinGrammarCommit}.tar.gz`
 const internalPackageRoot = `node_modules/${internalPackageName}`
@@ -127,7 +130,7 @@ describe("packed Semantifold legacy Tree-sitter boundary", () => {
     }
   })
 
-  it("installs both bundled runtimes and the HTTPS Kotlin grammar with only frozen legacy data", {timeoutMs: 300_000}, async () => {
+  it("installs both bundled runtimes plus the qualified Kotlin and Dart grammars with only frozen legacy data", {timeoutMs: 300_000}, async () => {
     const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "semantifold-packed-consumer-"))
     const packDirectory = path.join(temporaryRoot, "pack")
     const consumerDirectory = path.join(temporaryRoot, "consumer")
@@ -149,10 +152,12 @@ describe("packed Semantifold legacy Tree-sitter boundary", () => {
       const bundledPackages = new Set(packResult.bundled)
 
       expect({name: packResult.name, version: packResult.version}).toEqual({name: "semantifold", version: sourceManifest.version})
-      for (const packageName of [internalPackageName, "node-addon-api", "node-gyp-build", "tree-sitter"]) {
+      for (const packageName of [internalPackageName, "node-gyp-build", "tree-sitter"]) {
         expect(bundledPackages.has(packageName)).toBeTrue()
       }
+      expect(bundledPackages.has("node-addon-api")).toBeFalse()
       expect(bundledPackages.has("tree-sitter-kotlin")).toBeFalse()
+      expect(bundledPackages.has("@driftlog/tree-sitter-dart")).toBeFalse()
       for (const filename of [...requiredPackedFiles, ...requiredPrebuilds]) {
         expect(packedFiles.includes(filename)).toBeTrue()
       }
@@ -228,6 +233,7 @@ describe("packed Semantifold legacy Tree-sitter boundary", () => {
         expect(semantifold.version).toEqual(sourceManifest.version)
         expect(semantifold.dependencies["tree-sitter"].version).toEqual("0.25.1")
         expect(semantifold.dependencies["tree-sitter-kotlin"].version).toEqual("0.4.0")
+        expect(semantifold.dependencies["@driftlog/tree-sitter-dart"].version).toEqual("1.0.4")
         expect(internalPackage.version).toEqual("0.1.0")
         expect(internalPackage.dependencies["tree-sitter"].version).toEqual("0.21.1")
         expect(internalPackage.dependencies["tree-sitter-c"].version).toEqual("0.23.2")
@@ -254,6 +260,15 @@ describe("packed Semantifold legacy Tree-sitter boundary", () => {
         expect(kotlinEntry.inBundle).toEqual(undefined)
         expect(kotlinEntry.resolved).toEqual(kotlinGrammarSource)
         expect(kotlinEntry.integrity).toMatch(/^sha512-/u)
+        const dartEntries = Object.entries(installedLock.packages).filter(([filename]) =>
+          filename == dartGrammarRoot || filename.endsWith(`/${dartGrammarRoot}`))
+
+        expect(dartEntries.length).toEqual(1)
+        const dartEntry = dartEntries[0][1]
+
+        expect(dartEntry.inBundle).toEqual(undefined)
+        expect(dartEntry.resolved).toEqual(dartGrammarTarball)
+        expect(dartEntry.integrity).toEqual(dartGrammarIntegrity)
         expect(installedPackagePaths.some((filename) => filename.includes(retiredPackageName))).toBeFalse()
         expect(JSON.stringify(installedLock)).not.toMatch(/git\+ssh/u)
         expect(installedPackagePaths.some((filename) => filename.includes("packages/tree-sitter-legacy"))).toBeFalse()
@@ -272,6 +287,10 @@ describe("packed Semantifold legacy Tree-sitter boundary", () => {
         expect(proof.kotlinCompilerVersion).toMatch(/^info: kotlinc-jvm 2\.4\.20 \(JRE 25\.0\.4\+7-1-(?:24|26)\.04-Ubuntu\)$/u)
         delete proof.kotlinCompilerVersion
         expect(proof).toEqual({
+          dartGrammarVersion: "1.0.4",
+          dartGrammarIsInstalled: true,
+          dartRoot: "program",
+          dartRoundTrip: true,
           rustGrammarVersion: "0.23.1",
           rustGrammarIsInternal: true,
           rustSnapshotIsPlainFrozenData: true,

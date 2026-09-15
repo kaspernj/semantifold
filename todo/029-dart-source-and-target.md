@@ -1,12 +1,18 @@
 # 029 — Dart source and target support
 
-- Status: `todo`
+- Status: `blocked — parser route amendment required`
 - Phase/priority: Phase P / P1
 - Dependencies: [005-general-function-signatures-and-calls.md](005-general-function-signatures-and-calls.md), [015-language-expansion-foundation.md](015-language-expansion-foundation.md)
 
 ## Purpose
 
 Add Dart as a first-class frontend and Dart VM/native textual package backend for Tasks 001–005. This supplies the typed language basis for Task 030 without making Flutter widgets, browsers, or mobile lifecycle part of Dart language semantics.
+
+## Current qualification blocker
+
+The attempted exact registry route `@driftlog/tree-sitter-dart@1.0.4` passes Node 24 loading, Tree-sitter ABI, CST coverage, recovery, coordinate, integrity, and provenance checks, but fails the required clean-install contract. Both an isolated credential-free exact install and Semantifold's packed-consumer proof make `npm ls --all --json` report an undeclared `@driftlog/node-addon-api` directory containing four generated node-addon-api Makefiles. The published tarball does not contain that directory, so it is installation residue rather than an intentionally declared package.
+
+Implementation stopped at this gate before the Dart SDK rebuild/differential, final documentation, or acceptance claim. Resolving it requires an explicit parser-route/source amendment; a cleanup hook, source-text fallback, vendored parser, copied build, or silent package substitution is not permitted.
 
 ## Semantic and source profile
 
