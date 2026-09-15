@@ -5,7 +5,7 @@ import {readFile} from "node:fs/promises"
 import {describe, expect, it} from "@velocious/testing"
 import {generateDartPackage} from "../src/backends/dart.js"
 import {parseDart} from "../src/frontends/dart.js"
-import {parse} from "../index.js"
+import {generateArtifactSet, parse, SemantifoldDiagnostic} from "../index.js"
 
 const meaning = (value) => JSON.parse(JSON.stringify(value, (key, nested) =>
   ["location", "provenance", "resolution", "sourceProvenance"].includes(key) ? undefined : nested))
@@ -45,5 +45,76 @@ describe("Dart package backend", () => {
       code.replace("\nint _semantifoldIntegerAdd", "\n" + code.slice(0, code.indexOf("\nint _semantifoldIntegerAdd")) +
         "\nint _semantifoldIntegerAdd")
     ]) assert.throws(() => parseDart({filename: "forged.dart", source: changed}))
+  })
+
+  it("maps semantic tokens and marks manifests, checked support, and main scaffolding synthetic", async () => {
+    const source = await readFile(new URL("fixtures/locals/program.ts", import.meta.url), "utf8")
+    const module = parse({filename: "program.ts", language: "typescript", source})
+    const set = generateArtifactSet({language: "dart", module, sources: [{content: source, filename: "program.ts", language: "typescript"}]})
+    const entry = set.artifacts[2]
+
+    assert.equal(entry.provenance.kind, "text")
+    const {mapping, sourceMap} = entry.provenance
+    const code = /** @type {string} */ (entry.content)
+
+    assert.equal(mapping.generated.content, code)
+    assert.equal(sourceMap.file, "bin/program.dart")
+    assert.deepEqual(sourceMap.sourcesContent, [source])
+    for (const role of ["name", "type", "operator", "callee", "literal"]) {
+      assert.ok(mapping.spans.some((span) => span.mappingKind == "exact" && span.role == role), role)
+    }
+    for (const text of ["_semantifoldMaxSafeInteger", "void main() {"]) {
+      assert.ok(mapping.spans.some((span) => span.mappingKind == "synthetic" && span.generated &&
+        code.slice(span.generated.start.offset, span.generated.end.offset).includes(text)), text)
+    }
+    for (const artifact of set.artifacts.slice(0, 2)) {
+      assert.equal(artifact.provenance.kind, "synthetic")
+      assert.ok(artifact.provenance.relatedOrigins.length > 0)
+    }
+  })
+
+  it("rejects malformed IR, target collisions, unsafe integers, later-task nodes, and options transactionally", async () => {
+    const source = await readFile(new URL("fixtures/functions/program.ts", import.meta.url), "utf8")
+    const base = parse({filename: "program.ts", language: "typescript", source})
+    /** @type {((module: any) => void)[]} */
+    const mutations = [
+      (module) => { module.functions[0].name = "_semantifoldInteger" },
+      (module) => { module.functions[0].name = "BigInt" },
+      (module) => { module.functions[0].parameters[0] = null },
+      (module) => { Reflect.deleteProperty(module.entryPoint.body.statements[0].expression, "resolution") },
+      (module) => { module.entryPoint.body.statements[2].expression.arguments[0].value = Number.MAX_SAFE_INTEGER + 1 },
+      (module) => { module.entryPoint.body.statements[2].expression.arguments[0].value = -0 },
+      (module) => {
+        module.functions[0].body.statements[0].expression = {
+          kind: "BinaryExpression",
+          left: {kind: "IntegerLiteral", location: module.location, value: Number.MAX_SAFE_INTEGER},
+          location: module.location,
+          operation: "IntegerAdd",
+          right: {kind: "IntegerLiteral", location: module.location, value: 1},
+          type: "integer"
+        }
+      },
+      (module) => { module.functions[0].body.statements[0].expression = module.functions[0].body.statements[0] }
+    ]
+
+    for (const mutate of mutations) {
+      const module = structuredClone(base)
+
+      mutate(module)
+      assert.throws(() => generateArtifactSet({language: "dart", module}), (error) =>
+        error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" && error.language == "dart")
+    }
+    const collections = await readFile(new URL("fixtures/collections/program.ts", import.meta.url), "utf8")
+    const collectionModule = parse({filename: "program.ts", language: "typescript", source: collections})
+
+    assert.throws(() => generateArtifactSet({language: "dart", module: collectionModule}), (error) =>
+      error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" && error.language == "dart")
+    for (const options of [
+      {filename: "program.dart"}, {filename: "lib/program.dart"}, {mapDirective: "external"},
+      {mapDirective: "none"}, {sourceMapFilename: "program.dart.map"}
+    ]) {
+      assert.throws(() => generateArtifactSet({language: "dart", module: base, ...options}), (error) =>
+        error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" && error.language == "dart")
+    }
   })
 })
