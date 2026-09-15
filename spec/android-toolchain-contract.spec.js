@@ -50,6 +50,11 @@ describe("Android toolchain and TensorBuzz acceptance contract", () => {
     for (const checksum of archiveChecksums) expect(checksum).toMatch(/^[0-9a-f]{64}$/u)
     expect(bootstrap).not.toMatch(/\bsdkmanager\b/u)
     expect(bootstrap).toContain("Pkg.Revision=35.6.11")
+    const emulatorVersionAssertion = bootstrap.match(
+      /test "\$\("\$ANDROID_HOME\/emulator\/emulator" -version [^\n]+\)" = ([0-9.]+)$/mu
+    )
+
+    expect(emulatorVersionAssertion?.[1]).toEqual("35.6.11.0")
     expect(bootstrap).toContain("SEMANTIFOLD_ANDROID_MODE=prepare")
     expect(acceptance).toContain("SEMANTIFOLD_ANDROID_MODE=offline-build")
     expect(implementation).toContain("--offline")

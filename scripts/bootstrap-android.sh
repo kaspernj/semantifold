@@ -109,7 +109,7 @@ grep -Fqx 'Pkg.Revision=9' "$ANDROID_HOME/system-images/android-35/google_apis/x
 grep -Fqx 'AndroidVersion.ApiLevel=35' "$ANDROID_HOME/system-images/android-35/google_apis/x86_64/source.properties"
 grep -Fqx 'SystemImage.Abi=x86_64' "$ANDROID_HOME/system-images/android-35/google_apis/x86_64/source.properties"
 grep -Fqx 'SystemImage.TagId=google_apis' "$ANDROID_HOME/system-images/android-35/google_apis/x86_64/source.properties"
-test "$("$ANDROID_HOME/emulator/emulator" -version 2>&1 | sed -n 's/^Android emulator version \([^ ]*\).*/\1/p')" = 35.6.11
+test "$("$ANDROID_HOME/emulator/emulator" -version 2>&1 | sed -n 's/^Android emulator version \([^ ]*\).*/\1/p')" = 35.6.11.0
 
 AVD_NAME="${SEMANTIFOLD_ANDROID_AVD:-semantifold-api35}"
 export ANDROID_HOME ANDROID_SDK_ROOT="$ANDROID_HOME"
