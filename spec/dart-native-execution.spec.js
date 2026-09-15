@@ -101,4 +101,21 @@ void main() {
     expect(result.acceptance.stages.at(-1)?.stdout).toEqual(expected)
     expect(result.native.stdout).toEqual(expected)
   })
+
+  it("formats, reparses, analyzes, and executes an over-width signature while preserving underscore identifiers", async () => {
+    const source = `int formatterCanonicalFunctionWithLongName(int _value, int secondParameterValue, int thirdParameterValue, int fourthParameterValue, int fifthParameterValue, int sixthParameterValue) {
+  final int _copy = _value;
+  return _copy + secondParameterValue;
+}
+
+void main() {
+  print(formatterCanonicalFunctionWithLongName(1, 2, 3, 4, 5, 6));
+}
+`
+    const module = parse({filename: "wide.dart", language: "dart", source})
+    const result = await executeDart(module)
+
+    expect(result.acceptance.stages.at(-1)?.stdout).toEqual("3\n")
+    expect(result.native).toEqual({stderr: "", stdout: "3\n"})
+  })
 })

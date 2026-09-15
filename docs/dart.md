@@ -8,7 +8,7 @@ The frontend accepts one directive-free compilation unit containing synchronous 
 
 Every named, anonymous, extra, field, error, and missing CST edge is traversed. Parser recovery is `PARSE_ERROR`; missing explicit types use `MISSING_TYPE`; valid Dart outside the profile uses located `UNSUPPORTED_SYNTAX`. Ordinary comments may be ignored only after complete traversal. Parser trees stay inside `src/frontends/dart.js`.
 
-Inference, `var`, inferred `final`, `const`, `late`, `dynamic`, `Object`, `num`, `double`, user `BigInt`, nullability, named/optional/default parameters or arguments, generics, methods/classes/mixins/extensions/enums/records, closures/tear-offs, casts/type tests, interpolation, raw/multiline strings, collections, loops/switch/assert, exceptions, async/futures/streams/isolates, directives/imports, annotations, external/operator/getter/setter declarations, cascades, and null-aware syntax are rejected. Flutter and browser/JavaScript Dart are separate work.
+Inference, `var`, inferred `final`, `const`, `late`, `dynamic`, `Object`, `num`, `double`, user `BigInt`, nullability, named/optional/default parameters or arguments, generics, methods/classes/mixins/extensions/enums/records, closures/tear-offs, casts/type tests, interpolation, raw/multiline strings, collections, loops/switch/assert, exceptions, async/futures/streams/isolates, directives/imports, annotations, external/operator/getter/setter declarations, cascades, and null-aware syntax are rejected. Exact `_` is a Dart 3 wildcard rather than a binding and is rejected for semantic function, parameter, and local names; ordinary identifiers such as `_value` remain available. Exact lowercase `// dart format off` and `// dart format on` comments are rejected as formatter directives, while case or spacing near-misses remain ordinary comments. Flutter and browser/JavaScript Dart are separate work.
 
 ## Qualified parser
 
@@ -26,13 +26,13 @@ Use `generateArtifactSet({language: "dart", module})`. The ordered result is exa
 
 The fixed package is named `semantifold_generated`, has `publish_to: none`, declares exact SDK `3.13.3`, has no dependencies, and emits the deterministic empty-package lockfile. `.dart_tool/`, SDK files, caches, and compiled executables are never artifacts. Omitted `filename` selects `bin/program.dart`; any other filename or any map-directive/source-map filename option fails transactionally with `UNSUPPORTED_CAPABILITY`. Because Dart is multi-artifact, `generate()` and `generateArtifact()` reject it with `UNSUPPORTED_ROLE`.
 
-Generation validates the whole module before writer allocation, including types, required arity, complete call resolutions, identifiers, compiler-owned name collisions, safe known arithmetic, graph bounds, and Task 006+ exclusions. Repeated generation is byte-identical across paths, contents, mappings, Source Map v3, and metadata.
+Generation validates the whole module before writer allocation, including types, required arity, complete call resolutions, identifiers, compiler-owned name collisions, safe known arithmetic, graph bounds, and Task 006+ exclusions. Over-width signatures use Dart 3.13.3's canonical one-parameter-per-line form with a trailing comma while preserving parameter type/name mappings. Repeated generation is byte-identical across paths, contents, mappings, Source Map v3, and metadata.
 
 ## Safe integers and generated support
 
 Semantic integers remain within `[-9007199254740991, 9007199254740991]`. Literals and statically known arithmetic outside that range fail before artifact allocation. Dynamic integer add, subtract, multiply, and negate use exact private compiler-owned helpers that calculate in `BigInt`, range-check, and convert to `int`. A private Boolean identity helper prevents Dart analyzer constant folding from reporting valid short-circuit branches as dead code; it does not change left-to-right or short-circuit evaluation.
 
-The frontend recognizes these calls only after recursively matching the complete canonical runtime CST—node type, named/extra state, child count, field names, and leaf text. Partial, reordered, renamed, duplicated, or token-modified support fails. User source cannot name the helpers, `BigInt`, `RangeError`, or runtime constants. Formatter-added trailing commas are accepted only behind this authenticated generated-runtime route.
+The frontend recognizes these calls only after recursively matching the complete canonical runtime CST—node type, named/extra state, child count, field names, and leaf text. Partial, reordered, renamed, duplicated, or token-modified support fails. User source cannot name the helpers, `BigInt`, `RangeError`, or runtime constants. Formatter-required trailing commas in generated formal parameter and call lists are accepted only behind this authenticated generated-runtime route.
 
 ## Mappings
 

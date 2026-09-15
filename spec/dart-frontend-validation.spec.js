@@ -63,6 +63,23 @@ describe("Dart strict source profile", () => {
     for (const input of cases) expectRejected(/** @type {Parameters<typeof expectRejected>[0]} */ (input))
   })
 
+  it("rejects exact Dart formatter directives without classifying near-miss comments as directives", () => {
+    for (const directive of ["// dart format off", "// dart format on", "// dart format off  ", "// dart format on\t"]) {
+      expectRejected({source: baseFunction(`${directive}\n  return value;`), code: "UNSUPPORTED_SYNTAX", range: directive})
+    }
+    for (const comment of ["// Dart format off", "//  dart format off", "// dart format  off"]) {
+      expect(parseDart({filename: "comment.dart", source: baseFunction(`${comment}\n  return value;`)}).functions.length).toEqual(1)
+    }
+  })
+
+  it("rejects exact Dart wildcard function, parameter, and local bindings", () => {
+    for (const source of [
+      baseFunction("return value;", "int _(int value)", "print(_(1));"),
+      baseFunction("return _;", "int choose(int _)"),
+      baseFunction("final int _ = value;\n  return _;")
+    ]) expectRejected({source, code: "UNSUPPORTED_SYNTAX", range: "_"})
+  })
+
   it("rejects inference, unsupported scalar types, nullability, and parameter/argument variation", () => {
     const cases = [
       {source: baseFunction("return value;", "choose(int value)"), code: "MISSING_TYPE", range: "choose(int value)"},
@@ -78,6 +95,7 @@ describe("Dart strict source profile", () => {
       {source: baseFunction("return value;", "int choose({required int value})"), code: "UNSUPPORTED_SYNTAX"},
       {source: baseFunction("return value;", "int choose([int value = 1])"), code: "UNSUPPORTED_SYNTAX"},
       {source: baseFunction("return value;", "int choose(int value = 1)"), code: "PARSE_ERROR"},
+      {source: baseFunction("return value;", "int choose(int value,)"), code: "UNSUPPORTED_SYNTAX", range: ")"},
       {source: baseFunction("return value;", "T choose<T>(T value)"), code: "UNSUPPORTED_SYNTAX"},
       {source: baseFunction("return value;", "int choose(int value)", "print(choose(value: 1));"), code: "UNSUPPORTED_SYNTAX"}
     ]

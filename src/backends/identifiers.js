@@ -30,7 +30,7 @@ const reservedWords = {
     "finally", "for", "get", "hide", "if", "implements", "import", "in", "int", "interface", "is", "late", "library",
     "main", "mixin", "native", "new", "null", "num", "of", "on", "operator", "part", "print", "required", "rethrow",
     "return", "sealed", "set", "show", "static", "super", "switch", "sync", "this", "throw", "true", "try", "typedef",
-    "var", "void", "when", "while", "with", "yield", "BigInt"
+    "var", "void", "when", "while", "with", "yield", "BigInt", "_"
   ]),
   kotlin: new Set([
     "as", "break", "class", "continue", "do", "else", "false", "for", "fun", "if", "in", "interface", "is", "null",

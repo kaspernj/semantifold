@@ -18,6 +18,7 @@ Exact registry `tree-sitter-dart-orchard@0.7.0` is the amended route. Its immuta
 
 - Map semantic scalars to explicitly annotated `int`, `bool`, and `String`; use `final` for immutable locals and typed mutable declarations otherwise. Every parameter, result, and local has an explicit type.
 - Accept synchronous top-level functions with Task 005 required arity/void, initialized locals, assignment, current operators, strict-Boolean conditionals, explicit returns, direct calls, and a canonical `main`/print shell.
+- Reject exact `_` as Dart 3 wildcard syntax for semantic function, parameter, and local bindings, plus exact official `// dart format off`/`on` control comments; retain ordinary underscore-prefixed identifiers and ordinary comments.
 - Target the installed Dart VM/native executable profile only. Define and enforce the portable safe-integer range before execution; browser JavaScript numeric behavior is not part of this task.
 - Reject `dynamic`, `Object`/`Object?`, nullable types, `late`, inference, `num`/`double`/`BigInt`, casts/type tests, named/optional parameters, tear-offs/closures, classes/mixins/extensions/enums/records, collections, generics, operator overloading, exceptions, `async`/futures/streams/isolates, mirrors, FFI, imports other than the generated SDK-only shell, and interpolation.
 
@@ -30,6 +31,7 @@ Exact registry `tree-sitter-dart-orchard@0.7.0` is the amended route. Its immuta
 ## Backend and artifact strategy
 
 - Return exactly ordered dependency-free `pubspec.yaml`, deterministic generated `pubspec.lock`, and mapped `bin/program.dart` artifacts.
+- Emit over-width formal parameter lists in exact Dart 3.13.3 formatter-canonical multiline form and authenticate their trailing comma only through the complete generated runtime CST prefix.
 - Pin the supported SDK constraint and reject ambient package configuration, user imports, platform selection, or dependency solving. Validate names, types, calls, returns, mutability, ranges, and target capabilities before returning artifacts.
 - Reparse generated Dart and preserve rich provenance plus the Task 015 Source Map v3 form. Mark package metadata and `main`/printing scaffolding synthetic or configuration-derived.
 

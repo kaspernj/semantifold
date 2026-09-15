@@ -142,7 +142,8 @@ class DartReader {
       if (["annotation", "import_or_export", "library_name", "part_header", "part_of_header"].includes(node.type)) {
         this.fail(node, node.type)
       }
-      if (commentTypes.has(node.type) && /(?:@dart\s*=|dartfmt|ignore(?:_for_file)?\s*:|language[-_ ]version)/iu.test(node.text)) {
+      if (commentTypes.has(node.type) && (/(?:@dart\s*=|dartfmt|ignore(?:_for_file)?\s*:|language[-_ ]version)/iu.test(node.text) ||
+        /^\/\/ dart format (?:off|on)[\t ]*$/u.test(node.text))) {
         this.fail(node, "directive-bearing comment")
       }
     }
@@ -774,9 +775,13 @@ class DartReader {
     if (node.type != "formal_parameter_list" || parts.length < 2 || parts[0].text != "(" || parts.at(-1)?.text != ")") {
       this.fail(node, "formal parameter list shape")
     }
-    const parameters = parts.slice(1, -1).filter((_child, index) => index % 2 == 0)
+    const interior = parts.slice(1, -1)
+    const hasGeneratedTrailingComma = this.runtime && interior.at(-1)?.text == ","
+    const parameterParts = hasGeneratedTrailingComma ? interior.slice(0, -1) : interior
+    const parameters = parameterParts.filter((_child, index) => index % 2 == 0)
 
-    this.shape(node, ["(", ...parameters.flatMap((parameter, index) => index ? [",", parameter] : [parameter]), ")"])
+    this.shape(node, ["(", ...parameters.flatMap((parameter, index) => index ? [",", parameter] : [parameter]),
+      ...(hasGeneratedTrailingComma ? [","] : []), ")"])
     return parameters.map((parameter) => this.parameter(parameter))
   }
 

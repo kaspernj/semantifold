@@ -88,16 +88,24 @@ function emitProgram(module, writer) {
     })
     writer.synthetic(" ", "declaration spacing", [declaration], [path])
     writer.mapped(declaration.name, {mappingKind: "exact", node: declaration, path, role: "name"})
+    const flatParameters = declaration.parameters.map((parameter) =>
+      `${emitScalarType("dart", parameter.type)} ${parameter.name}`).join(", ")
+    const multilineParameters = declaration.parameters.length > 0 &&
+      writer.column - 1 + `(${flatParameters}) {`.length > 80
+
     writer.mapped("(", {mappingKind: "anchor", node: declaration, path})
     declaration.parameters.forEach((parameter, parameterIndex) => {
       const parameterPath = `${path}/parameters/${parameterIndex}`
 
-      if (parameterIndex) writer.synthetic(", ", "parameter separator", [parameter], [parameterPath])
+      if (multilineParameters) {
+        writer.synthetic(`${parameterIndex ? "" : "\n"}  `, "Dart parameter indentation", [parameter], [parameterPath])
+      } else if (parameterIndex) writer.synthetic(", ", "parameter separator", [parameter], [parameterPath])
       writer.mapped(emitScalarType("dart", parameter.type), {
         mappingKind: "exact", node: parameter.type, path: `${parameterPath}/type`, role: "type"
       })
       writer.synthetic(" ", "parameter spacing", [parameter], [parameterPath])
       writer.mapped(parameter.name, {mappingKind: "exact", node: parameter, path: parameterPath, role: "name"})
+      if (multilineParameters) writer.synthetic(",\n", "Dart formatter parameter separator", [parameter], [parameterPath])
     })
     writer.mapped(")", {mappingKind: "anchor", node: declaration, path})
     writer.synthetic(" ", "body spacing", [declaration], [path])

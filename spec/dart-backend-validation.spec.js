@@ -9,6 +9,15 @@ import {generateArtifactSet, parse, SemantifoldDiagnostic} from "../index.js"
 
 const meaning = (value) => JSON.parse(JSON.stringify(value, (key, nested) =>
   ["location", "provenance", "resolution", "sourceProvenance"].includes(key) ? undefined : nested))
+const wideSignatureSource = `int formatterCanonicalFunctionWithLongName(int _value, int secondParameterValue, int thirdParameterValue, int fourthParameterValue, int fifthParameterValue, int sixthParameterValue) {
+  final int _copy = _value;
+  return _copy + secondParameterValue;
+}
+
+void main() {
+  print(formatterCanonicalFunctionWithLongName(1, 2, 3, 4, 5, 6));
+}
+`
 
 describe("Dart package backend", () => {
   it("generates one deterministic three-artifact Tasks 001-005 package", async () => {
@@ -28,6 +37,26 @@ describe("Dart package backend", () => {
     expect(first.artifacts[0].provenance.kind).toEqual("synthetic")
     expect(first.artifacts[1].provenance.kind).toEqual("synthetic")
     expect(first.artifacts[2].provenance.kind).toEqual("text")
+  })
+
+  it("emits formatter-canonical mapped over-width function signatures that reparse", () => {
+    const module = parseDart({filename: "wide.dart", source: wideSignatureSource})
+    const entry = generateDartPackage({module}).artifacts[2]
+    const code = /** @type {string} */ (entry.content)
+
+    assert.match(code, /int formatterCanonicalFunctionWithLongName\(\n {2}int _value,\n {2}int secondParameterValue,\n {2}int thirdParameterValue,\n {2}int fourthParameterValue,\n {2}int fifthParameterValue,\n {2}int sixthParameterValue,\n\) \{/u)
+    expect(meaning(parseDart({filename: "bin/program.dart", source: code}))).toEqual(meaning(module))
+    assert.equal(entry.provenance.kind, "text")
+    for (let index = 0; index < module.functions[0].parameters.length; index += 1) {
+      const path = `/functions/0/parameters/${index}`
+      const nameNodeId = entry.provenance.mapping.nodes.find((node) => node.path == path)?.id
+      const typeNodeId = entry.provenance.mapping.nodes.find((node) => node.path == `${path}/type`)?.id
+
+      assert.ok(entry.provenance.mapping.spans.some((span) => span.mappingKind != "synthetic" &&
+        span.nodeId == typeNodeId && span.role == "type"), `parameter ${index} type mapping`)
+      assert.ok(entry.provenance.mapping.spans.some((span) => span.mappingKind != "synthetic" &&
+        span.nodeId == nameNodeId && span.role == "name"), `parameter ${index} name mapping`)
+    }
   })
 
   it("emits Dart formatter-canonical checked-integer support", async () => {
@@ -133,6 +162,19 @@ describe("Dart package backend", () => {
       {mapDirective: "none"}, {sourceMapFilename: "program.dart.map"}
     ]) {
       assert.throws(() => generateArtifactSet({language: "dart", module: base, ...options}), (error) =>
+        error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" && error.language == "dart")
+    }
+  })
+
+  it("rejects exact Dart wildcard bindings before allocating an artifact", () => {
+    for (const source of [
+      "function _(value: number): number { return value }\nconsole.log(_(1))\n",
+      "function choose(_: number): number { return _ }\nconsole.log(choose(1))\n",
+      "function choose(value: number): number { let _: number = value; return _ }\nconsole.log(choose(1))\n"
+    ]) {
+      const module = parse({filename: "wildcard.ts", language: "typescript", source})
+
+      assert.throws(() => generateDartPackage({module}), (error) =>
         error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" && error.language == "dart")
     }
   })
