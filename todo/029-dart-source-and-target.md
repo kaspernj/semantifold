@@ -1,6 +1,6 @@
 # 029 — Dart source and target support
 
-- Status: `in progress — parser route qualified; Dart SDK rebuild acceptance pending`
+- Status: `implemented and accepted locally — exact-head review/CI/merge pending`
 - Phase/priority: Phase P / P1
 - Dependencies: [005-general-function-signatures-and-calls.md](005-general-function-signatures-and-calls.md), [015-language-expansion-foundation.md](015-language-expansion-foundation.md)
 
@@ -12,7 +12,7 @@ Add Dart as a first-class frontend and Dart VM/native textual package backend fo
 
 The first attempted registry route, `@driftlog/tree-sitter-dart@1.0.4`, passes Node 24 loading and CST checks but fails the required clean-install contract because `npm ls --all --json` reports generated extraneous `@driftlog/node-addon-api` residue. Kasper authorized research and qualification of a different immutable public package on 2026-09-15.
 
-Exact registry `tree-sitter-dart-orchard@0.7.0` is the amended route. Its immutable annotated `v0.7.0` tag peels to npm `gitHead` `9322cd5e1266c60983ae0ff921fbb4e77e903781`; its MIT source/release workflow, ABI 14 parser, typed Node binding, Task 001–005 CST, recovery and coordinate behavior, clean isolated install/`npm ci` dependency trees, and credential-free packed-consumer behavior pass locally. Exact Dart 3.13.3 compiler/VM/native differential acceptance remains pending the canonical image rebuild. No gate was relaxed and no cleanup hook, source-text fallback, vendored parser, copied build, Git/archive dependency, or private package was introduced.
+Exact registry `tree-sitter-dart-orchard@0.7.0` is the amended route. Its immutable annotated `v0.7.0` tag peels to npm `gitHead` `9322cd5e1266c60983ae0ff921fbb4e77e903781`; its MIT source/release workflow, ABI 14 parser, typed Node binding, Task 001–005 CST, recovery and coordinate behavior, clean isolated install/`npm ci` dependency trees, and credential-free packed-consumer behavior pass locally. The rebuilt canonical lane also passes exact Dart 3.13.3 offline pub, formatter, fatal analyzer, VM, native compilation, and native execution checks. No gate was relaxed and no cleanup hook, source-text fallback, vendored parser, copied build, Git/archive dependency, or private package was introduced.
 
 ## Semantic and source profile
 
@@ -23,13 +23,13 @@ Exact registry `tree-sitter-dart-orchard@0.7.0` is the amended route. Its immuta
 
 ## Frontend strategy and parser qualification
 
-- Treat the pinned `tree-sitter-dart` registry package only as an unqualified community candidate. Before manifest adoption, establish maintained upstream provenance, license, shipped parser integrity, Node 24/grammar ABI, typed tree access, recovery/error behavior, UTF-8-byte to UTF-16 conversion, and complete profile coverage; differentially compare it with `dart analyze`/compiler parsing.
-- If provenance, maintenance, packaging, or syntax coverage cannot be established, block and record an explicit route amendment (for example, a separately designed official analyzer protocol). Do not silently call a compiler as an AST parser and never recover meaning from source text.
+- Use exact public registry `tree-sitter-dart-orchard@0.7.0`, whose immutable source, license, shipped parser integrity, Node 24/grammar ABI, typed tree access, recovery/error behavior, UTF-8-byte-to-UTF-16 conversion, complete profile coverage, and Dart SDK differential are recorded above and in `docs/parser-qualification.md`. The unscoped and Driftlog candidates remain rejected for their documented compatibility and clean-tree failures.
+- If the selected parser's provenance, maintenance, packaging, or syntax contract later fails, block and require an explicit route amendment. Do not silently call a compiler as an AST parser and never recover meaning from source text.
 - Exhaustively traverse compilation-unit, declaration/type/parameter, statement, expression/operator, directive, metadata, and comment children; reject all parser recovery and every unmodeled child.
 
 ## Backend and artifact strategy
 
-- Return an ordered dependency-free Dart package with deterministic `pubspec.yaml` and `bin/program.dart`; include a lockfile only if the supported SDK deterministically requires one for a no-dependency package.
+- Return exactly ordered dependency-free `pubspec.yaml`, deterministic generated `pubspec.lock`, and mapped `bin/program.dart` artifacts.
 - Pin the supported SDK constraint and reject ambient package configuration, user imports, platform selection, or dependency solving. Validate names, types, calls, returns, mutability, ranges, and target capabilities before returning artifacts.
 - Reparse generated Dart and preserve rich provenance plus the Task 015 Source Map v3 form. Mark package metadata and `main`/printing scaffolding synthetic or configuration-derived.
 
@@ -45,9 +45,11 @@ Exact registry `tree-sitter-dart-orchard@0.7.0` is the amended route. Its immuta
 - Cover Tasks 001–005, Unicode, void/value calls, parser recovery, every dynamic/nullability/concurrency boundary, generated reparse, all Dart directions, and representative existing-language crossings.
 - Generate twice and compare all package files and provenance byte-for-byte.
 
+Local acceptance on 2026-09-15 passes all six Dart profiles, representative PHP/Ruby/JavaScript/TypeScript/Java inputs into Dart, every Dart profile into all compatible Task-005 targets, and the Unicode/eager-order/recursion/void-call/short-circuit/safe-integer boundary. Each real Dart run owns fresh absolute HOME, PUB_CACHE, project/output, and TMPDIR paths; uses an unreachable hosted URL with analytics suppressed; executes offline restore, formatter verification, fatal analysis, VM, native compilation, and native execution; compares VM/native output; and proves all three emitted artifacts remain byte-identical. Exact-head review, TensorBuzz CI, merge, and post-merge verification remain pending.
+
 ## Documentation
 
-Document the strict Dart VM/native profile, parser-candidate status, SDK/offline package requirements, artifact layout, numeric/nullability exclusions, mappings, and separation from Flutter. Add a behavior changelog fragment when implemented.
+The strict Dart VM/native profile, selected and rejected parser routes, SDK/offline package requirements, artifact layout, numeric/nullability exclusions, mappings, and separation from Flutter are recorded in `docs/dart.md` and the Task 029 changelog fragment.
 
 ## Completion criteria
 
