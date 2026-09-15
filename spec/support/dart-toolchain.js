@@ -16,7 +16,7 @@ const artifactPaths = ["pubspec.yaml", "pubspec.lock", "bin/program.dart"]
 /**
  * Runs exact offline formatter, pub, analyzer, VM, compiler, and native acceptance.
  * @param {import("../../src/semantic/types.js").SemanticModule} module Semantic module.
- * @returns {Promise<{acceptance: import("../../src/semantic/types.js").AcceptanceResult, immutabilityCommands: string[], native: {stderr: string, stdout: string}, sourceHashes: string[]}>} Results.
+ * @returns {Promise<{acceptance: import("../../src/semantic/types.js").AcceptanceResult, commandResults: {label: string, status: number, stderr: string, stdout: string}[], immutabilityCommands: string[], native: {stderr: string, stdout: string}, sourceHashes: string[]}>} Results.
  */
 export async function executeDart(module) {
   const root = await mkdtemp(path.join(os.tmpdir(), "semantifold-dart-state-"))
@@ -48,6 +48,7 @@ export async function executeDart(module) {
     assert.equal(native.stdout, acceptance.stages.at(-1)?.stdout)
     return {
       acceptance,
+      commandResults: verified.results,
       immutabilityCommands: verified.commands,
       native: {stderr: native.stderr, stdout: native.stdout},
       sourceHashes: verified.hashes
@@ -109,7 +110,7 @@ export async function validateDartFormat(set, directory, environment, dart) {
  * @param {string} directory Isolated package directory.
  * @param {Record<string, string>} environment Isolated environment.
  * @param {import("../../src/semantic/types.js").DiscoveredToolchain} dart Exact Dart tool.
- * @returns {Promise<{commands: string[], hashes: string[]}>} Immutable hashes and executed command labels.
+ * @returns {Promise<{commands: string[], hashes: string[], results: {label: string, status: number, stderr: string, stdout: string}[]}>} Immutable hashes and executed command results.
  */
 async function validateDartPackage(set, directory, environment, dart) {
   await materializeDart(set, directory)
@@ -124,6 +125,8 @@ async function validateDartPackage(set, directory, environment, dart) {
     {arguments: ["compile", "exe", "bin/program.dart", "-o", binary],
       label: "dart compile exe bin/program.dart -o semantifold-dart"}
   ]
+  /** @type {{label: string, status: number, stderr: string, stdout: string}[]} */
+  const results = []
   let vmStdout = ""
 
   for (const [index, command] of commands.entries()) {
@@ -133,17 +136,19 @@ async function validateDartPackage(set, directory, environment, dart) {
 
     assert.equal(result.stderr, "", command.label)
     if (index == 3) vmStdout = result.stdout
+    results.push({label: command.label, status: 0, stderr: result.stderr, stdout: result.stdout})
     assert.deepEqual(await dartSourceHashes(directory), before, command.label)
   }
   const native = await executeFile(binary, [], {cwd: directory, encoding: "utf8", env: environment, timeout: 30_000})
 
   assert.equal(native.stderr, "", "./semantifold-dart")
   assert.equal(native.stdout, vmStdout)
+  results.push({label: "./semantifold-dart", status: 0, stderr: native.stderr, stdout: native.stdout})
   assert.deepEqual(await dartSourceHashes(directory), before, "./semantifold-dart")
   assert.deepEqual((await readdir(directory)).sort(),
     [".dart_tool", "bin", "pubspec.lock", "pubspec.yaml", "semantifold-dart"])
   assert.deepEqual(await readdir(path.join(directory, "bin")), ["program.dart"])
-  return {commands: [...commands.map(({label}) => label), "./semantifold-dart"], hashes: before}
+  return {commands: [...commands.map(({label}) => label), "./semantifold-dart"], hashes: before, results}
 }
 
 /** Materializes only the three validated generated artifacts. */

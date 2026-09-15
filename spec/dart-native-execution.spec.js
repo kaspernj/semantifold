@@ -13,6 +13,14 @@ const profiles = [
   ["statements/", "checking\nyes\nmatched\nfallback\n"],
   ["functions/", "ready\n6\n"]
 ]
+const commands = [
+  "dart pub get --offline --no-precompile",
+  "dart format --output=none --set-exit-if-changed bin/program.dart",
+  "dart analyze --fatal-infos --fatal-warnings",
+  "dart run bin/program.dart",
+  "dart compile exe bin/program.dart -o semantifold-dart",
+  "./semantifold-dart"
+]
 
 describe("Dart VM and native execution", () => {
   for (const [directory, expected] of profiles) {
@@ -26,16 +34,30 @@ describe("Dart VM and native execution", () => {
       expect(result.acceptance.stages.at(-1)?.stderr).toEqual("")
       expect(result.native).toEqual({stderr: "", stdout: expected})
       expect(result.sourceHashes.length).toEqual(3)
-      if (directory == "") {
-        expect(result.immutabilityCommands).toEqual([
-          "dart pub get --offline --no-precompile",
-          "dart format --output=none --set-exit-if-changed bin/program.dart",
-          "dart analyze --fatal-infos --fatal-warnings",
-          "dart run bin/program.dart",
-          "dart compile exe bin/program.dart -o semantifold-dart",
-          "./semantifold-dart"
-        ])
-      }
+      expect(result.immutabilityCommands).toEqual(commands)
+      expect(result.commandResults.map(({label, status, stderr}) => ({label, status, stderr}))).toEqual(
+        commands.map((label) => ({label, status: 0, stderr: ""})))
+      expect(result.commandResults[0]?.stdout).toEqual("Resolving dependencies...\nDownloading packages...\nGot dependencies!\n")
+      expect(result.commandResults[1]?.stdout.replace(/in [0-9]+\.[0-9]+ seconds\.\n$/u, "in <seconds>.\n"))
+        .toEqual("Formatted 1 file (0 changed) in <seconds>.\n")
+      expect(result.commandResults[2]?.stdout).toEqual("Analyzing verification...\nNo issues found!\n")
+      expect(result.commandResults[3]?.stdout).toEqual(expected)
+      expect(result.commandResults[4]?.stdout.replace(
+        /^Generated: \/[^\n]*\/verification\/semantifold-dart\n$/u,
+        "Generated: <absolute>/verification/semantifold-dart\n"
+      )).toEqual("Generated: <absolute>/verification/semantifold-dart\n")
+      expect(result.commandResults[5]?.stdout).toEqual(expected)
+      expect(result.acceptance.stages.map(({stderr}) => stderr)).toEqual(["", "", "", ""])
+      expect(result.acceptance.stages[0]?.stdout).toEqual("Resolving dependencies...\nDownloading packages...\nGot dependencies!\n")
+      expect(result.acceptance.stages[1]?.stdout.replace(
+        /^Generated: \/[^\n]*\/native\/semantifold-dart\n$/u,
+        "Generated: <absolute>/native/semantifold-dart\n"
+      )).toEqual("Generated: <absolute>/native/semantifold-dart\n")
+      expect(result.acceptance.stages[2]?.stdout.replace(
+        /^Analyzing semantifold-acceptance-[^\n]+\.\.\.\n/u,
+        "Analyzing <isolated-project>...\n"
+      )).toEqual("Analyzing <isolated-project>...\nNo issues found!\n")
+      expect(result.acceptance.stages[3]?.stdout).toEqual(expected)
     })
   }
 
