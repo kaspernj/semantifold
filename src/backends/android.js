@@ -579,13 +579,16 @@ function renderUnitTest(configuration, entryModule, spans) {
     "package ", field("packageName", configuration.packageName), `
 
 import `, field("packageName", configuration.packageName), `.semantic.SemantifoldModule${moduleName(entryModule)}
-import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class SemantifoldEntryTest {
   @Test
   fun entryIsDeterministicAcrossFreshRuns() {
-    assertEquals(SemantifoldModule${moduleName(entryModule)}.semantifoldEntry(), SemantifoldModule${moduleName(entryModule)}.semantifoldEntry())
+    val firstOutput = SemantifoldModule${moduleName(entryModule)}.semantifoldEntry()
+    val secondOutput = SemantifoldModule${moduleName(entryModule)}.semantifoldEntry()
+    if (!firstOutput.equals(secondOutput)) {
+      throw AssertionError("Semantic entry output differs across fresh runs.")
+    }
   }
 }
 `

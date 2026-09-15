@@ -180,6 +180,7 @@ fun main() {
     const manifest = content[`${root}/app/src/main/AndroidManifest.xml`]
     const activity = content[`${root}/app/src/main/kotlin/dev/semantifold/generated/MainActivity.kt`]
     const layout = content[`${root}/app/src/main/res/layout/activity_main.xml`]
+    const unitTest = content[`${root}/app/src/test/kotlin/dev/semantifold/generated/SemantifoldEntryTest.kt`]
     const instrumentation = content[`${root}/app/src/androidTest/kotlin/dev/semantifold/generated/SemantifoldUiInstrumentation.kt`]
 
     expect(content[`${root}/settings.gradle.kts`]).toContain("RepositoriesMode.FAIL_ON_PROJECT_REPOS")
@@ -199,6 +200,10 @@ fun main() {
     expect(layout).toContain('android:importantForAccessibility="yes"')
     expect(layout).not.toContain("contentDescription")
     expect(activity).toContain('@SuppressLint("SetTextI18n")')
+    expect(unitTest).toContain("import org.junit.Test")
+    expect(unitTest).not.toMatch(/org\.junit\.Assert|assertEquals/u)
+    expect(unitTest).toContain("if (!firstOutput.equals(secondOutput))")
+    expect(unitTest).toContain('throw AssertionError("Semantic entry output differs across fresh runs.")')
     expect(instrumentation).toContain('providedArguments.getString("expected_output_base64")')
     expect(instrumentation).toContain("actual.visibility != View.VISIBLE")
     expect(instrumentation).toContain("actual.importantForAccessibility != View.IMPORTANT_FOR_ACCESSIBILITY_YES")
