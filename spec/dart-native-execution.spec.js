@@ -26,6 +26,16 @@ describe("Dart VM and native execution", () => {
       expect(result.acceptance.stages.at(-1)?.stderr).toEqual("")
       expect(result.native).toEqual({stderr: "", stdout: expected})
       expect(result.sourceHashes.length).toEqual(3)
+      if (directory == "") {
+        expect(result.immutabilityCommands).toEqual([
+          "dart pub get --offline --no-precompile",
+          "dart format --output=none --set-exit-if-changed bin/program.dart",
+          "dart analyze --fatal-infos --fatal-warnings",
+          "dart run bin/program.dart",
+          "dart compile exe bin/program.dart -o semantifold-dart",
+          "./semantifold-dart"
+        ])
+      }
     })
   }
 

@@ -4,10 +4,20 @@ export const dartRuntime = `final BigInt _semantifoldMaxSafeInteger = BigInt.fro
 final BigInt _semantifoldMinSafeInteger = BigInt.from(-9007199254740991);
 
 int _semantifoldInteger(BigInt value) {
-  if (value < _semantifoldMinSafeInteger || value > _semantifoldMaxSafeInteger) {
+  final _ = _semantifoldIntegerAdd;
+  final _ = _semantifoldIntegerSubtract;
+  final _ = _semantifoldIntegerMultiply;
+  final _ = _semantifoldIntegerNegate;
+  final _ = _semantifoldBoolean;
+  if (value < _semantifoldMinSafeInteger ||
+      value > _semantifoldMaxSafeInteger) {
     throw RangeError('Semantifold safe integer overflow');
   }
   return value.toInt();
+}
+
+bool _semantifoldBoolean(bool value) {
+  return value;
 }
 
 int _semantifoldIntegerAdd(int left, int right) {

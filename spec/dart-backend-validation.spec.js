@@ -30,12 +30,31 @@ describe("Dart package backend", () => {
     expect(first.artifacts[2].provenance.kind).toEqual("text")
   })
 
+  it("emits Dart formatter-canonical checked-integer support", async () => {
+    const source = await readFile(new URL("fixtures/functions/program.ts", import.meta.url), "utf8")
+    const module = parse({filename: "program.ts", language: "typescript", source})
+    const code = /** @type {string} */ (generateDartPackage({module}).artifacts[2].content)
+
+    assert.match(code, /if \(value < _semantifoldMinSafeInteger \|\|\n {6}value > _semantifoldMaxSafeInteger\) \{/u)
+    for (const helper of ["Add", "Subtract", "Multiply", "Negate"]) {
+      assert.ok(code.includes(`final _ = _semantifoldInteger${helper};`), helper)
+    }
+    const operatorSource = await readFile(new URL("fixtures/operators/program.ts", import.meta.url), "utf8")
+    const operatorModule = parse({filename: "operators/program.ts", language: "typescript", source: operatorSource})
+    const operatorCode = /** @type {string} */ (generateDartPackage({module: operatorModule}).artifacts[2].content)
+
+    assert.match(operatorCode, /return _semantifoldIntegerAdd\(\n {6}_semantifoldIntegerNegate\(left\),\n {6}_semantifoldIntegerMultiply\(right, 2\),\n {4}\);/u)
+    assert.match(operatorCode, /ordered\(right, left\)\) &&\n {6}\(!logic\(_semantifoldBoolean\(false\), _semantifoldBoolean\(true\)\)\)/u)
+  })
+
   it("reparses only its complete canonical checked-arithmetic prefix", async () => {
     const source = await readFile(new URL("fixtures/operators/program.ts", import.meta.url), "utf8")
     const module = parse({filename: "program.ts", language: "typescript", source})
     const generated = generateDartPackage({module}).artifacts[2]
     const code = /** @type {string} */ (generated.content)
 
+    assert.match(code, /bool _semantifoldBoolean\(bool value\)/u)
+    assert.match(code, /_semantifoldBoolean\(false\)/u)
     expect(meaning(parseDart({filename: "bin/program.dart", source: code}))).toEqual(meaning(module))
     for (const changed of [
       code.replace(/^final BigInt[^\n]+\n/u, ""),

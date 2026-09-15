@@ -2127,7 +2127,11 @@ export function emitExpression(writer, expression, path, language, emitIdentifie
   if (expression.kind == "BooleanLiteral") {
     const spelling = language == "python" ? expression.value ? "True" : "False" : expression.value ? "true" : "false"
 
+    if (language == "dart") {
+      writer.synthetic("_semantifoldBoolean(", "Dart analyzed Boolean literal", [expression], [path])
+    }
     writer.mapped(spelling, {mappingKind: "exact", node: expression, path, role: "literal"})
+    if (language == "dart") writer.synthetic(")", "Dart analyzed Boolean literal", [expression], [path])
     return
   }
   if (expression.kind == "StringLiteral") {
@@ -2237,14 +2241,21 @@ export function emitExpression(writer, expression, path, language, emitIdentifie
     return
   }
   if (expression.kind == "CallExpression") {
+    const dartMultiline = language == "dart" && expression.arguments.length > 0 &&
+      dartExpressionExceedsPageWidth(writer, expression)
+    const dartIndent = dartMultiline ? currentLineIndent(writer) : ""
+
     writer.mapped(writer.callNameFor(expression), {
       mappingKind: "exact", name: expression.callee, node: expression, path, role: "callee"
     })
     writer.mapped("(", {mappingKind: "anchor", node: expression, path})
     expression.arguments.forEach((argument, index) => {
-      if (index > 0) writer.synthetic(", ", "argument separator", [expression], [path])
+      if (dartMultiline) writer.synthetic(`${index ? "" : "\n"}${dartIndent}  `, "Dart argument indentation", [expression], [path])
+      else if (index > 0) writer.synthetic(", ", "argument separator", [expression], [path])
       emitExpression(writer, argument, `${path}/arguments/${index}`, language, emitIdentifier)
+      if (dartMultiline) writer.synthetic(",\n", "Dart formatter argument separator", [expression], [path])
     })
+    if (dartMultiline) writer.synthetic(dartIndent, "Dart call closing indentation", [expression], [path])
     writer.mapped(")", {mappingKind: "anchor", node: expression, path})
     return
   }
@@ -2441,6 +2452,9 @@ export function emitExpression(writer, expression, path, language, emitIdentifie
     return
   }
 
+  const dartMultiline = language == "dart" && dartExpressionExceedsPageWidth(writer, expression)
+  const dartIndent = dartMultiline ? currentLineIndent(writer) : ""
+
   writer.mapped("(", {mappingKind: "anchor", node: expression, path})
   emitExpression(writer, expression.left, `${path}/left`, language, emitIdentifier)
   writer.synthetic(" ", "operator spacing", [expression], [path])
@@ -2450,7 +2464,7 @@ export function emitExpression(writer, expression, path, language, emitIdentifie
     writer.mapped(spelling.slice(0, 1), {mappingKind: "exact", node: expression, path, role: "operator"})
     writer.mapped(spelling.slice(1), {mappingKind: "exact", node: expression, path, role: "equalityOperator"})
   } else writer.mapped(spelling, {mappingKind: "exact", node: expression, path, role: "operator"})
-  writer.synthetic(" ", "operator spacing", [expression], [path])
+  writer.synthetic(dartMultiline ? `\n${dartIndent}    ` : " ", "operator spacing", [expression], [path])
   emitExpression(writer, expression.right, `${path}/right`, language, emitIdentifier)
   writer.mapped(")", {mappingKind: "anchor", node: expression, path})
 }
@@ -2483,13 +2497,75 @@ function emitKotlinIntegerHelper(writer, expression, path, helper, operands) {
  * @returns {void}
  */
 function emitDartIntegerHelper(writer, expression, path, helper, operands) {
+  const flatLength = helper.length + 2 + operands.reduce((total, [operand], index) =>
+    total + flatDartExpression(writer, operand).length + (index ? 2 : 0), 0)
+  const multiline = writer.column - 1 + flatLength > 80
+  const indent = multiline ? currentLineIndent(writer) : ""
+
   writer.mapped(helper, {mappingKind: "exact", node: expression, path, role: "operator"})
   writer.synthetic("(", "Dart checked-integer helper call", [expression], [path])
   operands.forEach(([operand, operandPath], index) => {
-    if (index) writer.synthetic(", ", "Dart checked-integer argument separator", [expression], [path])
+    if (multiline) writer.synthetic(`${index ? "" : "\n"}${indent}  `, "Dart checked-integer argument indentation", [expression], [path])
+    else if (index) writer.synthetic(", ", "Dart checked-integer argument separator", [expression], [path])
     emitExpression(writer, operand, operandPath, "dart", identityIdentifier)
+    if (multiline) writer.synthetic(",\n", "Dart formatter checked-integer argument separator", [expression], [path])
   })
+  if (multiline) writer.synthetic(indent, "Dart checked-integer closing indentation", [expression], [path])
   writer.synthetic(")", "Dart checked-integer helper call", [expression], [path])
+}
+
+/**
+ * Reports whether Dart's default 80-column formatter must split an expression at the current site.
+ * @param {import("./writer.js").SourceWriter} writer Source-aware writer.
+ * @param {import("../semantic/types.js").Expression} expression Semantic expression.
+ * @returns {boolean} Whether the flat expression crosses the formatter boundary.
+ */
+function dartExpressionExceedsPageWidth(writer, expression) {
+  return writer.column - 1 + flatDartExpression(writer, expression).length > 80
+}
+
+/**
+ * Returns the current generated line's structural indentation.
+ * @param {import("./writer.js").SourceWriter} writer Source-aware writer.
+ * @returns {string} Leading spaces.
+ */
+function currentLineIndent(writer) {
+  return /^ */u.exec(writer.code.slice(writer.code.lastIndexOf("\n") + 1))?.[0] ?? ""
+}
+
+/**
+ * Renders the bounded Task-005 Dart expression profile without mappings for page-width planning.
+ * @param {import("./writer.js").SourceWriter} writer Source-aware writer.
+ * @param {import("../semantic/types.js").Expression} expression Semantic expression.
+ * @returns {string} Flat canonical spelling.
+ */
+function flatDartExpression(writer, expression) {
+  if (expression.kind == "IdentifierExpression") return expression.name
+  if (expression.kind == "IntegerLiteral") return String(expression.value)
+  if (expression.kind == "BooleanLiteral") return `_semantifoldBoolean(${expression.value ? "true" : "false"})`
+  if (expression.kind == "StringLiteral") return emitStringLiteral("dart", expression.value)
+  if (expression.kind == "CallExpression") {
+    return `${writer.callNameFor(expression)}(${expression.arguments.map((argument) =>
+      flatDartExpression(writer, argument)).join(", ")})`
+  }
+  if (expression.kind == "UnaryExpression") {
+    const operand = flatDartExpression(writer, expression.operand)
+
+    return expression.operation == "IntegerNegate" ? `_semantifoldIntegerNegate(${operand})` : `(!${operand})`
+  }
+  if (expression.kind == "BinaryExpression") {
+    const left = flatDartExpression(writer, expression.left)
+    const right = flatDartExpression(writer, expression.right)
+
+    if (["IntegerAdd", "IntegerSubtract", "IntegerMultiply"].includes(expression.operation)) {
+      const helper = expression.operation == "IntegerAdd" ? "_semantifoldIntegerAdd" :
+        expression.operation == "IntegerSubtract" ? "_semantifoldIntegerSubtract" : "_semantifoldIntegerMultiply"
+
+      return `${helper}(${left}, ${right})`
+    }
+    return `(${left} ${binaryOperationSpelling(expression.operation, "dart")} ${right})`
+  }
+  throw new TypeError("Unsupported Dart expression reached formatter planning after preflight.")
 }
 
 /**

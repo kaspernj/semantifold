@@ -338,9 +338,13 @@ class DartReader {
     if (listParts.length < 2 || listParts[0].text != "(" || listParts.at(-1)?.text != ")") {
       this.fail(list, "call argument list shape")
     }
-    const arguments_ = listParts.slice(1, -1).filter((_child, index) => index % 2 == 0)
+    const interior = listParts.slice(1, -1)
+    const hasGeneratedTrailingComma = this.runtime && interior.at(-1)?.text == ","
+    const argumentParts = hasGeneratedTrailingComma ? interior.slice(0, -1) : interior
+    const arguments_ = argumentParts.filter((_child, index) => index % 2 == 0)
 
-    this.shape(list, ["(", ...arguments_.flatMap((argument, index) => index ? [",", argument] : [argument]), ")"])
+    this.shape(list, ["(", ...arguments_.flatMap((argument, index) => index ? [",", argument] : [argument]),
+      ...(hasGeneratedTrailingComma ? [","] : []), ")"])
     return arguments_.map((argument) => {
       if (argument.type != "argument") this.fail(argument, "required positional argument")
       const expressionParts = this.parts(argument)
@@ -374,6 +378,13 @@ class DartReader {
     const location = this.location(invocation)
     const argumentNodes = this.arguments(argumentPart)
 
+    if (this.runtime && name == "_semantifoldBoolean") {
+      if (argumentNodes.length != 1) this.fail(argumentPart, "Dart Boolean literal helper shape")
+      const literal = this.expression(argumentNodes[0], owner)
+
+      if (literal.kind != "BooleanLiteral") this.fail(argumentPart, "Dart Boolean literal helper shape")
+      return literal
+    }
     if (helper) {
       const count = helper == "Negate" ? 1 : 2
 
