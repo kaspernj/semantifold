@@ -41,6 +41,7 @@ RUN apt-get update \
     python3 \
     ripgrep \
     ruby \
+    unzip \
     wabt=1.0.36+dfsg+~cs1.0.36-2ubuntu1 \
     xz-utils \
   && install -d -m 0755 /etc/apt/keyrings \
@@ -93,6 +94,23 @@ RUN install -d -m 0755 /tmp/semantifold-kotlin \
   && printf '%s\n' "$KOTLIN_VERSION_OUTPUT" | grep --extended-regexp --quiet '^info: kotlinc-jvm 2\.4\.20 \(JRE 25\.0\.4\+7-1-(24|26)\.04-Ubuntu\)$' \
   && test "$(java -version 2>&1 | sed -n '1p')" = 'openjdk version "25.0.4" 2026-07-21' \
   && rm -rf /tmp/semantifold-kotlin
+
+ENV SEMANTIFOLD_DART=/opt/dart-sdk-3.13.3/bin/dart
+
+RUN test "$(dpkg --print-architecture)" = "amd64" \
+  && install -d -m 0755 /tmp/semantifold-dart \
+  && curl --fail --silent --show-error --location \
+    https://storage.googleapis.com/dart-archive/channels/stable/release/3.13.3/sdk/dartsdk-linux-x64-release.zip \
+    --output /tmp/semantifold-dart/dartsdk-linux-x64-release.zip \
+  && echo '549c182cffbdc6864df7509c16fec646c73fe6cb8a18c2cb572db1292f300cd7  /tmp/semantifold-dart/dartsdk-linux-x64-release.zip' | sha256sum --check - \
+  && unzip -q /tmp/semantifold-dart/dartsdk-linux-x64-release.zip -d /tmp/semantifold-dart \
+  && mv /tmp/semantifold-dart/dart-sdk /opt/dart-sdk-3.13.3 \
+  && ln --symbolic /opt/dart-sdk-3.13.3/bin/dart /usr/local/bin/dart \
+  && DART_VERSION_OUTPUT="$(/opt/dart-sdk-3.13.3/bin/dart --version 2>&1)" \
+  && printf '%s\n' "$DART_VERSION_OUTPUT" \
+  && test "$DART_VERSION_OUTPUT" = 'Dart SDK version: 3.13.3 (stable) (Tue Sep 1 01:07:17 2026 -0700) on "linux_x64"' \
+  && test "$(readlink -f "$(command -v dart)")" = "/opt/dart-sdk-3.13.3/bin/dart" \
+  && rm -rf /tmp/semantifold-dart
 
 RUN test "$(dpkg --print-architecture)" = "amd64" \
   && curl --fail --silent --show-error --location \

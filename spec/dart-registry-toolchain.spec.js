@@ -1,10 +1,13 @@
 // @ts-check
 
 import assert from "node:assert/strict"
-import {readFile} from "node:fs/promises"
+import {chmod, mkdtemp, readFile, rm, writeFile} from "node:fs/promises"
+import os from "node:os"
+import path from "node:path"
 import {describe, expect, it} from "@velocious/testing"
 import {
   canonicalToolchains,
+  discoverCanonicalToolchain,
   generate,
   generateArtifact,
   generateArtifactSet,
@@ -63,6 +66,47 @@ describe("Dart registry and toolchain", () => {
     for (const api of [generate, generateArtifact]) {
       assert.throws(() => api({language: "dart", module}), (error) =>
         error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_ROLE" && error.language == "dart")
+    }
+  })
+
+  it("discovers exact Dart 3.13.3 Linux x64 output from stderr through PATH or an override", async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), "semantifold-dart-toolchain-"))
+    const executable = path.join(directory, "dart")
+    const version = 'Dart SDK version: 3.13.3 (stable) (Tue Sep 1 01:07:17 2026 -0700) on "linux_x64"'
+
+    try {
+      await writeFile(executable, `#!/bin/sh\nprintf '%s\\n' '${version}' >&2\n`)
+      await chmod(executable, 0o755)
+      const canonical = await discoverCanonicalToolchain("dart", {environment: {PATH: directory}})
+      const override = await discoverCanonicalToolchain("dart", {override: executable})
+
+      expect(canonical).toMatchObject({executable, source: "canonical", version, versionOutput: version})
+      expect(override).toMatchObject({executable, source: "override", version, versionOutput: version})
+    } finally {
+      await rm(directory, {force: true, recursive: true})
+    }
+  })
+
+  it("fails loudly for missing, wrong-version, and wrong-platform Dart executables", async () => {
+    await assert.rejects(() => discoverCanonicalToolchain("dart", {environment: {PATH: ""}}), (error) =>
+      error instanceof SemantifoldDiagnostic && error.code == "TOOL_NOT_FOUND" && error.language == "dart")
+    const directory = await mkdtemp(path.join(os.tmpdir(), "semantifold-dart-toolchain-invalid-"))
+
+    try {
+      for (const [name, version] of [
+        ["version", 'Dart SDK version: 3.13.2 (stable) (Tue Aug 25 00:00:00 2026 -0700) on "linux_x64"'],
+        ["platform", 'Dart SDK version: 3.13.3 (stable) (Tue Sep 1 01:07:17 2026 -0700) on "linux_arm64"']
+      ]) {
+        const executable = path.join(directory, name)
+
+        await writeFile(executable, `#!/bin/sh\nprintf '%s\\n' '${version}' >&2\n`)
+        await chmod(executable, 0o755)
+        await assert.rejects(() => discoverCanonicalToolchain("dart", {override: executable}), (error) =>
+          error instanceof SemantifoldDiagnostic && error.code == "TOOL_UNSUPPORTED_VERSION" &&
+            error.language == "dart" && error.version == version)
+      }
+    } finally {
+      await rm(directory, {force: true, recursive: true})
     }
   })
 })
