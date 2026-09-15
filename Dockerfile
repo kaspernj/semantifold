@@ -176,6 +176,7 @@ RUN PROVIDER_NPM_CACHE="$(mktemp -d)" \
     @openai/codex \
     @anthropic-ai/claude-code \
     @moonshot-ai/kimi-code \
+    @qwen-code/qwen-code@0.23.3 \
   && rm -rf "${PROVIDER_NPM_CACHE}"
 
 USER dev
