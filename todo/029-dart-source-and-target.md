@@ -32,6 +32,7 @@ Exact registry `tree-sitter-dart-orchard@0.7.0` is the amended route. Its immuta
 
 - Return exactly ordered dependency-free `pubspec.yaml`, deterministic generated `pubspec.lock`, and mapped `bin/program.dart` artifacts.
 - Emit over-width formal parameter lists in exact Dart 3.13.3 formatter-canonical multiline form and authenticate their trailing comma only through the complete generated runtime CST prefix.
+- Preserve initializer effects for semantically unread locals and keep fatal Dart analysis clean with an authenticated synthetic no-op read that generated reparse removes.
 - Pin the supported SDK constraint and reject ambient package configuration, user imports, platform selection, or dependency solving. Validate names, types, calls, returns, mutability, ranges, and target capabilities before returning artifacts.
 - Reparse generated Dart and preserve rich provenance plus the Task 015 Source Map v3 form. Mark package metadata and `main`/printing scaffolding synthetic or configuration-derived.
 
@@ -47,7 +48,7 @@ Exact registry `tree-sitter-dart-orchard@0.7.0` is the amended route. Its immuta
 - Cover Tasks 001–005, Unicode, void/value calls, parser recovery, every dynamic/nullability/concurrency boundary, generated reparse, all Dart directions, and representative existing-language crossings.
 - Generate twice and compare all package files and provenance byte-for-byte.
 
-Local acceptance on 2026-09-15 passes all six Dart profiles, representative PHP/Ruby/JavaScript/TypeScript/Java inputs into Dart, every Dart profile into all compatible Task-005 targets, and the Unicode/eager-order/recursion/void-call/short-circuit/safe-integer boundary. Each real Dart run owns fresh absolute HOME, PUB_CACHE, project/output, and TMPDIR paths; uses an unreachable hosted URL with analytics suppressed; executes offline restore, formatter verification, fatal analysis, VM, native compilation, and native execution; compares VM/native output; and proves all three emitted artifacts remain byte-identical. Exact-head review, TensorBuzz CI, merge, and post-merge verification remain pending.
+Local acceptance on 2026-09-15 passes all six Dart profiles, representative PHP/Ruby/JavaScript/TypeScript/Java inputs into Dart, every Dart profile into all compatible Task-005 targets, compatible Dart Tasks 001–004 semantic generation into the iOS application target, and the Unicode/eager-order/recursion/void-call/short-circuit/safe-integer boundary. It also proves an unread initialized local retains initializer effects while remaining formatter- and fatal-analyzer-clean. Each real Dart run owns fresh absolute HOME, PUB_CACHE, project/output, and TMPDIR paths; uses an unreachable hosted URL with analytics suppressed; executes offline restore, formatter verification, fatal analysis, VM, native compilation, and native execution; compares VM/native output; and proves all three emitted artifacts remain byte-identical. Exact-head review, TensorBuzz CI, merge, and post-merge verification remain pending.
 
 ## Documentation
 

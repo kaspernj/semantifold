@@ -672,6 +672,35 @@ class DartReader {
   }
 
   /**
+   * Consumes one compiler-owned read that prevents Dart from rejecting an otherwise unread local.
+   * @param {import("tree-sitter").SyntaxNode} node Candidate source statement.
+   * @param {import("../semantic/types.js").Statement | undefined} previous Previous semantic statement.
+   * @returns {boolean} Whether the exact authenticated support statement was consumed.
+   */
+  generatedLocalUse(node, previous) {
+    if (!this.runtime || previous?.kind != "LocalDeclaration" || node.type != "expression_statement") return false
+    const statementParts = this.parts(node)
+    const invocation = statementParts[0]
+
+    if (statementParts.length != 2 || invocation?.type != "method_invocation" || statementParts[1].text != ";") return false
+    const invocationParts = this.parts(invocation)
+    const functionNode = this.field(invocation, "function")
+    const argumentPart = this.field(invocation, "arguments")
+
+    if (invocationParts.length != 2 || invocationParts[0].id != functionNode.id || functionNode.type != "identifier" ||
+      functionNode.text != "_semantifoldUse" || invocationParts[1].id != argumentPart.id || argumentPart.type != "argument_part") {
+      return false
+    }
+    this.shape(node, [invocation, ";"])
+    this.shape(invocation, [functionNode, argumentPart])
+    const arguments_ = this.arguments(argumentPart)
+
+    if (arguments_.length != 1 || arguments_[0].length != 1 || arguments_[0][0].type != "identifier" ||
+      this.identifier(arguments_[0][0]) != previous.name) this.fail(argumentPart, "Dart analyzer local-use support shape")
+    return true
+  }
+
+  /**
    * Converts a braced Dart block.
    * @param {import("tree-sitter").SyntaxNode} node Braced block.
    * @returns {import("../semantic/types.js").Block} Semantic block.
@@ -683,10 +712,16 @@ class DartReader {
       this.fail(node, "braced block shape")
     }
     this.shape(node, ["{", ...parts.slice(1, -1), "}"])
+    /** @type {import("../semantic/types.js").Statement[]} */
+    const statements = []
+
+    for (const statement of parts.slice(1, -1)) {
+      if (!this.generatedLocalUse(statement, statements.at(-1))) statements.push(this.statement(statement))
+    }
     return {
       kind: /** @type {const} */ ("Block"),
       location: this.location(node),
-      statements: parts.slice(1, -1).map((statement) => this.statement(statement))
+      statements
     }
   }
 

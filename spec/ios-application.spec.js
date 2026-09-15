@@ -115,6 +115,32 @@ print(difference(4, 9))
     expect(set.artifacts.find(({path}) => path == "Sources/Generated/Main.swift")?.provenance.kind).toEqual("text")
   })
 
+  it("carries a parsed Dart Tasks 001-004 module through normal iOS semantic generation", () => {
+    const dart = parse({
+      filename: "program.dart",
+      language: "dart",
+      source: `void main() {
+  final int value = 4;
+  if (value > 1) {
+    print("dart");
+  } else {
+    print("other");
+  }
+}
+`
+    })
+    const set = generateArtifactSet({configuration: configuration(), language: "ios", module: dart, role: "application"})
+    const entry = set.artifacts.find(({path}) => path == "Sources/Generated/Main.swift")
+
+    assert.ok(entry)
+    expect(String(entry.content)).toContain("let value: Int64 = 4")
+    expect(String(entry.content)).toContain("if (value > 1)")
+    expect(String(entry.content)).toContain('semantifold_output.write("dart")')
+    assert.equal(entry.provenance.kind, "text")
+    expect(entry.provenance.mapping.sources.map(({filename, language}) => ({filename, language})))
+      .toEqual([{filename: "program.dart", language: "dart"}])
+  })
+
   it("rejects unsupported semantics across the whole graph as located iOS capabilities", () => {
     const collectionSource = `# @param left [Array[Integer]]
 # @param right [Array[Integer]]

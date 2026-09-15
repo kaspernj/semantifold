@@ -9,6 +9,7 @@ int _semantifoldInteger(BigInt value) {
   final _ = _semantifoldIntegerMultiply;
   final _ = _semantifoldIntegerNegate;
   final _ = _semantifoldBoolean;
+  final _ = _semantifoldUse;
   if (value < _semantifoldMinSafeInteger ||
       value > _semantifoldMaxSafeInteger) {
     throw RangeError('Semantifold safe integer overflow');
@@ -19,6 +20,8 @@ int _semantifoldInteger(BigInt value) {
 bool _semantifoldBoolean(bool value) {
   return value;
 }
+
+void _semantifoldUse(Object _) {}
 
 int _semantifoldIntegerAdd(int left, int right) {
   return _semantifoldInteger(BigInt.from(left) + BigInt.from(right));

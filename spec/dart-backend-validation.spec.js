@@ -18,6 +18,16 @@ void main() {
   print(formatterCanonicalFunctionWithLongName(1, 2, 3, 4, 5, 6));
 }
 `
+const unusedLocalSource = `int announce(int value) {
+  print(value);
+  return value;
+}
+
+void main() {
+  final int unused = announce(7);
+  print("done");
+}
+`
 
 describe("Dart package backend", () => {
   it("generates one deterministic three-artifact Tasks 001-005 package", async () => {
@@ -59,6 +69,24 @@ describe("Dart package backend", () => {
     }
   })
 
+  it("keeps unread initialized locals analyzer-clean with synthetic authenticated support", () => {
+    const module = parseDart({filename: "unused.dart", source: unusedLocalSource})
+    const entry = generateDartPackage({module}).artifacts[2]
+    const code = /** @type {string} */ (entry.content)
+    const support = "  _semantifoldUse(unused);"
+    const supportStart = code.indexOf(support)
+
+    assert.ok(supportStart >= 0)
+    expect(meaning(parseDart({filename: "bin/program.dart", source: code}))).toEqual(meaning(module))
+    assert.equal(entry.provenance.kind, "text")
+    assert.ok(entry.provenance.mapping.spans.some((span) => span.mappingKind == "synthetic" && span.generated &&
+      span.generated.start.offset <= supportStart && span.generated.end.offset >= supportStart + support.length))
+    const localNodeId = entry.provenance.mapping.nodes.find(({path}) => path == "/entryPoint/body/statements/0")?.id
+
+    assert.ok(entry.provenance.mapping.spans.some((span) => span.mappingKind != "synthetic" &&
+      span.nodeId == localNodeId && span.role == "name"))
+  })
+
   it("emits Dart formatter-canonical checked-integer support", async () => {
     const source = await readFile(new URL("fixtures/functions/program.ts", import.meta.url), "utf8")
     const module = parse({filename: "program.ts", language: "typescript", source})
@@ -68,6 +96,8 @@ describe("Dart package backend", () => {
     for (const helper of ["Add", "Subtract", "Multiply", "Negate"]) {
       assert.ok(code.includes(`final _ = _semantifoldInteger${helper};`), helper)
     }
+    assert.ok(code.includes("final _ = _semantifoldUse;"))
+    assert.ok(code.includes("void _semantifoldUse(Object _) {}"))
     const operatorSource = await readFile(new URL("fixtures/operators/program.ts", import.meta.url), "utf8")
     const operatorModule = parse({filename: "operators/program.ts", language: "typescript", source: operatorSource})
     const operatorCode = /** @type {string} */ (generateDartPackage({module: operatorModule}).artifacts[2].content)

@@ -150,6 +150,7 @@ describe("Dart strict source profile", () => {
     for (const source of [
       baseFunction("return _semantifoldIntegerAdd(value, 1);"),
       baseFunction("return _semantifoldIntegerNegate(value);"),
+      baseFunction("final int unread = value;\n  _semantifoldUse(unread);\n  return value;"),
       baseFunction("return BigInt.from(value).toInt();"),
       baseFunction("throw RangeError('bad');"),
       "final BigInt limit = BigInt.from(1);\n" + baseFunction("return value;")

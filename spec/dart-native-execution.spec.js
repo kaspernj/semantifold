@@ -118,4 +118,28 @@ void main() {
     expect(result.acceptance.stages.at(-1)?.stdout).toEqual("3\n")
     expect(result.native).toEqual({stderr: "", stdout: "3\n"})
   })
+
+  it("preserves an unread local initializer while remaining analyzer-clean on the VM and native runtime", async () => {
+    const source = `int announce(int value) {
+  print(value);
+  return value;
+}
+
+void main() {
+  final int unused = announce(7);
+  print("done");
+}
+`
+    const result = await executeDart(parse({filename: "unused.dart", language: "dart", source}))
+    const expected = "7\ndone\n"
+
+    expect(result.commandResults[2]).toEqual({
+      label: "dart analyze --fatal-infos --fatal-warnings",
+      status: 0,
+      stderr: "",
+      stdout: "Analyzing verification...\nNo issues found!\n"
+    })
+    expect(result.acceptance.stages.at(-1)?.stdout).toEqual(expected)
+    expect(result.native).toEqual({stderr: "", stdout: expected})
+  })
 })

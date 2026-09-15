@@ -23,9 +23,10 @@ export function generateDartPackage({filename, mapDirective, module, sourceMapFi
   if (mapDirective !== undefined || sourceMapFilename !== undefined) {
     unsupportedCapability("dart", "source-map filename or directive option", module.location)
   }
+  const unreadLocals = findUnreadLocals(module)
   const writer = new SourceWriter({filename: "bin/program.dart", language: "dart", module, sources})
 
-  emitProgram(module, writer)
+  emitProgram(module, writer, unreadLocals)
   const mapping = finalizeMapping(writer.finish())
   const root = mapping.nodes.find(({path}) => path == "")
 
@@ -74,9 +75,10 @@ export function generateDartPackage({filename, mapDirective, module, sourceMapFi
  * Emits the compiler-owned prefix and one complete program.
  * @param {import("../semantic/types.js").SemanticModule} module Semantic module.
  * @param {SourceWriter} writer Source-aware writer.
+ * @param {Set<import("../semantic/types.js").LocalDeclaration>} unreadLocals Locals requiring an analyzer-only read.
  * @returns {void}
  */
-function emitProgram(module, writer) {
+function emitProgram(module, writer, unreadLocals) {
   writer.synthetic(dartRuntime, "Checked Dart safe-integer support", [module], [""])
   for (let index = 0; index < module.functions.length; index += 1) {
     const declaration = module.functions[index]
@@ -111,12 +113,12 @@ function emitProgram(module, writer) {
     writer.synthetic(" ", "body spacing", [declaration], [path])
     writer.mapped("{", {mappingKind: "anchor", node: declaration.body, path: `${path}/body`})
     writer.synthetic("\n", "line break", [declaration], [path])
-    emitBlock(writer, declaration.body, "  ", `${path}/body`)
+    emitBlock(writer, declaration.body, "  ", `${path}/body`, unreadLocals)
     writer.mapped("}", {mappingKind: "anchor", node: declaration.body, path: `${path}/body`})
     writer.synthetic("\n", "line break", [declaration], [path])
   }
   writer.synthetic("\nvoid main() {\n", "Dart generated main scaffold", [module.entryPoint], ["/entryPoint"])
-  emitBlock(writer, module.entryPoint.body, "  ", "/entryPoint/body")
+  emitBlock(writer, module.entryPoint.body, "  ", "/entryPoint/body", unreadLocals)
   writer.synthetic("}\n", "Dart generated main scaffold", [module.entryPoint], ["/entryPoint"])
 }
 
@@ -126,10 +128,12 @@ function emitProgram(module, writer) {
  * @param {import("../semantic/types.js").Block} block Semantic block.
  * @param {string} indent Current indentation.
  * @param {string} path Exact semantic path.
+ * @param {Set<import("../semantic/types.js").LocalDeclaration>} unreadLocals Locals requiring an analyzer-only read.
  * @returns {void}
  */
-function emitBlock(writer, block, indent, path) {
-  block.statements.forEach((statement, index) => emitStatement(writer, statement, indent, `${path}/statements/${index}`))
+function emitBlock(writer, block, indent, path, unreadLocals) {
+  block.statements.forEach((statement, index) =>
+    emitStatement(writer, statement, indent, `${path}/statements/${index}`, unreadLocals))
 }
 
 /**
@@ -138,9 +142,10 @@ function emitBlock(writer, block, indent, path) {
  * @param {import("../semantic/types.js").Statement} statement Semantic statement.
  * @param {string} indent Current indentation.
  * @param {string} path Exact semantic path.
+ * @param {Set<import("../semantic/types.js").LocalDeclaration>} unreadLocals Locals requiring an analyzer-only read.
  * @returns {void}
  */
-function emitStatement(writer, statement, indent, path) {
+function emitStatement(writer, statement, indent, path, unreadLocals) {
   writer.synthetic(indent, "indentation", [statement], [path])
   if (statement.kind == "LocalDeclaration") {
     if (!statement.mutable) writer.mapped("final", {mappingKind: "anchor", node: statement, path})
@@ -161,6 +166,9 @@ function emitStatement(writer, statement, indent, path) {
     emitExpression(writer, statement.initializer, `${path}/initializer`, "dart", identity)
     writer.mapped(";", {mappingKind: "anchor", node: statement, path})
     writer.synthetic("\n", "line break", [statement], [path])
+    if (unreadLocals.has(statement)) {
+      writer.synthetic(`${indent}_semantifoldUse(${statement.name});\n`, "Dart analyzer unread-local use", [statement], [path])
+    }
     return
   }
   if (statement.kind == "AssignmentStatement") {
@@ -173,7 +181,7 @@ function emitStatement(writer, statement, indent, path) {
     writer.synthetic("\n", "line break", [statement], [path])
     return
   }
-  if (statement.kind == "IfStatement") return emitIf(writer, statement, indent, path)
+  if (statement.kind == "IfStatement") return emitIf(writer, statement, indent, path, unreadLocals)
   if (statement.kind == "ReturnStatement") {
     writer.mapped("return", {mappingKind: "anchor", node: statement, path})
     if (statement.expression) {
@@ -207,27 +215,91 @@ function emitStatement(writer, statement, indent, path) {
  * @param {import("../semantic/types.js").IfStatement} statement Conditional.
  * @param {string} indent Current indentation.
  * @param {string} path Exact semantic path.
+ * @param {Set<import("../semantic/types.js").LocalDeclaration>} unreadLocals Locals requiring an analyzer-only read.
  * @returns {void}
  */
-function emitIf(writer, statement, indent, path) {
+function emitIf(writer, statement, indent, path, unreadLocals) {
   writer.mapped("if", {mappingKind: "anchor", node: statement, path})
   writer.synthetic(" (", "Dart conditional scaffold", [statement], [path])
   emitExpression(writer, statement.condition, `${path}/condition`, "dart", identity)
   writer.synthetic(") ", "Dart conditional scaffold", [statement], [path])
   writer.mapped("{", {mappingKind: "anchor", node: statement.consequent, path: `${path}/consequent`})
   writer.synthetic("\n", "line break", [statement], [path])
-  emitBlock(writer, statement.consequent, `${indent}  `, `${path}/consequent`)
+  emitBlock(writer, statement.consequent, `${indent}  `, `${path}/consequent`, unreadLocals)
   writer.synthetic(indent, "indentation", [statement], [path])
   writer.mapped("}", {mappingKind: "anchor", node: statement.consequent, path: `${path}/consequent`})
   if (statement.alternate) {
     writer.synthetic(" else ", "Dart alternate scaffold", [statement], [path])
     writer.mapped("{", {mappingKind: "anchor", node: statement.alternate, path: `${path}/alternate`})
     writer.synthetic("\n", "line break", [statement], [path])
-    emitBlock(writer, statement.alternate, `${indent}  `, `${path}/alternate`)
+    emitBlock(writer, statement.alternate, `${indent}  `, `${path}/alternate`, unreadLocals)
     writer.synthetic(indent, "indentation", [statement], [path])
     writer.mapped("}", {mappingKind: "anchor", node: statement.alternate, path: `${path}/alternate`})
   }
   writer.synthetic("\n", "line break", [statement], [path])
+}
+
+/**
+ * Finds scalar locals that Dart would diagnose because no semantic expression reads them.
+ * @param {import("../semantic/types.js").SemanticModule} module Validated semantic module.
+ * @returns {Set<import("../semantic/types.js").LocalDeclaration>} Unread declaration identities.
+ */
+function findUnreadLocals(module) {
+  /** @type {Set<import("../semantic/types.js").LocalDeclaration>} */
+  const unread = new Set()
+
+  for (const root of [...module.functions.map(({body}) => body), module.entryPoint.body]) {
+    /** @type {import("../semantic/types.js").LocalDeclaration[]} */
+    const declarations = []
+    /** @type {Set<string>} */
+    const reads = new Set()
+
+    visitStatements(root, (statement) => {
+      if (statement.kind == "LocalDeclaration") {
+        declarations.push(statement)
+        collectIdentifierReads(statement.initializer, reads)
+      } else if (statement.kind == "IfStatement") collectIdentifierReads(statement.condition, reads)
+      else if (statement.kind == "AssignmentStatement" || statement.kind == "ExpressionStatement" ||
+        statement.kind == "PrintStatement" || statement.kind == "ReturnStatement") {
+        if (statement.expression) collectIdentifierReads(statement.expression, reads)
+      }
+    })
+    for (const declaration of declarations) if (!reads.has(declaration.name)) unread.add(declaration)
+  }
+  return unread
+}
+
+/**
+ * Visits every Tasks 001-005 statement in one semantic body.
+ * @param {import("../semantic/types.js").Block} block Semantic block.
+ * @param {(statement: import("../semantic/types.js").Statement) => void} callback Statement visitor.
+ * @returns {void}
+ */
+function visitStatements(block, callback) {
+  for (const statement of block.statements) {
+    callback(statement)
+    if (statement.kind == "IfStatement") {
+      visitStatements(statement.consequent, callback)
+      if (statement.alternate) visitStatements(statement.alternate, callback)
+    }
+  }
+}
+
+/**
+ * Collects identifier reads without treating assignment targets as reads.
+ * @param {import("../semantic/types.js").Expression} expression Semantic expression.
+ * @param {Set<string>} reads Collected binding names.
+ * @returns {void}
+ */
+function collectIdentifierReads(expression, reads) {
+  if (expression.kind == "IdentifierExpression") reads.add(expression.name)
+  else if (expression.kind == "CallExpression") {
+    for (const argument of expression.arguments) collectIdentifierReads(argument, reads)
+  } else if (expression.kind == "UnaryExpression") collectIdentifierReads(expression.operand, reads)
+  else if (expression.kind == "BinaryExpression") {
+    collectIdentifierReads(expression.left, reads)
+    collectIdentifierReads(expression.right, reads)
+  }
 }
 
 /**
