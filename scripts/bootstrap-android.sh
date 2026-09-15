@@ -51,30 +51,74 @@ curl --fail --silent --show-error --location --retry 5 --retry-delay 5 --retry-a
   --output "$BOOTSTRAP_ROOT/commandlinetools-linux-11076708_latest.zip"
 printf '%s  %s\n' '2d2d50857e4eb553af5a6dc3ad507a17adf43d115264b1afc116f95c92e5e258' \
   "$BOOTSTRAP_ROOT/commandlinetools-linux-11076708_latest.zip" | sha256sum --check -
-sudo rm -rf "$ANDROID_HOME"
-mkdir "$BOOTSTRAP_ROOT/cmdline"
+
+download_android_archive() {
+  archive=$1
+  sha256=$2
+  url=$3
+
+  curl --fail --silent --show-error --location --retry 5 --retry-delay 5 --retry-all-errors \
+    "$url" --output "$BOOTSTRAP_ROOT/$archive"
+  printf '%s  %s\n' "$sha256" "$BOOTSTRAP_ROOT/$archive" | sha256sum --check -
+}
+
+download_android_archive platform-tools_r37.0.1-linux.zip \
+  d230f13842f60f782a8645f9c813f8f845bf36089ea7289f28c48f17979313f1 \
+  https://dl.google.com/android/repository/platform-tools_r37.0.1-linux.zip
+download_android_archive platform-35_r02.zip \
+  0988cacad01b38a18a47bac14a0695f246bc76c1b06c0eeb8eb0dc825ab0c8e0 \
+  https://dl.google.com/android/repository/platform-35_r02.zip
+download_android_archive build-tools_r35_linux.zip \
+  bd3a4966912eb8b30ed0d00b0cda6b6543b949d5ffe00bea54c04c81e1561d88 \
+  https://dl.google.com/android/repository/build-tools_r35_linux.zip
+download_android_archive emulator-linux_x64-13610412.zip \
+  2fe2b56fe93ce75e1d478a40162131381d911c355efeaedb54dd1e0d0897a5cf \
+  https://edgedl.me.gvt1.com/edgedl/android/repository/emulator-linux_x64-13610412.zip
+download_android_archive x86_64-35_r09.zip \
+  c67b9ba0ff5bc0eb6d046871bfa228af14d4d47b02f0cdae94f048e511b7566e \
+  https://dl.google.com/android/repository/sys-img/google_apis/x86_64-35_r09.zip
+
+for directory in cmdline platform-tools platform build-tools emulator system-image; do
+  mkdir "$BOOTSTRAP_ROOT/$directory"
+done
 unzip -q "$BOOTSTRAP_ROOT/commandlinetools-linux-11076708_latest.zip" -d "$BOOTSTRAP_ROOT/cmdline"
-sudo install -d -m 0755 "$ANDROID_HOME/cmdline-tools"
+unzip -q "$BOOTSTRAP_ROOT/platform-tools_r37.0.1-linux.zip" -d "$BOOTSTRAP_ROOT/platform-tools"
+unzip -q "$BOOTSTRAP_ROOT/platform-35_r02.zip" -d "$BOOTSTRAP_ROOT/platform"
+unzip -q "$BOOTSTRAP_ROOT/build-tools_r35_linux.zip" -d "$BOOTSTRAP_ROOT/build-tools"
+unzip -q "$BOOTSTRAP_ROOT/emulator-linux_x64-13610412.zip" -d "$BOOTSTRAP_ROOT/emulator"
+unzip -q "$BOOTSTRAP_ROOT/x86_64-35_r09.zip" -d "$BOOTSTRAP_ROOT/system-image"
+
+sudo rm -rf "$ANDROID_HOME"
+sudo install -d -m 0755 "$ANDROID_HOME/cmdline-tools" "$ANDROID_HOME/platforms" "$ANDROID_HOME/build-tools" \
+  "$ANDROID_HOME/system-images/android-35/google_apis"
 sudo mv "$BOOTSTRAP_ROOT/cmdline/cmdline-tools" "$ANDROID_HOME/cmdline-tools/12.0"
+sudo mv "$BOOTSTRAP_ROOT/platform-tools/platform-tools" "$ANDROID_HOME/platform-tools"
+sudo mv "$BOOTSTRAP_ROOT/platform/android-35" "$ANDROID_HOME/platforms/android-35"
+sudo mv "$BOOTSTRAP_ROOT/build-tools/android-15" "$ANDROID_HOME/build-tools/35.0.0"
+sudo mv "$BOOTSTRAP_ROOT/emulator/emulator" "$ANDROID_HOME/emulator"
+sudo mv "$BOOTSTRAP_ROOT/system-image/x86_64" "$ANDROID_HOME/system-images/android-35/google_apis/x86_64"
 sudo chown -R "$(id -u):$(id -g)" "$ANDROID_HOME"
 
-SDKMANAGER="$ANDROID_HOME/cmdline-tools/12.0/bin/sdkmanager"
-yes | "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --licenses >/dev/null
-"$SDKMANAGER" --sdk_root="$ANDROID_HOME" \
-  'platform-tools' \
-  'platforms;android-35' \
-  'build-tools;35.0.0' \
-  'emulator' \
-  'system-images;android-35;google_apis;x86_64'
-test "$("$ANDROID_HOME/emulator/emulator" -version 2>&1 | sed -n 's/^Android emulator version \([^ ]*\).*/\1/p')" = 35.6.12
+grep -Fqx 'Pkg.Revision=37.0.1' "$ANDROID_HOME/platform-tools/source.properties"
+grep -Fqx 'Pkg.Revision=2' "$ANDROID_HOME/platforms/android-35/source.properties"
+grep -Fqx 'AndroidVersion.ApiLevel=35' "$ANDROID_HOME/platforms/android-35/source.properties"
+grep -Fqx 'Pkg.Revision=35.0.0' "$ANDROID_HOME/build-tools/35.0.0/source.properties"
+grep -Fqx 'Pkg.Revision=35.6.11' "$ANDROID_HOME/emulator/source.properties"
+grep -Fqx 'Pkg.BuildId=13610412' "$ANDROID_HOME/emulator/source.properties"
+grep -Fqx 'Pkg.Revision=9' "$ANDROID_HOME/system-images/android-35/google_apis/x86_64/source.properties"
+grep -Fqx 'AndroidVersion.ApiLevel=35' "$ANDROID_HOME/system-images/android-35/google_apis/x86_64/source.properties"
+grep -Fqx 'SystemImage.Abi=x86_64' "$ANDROID_HOME/system-images/android-35/google_apis/x86_64/source.properties"
+grep -Fqx 'SystemImage.TagId=google_apis' "$ANDROID_HOME/system-images/android-35/google_apis/x86_64/source.properties"
+test "$("$ANDROID_HOME/emulator/emulator" -version 2>&1 | sed -n 's/^Android emulator version \([^ ]*\).*/\1/p')" = 35.6.11
 
 AVD_NAME="${SEMANTIFOLD_ANDROID_AVD:-semantifold-api35}"
+export ANDROID_HOME ANDROID_SDK_ROOT="$ANDROID_HOME"
 printf '%s\n' no | "$ANDROID_HOME/cmdline-tools/12.0/bin/avdmanager" create avd --force \
   --name "$AVD_NAME" --package 'system-images;android-35;google_apis;x86_64' --device pixel_6
 
 sudo install -d -m 0755 "$GRADLE_USER_HOME"
 sudo chown -R "$(id -u):$(id -g)" "$GRADLE_USER_HOME"
-export ANDROID_HOME ANDROID_SDK_ROOT="$ANDROID_HOME" GRADLE_USER_HOME JAVA_HOME
+export GRADLE_USER_HOME JAVA_HOME
 export SEMANTIFOLD_ANDROID_HOME="$ANDROID_HOME" SEMANTIFOLD_GRADLE_HOME="$GRADLE_HOME"
 export SEMANTIFOLD_GRADLE_USER_HOME="$GRADLE_USER_HOME" SEMANTIFOLD_ANDROID_MODE=prepare
 export SEMANTIFOLD_KOTLIN_HOME="$KOTLIN_HOME"

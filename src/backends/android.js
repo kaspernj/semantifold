@@ -29,14 +29,51 @@ const kotlinKeywords = new Set([
   "as", "break", "class", "continue", "do", "else", "false", "for", "fun", "if", "in", "interface", "is", "null",
   "object", "package", "return", "super", "this", "throw", "true", "try", "typealias", "typeof", "val", "var", "when", "while"
 ])
+const androidScaffoldSymbols = new Set([
+  "Activity", "Base64", "Bundle", "IllegalStateException", "Instrumentation", "Intent", "R", "SemantifoldEntryTest",
+  "SemantifoldUiInstrumentation", "StandardCharsets", "String", "SuppressLint", "Test", "TextView", "Throwable", "View"
+])
 const mediaTypePattern = /^[A-Za-z0-9!#$&^_.+-]+\/[A-Za-z0-9!#$&^_.+-]+(?:;[\u0020-\u007e]+)?$/u
 const semanticVersionPattern = /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[A-Za-z-][A-Za-z0-9-]*)(?:\.(?:0|[1-9][0-9]*|[A-Za-z-][A-Za-z0-9-]*))*)?(?:\+[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*)?$/u
 const toolchain = Object.freeze({
   androidGradlePlugin: "8.11.1",
+  archives: {
+    buildTools: {
+      revision: "35.0.0",
+      sha256: "bd3a4966912eb8b30ed0d00b0cda6b6543b949d5ffe00bea54c04c81e1561d88",
+      url: "https://dl.google.com/android/repository/build-tools_r35_linux.zip"
+    },
+    commandLineTools: {
+      revision: "11076708",
+      sha256: "2d2d50857e4eb553af5a6dc3ad507a17adf43d115264b1afc116f95c92e5e258",
+      url: "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip"
+    },
+    emulator: {
+      buildId: "13610412",
+      revision: "35.6.11",
+      sha256: "2fe2b56fe93ce75e1d478a40162131381d911c355efeaedb54dd1e0d0897a5cf",
+      url: "https://edgedl.me.gvt1.com/edgedl/android/repository/emulator-linux_x64-13610412.zip"
+    },
+    platform: {
+      revision: "35-r2",
+      sha256: "0988cacad01b38a18a47bac14a0695f246bc76c1b06c0eeb8eb0dc825ab0c8e0",
+      url: "https://dl.google.com/android/repository/platform-35_r02.zip"
+    },
+    platformTools: {
+      revision: "37.0.1",
+      sha256: "d230f13842f60f782a8645f9c813f8f845bf36089ea7289f28c48f17979313f1",
+      url: "https://dl.google.com/android/repository/platform-tools_r37.0.1-linux.zip"
+    },
+    systemImage: {
+      revision: "35-google_apis-x86_64-r9",
+      sha256: "c67b9ba0ff5bc0eb6d046871bfa228af14d4d47b02f0cdae94f048e511b7566e",
+      url: "https://dl.google.com/android/repository/sys-img/google_apis/x86_64-35_r09.zip"
+    }
+  },
   buildTools: "35.0.0",
   commandLineTools: "11076708",
   compileSdk: 35,
-  emulator: "35.6.12",
+  emulator: "35.6.11",
   gradle: "8.13",
   java: "21.0.8",
   kotlin: "2.2.10",
@@ -98,6 +135,7 @@ export function preflightAndroidApplication(input) {
     program: /** @type {import("../semantic/types.js").SemanticProgram} */ (program),
     sourceLanguages: androidSourceLanguages
   })
+  validateActivityClassName(configuration.activityClassName, prepared.program.entryModule)
   const packagePath = configuration.packageName.replaceAll(".", "/")
   const semanticRoot = `${projectRoot}/app/src/main/kotlin/${packagePath}/semantic`
   const modulePaths = new Map(prepared.modules.map(module => [
@@ -406,7 +444,8 @@ android {
     field("applicationId", configuration.applicationId), `"\n    minSdk = `, field("minimumSdk", String(configuration.minimumSdk)),
     `\n    targetSdk = `, field("targetSdk", String(configuration.targetSdk)), `\n    versionCode = `,
     field("versionCode", String(configuration.versionCode)), `\n    versionName = "`, field("versionName", kotlinEscape(configuration.versionName)),
-    `"\n    testInstrumentationRunner = "`, field("packageName", configuration.packageName),
+    `"\n    testApplicationId = "`, field("applicationId", configuration.applicationId),
+    `.test"\n    testInstrumentationRunner = "`, field("packageName", configuration.packageName),
     `.SemantifoldUiInstrumentation"\n  }\n\n  signingConfigs {\n    getByName("debug") {\n      storeFile = semantifoldDebugKeystore\n      storePassword = "android"\n      keyAlias = "androiddebugkey"\n      keyPassword = "android"\n    }\n  }\n  buildTypes {\n    getByName("debug") {\n      signingConfig = signingConfigs.getByName("debug")\n    }\n  }\n  buildFeatures {\n    buildConfig = false\n  }\n  compileOptions {\n    sourceCompatibility = JavaVersion.VERSION_21\n    targetCompatibility = JavaVersion.VERSION_21\n  }\n  lint {\n    abortOnError = true\n    checkDependencies = true\n    disable += "MissingApplicationIcon"\n    warningsAsErrors = true\n  }\n  packaging {\n    resources.excludes += setOf("META-INF/LICENSE*", "META-INF/NOTICE*")\n  }\n}\n\ntasks.withType<KotlinJvmCompile>().configureEach {\n  libraries.from(files(semantifoldKotlinStdlib))\n  compilerOptions {\n    allWarningsAsErrors.set(true)\n    freeCompilerArgs.addAll("-Xno-call-assertions", "-Xno-param-assertions", "-Xno-receiver-assertions")\n    jvmTarget.set(JvmTarget.JVM_21)\n  }\n}\n\ndependencies {\n  testImplementation("junit:junit:4.13.2") {\n    isTransitive = false\n  }\n}\n`
   ])
 }
@@ -851,8 +890,33 @@ function normalizeInputFiles(candidate, kind) {
   const conflict = findPortableArtifactPathConflict(files.map(({fullPath}) => fullPath))
 
   if (conflict) invalidResource(`${capitalize(kind)} path '${conflict.path}' has a ${conflict.kind} conflict.`)
+  if (kind == "resource") validateResourceIdentifiers(files)
 
   return files
+}
+
+/**
+ * Rejects two files that Android would compile to the same resource identifier in one configuration.
+ * @param {AndroidInputFile[]} files - Validated resource inputs.
+ */
+function validateResourceIdentifiers(files) {
+  const identifiers = new Map()
+
+  for (const file of files) {
+    const separator = file.path.indexOf("/")
+    const directory = file.path.slice(0, separator)
+    const filename = file.path.slice(separator + 1)
+    const extension = filename.indexOf(".")
+    const name = extension == -1 ? filename : filename.slice(0, extension)
+    const resourceType = directory.split("-", 1)[0]
+    const key = `${directory}/${name}`
+    const previous = identifiers.get(key)
+
+    if (previous) {
+      invalidResource(`Android resource identifier '${resourceType}/${name}' collides between '${previous}' and '${file.path}' in configuration '${directory}'.`)
+    }
+    identifiers.set(key, file.path)
+  }
 }
 
 /**
@@ -1041,6 +1105,19 @@ function isPackageName(value) {
   const parts = value.split(".")
 
   return parts.length >= 2 && parts.every(part => /^[a-z][a-z0-9_]*$/u.test(part) && !kotlinKeywords.has(part))
+}
+
+/**
+ * Rejects launcher names that shadow an unqualified symbol in generated same-package Kotlin.
+ * @param {string} activityClassName - Validated launcher class name.
+ * @param {string} entryModule - Selected semantic entry module.
+ */
+function validateActivityClassName(activityClassName, entryModule) {
+  const semanticEntrySymbol = `SemantifoldModule${moduleName(entryModule)}`
+
+  if (androidScaffoldSymbols.has(activityClassName) || activityClassName == semanticEntrySymbol) {
+    invalidConfiguration(`Activity class name '${activityClassName}' collides with generated Kotlin symbol '${activityClassName}'.`)
+  }
 }
 
 /**

@@ -186,6 +186,7 @@ fun main() {
     expect(content[`${root}/build.gradle.kts`]).toContain('id("com.android.application") version "8.11.1" apply false')
     expect(content[`${root}/build.gradle.kts`]).toContain('id("org.jetbrains.kotlin.android") version "2.2.10" apply false')
     expect(build).toContain('buildToolsVersion = "35.0.0"')
+    expect(build).toContain('testApplicationId = "dev.semantifold.generated.test"')
     expect(build).toContain('testImplementation("junit:junit:4.13.2")')
     expect(build).toContain("libraries.from(files(semantifoldKotlinStdlib))")
     expect(build).toContain('storeFile = semantifoldDebugKeystore')
@@ -241,6 +242,7 @@ fun main() {
       .toContain('android:name="dev.example.source.MainActivity"')
     expect(content[`${root}/app/src/androidTest/AndroidManifest.xml`])
       .toContain('android:targetPackage="dev.example.install"')
+    expect(content[`${root}/app/build.gradle.kts`]).toContain('testApplicationId = "dev.example.install.test"')
     expect(content[`${root}/settings.gradle.kts`]).toContain('rootProject.name = "Semantifold \\$ App"')
     expect(content[`${root}/app/src/main/res/values/strings.xml`])
       .toContain("<string name=\"app_name\">Semantifold &amp; Android</string>")
@@ -264,10 +266,43 @@ fun main() {
     expect(manifest.ownership.ownedPaths).toEqual(set.artifacts.map(({path}) => path))
     expect(manifest.toolchain).toEqual({
       androidGradlePlugin: "8.11.1",
+      archives: {
+        buildTools: {
+          revision: "35.0.0",
+          sha256: "bd3a4966912eb8b30ed0d00b0cda6b6543b949d5ffe00bea54c04c81e1561d88",
+          url: "https://dl.google.com/android/repository/build-tools_r35_linux.zip"
+        },
+        commandLineTools: {
+          revision: "11076708",
+          sha256: "2d2d50857e4eb553af5a6dc3ad507a17adf43d115264b1afc116f95c92e5e258",
+          url: "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip"
+        },
+        emulator: {
+          buildId: "13610412",
+          revision: "35.6.11",
+          sha256: "2fe2b56fe93ce75e1d478a40162131381d911c355efeaedb54dd1e0d0897a5cf",
+          url: "https://edgedl.me.gvt1.com/edgedl/android/repository/emulator-linux_x64-13610412.zip"
+        },
+        platform: {
+          revision: "35-r2",
+          sha256: "0988cacad01b38a18a47bac14a0695f246bc76c1b06c0eeb8eb0dc825ab0c8e0",
+          url: "https://dl.google.com/android/repository/platform-35_r02.zip"
+        },
+        platformTools: {
+          revision: "37.0.1",
+          sha256: "d230f13842f60f782a8645f9c813f8f845bf36089ea7289f28c48f17979313f1",
+          url: "https://dl.google.com/android/repository/platform-tools_r37.0.1-linux.zip"
+        },
+        systemImage: {
+          revision: "35-google_apis-x86_64-r9",
+          sha256: "c67b9ba0ff5bc0eb6d046871bfa228af14d4d47b02f0cdae94f048e511b7566e",
+          url: "https://dl.google.com/android/repository/sys-img/google_apis/x86_64-35_r09.zip"
+        }
+      },
       buildTools: "35.0.0",
       commandLineTools: "11076708",
       compileSdk: 35,
-      emulator: "35.6.12",
+      emulator: "35.6.11",
       gradle: "8.13",
       java: "21.0.8",
       kotlin: "2.2.10",
@@ -354,6 +389,18 @@ fun main() {
     }
   })
 
+  it("rejects launcher class names that collide with generated Kotlin scaffold symbols before output", () => {
+    const module = parse({filename: "program.kt", language: "kotlin", source})
+
+    for (const activityClassName of ["Activity", "SemantifoldModuleMain"]) {
+      assert.throws(
+        () => generateArtifactSet({configuration: {activityClassName}, language: "android", module, role: "application"}),
+        error => error instanceof SemantifoldDiagnostic && error.code == "INVALID_APPLICATION_CONFIGURATION" &&
+          error.language == "android" && /collides with generated Kotlin symbol/u.test(error.message)
+      )
+    }
+  })
+
   it("rejects malformed resource paths, qualifiers, checksums, normalization/case collisions, and generated collisions", () => {
     const module = parse({filename: "program.kt", language: "kotlin", source})
     const item = {content: "x", mediaType: "text/plain", path: "raw/value.txt", sha256: sha256("x")}
@@ -375,6 +422,28 @@ fun main() {
         () => generateArtifactSet({...candidate, language: "android", module, role: "application"}),
         error => error instanceof SemantifoldDiagnostic && error.language == "android" &&
           ["INVALID_APPLICATION_RESOURCE", "INVALID_APPLICATION_PATH"].includes(error.code)
+      )
+    }
+  })
+
+  it("rejects duplicate Android resource identifiers before returning an artifact set", () => {
+    const module = parse({filename: "program.kt", language: "kotlin", source})
+    const collisions = [
+      [
+        {content: "text", mediaType: "text/plain", path: "raw/value.txt", sha256: sha256("text")},
+        {content: "json", mediaType: "application/json", path: "raw/value.json", sha256: sha256("json")}
+      ],
+      [
+        {content: "plain", mediaType: "text/plain", path: "raw/value", sha256: sha256("plain")},
+        {content: "text", mediaType: "text/plain", path: "raw/value.txt", sha256: sha256("text")}
+      ]
+    ]
+
+    for (const resources of collisions) {
+      assert.throws(
+        () => generateArtifactSet({language: "android", module, resources, role: "application"}),
+        error => error instanceof SemantifoldDiagnostic && error.code == "INVALID_APPLICATION_RESOURCE" &&
+          error.language == "android" && error.message.includes("Android resource identifier 'raw/value'")
       )
     }
   })

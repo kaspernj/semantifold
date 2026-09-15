@@ -174,19 +174,48 @@ async function checkInfrastructure(mode) {
   if (!/^Gradle 8\.13$/mu.test(gradleVersion.stdout)) infrastructure("Gradle is not exact version 8.13.")
   if (!/version "21\.0\.8"/u.test(javaVersion.stderr)) infrastructure("Java is not exact version 21.0.8.")
   if (!/kotlinc-jvm 2\.2\.10/u.test(kotlinVersion.stderr)) infrastructure("Kotlin is not exact version 2.2.10.")
-  if (!/Android emulator version 35\.6\.12/u.test(`${emulatorVersion.stdout}\n${emulatorVersion.stderr}`)) {
-    infrastructure("Android emulator is not exact version 35.6.12.")
+  if (!/Android emulator version 35\.6\.11/u.test(`${emulatorVersion.stdout}\n${emulatorVersion.stderr}`)) {
+    infrastructure("Android emulator is not exact version 35.6.11.")
   }
   for (const sdkPath of ["platforms/android-35/android.jar", "build-tools/35.0.0/aapt2",
-    "system-images/android-35/google_apis/x86_64/package.xml"]) {
+    "system-images/android-35/google_apis/x86_64/system.img"]) {
     try {
       await readFile(path.join(androidHome, sdkPath))
     } catch (error) {
       infrastructure(`Required Android SDK package is missing: ${sdkPath}`, error)
     }
   }
+  await requireProperties(path.join(androidHome, "platform-tools/source.properties"), ["Pkg.Revision=37.0.1"], "Platform Tools")
+  await requireProperties(path.join(androidHome, "platforms/android-35/source.properties"),
+    ["Pkg.Revision=2", "AndroidVersion.ApiLevel=35"], "Android platform")
+  await requireProperties(path.join(androidHome, "build-tools/35.0.0/source.properties"),
+    ["Pkg.Revision=35.0.0"], "Build Tools")
+  await requireProperties(path.join(androidHome, "emulator/source.properties"),
+    ["Pkg.Revision=35.6.11", "Pkg.BuildId=13610412"], "Android emulator")
+  await requireProperties(path.join(androidHome, "system-images/android-35/google_apis/x86_64/source.properties"),
+    ["Pkg.Revision=9", "AndroidVersion.ApiLevel=35", "SystemImage.Abi=x86_64", "SystemImage.TagId=google_apis"],
+    "Android system image")
 
   return {environment, gradle, keytool}
+}
+
+/**
+ * Requires exact package properties for one checksum-installed Android archive.
+ * @param {string} filename - Installed source.properties path.
+ * @param {string[]} requiredLines - Exact required property lines.
+ * @param {string} name - Stable package name.
+ */
+async function requireProperties(filename, requiredLines, name) {
+  let lines
+
+  try {
+    lines = new Set((await readFile(filename, "utf8")).split(/\r?\n/u))
+  } catch (error) {
+    infrastructure(`${name} provenance is missing: ${filename}`, error)
+  }
+  for (const line of requiredLines) {
+    if (!lines.has(line)) infrastructure(`${name} provenance does not contain exact '${line}'.`)
+  }
 }
 
 function requiredDirectory(name) {

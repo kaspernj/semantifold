@@ -84,7 +84,7 @@ run_emulator_acceptance() {
   EXIT_REASON="emulator $sequence instrumentation assertion failed"
   timeout 60 "$ADB" -s "$SERIAL" shell am instrument -w \
     -e expected_output_base64 "$EXPECTED_OUTPUT_BASE64" \
-    dev.semantifold.generated/dev.semantifold.generated.SemantifoldUiInstrumentation \
+    dev.semantifold.generated.test/dev.semantifold.generated.SemantifoldUiInstrumentation \
     > "$ARTIFACTS/instrumentation-$sequence.txt"
   grep -q 'INSTRUMENTATION_CODE: -1' "$ARTIFACTS/instrumentation-$sequence.txt"
   EXIT_REASON="emulator $sequence teardown failed"
