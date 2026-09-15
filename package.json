@@ -50,6 +50,7 @@
   "dependencies": {
     "@babel/parser": "^7.28.4",
     "@babel/types": "^7.28.4",
+    "@driftlog/tree-sitter-dart": "1.0.4",
     "@jridgewell/gen-mapping": "^0.3.13",
     "@jridgewell/trace-mapping": "^0.3.31",
     "@lezer/common": "^1.2.3",
