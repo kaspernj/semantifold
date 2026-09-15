@@ -224,6 +224,7 @@ export function validateTargetIdentifier(language, name, role, location) {
     language == "c" && !isCIdentifier(name) ||
     language == "rust" && !isRustIdentifier(name) ||
     language == "cpp" && !isCppIdentifier(name) ||
+    language == "dart" && !isDartIdentifier(name) ||
     language == "swift" && (!isSwiftIdentifier(name) || name.normalize("NFC") != name) ||
     language == "kotlin" && (!isKotlinIdentifier(name) || name.normalize("NFC") != name)) {
     unsupportedCapability(language, `${role} identifier '${name}'`, location)

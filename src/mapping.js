@@ -1120,7 +1120,7 @@ function validPoint(value) {
  */
 function isSemanticLanguage(value) {
   return value == "php" || value == "ruby" || value == "javascript" || value == "typescript" || value == "java" ||
-    value == "kotlin" || value == "python" || value == "csharp" || value == "go" || value == "c" || value == "cpp" || value == "rust" || value == "swift"
+    value == "kotlin" || value == "python" || value == "csharp" || value == "go" || value == "c" || value == "cpp" || value == "rust" || value == "swift" || value == "dart"
 }
 
 /**

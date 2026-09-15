@@ -27,7 +27,7 @@ const binaryOperationSyntax = Object.freeze({
   StringEqual: Object.freeze({default: "==", strict: "==="}),
   StringNotEqual: Object.freeze({default: "!=", strict: "!=="})
 })
-const task005Languages = new Set(["php", "ruby", "javascript", "typescript", "java"])
+const task005Languages = new Set(["php", "ruby", "javascript", "typescript", "java", "dart"])
 const task006Languages = new Set(["php", "ruby", "javascript", "typescript", "java"])
 const task007Languages = new Set(["php", "ruby", "javascript", "typescript", "java"])
 const task008Languages = new Set(["php", "ruby", "javascript", "typescript", "java"])
@@ -1728,8 +1728,8 @@ function validateExpression(expression, language, ownerLocation, allowJavaNegate
     if (language == "java" && !validNegatedMinimumOperand && (candidate.value < -2147483648 || candidate.value > 2147483647)) {
       unsupportedCapability(language, "integer literal outside signed 32-bit int range", location)
     }
-    if ((language == "csharp" || language == "go" || language == "c" || language == "cpp" || language == "kotlin" || language == "rust" || language == "swift") && candidate.value < 0 ||
-      (language == "c" || language == "cpp" || language == "kotlin" || language == "rust" || language == "swift") && Object.is(candidate.value, -0)) {
+    if ((language == "csharp" || language == "go" || language == "c" || language == "cpp" || language == "dart" || language == "kotlin" || language == "rust" || language == "swift") && candidate.value < 0 ||
+      (language == "c" || language == "cpp" || language == "dart" || language == "kotlin" || language == "rust" || language == "swift") && Object.is(candidate.value, -0)) {
       unsupportedCapability(language, "negative integer literal without semantic negation", location)
     }
     return
@@ -1958,7 +1958,7 @@ function validateKnownTargetInteger(expression, language, location) {
 
     unsupportedCapability(language, `compile-time-known integer operation outside signed 64-bit ${scalar} range`, location)
   }
-  if (language == "kotlin" && value !== undefined &&
+  if ((language == "dart" || language == "kotlin") && value !== undefined &&
     (value < -BigInt(Number.MAX_SAFE_INTEGER) || value > BigInt(Number.MAX_SAFE_INTEGER))) {
     unsupportedCapability(language, "compile-time-known integer operation outside the Semantifold safe-integer range", location)
   }
@@ -2348,6 +2348,12 @@ export function emitExpression(writer, expression, path, language, emitIdentifie
   }
 
   if (expression.kind == "UnaryExpression") {
+    if (language == "dart" && expression.operation == "IntegerNegate") {
+      emitDartIntegerHelper(writer, expression, path, "_semantifoldIntegerNegate", [
+        [expression.operand, `${path}/operand`]
+      ])
+      return
+    }
     if (language == "kotlin" && expression.operation == "IntegerNegate") {
       emitKotlinIntegerHelper(writer, expression, path, "semantifold_integer_negate", [
         [expression.operand, `${path}/operand`]
@@ -2367,6 +2373,16 @@ export function emitExpression(writer, expression, path, language, emitIdentifie
     })
     emitExpression(writer, expression.operand, `${path}/operand`, language, emitIdentifier)
     writer.mapped(")", {mappingKind: "anchor", node: expression, path})
+    return
+  }
+
+  if (language == "dart" && ["IntegerAdd", "IntegerSubtract", "IntegerMultiply"].includes(expression.operation)) {
+    const helper = expression.operation == "IntegerAdd" ? "_semantifoldIntegerAdd" :
+      expression.operation == "IntegerSubtract" ? "_semantifoldIntegerSubtract" : "_semantifoldIntegerMultiply"
+
+    emitDartIntegerHelper(writer, expression, path, helper, [
+      [expression.left, `${path}/left`], [expression.right, `${path}/right`]
+    ])
     return
   }
 
@@ -2455,6 +2471,25 @@ function emitKotlinIntegerHelper(writer, expression, path, helper, operands) {
     emitExpression(writer, operand, operandPath, "kotlin", identityIdentifier)
   })
   writer.synthetic(")", "Kotlin checked-integer helper call", [expression], [path])
+}
+
+/**
+ * Emits a compiler-owned Dart checked-integer helper call.
+ * @param {import("./writer.js").SourceWriter} writer Source-aware writer.
+ * @param {import("../semantic/types.js").UnaryExpression | import("../semantic/types.js").BinaryExpression} expression Operation.
+ * @param {string} path Operation path.
+ * @param {string} helper Exact target helper.
+ * @param {[import("../semantic/types.js").Expression, string][]} operands Ordered operands and paths.
+ * @returns {void}
+ */
+function emitDartIntegerHelper(writer, expression, path, helper, operands) {
+  writer.mapped(helper, {mappingKind: "exact", node: expression, path, role: "operator"})
+  writer.synthetic("(", "Dart checked-integer helper call", [expression], [path])
+  operands.forEach(([operand, operandPath], index) => {
+    if (index) writer.synthetic(", ", "Dart checked-integer argument separator", [expression], [path])
+    emitExpression(writer, operand, operandPath, "dart", identityIdentifier)
+  })
+  writer.synthetic(")", "Dart checked-integer helper call", [expression], [path])
 }
 
 /**
