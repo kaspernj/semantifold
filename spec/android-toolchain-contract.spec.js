@@ -2,7 +2,7 @@
 
 import assert from "node:assert/strict"
 import {execFile} from "node:child_process"
-import {chmod, mkdir, mkdtemp, readFile, rm, writeFile} from "node:fs/promises"
+import {chmod, mkdir, mkdtemp, readFile, rm, truncate, writeFile} from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import {promisify} from "node:util"
@@ -64,6 +64,9 @@ describe("Android toolchain and TensorBuzz acceptance contract", () => {
     expect(implementation).toContain("testDebugUnitTest")
     expect(implementation).toContain("assembleDebugAndroidTest")
     expect(implementation).toContain('system-images/android-35/google_apis/x86_64/system.img')
+    expect(bootstrap).toContain(
+      'sudo mv "$BOOTSTRAP_ROOT/system-image/x86_64" "$ANDROID_HOME/system-images/android-35/google_apis/x86_64"'
+    )
     expect(implementation).toContain('path.join(root, "debug.keystore")')
     expect(implementation).toContain("SEMANTIFOLD_ANDROID_ACCEPTANCE_ROOT: root")
     expect(acceptance).not.toMatch(/curl|wget/u)
@@ -85,6 +88,69 @@ describe("Android toolchain and TensorBuzz acceptance contract", () => {
     expect(registration).toContain("<revision><major>35</major><minor>6</minor><micro>11</micro></revision>")
     expect(registration).toContain("<display-name>Android Emulator</display-name>")
     expect(documentation).toContain("checked-in exact local-package descriptor")
+  })
+
+  it("checks the installed API-35 system image without loading its multi-gigabyte payload", {timeoutMs: 30_000}, async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "semantifold-android-system-image-"))
+    const androidHome = path.join(root, "android")
+    const gradleHome = path.join(root, "gradle")
+    const gradleUserHome = path.join(root, "gradle-cache")
+    const javaHome = path.join(root, "java")
+    const kotlinHome = path.join(root, "kotlin")
+
+    try {
+      const executableSources = new Map([
+        [path.join(gradleHome, "bin/gradle"), "printf 'Gradle 8.13\\n'"],
+        [path.join(javaHome, "bin/java"), "printf 'openjdk version \"21.0.8\"\\n' >&2"],
+        [path.join(javaHome, "bin/keytool"), ":"],
+        [path.join(kotlinHome, "bin/kotlinc"), "printf 'info: kotlinc-jvm 2.2.10\\n' >&2"],
+        [path.join(androidHome, "platform-tools/adb"), ":"],
+        [path.join(androidHome, "emulator/emulator"), "printf 'Android emulator version 35.6.11.0\\n'"],
+        [path.join(androidHome, "build-tools/35.0.0/aapt2"), ":"]
+      ])
+
+      for (const [filename, source] of executableSources) {
+        await mkdir(path.dirname(filename), {recursive: true})
+        await writeFile(filename, `#!/bin/sh\n${source}\n`)
+        await chmod(filename, 0o700)
+      }
+      await mkdir(gradleUserHome)
+      await writeFile(path.join(gradleUserHome, "cache-marker"), "prepared\n")
+      await mkdir(path.join(kotlinHome, "lib"))
+      await writeFile(path.join(kotlinHome, "lib/kotlin-stdlib.jar"), "")
+      await mkdir(path.join(androidHome, "platforms/android-35"), {recursive: true})
+      await writeFile(path.join(androidHome, "platforms/android-35/android.jar"), "")
+      const systemImageDirectory = path.join(androidHome, "system-images/android-35/google_apis/x86_64")
+      const systemImage = path.join(systemImageDirectory, "system.img")
+
+      await mkdir(systemImageDirectory, {recursive: true})
+      await writeFile(systemImage, "")
+      await truncate(systemImage, 3_576_692_736)
+      await writeFile(path.join(androidHome, "platform-tools/source.properties"), "Pkg.Revision=37.0.1\n")
+      await writeFile(path.join(androidHome, "platforms/android-35/source.properties"),
+        "Pkg.Revision=2\nAndroidVersion.ApiLevel=35\n")
+      await writeFile(path.join(androidHome, "build-tools/35.0.0/source.properties"), "Pkg.Revision=35.0.0\n")
+      await writeFile(path.join(androidHome, "emulator/source.properties"),
+        "Pkg.Revision=35.6.11\nPkg.BuildId=13610412\n")
+      await writeFile(path.join(systemImageDirectory, "source.properties"),
+        "Pkg.Revision=9\nAndroidVersion.ApiLevel=35\nSystemImage.Abi=x86_64\nSystemImage.TagId=google_apis\n")
+
+      await executeFile(process.execPath, ["scripts/android-acceptance.js", "--check"], {
+        cwd: new URL("../", import.meta.url),
+        env: {
+          LANG: "C.UTF-8",
+          LC_ALL: "C.UTF-8",
+          PATH: "/usr/bin:/bin",
+          SEMANTIFOLD_ANDROID_HOME: androidHome,
+          SEMANTIFOLD_GRADLE_HOME: gradleHome,
+          SEMANTIFOLD_GRADLE_USER_HOME: gradleUserHome,
+          SEMANTIFOLD_KOTLIN_HOME: kotlinHome,
+          JAVA_HOME: javaHome
+        }
+      })
+    } finally {
+      await rm(root, {force: true, recursive: true})
+    }
   })
 
   it("propagates a verifier failure even when both APK paths already exist", {timeoutMs: 30_000}, async () => {

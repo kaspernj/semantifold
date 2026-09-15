@@ -179,11 +179,14 @@ async function checkInfrastructure(mode) {
   }
   for (const sdkPath of ["platforms/android-35/android.jar", "build-tools/35.0.0/aapt2",
     "system-images/android-35/google_apis/x86_64/system.img"]) {
+    let information
+
     try {
-      await readFile(path.join(androidHome, sdkPath))
+      information = await stat(path.join(androidHome, sdkPath))
     } catch (error) {
       infrastructure(`Required Android SDK package is missing: ${sdkPath}`, error)
     }
+    if (!information.isFile()) infrastructure(`Required Android SDK package is not a file: ${sdkPath}`)
   }
   await requireProperties(path.join(androidHome, "platform-tools/source.properties"), ["Pkg.Revision=37.0.1"], "Platform Tools")
   await requireProperties(path.join(androidHome, "platforms/android-35/source.properties"),
