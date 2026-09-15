@@ -73,6 +73,8 @@ class DartReader {
   constructor(filename, source) {
     this.filename = filename
     this.source = source
+    /** @type {Set<string>} */
+    this.functionNames = new Set()
   }
 
   /**
@@ -374,7 +376,10 @@ class DartReader {
     const location = this.location(node)
 
     if (node.type == "identifier") {
-      return withParserRanges({kind: /** @type {const} */ ("IdentifierExpression"), location, name: this.identifier(node)}, {name: location})
+      const name = this.identifier(node)
+
+      if (this.functionNames.has(name)) this.fail(node, "function tear-off")
+      return withParserRanges({kind: /** @type {const} */ ("IdentifierExpression"), location, name}, {name: location})
     }
     if (node.type == "decimal_integer_literal") {
       if (this.parts(node).length != 0 || !/^(?:0|[1-9][0-9]*)$/u.test(node.text)) this.fail(node, "noncanonical integer literal")
@@ -489,7 +494,7 @@ class DartReader {
     const definition = declarationParts[0]
     const parts = this.parts(definition)
 
-    if (parts[0]?.type == "inferred_type" || parts[0]?.type == "final_builtin" && parts[1]?.type != "type_identifier") {
+    if (parts[0]?.type == "inferred_type" || parts[0]?.type == "final_builtin" && parts[1]?.type == "identifier") {
       return missingType("dart", "Local", this.location(definition))
     }
     const immutable = parts[0]?.type == "final_builtin"
@@ -762,6 +767,8 @@ class DartReader {
 
     if (mainIndexes.length != 1) this.fail(root, "exactly one main declaration required")
     const mainIndex = mainIndexes[0]
+
+    this.functionNames = new Set(declarations.map(({signature}) => this.parts(signature)[1]?.text).filter(Boolean))
 
     if (mainIndex != declarations.length - 1) this.fail(declarations[mainIndex + 1].signature, "declaration after main")
     const main = declarations[mainIndex]
