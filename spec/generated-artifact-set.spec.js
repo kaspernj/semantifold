@@ -12,10 +12,22 @@ import {
   parse,
   SemantifoldDiagnostic
 } from "../index.js"
+import {generateDartPackage} from "../src/backends/dart.js"
 
 const synthetic = (reason = "test scaffolding") => ({kind: "synthetic", reason, relatedOrigins: []})
 
 describe("generated artifact sets", () => {
+  it("validates Dart's manifest-first package as one frozen transactional set", async () => {
+    const source = await readFile(new URL("fixtures/program.ts", import.meta.url), "utf8")
+    const module = parse({filename: "program.ts", language: "typescript", source})
+    const set = createGeneratedArtifactSet(generateDartPackage({module}))
+
+    expect(set.entry).toEqual("bin/program.dart")
+    expect(set.artifacts.map(({path}) => path)).toEqual(["pubspec.yaml", "pubspec.lock", "bin/program.dart"])
+    expect(Object.isFrozen(set)).toBeTrue()
+    expect(Object.isFrozen(set.artifacts)).toBeTrue()
+  })
+
   it("wraps every original single-text target without changing its bytes or rich mappings", async () => {
     const source = await readFile(new URL("fixtures/program.ts", import.meta.url), "utf8")
     const module = parse({filename: "program.ts", language: "typescript", source})

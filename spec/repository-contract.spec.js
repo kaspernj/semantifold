@@ -14,9 +14,10 @@ const swiftKeyUrl = "https://swift.org/keys/release-key-swift-6.x.asc"
 const swiftArchiveUrl = "https://download.swift.org/swift-6.3.3-release/ubuntu2404/swift-6.3.3-RELEASE/swift-6.3.3-RELEASE-ubuntu24.04.tar.gz"
 const swiftExecutable = "/opt/swift-6.3.3-RELEASE-ubuntu24.04/usr/bin/swiftc"
 const swiftToolchainPath = "/opt/swift-6.3.3-RELEASE-ubuntu24.04/usr/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-const providerPackages = Object.freeze([
+const bareProviderPackages = Object.freeze([
   "opencode-ai", "@openai/codex", "@anthropic-ai/claude-code", "@moonshot-ai/kimi-code"
 ])
+const qwenCodePackage = "@qwen-code/qwen-code@0.23.3"
 const activeProviderExecutables = Object.freeze(["codex", "opencode"])
 const internalLegacyPackage = "semantifold-tree-sitter-legacy-internal"
 const retiredLegacyPackage = "@kaspernj/semantifold-tree-sitter-legacy"
@@ -245,7 +246,7 @@ describe("repository delivery contracts", () => {
       'test -r "$(clang++-21 -print-file-name=libstdc++.so)"', "dpkg-query -W libstdc++-13-dev"]) {
       assert.ok(config.before_install.includes(probe), probe)
     }
-    expect(config.builds.end_to_end.name).toEqual("Thirteen-language tests with Kotlin/JVM, Rust debug/release and C/CPP O0/O2 sanitizers")
+    expect(config.builds.end_to_end.name).toEqual("Fourteen-language tests with Dart VM/native, Kotlin/JVM, Rust debug/release and C/CPP O0/O2 sanitizers")
     await assert.rejects(access(new URL("../.github/workflows", import.meta.url)))
   })
 
@@ -298,7 +299,7 @@ describe("repository delivery contracts", () => {
     assert.ok(instructions.some((instruction) => instruction.getKeyword() == "WORKDIR" && instruction.getArgumentsContent() == "/home/dev/semantifold"))
   })
 
-  it("installs four native provider CLIs and probes only active routes as the development user", async () => {
+  it("installs four bare provider CLIs plus owner-pinned Qwen and probes only active routes as the development user", async () => {
     const [source, packageJson, packageLock, repositoryInstructions] = await Promise.all([
       readFile(new URL("../Dockerfile", import.meta.url), "utf8"),
       readFile(new URL("../package.json", import.meta.url), "utf8").then(JSON.parse),
@@ -318,14 +319,14 @@ describe("repository delivery contracts", () => {
     const normalizedInstall = providerInstall.arguments.replace(/\s+/gu, " ")
     const installCommand = normalizedInstall.match(/npm install --global [^&]+/u)?.[0].trim()
     const expectedInstall = [
-      "npm install --global", "--cache", '"${PROVIDER_NPM_CACHE}"', ...providerPackages
+      "npm install --global", "--cache", '"${PROVIDER_NPM_CACHE}"', ...bareProviderPackages, qwenCodePackage
     ].join(" ")
 
     expect(installCommand).toEqual(expectedInstall)
     assert.match(providerInstall.arguments, /PROVIDER_NPM_CACHE="\$\(mktemp -d\)"/u)
     assert.match(providerInstall.arguments, /rm -rf "\$\{PROVIDER_NPM_CACHE\}"/u)
     assert.doesNotMatch(providerInstall.arguments, /@latest/u)
-    for (const packageName of providerPackages) assert.equal(providerInstall.arguments.includes(`${packageName}@`), false)
+    for (const packageName of bareProviderPackages) assert.equal(providerInstall.arguments.includes(`${packageName}@`), false)
 
     const identity = runs.find(({arguments: command}) => command.includes("usermod --login dev --home /home/dev --move-home ubuntu"))
     const userIndex = instructions.findIndex((instruction) =>
@@ -336,7 +337,7 @@ describe("repository delivery contracts", () => {
       command.includes(`command -v ${executable}`) && command.includes(`${executable} --version`)))
 
     assert.doesNotMatch(runs.map(({arguments: command}) => command).join("\n"),
-      /command -v (?:claude|kimi)|\b(?:claude|kimi) --version/u)
+      /command -v (?:claude|kimi|qwen)|\b(?:claude|kimi|qwen) --version/u)
 
     assert.ok(identity)
     for (const command of [
@@ -352,12 +353,14 @@ describe("repository delivery contracts", () => {
       .filter((instruction) => instruction.getKeyword() == "USER").at(-1)?.getArgumentsContent(), "dev")
 
     assert.doesNotMatch(source, /@latest/u)
-    assert.doesNotMatch(source, /^ARG\s+.*(?:OPENCODE|CODEX|CLAUDE|KIMI|PROVIDER).*VERSION/imu)
+    assert.doesNotMatch(source, /^ARG\s+.*(?:OPENCODE|CODEX|CLAUDE|KIMI|QWEN|PROVIDER).*VERSION/imu)
     assert.doesNotMatch(source, /NODE_AUTH_TOKEN|NPM_TOKEN|npm_config_(?:_auth|token)|npm (?:adduser|login)|_authToken/u)
     assert.match(repositoryInstructions, /image remains source-independent: do not add project `COPY`, project dependency installation, or orchestration coupling/u)
     assert.match(repositoryInstructions, /infrastructure tooling rather than project dependencies/u)
-    assert.match(repositoryInstructions, /four native provider CLI baselines globally from the bare npm package specs/u)
-    assert.match(repositoryInstructions, /Provider versions and authentication remain external/u)
+    assert.match(repositoryInstructions, /four retained native provider CLI baselines globally from the bare npm package specs/u)
+    assert.match(repositoryInstructions, /owner-pinned native Qwen Code baseline from exact `@qwen-code\/qwen-code@0\.23\.3`/u)
+    assert.match(repositoryInstructions, /No other provider version pins or version `ARG`s/u)
+    assert.match(repositoryInstructions, /Other provider versions and authentication remain external/u)
     assert.doesNotMatch(repositoryInstructions, /do not add[^.\n]*provider CLIs/iu)
     const projectDependencies = {
       ...packageJson.dependencies,
@@ -366,11 +369,15 @@ describe("repository delivery contracts", () => {
       ...packageJson.peerDependencies
     }
 
-    for (const packageName of providerPackages) {
+    for (const packageName of bareProviderPackages) {
       assert.ok(repositoryInstructions.includes(`\`${packageName}\``))
       assert.equal(Object.hasOwn(projectDependencies, packageName), false)
       assert.equal(Object.hasOwn(packageLock.packages, `node_modules/${packageName}`), false)
     }
+    const qwenCodeName = qwenCodePackage.replace(/@\d[^@]*$/u, "")
+
+    assert.equal(Object.hasOwn(projectDependencies, qwenCodeName), false)
+    assert.equal(Object.hasOwn(packageLock.packages, `node_modules/${qwenCodeName}`), false)
     assert.doesNotMatch(JSON.stringify([source, packageJson, packageLock]), /threadwire/iu)
   })
 

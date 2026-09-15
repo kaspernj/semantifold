@@ -11,6 +11,8 @@ import {isSupportedTimeoutMs, maximumTimeoutMs} from "./timeout.js"
 const defaultTimeoutMs = 10_000
 
 export const canonicalToolchains = deepFreeze({
+  dart: definition("dart", "SEMANTIFOLD_DART", ["--version"],
+    /^Dart SDK version: 3\.13\.3 \(stable\) \(Tue Sep 1 01:07:17 2026 -0700\) on "linux_x64"$/u),
   php: definition("php", "SEMANTIFOLD_PHP", ["--version"], /^PHP 8\./u),
   php82: definition("php", "SEMANTIFOLD_PHP", ["--version"], /^PHP (?:8\.(?:[2-9]|[1-9][0-9]+)|(?:9|[1-9][0-9]+)\.[0-9]+)\./u),
   ruby: definition("ruby", "SEMANTIFOLD_RUBY", ["--version"], /^ruby 3\./u),

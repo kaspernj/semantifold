@@ -34,10 +34,51 @@ All Tree-sitter languages use the official `tree-sitter` Node binding. The langu
 | 022 | Swift | community grammar through the exact Semantifold packaging fork plus differential `swiftc` checks | Node/package/CST qualification and rebuilt-image Swift 6.3.3 compiler differential passed locally at merge commit `2a4515bb1d2d075c4c72a3466fbccb75f5269caf`; delivery gates remain separate |
 | 023 | Kotlin/JVM | community grammar through the exact Semantifold packaging fork plus differential `kotlinc` checks | passed for immutable tag `v0.4.0-semantifold.1`, commit `57c35ad1a80ccd2a0ebd8fffe852f0d13a20acd0`, ABI 14, Node24, and Kotlin/JVM 2.4.20; see below |
 | 024 | Go | official [`tree-sitter/tree-sitter-go`](https://github.com/tree-sitter/tree-sitter-go) grammar package | passed for exact `tree-sitter-go@0.25.0`; see the checked-in record below |
-| 029 | Dart | candidate selected and qualified by Task 029 | intentionally deferred |
+| 029 | Dart | exact public registry grammar plus differential Dart SDK checks | passed for `tree-sitter-dart-orchard@0.7.0`, Node 24/Tree-sitter 0.25.1, packed consumers, and exact Dart 3.13.3 Linux x64 format/analyze/VM/native acceptance |
 | 031 | Zig | candidate selected and qualified by Task 031 | intentionally deferred |
 
 Swift or Kotlin qualification failure leaves Task 022 or 023 blocked until its roadmap/source decision is explicitly revised. Parser archives produced by CI or release pages are not an alternative dependency route. Tasks022 and 023 record narrow amendments: the selected registry packages lack the required install-safe Node24 contract, so Semantifold uses full-SHA GitHub source archives from its public packaging forks rather than generated release assets or mutable Git references.
+
+## Task 029 Dart grammar qualification — 2026-09-15
+
+Task 029 rejects the old unscoped `tree-sitter-dart@1.0.0`: its grammar object is not accepted by the repository's exact `tree-sitter@0.25.1` binding. The first replacement candidate, `@driftlog/tree-sitter-dart@1.0.4`, passes parser API and CST checks but fails the mandatory clean-install dependency-tree gate by creating an extraneous `node_modules/@driftlog/node-addon-api` directory. Kasper authorized a narrow parser-route amendment on 2026-09-15. The selected replacement is exact public registry `tree-sitter-dart-orchard@0.7.0`; no Git/archive dependency, copied grammar, source-text fallback, compiler-output AST, vendored build, cleanup hook, or private package is used.
+
+The amendment considered every relevant public registry result observed on 2026-09-15:
+
+| Candidate | Result |
+| --- | --- |
+| `tree-sitter-dart@1.0.0` | Rejected: `Parser#setLanguage` reports `Invalid language object` with exact root `tree-sitter@0.25.1`. |
+| `@driftlog/tree-sitter-dart@1.0.4` | Rejected: clean install and packed consumer report extraneous generated `@driftlog/node-addon-api` dependency residue. |
+| `@sengac/tree-sitter-dart@1.1.6` | Rejected before install: it peers on `@sengac/tree-sitter@^0.25.10`, not the required root binding, and no immutable `v1.1.6` upstream tag resolves to npm `gitHead`. |
+| `@vokturz/tree-sitter-dart@1.0.0` | Rejected before install: package metadata says it is only for CodeGPT internals, peers on Tree-sitter 0.21, and supplies no verifiable repository/tag identity. |
+| `ast-grep-tree-sitter-dart@0.0.5`, `@ast-grep/lang-dart@0.0.7` | Rejected before install: ast-grep loaders with a `postinstall` setup contract, not native Node language objects for `tree-sitter@0.25.1`. |
+| `@plurnk/plurnk-mimetypes-grammar-dart@1.16.1`, `@lumis-sh/wasm-dart@0.26.3` | Rejected before install: WebAssembly-only packages for web-tree-sitter/host-specific loaders, not the required native Node binding. |
+| `tree-sitter-dart-orchard@0.7.0` | Selected: exact native Node registry package with clean graph, matching immutable annotated tag/commit, Task 001–005 CST coverage, and packed-consumer proof. |
+
+| Evidence | Qualified result |
+| --- | --- |
+| npm distribution | Exact `tree-sitter-dart-orchard@0.7.0`, registry tarball `https://registry.npmjs.org/tree-sitter-dart-orchard/-/tree-sitter-dart-orchard-0.7.0.tgz`, integrity `sha512-dO4hyC6eCz7tnXNWk7ZZ/CVzorvWQKRhxRYUT/uwAnA50m+4Jbogd1Oh33lPcj1/bP9wG1pS3TWQEfs1W3LFbg==`, SHA-1 `eb5c0f0b1d9f784fd292d84e6be6d1b951eab6fa`, 21 files, 424,008 compressed bytes and 8,695,564 unpacked bytes. |
+| upstream identity | [`grammar-orchard/tree-sitter-dart-orchard`](https://codeberg.org/grammar-orchard/tree-sitter-dart-orchard), immutable annotated tag object `v0.7.0` at `97d5d3608db84ee5b5c0efdaa227b62cfb7f9c09`, peeled commit and npm `gitHead` `9322cd5e1266c60983ae0ff921fbb4e77e903781`. Registry grammar, scanner, license, and `tree-sitter.json` match the tag byte-for-byte. Their SHA-256 values are `284c4fad3e9e267fbd593d6befbbbaa9998e90bf60163c241b95597ac5ca5a40`, `f3b455e7ff4f70ec6db93262b660041dc71e465531929354961d0ee56686c447`, `d270cb3a4985d75033bd77d875ccebff1d66e32788a3f727891e28d76132dd46`, and `7bc667f7779553e3a65f70e16e5af857963c2c8faf5891bbc6a2dcf0b1d7be7d`. |
+| generated release inputs | The immutable tag's release workflow pins Tree-sitter CLI `0.26.12`, runs `tree-sitter init`, `tree-sitter generate --abi 14`, tests the grammar, builds its Wasm distribution, and then publishes npm. The resulting registry parser C, Node declaration, and Node loader hashes are `04293ee18d82879f70b21b60632a831547de9b870e9987264bff869bac44af11`, `5a722dbeb8d141e49dbce4b78aee56ad4f552a86dc0b754a1b7f042768095830`, and `901a2db34556336f5ed44ea54bd2d649af1cdaa2bf848a1362f6d4fdeee53005`. Semantifold consumes only the registry package, not the upstream release archive or Wasm file. |
+| legal and registry provenance | Package metadata and the byte-identical shipped/tagged license both identify MIT. `npm audit signatures --json` reports no invalid or missing signatures in the fresh isolated graph. |
+| clean Node 24 install/load | Passed twice in a credential-free temporary package with an empty home, distinct empty user/global npm configuration, fresh caches, explicit public registry, Node 24.18.1, exact `tree-sitter@0.25.1`, and exact Orchard grammar: ordinary `npm install`, clean `npm ci`, and both `npm ls --all --json` results contain no `problems`. The graph contains only the two requested packages plus declared `node-addon-api@8.9.2` and `node-gyp-build@4.8.4`. The explicit shipped Node binding imports without warnings; `new Parser()`, `setLanguage`, parse, and indexed child/field traversal succeed. |
+| ABI, typed API, and lifecycle | The registry parser declares ABI 14, accepted by the root binding's ABI 13–15 range, and exposes 359 typed node descriptions. It ships declarations, `binding.gyp`, generated parser/scanner C source, Tree-sitter headers, and standard local build inputs. Its only install action is `node-gyp-build`; package scripts and load code contain no URL/downloader. No undeclared or extraneous package directory appears after install. |
+| corpus and complete traversal | The six checked-in Dart fixtures cover Tasks 001–005: arbitrary required positional signatures, scalar/void returns, initialized typed mutable and `final` locals, assignment, calls/arguments, print, bare/value returns, all scalar literals/operators, parentheses, nested/fallthrough/else-if conditionals, recursion, zero/one/three-argument calls, and comments. Traversal includes every named and anonymous child plus field names. Fixture hashes are recorded below. |
+| rejection visibility and coordinates | Directives, annotations, nullable/generic/optional/default syntax, inference, null-aware expressions, casts, await/async bodies, classes, constructors, interpolation, raw strings, and multiline strings remain present as CST nodes or exact literal leaves. Malformed braces, parameters, operands, strings, and semicolons propagate error/missing state. Astral text with CRLF and lone CR verifies binding UTF-16 indexes against explicit UTF-8 boundary conversion; source adapters preflight lone surrogates before parsing. |
+| official compiler differential | Exact `Dart SDK version: 3.13.3 (stable) (Tue Sep 1 01:07:17 2026 -0700) on "linux_x64"` passed offline pub restore, formatter verification, fatal-warning/info analysis, VM execution, native executable compilation, and native execution. Six Dart fixtures and representative PHP/Ruby/JavaScript/TypeScript/Java inputs preserve semantic meaning; VM/native outputs match for Unicode, eager call ordering, recursion, void calls, short-circuiting, and safe-integer boundaries. Every run uses fresh absolute HOME, PUB_CACHE, project, output, and TMPDIR paths, deterministic locale/timezone, suppressed analytics, an unreachable package host, and byte checks proving the two manifests and source remain unchanged. Compiler output is never used as an AST. |
+
+The retained corpus SHA-256 values are:
+
+| Corpus path | SHA-256 |
+| --- | --- |
+| `spec/fixtures/program.dart` | `e4e06faab4c539f16bdd712a8be40f53e3f1a4aef430ec021db3a4723762893b` |
+| `spec/fixtures/scalars/program.dart` | `96d02a48ebfc53362da4d963347909471428033164c0356a99fb866824441b5e` |
+| `spec/fixtures/locals/program.dart` | `738a1a8e41a51abc198ddc3978f77ddb784f2c3720e065d28a1d99073c49fc72` |
+| `spec/fixtures/operators/program.dart` | `ef0e6c233730b5776b2484d4abb6d3af6068a27e657933c646b30bba3dac0c04` |
+| `spec/fixtures/statements/program.dart` | `c5edc983553c50ce393563953927d1d18f0b0e33d10f4381f87f1e7645ee84e8` |
+| `spec/fixtures/functions/program.dart` | `64c7eaec72b624781c102a1a6740cbbbc653148f6778f4282e5b3c187ea4bd4c` |
+
+Run `npx velocious-test spec/dart-parser-qualification.spec.js` for retained Node/CST evidence, `npx velocious-test spec/tree-sitter-legacy-packed-consumer.spec.js` for ordinary-install plus clean-`npm ci` packed-consumer proof, and the individual `spec/dart-cross-language-acceptance.spec.js` and `spec/dart-native-execution.spec.js` files for the real SDK differential. All pass in the rebuilt canonical lane; review, exact-head CI, merge, and post-merge verification remain separate delivery gates.
 
 ## Task 016 Python qualification
 

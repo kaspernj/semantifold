@@ -4,6 +4,7 @@ import {unsupportedCapability} from "../diagnostic.js"
 
 /** @type {Record<Exclude<import("../semantic/types.js").BackendLanguage, "ios">, RegExp>} */
 const identifierPatterns = {
+  dart: /^(?:_|\p{L})(?:_|\p{L}|\p{Nd})*$/u,
   kotlin: /^(?:_|\p{L})(?:_|\p{L}|\p{Nd})*$/u,
   swift: /^(?:_|\p{XID_Start})(?:_|\p{XID_Continue})*$/u,
   rust: /^[A-Za-z_][A-Za-z0-9_]*$/u,
@@ -22,6 +23,15 @@ const identifierPatterns = {
 
 /** @type {Record<Exclude<import("../semantic/types.js").BackendLanguage, "ios">, Set<string>>} */
 const reservedWords = {
+  dart: new Set([
+    "Function", "Never", "Object", "RangeError", "String", "abstract", "as", "assert", "async", "await", "base",
+    "bool", "break", "case", "catch", "class", "const", "continue", "covariant", "default", "deferred", "do",
+    "double", "dynamic", "else", "enum", "export", "extends", "extension", "external", "factory", "false", "final",
+    "finally", "for", "get", "hide", "if", "implements", "import", "in", "int", "interface", "is", "late", "library",
+    "main", "mixin", "native", "new", "null", "num", "of", "on", "operator", "part", "print", "required", "rethrow",
+    "return", "sealed", "set", "show", "static", "super", "switch", "sync", "this", "throw", "true", "try", "typedef",
+    "var", "void", "when", "while", "with", "yield", "BigInt", "_"
+  ]),
   kotlin: new Set([
     "as", "break", "class", "continue", "do", "else", "false", "for", "fun", "if", "in", "interface", "is", "null",
     "object", "package", "return", "super", "this", "throw", "true", "try", "typealias", "typeof", "val", "var", "when",
@@ -214,6 +224,7 @@ export function validateTargetIdentifier(language, name, role, location) {
     language == "c" && !isCIdentifier(name) ||
     language == "rust" && !isRustIdentifier(name) ||
     language == "cpp" && !isCppIdentifier(name) ||
+    language == "dart" && !isDartIdentifier(name) ||
     language == "swift" && (!isSwiftIdentifier(name) || name.normalize("NFC") != name) ||
     language == "kotlin" && (!isKotlinIdentifier(name) || name.normalize("NFC") != name)) {
     unsupportedCapability(language, `${role} identifier '${name}'`, location)
@@ -307,4 +318,14 @@ export function isSwiftIdentifier(name) {
 export function isKotlinIdentifier(name) {
   return identifierPatterns.kotlin.test(name) && !reservedWords.kotlin.has(name) && !name.startsWith("semantifold_") &&
     !name.startsWith("SEMANTIFOLD_")
+}
+
+/**
+ * Protects Dart keywords, VM scalar/scaffold names, and compiler-owned helpers.
+ * @param {string} name - Caller-owned function or binding name.
+ * @returns {boolean} Whether ordinary Dart syntax can preserve the name.
+ */
+export function isDartIdentifier(name) {
+  return identifierPatterns.dart.test(name) && !reservedWords.dart.has(name) &&
+    !name.startsWith("_semantifold") && name.normalize("NFC") == name
 }

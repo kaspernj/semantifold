@@ -2,6 +2,7 @@
 
 /** @type {Readonly<Record<import("../semantic/types.js").TextBackendLanguage, Readonly<Record<import("../semantic/types.js").FunctionReturnTypeName, string>>>>} */
 const targetScalarTypes = Object.freeze({
+  dart: Object.freeze({boolean: "bool", integer: "int", string: "String", void: "void"}),
   swift: Object.freeze({boolean: "Bool", integer: "Int64", string: "String", void: "Void"}),
   rust: Object.freeze({boolean: "bool", integer: "i64", string: "String", void: "()"}),
   cpp: Object.freeze({boolean: "bool", integer: "std::int64_t", string: "std::string", void: "void"}),
@@ -76,6 +77,7 @@ export function emitSemanticType(language, type, javaBoxed = false) {
  * @returns {string} Target string literal.
  */
 export function emitStringLiteral(language, value) {
+  if (language == "dart") return emitDartString(value)
   if (language == "swift") return emitSwiftString(value)
   if (language == "php") return emitPhpString(value)
   if (language == "ruby") return emitRubyString(value)
@@ -89,6 +91,33 @@ export function emitStringLiteral(language, value) {
   const escapedLineSeparators = literal.replaceAll("\u2028", "\\u2028").replaceAll("\u2029", "\\u2029")
 
   return language == "csharp" ? escapedLineSeparators.replaceAll("\u0085", "\\u0085") : escapedLineSeparators
+}
+
+/**
+ * Emits an ordinary noninterpolated Dart string.
+ * @param {string} value Valid Unicode scalar string.
+ * @returns {string} Dart string literal.
+ */
+function emitDartString(value) {
+  let emitted = "\""
+
+  for (const character of value) {
+    const codePoint = /** @type {number} */ (character.codePointAt(0))
+
+    if (character == "\"") emitted += "\\\""
+    else if (character == "\\") emitted += "\\\\"
+    else if (character == "$") emitted += "\\$"
+    else if (character == "\n") emitted += "\\n"
+    else if (character == "\r") emitted += "\\r"
+    else if (character == "\t") emitted += "\\t"
+    else if (character == "\b") emitted += "\\b"
+    else if (character == "\f") emitted += "\\f"
+    else if (character == "\v") emitted += "\\v"
+    else if (codePoint < 32 || codePoint == 127 || codePoint == 0x85 || codePoint == 0x2028 || codePoint == 0x2029) {
+      emitted += `\\u{${codePoint.toString(16)}}`
+    } else emitted += character
+  }
+  return `${emitted}"`
 }
 
 /**

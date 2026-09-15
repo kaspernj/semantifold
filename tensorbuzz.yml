@@ -8,7 +8,25 @@ before_install:
   - sudo ln --symbolic --force /usr/local/go/bin/go /usr/local/bin/go
   - sudo ln --symbolic --force /usr/local/go/bin/gofmt /usr/local/bin/gofmt
   - sudo apt-get update
-  - sudo apt-get install --yes --no-install-recommends php-cli python3 ruby openjdk-25-jdk-headless=25.0.4+7-1~24.04 dotnet-sdk-10.0 ca-certificates curl gnupg g++-13 xz-utils build-essential libncurses6 libxml2-dev
+  - sudo apt-get install --yes --no-install-recommends php-cli python3 ruby openjdk-25-jdk-headless=25.0.4+7-1~24.04 dotnet-sdk-10.0 ca-certificates curl gnupg g++-13 unzip xz-utils build-essential libncurses6 libxml2-dev
+  - |
+    sudo sh -eu <<'DART_TOOLCHAIN'
+    test "$(dpkg --print-architecture)" = "amd64"
+    DART_ROOT=/tmp/semantifold-dart
+    DART_ARCHIVE="$DART_ROOT/dartsdk-linux-x64-release.zip"
+    install -d -m 0755 "$DART_ROOT"
+    curl --fail --silent --show-error --location --retry 5 --retry-delay 5 --retry-all-errors https://storage.googleapis.com/dart-archive/channels/stable/release/3.13.3/sdk/dartsdk-linux-x64-release.zip --output "$DART_ARCHIVE"
+    printf '%s  %s\n' '549c182cffbdc6864df7509c16fec646c73fe6cb8a18c2cb572db1292f300cd7' "$DART_ARCHIVE" | sha256sum --check -
+    unzip -q "$DART_ARCHIVE" -d "$DART_ROOT"
+    rm -rf /opt/dart-sdk-3.13.3
+    mv "$DART_ROOT/dart-sdk" /opt/dart-sdk-3.13.3
+    ln --symbolic --force /opt/dart-sdk-3.13.3/bin/dart /usr/local/bin/dart
+    DART_VERSION_OUTPUT="$(/opt/dart-sdk-3.13.3/bin/dart --version 2>&1)"
+    printf '%s\n' "$DART_VERSION_OUTPUT"
+    test "$DART_VERSION_OUTPUT" = 'Dart SDK version: 3.13.3 (stable) (Tue Sep 1 01:07:17 2026 -0700) on "linux_x64"'
+    test "$(readlink -f "$(command -v dart)")" = "/opt/dart-sdk-3.13.3/bin/dart"
+    rm -rf "$DART_ROOT"
+    DART_TOOLCHAIN
   - |
     sudo sh -eu <<'KOTLIN_TOOLCHAIN'
     KOTLIN_ROOT=/tmp/semantifold-kotlin
@@ -137,6 +155,7 @@ before_script:
   - npm ci
 environment:
   NODE_ENV: test
+  SEMANTIFOLD_DART: /opt/dart-sdk-3.13.3/bin/dart
   SEMANTIFOLD_NODE: /usr/local/bin/node
   SEMANTIFOLD_KOTLINC: /opt/kotlinc/bin/kotlinc
   SEMANTIFOLD_PYTHON: /usr/bin/python3
@@ -161,6 +180,6 @@ builds:
       - npm ls --all
       - npm pack --dry-run --json
   end_to_end:
-    name: Thirteen-language tests with Kotlin/JVM, Rust debug/release and C/CPP O0/O2 sanitizers
+    name: Fourteen-language tests with Dart VM/native, Kotlin/JVM, Rust debug/release and C/CPP O0/O2 sanitizers
     script:
       - LANG=C.UTF-8 LC_ALL=C.UTF-8 npm test

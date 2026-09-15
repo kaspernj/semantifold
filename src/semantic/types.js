@@ -1,6 +1,6 @@
 // @ts-check
 
-/** @typedef {"php" | "ruby" | "javascript" | "typescript" | "java" | "kotlin" | "python" | "csharp" | "go" | "c" | "cpp" | "rust" | "swift"} SemanticLanguage */
+/** @typedef {"php" | "ruby" | "javascript" | "typescript" | "java" | "kotlin" | "python" | "csharp" | "go" | "c" | "cpp" | "rust" | "swift" | "dart"} SemanticLanguage */
 /** @typedef {SemanticLanguage} TextBackendLanguage */
 /** @typedef {TextBackendLanguage | "wasm" | "ios"} BackendLanguage */
 /** @typedef {SemanticLanguage | "html"} GeneratedTextLanguage */

@@ -24,6 +24,10 @@ const kotlinModule = parse({language: "kotlin", filename: "Program.kt", source:
   "fun add(left: Long, right: Long): Long { return left + right }\\nfun main() { println(add(1, 2)) }\\n"})
 const kotlinArtifacts = generateArtifactSet({language: "kotlin", module: kotlinModule})
 void kotlinArtifacts
+const dartModule = parse({language: "dart", filename: "program.dart", source:
+  "int add(int left, int right) { return left + right; }\\nvoid main() { print(add(1, 2)); }\\n"})
+const dartArtifacts = generateArtifactSet({language: "dart", module: dartModule})
+void dartArtifacts
 `
 
 export const consumerSource = `
@@ -56,6 +60,8 @@ const cGrammarPath = internalRequire.resolve("tree-sitter-c")
 const goGrammarPath = semantifoldRequire.resolve("tree-sitter-go/bindings/node/index.js")
 const kotlinGrammarPath = semantifoldRequire.resolve("tree-sitter-kotlin")
 const kotlinGrammar = JSON.parse(await readFile(semantifoldRequire.resolve("tree-sitter-kotlin/package.json"), "utf8"))
+const dartGrammarPath = semantifoldRequire.resolve("tree-sitter-dart-orchard/bindings/node/index.js")
+const dartGrammar = JSON.parse(await readFile(semantifoldRequire.resolve("tree-sitter-dart-orchard/package.json"), "utf8"))
 const modernRuntime = JSON.parse(await readFile(semantifoldRequire.resolve("tree-sitter/package.json"), "utf8"))
 const legacyRuntime = JSON.parse(await readFile(internalRequire.resolve("tree-sitter/package.json"), "utf8"))
 const cGrammar = JSON.parse(await readFile(internalRequire.resolve("tree-sitter-c/package.json"), "utf8"))
@@ -63,16 +69,20 @@ const internalManifest = JSON.parse(await readFile(path.join(internalDirectory, 
 const consumerModules = path.join(process.cwd(), "node_modules") + path.sep
 
 for (const filename of [semantifoldEntry, internalEntry, modernRuntimePath, legacyRuntimePath, cGrammarPath, cppGrammarPath,
-  rustGrammarPath, kotlinGrammarPath]) {
+  rustGrammarPath, kotlinGrammarPath, dartGrammarPath]) {
   assert.ok((await realpath(filename)).startsWith(consumerModules))
 }
 const {parseCst} = await import(pathToFileURL(internalEntry).href)
 const {default: Parser} = await import(pathToFileURL(modernRuntimePath).href)
 const {default: GoLanguage} = await import(pathToFileURL(goGrammarPath).href)
+const {default: DartLanguage} = await import(pathToFileURL(dartGrammarPath).href)
 const goParser = new Parser()
+const dartParser = new Parser()
 
 goParser.setLanguage(GoLanguage)
+dartParser.setLanguage(DartLanguage)
 const goTree = goParser.parse("package main\\nfunc main() {}\\n")
+const dartTree = dartParser.parse("void main() {}\\n")
 const cSnapshot = parseCst("/* 😀 */\\r\\nint main(void) { return 0; }\\r\\n")
 
 function isPlainFrozenData(value) {
@@ -89,6 +99,7 @@ const cppSnapshot = parseCst("std::string copy(std::string a, std::string b) { r
 assert.equal(cppSnapshot.language, "cpp")
 assert.equal(cppSnapshot.root.hasError, false)
 assert.equal(goTree.rootNode.hasError, false)
+assert.equal(dartTree.rootNode.hasError, false)
 assert.equal(cSnapshot.root.hasError, false)
 assert.equal(cSnapshot.root.endIndex, "/* 😀 */\\r\\nint main(void) { return 0; }\\r\\n".length)
 assert.deepEqual(JSON.parse(JSON.stringify(cSnapshot)), cSnapshot)
@@ -183,7 +194,21 @@ try {
     artifacts: kotlinArtifacts}, null, 2) + "\\n")
   await rm(kotlinDirectory, {recursive: true, force: true})
 }
+const dartSource = "int add(int left, int right) { return left + right; }\\nvoid main() { print(add(1, 2)); }\\n"
+const dartModule = semantifold.parse({language: "dart", filename: "program.dart", source: dartSource})
+const dartArtifacts = semantifold.generateArtifactSet({language: "dart", module: dartModule})
+assert.deepEqual(dartArtifacts.artifacts.map(({path: artifactPath}) => artifactPath),
+  ["pubspec.yaml", "pubspec.lock", "bin/program.dart"])
+const dartRoundTrip = semantifold.parse({language: "dart", filename: "bin/program.dart",
+  source: dartArtifacts.artifacts[2].content})
+assert.equal(dartRoundTrip.functions[0].name, "add")
+assert.deepEqual(semantifold.generateArtifactSet({language: "dart", module: dartRoundTrip}).artifacts.map(({content}) => content),
+  dartArtifacts.artifacts.map(({content}) => content))
 process.stdout.write(JSON.stringify({
+  dartGrammarVersion: dartGrammar.version,
+  dartGrammarIsInstalled: (await realpath(dartGrammarPath)).startsWith(consumerModules),
+  dartRoot: dartTree.rootNode.type,
+  dartRoundTrip: true,
   rustGrammarVersion: rustGrammar.version,
   rustGrammarIsInternal: rustGrammarPath.startsWith(internalDirectory + path.sep),
   rustSnapshotIsPlainFrozenData: isPlainFrozenData(rustSnapshot),

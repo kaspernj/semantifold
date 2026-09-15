@@ -12,7 +12,7 @@ import {
 import {createLanguageRegistry} from "../src/language-registry.js"
 
 const originalFive = ["php", "ruby", "javascript", "typescript", "java"]
-const allLanguages = [...originalFive, "kotlin", "python", "csharp", "go", "c", "cpp", "rust", "swift"]
+const allLanguages = [...originalFive, "kotlin", "python", "csharp", "go", "c", "cpp", "rust", "swift", "dart"]
 const allTargets = [...allLanguages, "wasm", "ios"]
 
 describe("language role registry", () => {
@@ -66,11 +66,13 @@ describe("language role registry", () => {
         provider: originalFive.includes(descriptor.id),
         textBackend: true
       })
+      const task005 = originalFive.includes(descriptor.id) || descriptor.id == "dart"
+
       expect(descriptor.features).toEqual({
         closedRecords: originalFive.includes(descriptor.id),
         conditionControlledLoops: originalFive.includes(descriptor.id),
         effectfulCapabilitiesAndResources: originalFive.includes(descriptor.id),
-        generalFunctionsAndCalls: originalFive.includes(descriptor.id),
+        generalFunctionsAndCalls: task005,
         immutableCollections: originalFive.includes(descriptor.id),
         optionalValues: originalFive.includes(descriptor.id),
         orderedListIteration: originalFive.includes(descriptor.id),
@@ -79,7 +81,7 @@ describe("language role registry", () => {
         typeParametersAndGenerics: originalFive.includes(descriptor.id),
         typedErrors: originalFive.includes(descriptor.id)
       })
-      expect(descriptor.artifactMultiplicity).toEqual(["csharp", "go", "c", "rust"].includes(descriptor.id) ? "multiple" : "single")
+      expect(descriptor.artifactMultiplicity).toEqual(["csharp", "go", "c", "rust", "dart"].includes(descriptor.id) ? "multiple" : "single")
       expect(descriptor.roundTrip).toBeTrue()
       expect(descriptor.mapping).toEqual({binaryRanges: false, richText: true, sourceMapV3: true})
       assert.ok(descriptor.acceptance.stages.includes("parse"))

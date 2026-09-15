@@ -12,7 +12,7 @@ import {
   SemantifoldDiagnostic
 } from "../index.js"
 
-const cohort = ["php", "ruby", "javascript", "typescript", "java"]
+const cohort = ["php", "ruby", "javascript", "typescript", "java", "dart"]
 const deferred = ["kotlin", "python", "csharp", "go", "c", "cpp", "rust", "swift", "wasm"]
 
 async function moduleFromFixture() {
@@ -61,8 +61,9 @@ describe("general function backend validation", () => {
     const module = await moduleFromFixture()
 
     for (const language of cohort) {
-      const generated = generate({language, module})
-      const filename = language == "java" ? "Main.java" : `program.${language}`
+      const dart = language == "dart" ? generateArtifactSet({language, module}) : undefined
+      const generated = dart ? String(dart.artifacts.find(({role}) => role == "entry")?.content) : generate({language, module})
+      const filename = language == "java" ? "Main.java" : language == "dart" ? "bin/program.dart" : `program.${language}`
       const reparsed = parse({filename, language, source: generated})
 
       expect(reparsed.functions.map(({parameters, returnType}) => [parameters.length, returnType.name])).toEqual([

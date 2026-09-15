@@ -8,6 +8,7 @@ import {generateCSharpProject} from "./backends/csharp.js"
 import {generateGoModule} from "./backends/go.js"
 import {generateRustProject} from "./backends/rust.js"
 import {generateSwift} from "./backends/swift.js"
+import {generateDartPackage} from "./backends/dart.js"
 import {generateJavaScript} from "./backends/javascript.js"
 import {generatePhp} from "./backends/php.js"
 import {generatePython} from "./backends/python.js"
@@ -21,6 +22,7 @@ import {parseCSharp} from "./frontends/csharp.js"
 import {parseGo} from "./frontends/go.js"
 import {parseRust} from "./frontends/rust.js"
 import {parseSwift} from "./frontends/swift.js"
+import {parseDart} from "./frontends/dart.js"
 import {parseCpp} from "./frontends/cpp.js"
 import {generateCpp} from "./backends/cpp.js"
 import {parseC} from "./frontends/c.js"
@@ -364,6 +366,12 @@ const csharpFrontend = ({filename, source}) => parseCSharp({filename, source})
  */
 const goFrontend = ({filename, source}) => parseGo({filename, source})
 
+/**
+ * Dart registry frontend wrapper.
+ * @type {Frontend}
+ */
+const dartFrontend = ({filename, source}) => parseDart({filename, source})
+
 const records = [
   language({
     acceptance: {stages: ["parse", "generate", "execute"], toolchains: ["php82"]},
@@ -459,6 +467,28 @@ const records = [
   }),
   language({acceptance: {stages: ["parse", "generate", "compile", "execute"], toolchains: ["swiftc"]},
     defaultFilename: "program.swift", frontend: parseSwift, id: "swift", mediaType: "text/x-swift", textBackend: generateSwift}),
+  language({
+    acceptance: {stages: ["parse", "generate", "restore", "compile", "validate", "execute"], toolchains: ["dart"]},
+    artifactMultiplicity: "multiple",
+    defaultFilename: "bin/program.dart",
+    features: {
+      closedRecords: false,
+      conditionControlledLoops: false,
+      effectfulCapabilitiesAndResources: false,
+      generalFunctionsAndCalls: true,
+      immutableCollections: false,
+      optionalValues: false,
+      orderedListIteration: false,
+      orderedMapIteration: false,
+      referenceClasses: false,
+      typedErrors: false,
+      typeParametersAndGenerics: false
+    },
+    frontend: dartFrontend,
+    id: "dart",
+    mediaType: "text/x-dart",
+    textBackend: generateDartPackage
+  }),
   {
     acceptance: {stages: ["generate", "validate", "instantiate", "execute"], toolchains: ["wasm-validate", "node", "chromium"]},
     applicationBackend: generateBrowserWasm,
