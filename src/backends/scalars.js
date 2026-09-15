@@ -2,6 +2,7 @@
 
 /** @type {Readonly<Record<import("../semantic/types.js").TextBackendLanguage, Readonly<Record<import("../semantic/types.js").FunctionReturnTypeName, string>>>>} */
 const targetScalarTypes = Object.freeze({
+  dart: Object.freeze({boolean: "bool", integer: "int", string: "String", void: "void"}),
   swift: Object.freeze({boolean: "Bool", integer: "Int64", string: "String", void: "Void"}),
   rust: Object.freeze({boolean: "bool", integer: "i64", string: "String", void: "()"}),
   cpp: Object.freeze({boolean: "bool", integer: "std::int64_t", string: "std::string", void: "void"}),
