@@ -197,7 +197,7 @@ fun main() {
     expect(build).toContain("abortOnError = true")
     expect(build).toContain("warningsAsErrors = true")
     expect([...build.matchAll(/disable \+= "([^"]+)"/gu)].map(([, issue]) => issue))
-      .toEqual(["MissingApplicationIcon", "OldTargetApi"])
+      .toEqual(["MissingApplicationIcon", "OldTargetApi", "GradleDependency"])
     expect(manifest).toContain('android:exported="true"')
     expect(manifest.replace('xmlns:android="http://schemas.android.com/apk/res/android"', ""))
       .not.toMatch(/uses-permission|<service|<receiver|<provider|http:|https:/u)
