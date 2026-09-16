@@ -116,6 +116,7 @@ describe("Android application artifact target", () => {
       `${root}/app/src/main/res/layout/activity_main.xml`,
       `${root}/app/src/main/res/values/strings.xml`,
       `${root}/app/src/main/res/values/themes.xml`,
+      `${root}/app/src/main/res/xml/backup_rules.xml`,
       `${root}/app/src/main/res/xml/data_extraction_rules.xml`,
       `${root}/app/src/test/kotlin/dev/semantifold/generated/SemantifoldEntryTest.kt`,
       `${root}/build.gradle.kts`,
@@ -179,6 +180,7 @@ fun main() {
     const root = "generated/android-app"
     const build = content[`${root}/app/build.gradle.kts`]
     const manifest = content[`${root}/app/src/main/AndroidManifest.xml`]
+    const backupRules = content[`${root}/app/src/main/res/xml/backup_rules.xml`]
     const dataExtractionRules = content[`${root}/app/src/main/res/xml/data_extraction_rules.xml`]
     const activity = content[`${root}/app/src/main/kotlin/dev/semantifold/generated/MainActivity.kt`]
     const layout = content[`${root}/app/src/main/res/layout/activity_main.xml`]
@@ -201,7 +203,21 @@ fun main() {
     expect([...build.matchAll(/disable \+= "([^"]+)"/gu)].map(([, issue]) => issue))
       .toEqual(["MissingApplicationIcon", "OldTargetApi", "GradleDependency"])
     expect(manifest).toContain('android:allowBackup="false"')
+    expect(manifest).toContain('android:fullBackupContent="@xml/backup_rules"')
     expect(manifest).toContain('android:dataExtractionRules="@xml/data_extraction_rules"')
+    expect(backupRules).toEqual(`<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+  <exclude domain="root" path="." />
+  <exclude domain="file" path="." />
+  <exclude domain="database" path="." />
+  <exclude domain="sharedpref" path="." />
+  <exclude domain="external" path="." />
+  <exclude domain="device_root" path="." />
+  <exclude domain="device_file" path="." />
+  <exclude domain="device_database" path="." />
+  <exclude domain="device_sharedpref" path="." />
+</full-backup-content>
+`)
     expect(dataExtractionRules).toEqual(`<?xml version="1.0" encoding="utf-8"?>
 <data-extraction-rules>
   <cloud-backup>

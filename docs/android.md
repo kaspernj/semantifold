@@ -11,7 +11,7 @@ const project = generateProgramArtifactSet({
 })
 ```
 
-Every path is below fixed root `generated/android-app`. The set contains pinned settings/root/app Gradle Kotlin scripts, `gradle.properties`, one allowlisted manifest, mapped per-module semantic Kotlin, a checked scalar/output runtime, one `Activity`, one native XML `TextView`, label/theme resources, explicit no-backup data extraction rules, one JUnit unit test, a platform-only instrumentation test, and `semantifold-project.json`. There is no Gradle wrapper JAR or distribution, SDK, Maven archive, APK, key, cache, or binary tool in the returned project.
+Every path is below fixed root `generated/android-app`. The set contains pinned settings/root/app Gradle Kotlin scripts, `gradle.properties`, one allowlisted manifest, mapped per-module semantic Kotlin, a checked scalar/output runtime, one `Activity`, one native XML `TextView`, label/theme resources, paired legacy full-backup and Android 12+ data-extraction exclusion resources, one JUnit unit test, a platform-only instrumentation test, and `semantifold-project.json`. There is no Gradle wrapper JAR or distribution, SDK, Maven archive, APK, key, cache, or binary tool in the returned project.
 
 ## Application contract
 
@@ -33,7 +33,7 @@ Defaults are:
 
 Application/package segments are lowercase Java/Kotlin identifiers and cannot be keywords. The activity is an ASCII upper-camel identifier and cannot shadow an unqualified symbol used by the generated Activity, unit test, or instrumentation scaffold. Labels are trimmed Unicode-scalar strings of at most 64 characters. SDK values are the qualified fixed matrix, version code is positive and Android-bounded, and version name is canonical. The permission allowlist is empty.
 
-The manifest contains exactly one exported launcher activity and no permissions, services, receivers, providers, deep links, network/storage access, or background work. It keeps `android:allowBackup="false"` and references a synthetic Android 12+ data extraction resource that excludes every supported storage domain from both cloud backup and device transfer. The activity runs the semantic entry afresh and joins captured output with one LF between printed values. The sole native `TextView` has ID `semantifold_output` and is accessibility-important; its visible text is the accessibility-node text, so no redundant `contentDescription` is generated.
+The manifest contains exactly one exported launcher activity and no permissions, services, receivers, providers, deep links, network/storage access, or background work. It keeps `android:allowBackup="false"`, points `android:fullBackupContent` to the owned `@xml/backup_rules` exclusions for API 23–30, and points `android:dataExtractionRules` to the owned `@xml/data_extraction_rules` cloud-backup/device-transfer exclusions for Android 12+. Both resources exclude every supported storage domain. The activity runs the semantic entry afresh and joins captured output with one LF between printed values. The sole native `TextView` has ID `semantifold_output` and is accessibility-important; its visible text is the accessibility-node text, so no redundant `contentDescription` is generated.
 
 ## Semantic and provenance boundary
 

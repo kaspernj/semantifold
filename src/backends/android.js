@@ -189,6 +189,8 @@ export function generateAndroidApplication(input) {
       renderStrings(configuration, configurationSpans), "Escaped application labels derived from configuration."),
     syntheticText(`${projectRoot}/app/src/main/res/values/themes.xml`, "resource", renderTheme(),
       "Closed platform-native application theme."),
+    syntheticText(`${projectRoot}/app/src/main/res/xml/backup_rules.xml`, "resource", renderBackupRules(),
+      "Closed API 23-30 full-backup exclusions."),
     syntheticText(`${projectRoot}/app/src/main/res/xml/data_extraction_rules.xml`, "resource", renderDataExtractionRules(),
       "Closed Android 12+ cloud-backup and device-transfer exclusions."),
     configuredText(`${projectRoot}/app/src/test/kotlin/${packagePath}/SemantifoldEntryTest.kt`, "support",
@@ -347,6 +349,7 @@ function applicationPaths(configuration, modulePaths) {
     `${projectRoot}/app/src/main/res/layout/activity_main.xml`,
     `${projectRoot}/app/src/main/res/values/strings.xml`,
     `${projectRoot}/app/src/main/res/values/themes.xml`,
+    `${projectRoot}/app/src/main/res/xml/backup_rules.xml`,
     `${projectRoot}/app/src/main/res/xml/data_extraction_rules.xml`,
     `${projectRoot}/app/src/test/kotlin/${packagePath}/SemantifoldEntryTest.kt`,
     `${projectRoot}/build.gradle.kts`,
@@ -469,11 +472,31 @@ function renderAndroidManifest(configuration, spans) {
   const orientation = configuration.orientation == "unspecified" ? "" : ` android:screenOrientation="${configuration.orientation}"`
 
   return configured(`${projectRoot}/app/src/main/AndroidManifest.xml`, spans, [
-    `<?xml version="1.0" encoding="utf-8"?>\n<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n  <application\n    android:allowBackup="false"\n    android:dataExtractionRules="@xml/data_extraction_rules"\n    android:label="@string/app_name"\n    android:supportsRtl="true"\n    android:theme="@style/Theme.Semantifold">\n    <activity\n      android:name="`,
+    `<?xml version="1.0" encoding="utf-8"?>\n<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n  <application\n    android:allowBackup="false"\n    android:dataExtractionRules="@xml/data_extraction_rules"\n    android:fullBackupContent="@xml/backup_rules"\n    android:label="@string/app_name"\n    android:supportsRtl="true"\n    android:theme="@style/Theme.Semantifold">\n    <activity\n      android:name="`,
     field("packageName", configuration.packageName), `.`, field("activityClassName", configuration.activityClassName),
     `"\n      android:exported="true"`,
     orientation ? field("orientation", orientation) : "", `>\n      <intent-filter>\n        <action android:name="android.intent.action.MAIN" />\n        <category android:name="android.intent.category.LAUNCHER" />\n      </intent-filter>\n    </activity>\n  </application>\n</manifest>\n`
   ])
+}
+
+/**
+ * Renders explicit API 23-30 exclusions for every full-backup storage domain.
+ * @returns {string} Android full-backup rules XML.
+ */
+function renderBackupRules() {
+  return `<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+  <exclude domain="root" path="." />
+  <exclude domain="file" path="." />
+  <exclude domain="database" path="." />
+  <exclude domain="sharedpref" path="." />
+  <exclude domain="external" path="." />
+  <exclude domain="device_root" path="." />
+  <exclude domain="device_file" path="." />
+  <exclude domain="device_database" path="." />
+  <exclude domain="device_sharedpref" path="." />
+</full-backup-content>
+`
 }
 
 /**

@@ -34,7 +34,7 @@ try {
   rejected = error.code === "INVALID_APPLICATION_INPUT"
 }
 console.log(JSON.stringify({
-  artifactCount: set.artifacts.length,
+  artifactPaths: set.artifacts.map(({path}) => path),
   entry: set.entry,
   hasMaterializer: "materializeAndroidAcceptanceProject" in semantifold,
   rejected,
@@ -106,7 +106,25 @@ describe("packed Android application consumer", () => {
         const executed = await executeFile(process.execPath, ["consumer.mjs"], {cwd: consumerDirectory, env: environment})
 
         expect(JSON.parse(executed.stdout)).toEqual({
-          artifactCount: 15,
+          artifactPaths: [
+            "generated/android-app/app/build.gradle.kts",
+            "generated/android-app/app/src/androidTest/AndroidManifest.xml",
+            "generated/android-app/app/src/androidTest/kotlin/dev/semantifold/generated/SemantifoldUiInstrumentation.kt",
+            "generated/android-app/app/src/main/AndroidManifest.xml",
+            "generated/android-app/app/src/main/kotlin/dev/semantifold/generated/MainActivity.kt",
+            "generated/android-app/app/src/main/kotlin/dev/semantifold/generated/semantic/Main.kt",
+            "generated/android-app/app/src/main/kotlin/dev/semantifold/generated/semantic/SemantifoldRuntime.kt",
+            "generated/android-app/app/src/main/res/layout/activity_main.xml",
+            "generated/android-app/app/src/main/res/values/strings.xml",
+            "generated/android-app/app/src/main/res/values/themes.xml",
+            "generated/android-app/app/src/main/res/xml/backup_rules.xml",
+            "generated/android-app/app/src/main/res/xml/data_extraction_rules.xml",
+            "generated/android-app/app/src/test/kotlin/dev/semantifold/generated/SemantifoldEntryTest.kt",
+            "generated/android-app/build.gradle.kts",
+            "generated/android-app/gradle.properties",
+            "generated/android-app/settings.gradle.kts",
+            "generated/android-app/semantifold-project.json"
+          ],
           entry: "generated/android-app/app/src/main/kotlin/dev/semantifold/generated/MainActivity.kt",
           hasMaterializer: false,
           rejected: true,
