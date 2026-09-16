@@ -47,12 +47,12 @@ export function generateKotlin(module, writer) {
     writer.mapped(emitScalarType("kotlin", declaration.returnType), {mappingKind: "exact", node: declaration.returnType,
       path: `${path}/returnType`, role: "type"})
     writer.synthetic(" {\n", "Kotlin function body scaffold", [declaration], [path])
-    emitBlock(writer, declaration.body, "  ", `${path}/body`)
+    emitKotlinBlock(writer, declaration.body, "  ", `${path}/body`)
     writer.synthetic("}\n", "Kotlin function body scaffold", [declaration], [path])
   })
 
   writer.synthetic("\nfun main() {\n", "Kotlin generated main scaffold", [module.entryPoint], ["/entryPoint"])
-  emitBlock(writer, module.entryPoint.body, "  ", "/entryPoint/body")
+  emitKotlinBlock(writer, module.entryPoint.body, "  ", "/entryPoint/body")
   writer.synthetic("}\n", "Kotlin generated main scaffold", [module.entryPoint], ["/entryPoint"])
 }
 
@@ -62,10 +62,12 @@ export function generateKotlin(module, writer) {
  * @param {import("../semantic/types.js").Block} block - Semantic block.
  * @param {string} indent - Current indentation.
  * @param {string} path - Semantic block path.
+ * @param {string} [printTarget] - Target-owned print function spelling.
  * @returns {void}
  */
-function emitBlock(writer, block, indent, path) {
-  block.statements.forEach((statement, index) => emitStatement(writer, statement, indent, `${path}/statements/${index}`))
+export function emitKotlinBlock(writer, block, indent, path, printTarget = "println") {
+  block.statements.forEach((statement, index) =>
+    emitKotlinStatement(writer, statement, indent, `${path}/statements/${index}`, printTarget))
 }
 
 /**
@@ -74,9 +76,10 @@ function emitBlock(writer, block, indent, path) {
  * @param {import("../semantic/types.js").Statement} statement - Semantic statement.
  * @param {string} indent - Current indentation.
  * @param {string} path - Semantic statement path.
+ * @param {string} printTarget - Target-owned print function spelling.
  * @returns {void}
  */
-function emitStatement(writer, statement, indent, path) {
+function emitKotlinStatement(writer, statement, indent, path, printTarget) {
   writer.synthetic(indent, "indentation", [statement], [path])
   if (statement.kind == "LocalDeclaration") {
     writer.mapped(statement.mutable ? "var" : "val", {mappingKind: "anchor", node: statement, path})
@@ -111,7 +114,7 @@ function emitStatement(writer, statement, indent, path) {
     return
   }
   if (statement.kind == "PrintStatement") {
-    writer.synthetic("println(", "Kotlin println plumbing", [statement], [path])
+    writer.synthetic(`${printTarget}(`, "Kotlin print plumbing", [statement], [path])
     emitExpression(writer, statement.expression, `${path}/expression`, "kotlin", identity)
     writer.synthetic(")\n", "Kotlin println plumbing", [statement], [path])
     return
@@ -121,11 +124,11 @@ function emitStatement(writer, statement, indent, path) {
   writer.synthetic(" (", "Kotlin conditional scaffold", [statement], [path])
   emitExpression(writer, statement.condition, `${path}/condition`, "kotlin", identity)
   writer.synthetic(") {\n", "Kotlin conditional scaffold", [statement.consequent], [`${path}/consequent`])
-  emitBlock(writer, statement.consequent, `${indent}  `, `${path}/consequent`)
+  emitKotlinBlock(writer, statement.consequent, `${indent}  `, `${path}/consequent`, printTarget)
   writer.synthetic(`${indent}}`, "Kotlin conditional scaffold", [statement.consequent], [`${path}/consequent`])
   if (statement.alternate) {
     writer.synthetic(" else {\n", "Kotlin alternate scaffold", [statement.alternate], [`${path}/alternate`])
-    emitBlock(writer, statement.alternate, `${indent}  `, `${path}/alternate`)
+    emitKotlinBlock(writer, statement.alternate, `${indent}  `, `${path}/alternate`, printTarget)
     writer.synthetic(`${indent}}`, "Kotlin alternate scaffold", [statement.alternate], [`${path}/alternate`])
   }
   writer.synthetic("\n", "line break", [statement], [path])

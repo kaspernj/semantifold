@@ -2255,6 +2255,12 @@ export function emitExpression(writer, expression, path, language, emitIdentifie
       emitExpression(writer, argument, `${path}/arguments/${index}`, language, emitIdentifier)
       if (dartMultiline) writer.synthetic(",\n", "Dart formatter argument separator", [expression], [path])
     })
+    const callArgumentSuffix = writer.callArgumentSuffixFor(expression)
+
+    if (callArgumentSuffix) {
+      writer.synthetic(`${expression.arguments.length ? ", " : ""}${callArgumentSuffix}`,
+        "target-container semantic call argument", [expression], [path])
+    }
     if (dartMultiline) writer.synthetic(dartIndent, "Dart call closing indentation", [expression], [path])
     writer.mapped(")", {mappingKind: "anchor", node: expression, path})
     return
@@ -2404,6 +2410,19 @@ export function emitExpression(writer, expression, path, language, emitIdentifie
     emitKotlinIntegerHelper(writer, expression, path, helper, [
       [expression.left, `${path}/left`], [expression.right, `${path}/right`]
     ])
+    return
+  }
+
+  if (language == "kotlin" && writer.usesMethodStringEquality() &&
+    (expression.operation == "StringEqual" || expression.operation == "StringNotEqual")) {
+    writer.mapped("(", {mappingKind: "anchor", node: expression, path})
+    if (expression.operation == "StringNotEqual") {
+      writer.mapped("!", {mappingKind: "exact", node: expression, path, role: "operator"})
+    }
+    emitExpression(writer, expression.left, `${path}/left`, language, emitIdentifier)
+    writer.mapped(".equals(", {mappingKind: "exact", node: expression, path, role: "operator"})
+    emitExpression(writer, expression.right, `${path}/right`, language, emitIdentifier)
+    writer.mapped("))", {mappingKind: "anchor", node: expression, path})
     return
   }
 

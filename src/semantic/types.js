@@ -2,7 +2,7 @@
 
 /** @typedef {"php" | "ruby" | "javascript" | "typescript" | "java" | "kotlin" | "python" | "csharp" | "go" | "c" | "cpp" | "rust" | "swift" | "dart"} SemanticLanguage */
 /** @typedef {SemanticLanguage} TextBackendLanguage */
-/** @typedef {TextBackendLanguage | "wasm" | "ios"} BackendLanguage */
+/** @typedef {TextBackendLanguage | "wasm" | "ios" | "android"} BackendLanguage */
 /** @typedef {SemanticLanguage | "html"} GeneratedTextLanguage */
 /** @typedef {"integer" | "boolean" | "string"} SemanticTypeName */
 /** @typedef {SemanticTypeName | "void"} FunctionReturnTypeName */
@@ -53,6 +53,51 @@
 /**
  * @typedef IosApplicationAssetInput
  * @property {string} path - Full safe destination below Assets.xcassets.
+ * @property {string | Uint8Array} content - Exact caller-provided text or bytes.
+ * @property {string} mediaType - Explicit artifact media type.
+ * @property {string} sha256 - Lowercase SHA-256 of exact UTF-8 text or bytes.
+ */
+
+/**
+ * @typedef AndroidApplicationConfigurationInput
+ * @property {string} [applicationId] - Lowercase reverse-DNS Android application identity.
+ * @property {string} [namespace] - Kotlin/Android namespace; defaults to applicationId.
+ * @property {string} [packageName] - Generated Kotlin package; defaults to namespace.
+ * @property {string} [activityClassName] - Launcher Activity class name.
+ * @property {string} [productName] - Deterministic project product name.
+ * @property {string} [displayName] - User-visible application label.
+ * @property {23} [minimumSdk] - Qualified minimum Android API.
+ * @property {35} [targetSdk] - Qualified target Android API.
+ * @property {35} [compileSdk] - Qualified compile Android API.
+ * @property {"35.0.0"} [buildToolsVersion] - Qualified Android Build Tools version.
+ * @property {number} [versionCode] - Positive Android version code.
+ * @property {string} [versionName] - Canonical application version name.
+ * @property {"unspecified"} [orientation] - Baseline orientation behavior.
+ * @property {"system"} [theme] - Baseline platform-native theme.
+ * @property {unknown[]} [permissions] - Validated as the closed empty permission set.
+ */
+
+/**
+ * @typedef AndroidApplicationConfiguration
+ * @property {string} applicationId - Validated Android application identity.
+ * @property {string} namespace - Validated Android namespace.
+ * @property {string} packageName - Generated Kotlin package.
+ * @property {string} activityClassName - Launcher Activity class name.
+ * @property {string} productName - Project product name.
+ * @property {string} displayName - User-visible application label.
+ * @property {23} minimumSdk - Qualified minimum Android API.
+ * @property {35} targetSdk - Qualified target Android API.
+ * @property {35} compileSdk - Qualified compile Android API.
+ * @property {"35.0.0"} buildToolsVersion - Qualified Android Build Tools version.
+ * @property {number} versionCode - Positive Android version code.
+ * @property {string} versionName - Canonical application version name.
+ * @property {"unspecified"} orientation - Baseline orientation behavior.
+ * @property {"system"} theme - Platform-native theme.
+ */
+
+/**
+ * @typedef AndroidApplicationInputFile
+ * @property {string} path - Safe path relative to the selected fixed Android resource or asset root.
  * @property {string | Uint8Array} content - Exact caller-provided text or bytes.
  * @property {string} mediaType - Explicit artifact media type.
  * @property {string} sha256 - Lowercase SHA-256 of exact UTF-8 text or bytes.
