@@ -57,6 +57,8 @@ The qualified application lane is independent of the generic Kotlin/JVM compiler
 - platform/target API `35`, Build Tools `35.0.0`
 - emulator `35.6.11` build `13610412` and `system-images;android-35;google_apis;x86_64` revision `9`
 
+API 35 is an owner-pinned acceptance boundary rather than an ambient latest-SDK choice. Generated lint keeps warnings as errors and aborts on findings, while disabling only `MissingApplicationIcon` for the deliberately icon-free baseline and `OldTargetApi` for the conflicting moving-latest-target recommendation.
+
 Every Android SDK payload is a direct immutable official archive verified before extraction; no mutable package channel participates:
 
 | SDK input | Exact archive | SHA-256 |
