@@ -116,6 +116,7 @@ describe("Android application artifact target", () => {
       `${root}/app/src/main/res/layout/activity_main.xml`,
       `${root}/app/src/main/res/values/strings.xml`,
       `${root}/app/src/main/res/values/themes.xml`,
+      `${root}/app/src/main/res/xml/data_extraction_rules.xml`,
       `${root}/app/src/test/kotlin/dev/semantifold/generated/SemantifoldEntryTest.kt`,
       `${root}/build.gradle.kts`,
       `${root}/gradle.properties`,
@@ -178,6 +179,7 @@ fun main() {
     const root = "generated/android-app"
     const build = content[`${root}/app/build.gradle.kts`]
     const manifest = content[`${root}/app/src/main/AndroidManifest.xml`]
+    const dataExtractionRules = content[`${root}/app/src/main/res/xml/data_extraction_rules.xml`]
     const activity = content[`${root}/app/src/main/kotlin/dev/semantifold/generated/MainActivity.kt`]
     const layout = content[`${root}/app/src/main/res/layout/activity_main.xml`]
     const unitTest = content[`${root}/app/src/test/kotlin/dev/semantifold/generated/SemantifoldEntryTest.kt`]
@@ -198,6 +200,34 @@ fun main() {
     expect(build).toContain("warningsAsErrors = true")
     expect([...build.matchAll(/disable \+= "([^"]+)"/gu)].map(([, issue]) => issue))
       .toEqual(["MissingApplicationIcon", "OldTargetApi", "GradleDependency"])
+    expect(manifest).toContain('android:allowBackup="false"')
+    expect(manifest).toContain('android:dataExtractionRules="@xml/data_extraction_rules"')
+    expect(dataExtractionRules).toEqual(`<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+  <cloud-backup>
+    <exclude domain="root" path="." />
+    <exclude domain="file" path="." />
+    <exclude domain="database" path="." />
+    <exclude domain="sharedpref" path="." />
+    <exclude domain="external" path="." />
+    <exclude domain="device_root" path="." />
+    <exclude domain="device_file" path="." />
+    <exclude domain="device_database" path="." />
+    <exclude domain="device_sharedpref" path="." />
+  </cloud-backup>
+  <device-transfer>
+    <exclude domain="root" path="." />
+    <exclude domain="file" path="." />
+    <exclude domain="database" path="." />
+    <exclude domain="sharedpref" path="." />
+    <exclude domain="external" path="." />
+    <exclude domain="device_root" path="." />
+    <exclude domain="device_file" path="." />
+    <exclude domain="device_database" path="." />
+    <exclude domain="device_sharedpref" path="." />
+  </device-transfer>
+</data-extraction-rules>
+`)
     expect(manifest).toContain('android:exported="true"')
     expect(manifest.replace('xmlns:android="http://schemas.android.com/apk/res/android"', ""))
       .not.toMatch(/uses-permission|<service|<receiver|<provider|http:|https:/u)
