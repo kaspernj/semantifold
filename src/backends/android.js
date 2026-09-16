@@ -424,6 +424,12 @@ plugins {
   id("org.jetbrains.kotlin.android")
 }
 
+dependencies {
+  testRuntimeOnly("org.hamcrest:hamcrest-core:1.3") {
+    isTransitive = false
+  }
+}
+
 val semantifoldKotlinHome = providers.environmentVariable("SEMANTIFOLD_KOTLIN_HOME").orNull
   ?: throw GradleException("SEMANTIFOLD_ANDROID_INFRASTRUCTURE: SEMANTIFOLD_KOTLIN_HOME is required")
 val semantifoldKotlinStdlib = file("$semantifoldKotlinHome/lib/kotlin-stdlib.jar")

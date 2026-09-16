@@ -234,7 +234,7 @@ exit 23
     expect(ios).not.toContain("currently only `ios`")
   })
 
-  it("allows only non-transitive JUnit in test scope and records deterministic runtime/APK leak checks", async () => {
+  it("allows only exact non-transitive JUnit implementation and Hamcrest runtime test dependencies", async () => {
     const module = parse({
       filename: "program.kt",
       language: "kotlin",
@@ -251,15 +251,18 @@ fun main() {
     const properties = String(set.artifacts.find(({path}) => path.endsWith("gradle.properties"))?.content)
     const acceptance = await readFile(new URL("../scripts/android-acceptance.js", import.meta.url), "utf8")
 
-    expect(build.match(/(?:api|compileOnly|implementation|runtimeOnly|testImplementation|androidTestImplementation)\s*\(/gu))
-      .toEqual(["testImplementation("])
+    expect(build.match(
+      /(?:api|compileOnly|implementation|runtimeOnly|testImplementation|testRuntimeOnly|androidTestImplementation)\s*\(/gu
+    )).toEqual(["testRuntimeOnly(", "testImplementation("])
     expect(build).toContain('testImplementation("junit:junit:4.13.2") {\n    isTransitive = false\n  }')
+    expect(build).toContain('testRuntimeOnly("org.hamcrest:hamcrest-core:1.3") {\n    isTransitive = false\n  }')
     expect(properties).toContain("kotlin.stdlib.default.dependency=false")
     expect(build).toContain("libraries.from(files(semantifoldKotlinStdlib))")
     expect(acceptance).toContain("debugRuntimeClasspath")
     expect(acceptance).toContain("debugUnitTestRuntimeClasspath")
     expect(acceptance).toContain("Runtime dependency graph must be empty")
     expect(acceptance).toContain("junit:junit:4.13.2")
+    expect(acceptance).toContain("org.hamcrest:hamcrest-core:1.3")
     expect(acceptance).toContain("org/junit/")
     expect(acceptance).toContain("org/hamcrest/")
     expect(acceptance).toContain("kotlin/jvm/internal/")

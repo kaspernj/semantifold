@@ -85,8 +85,13 @@ try {
       if (runtimeDependencies.length != 0) {
         throw new Error(`Runtime dependency graph must be empty, received: ${runtimeDependencies.join(", ")}.`)
       }
-      if (testDependencies.length != 1 || testDependencies[0] != "junit:junit:4.13.2") {
-        throw new Error(`Unit-test dependency graph differs from exact non-transitive junit:junit:4.13.2: ${testDependencies.join(", ")}.`)
+      const expectedTestDependencies = new Set(["junit:junit:4.13.2", "org.hamcrest:hamcrest-core:1.3"])
+      const testDependencySet = new Set(testDependencies)
+
+      if (testDependencies.length != expectedTestDependencies.size ||
+        testDependencySet.size != expectedTestDependencies.size ||
+        [...expectedTestDependencies].some(coordinate => !testDependencySet.has(coordinate))) {
+        throw new Error(`Unit-test dependency graph differs from exact non-transitive junit:junit:4.13.2 and org.hamcrest:hamcrest-core:1.3: ${testDependencies.join(", ")}.`)
       }
       const apk = path.join(materialized.projectDirectory, "app/build/outputs/apk/debug/app-debug.apk")
       const testApk = path.join(materialized.projectDirectory, "app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk")
