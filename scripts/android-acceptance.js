@@ -302,7 +302,8 @@ async function createDebugKeystore(keytool, root, environment) {
  * @returns {string[]} Resolved coordinates in report order.
  */
 function dependencyCoordinates(output) {
-  return [...output.matchAll(/^[| ]*(?:\+---|\\---) ([^\s]+).*$/gmu)].map(([, coordinate]) => coordinate)
+  return [...output.matchAll(/^[| ]*(?:\+---|\\---) ((\S+)(?: [^\r\n]*)?)$/gmu)]
+    .flatMap(([, dependency, coordinate]) => dependency == "project" ? [] : [coordinate])
 }
 
 function infrastructure(message, cause) {

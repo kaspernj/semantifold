@@ -269,6 +269,87 @@ fun main() {
     expect(acceptance).toContain("kotlin/collections/")
   })
 
+  it("ignores only Gradle's structural self project in the unit-test dependency report", {timeoutMs: 30_000}, async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "semantifold-android-dependency-report-"))
+    const androidHome = path.join(root, "android")
+    const binaryDirectory = path.join(root, "bin")
+    const gradleHome = path.join(root, "gradle")
+    const gradleUserHome = path.join(root, "gradle-cache")
+    const javaHome = path.join(root, "java")
+    const kotlinHome = path.join(root, "kotlin")
+
+    try {
+      const executableSources = new Map([
+        [path.join(gradleHome, "bin/gradle"), `if [ "\${1:-}" = --version ]; then
+  printf 'Gradle 8.13\\n'
+elif printf ' %s ' "$*" | grep -q ' lintDebug '; then
+  project="$SEMANTIFOLD_ANDROID_ACCEPTANCE_ROOT/generated/android-app/app/build/outputs/apk"
+  mkdir -p "$project/debug" "$project/androidTest/debug"
+  : > "$project/debug/app-debug.apk"
+  : > "$project/androidTest/debug/app-debug-androidTest.apk"
+elif printf ' %s ' "$*" | grep -q ' debugUnitTestRuntimeClasspath '; then
+  printf '%s\\n' '+--- junit:junit:4.13.2' '+--- org.hamcrest:hamcrest-core:1.3' "\\--- \${SEMANTIFOLD_FAKE_PROJECT_ENTRY:-project}"
+fi`],
+        [path.join(javaHome, "bin/java"), "printf 'openjdk version \"21.0.8\"\\n' >&2"],
+        [path.join(javaHome, "bin/keytool"), `while [ "$#" -gt 0 ]; do
+  if [ "$1" = -keystore ]; then shift; destination=$1; fi
+  shift
+done
+: > "$destination"`],
+        [path.join(kotlinHome, "bin/kotlinc"), "printf 'info: kotlinc-jvm 2.2.10\\n' >&2"],
+        [path.join(androidHome, "platform-tools/adb"), ":"],
+        [path.join(androidHome, "emulator/emulator"), "printf 'Android emulator version 35.6.11.0\\n'"],
+        [path.join(androidHome, "build-tools/35.0.0/aapt2"), ":"],
+        [path.join(binaryDirectory, "unzip"), ":"]
+      ])
+
+      for (const [filename, source] of executableSources) {
+        await mkdir(path.dirname(filename), {recursive: true})
+        await writeFile(filename, `#!/bin/sh\nset -eu\n${source}\n`)
+        await chmod(filename, 0o700)
+      }
+      await mkdir(gradleUserHome)
+      await writeFile(path.join(gradleUserHome, "cache-marker"), "prepared\n")
+      await mkdir(path.join(kotlinHome, "lib"))
+      await writeFile(path.join(kotlinHome, "lib/kotlin-stdlib.jar"), "")
+      await mkdir(path.join(androidHome, "platforms/android-35"), {recursive: true})
+      await writeFile(path.join(androidHome, "platforms/android-35/android.jar"), "")
+      const systemImageDirectory = path.join(androidHome, "system-images/android-35/google_apis/x86_64")
+
+      await mkdir(systemImageDirectory, {recursive: true})
+      await writeFile(path.join(systemImageDirectory, "system.img"), "")
+      await writeFile(path.join(androidHome, "platform-tools/source.properties"), "Pkg.Revision=37.0.1\n")
+      await writeFile(path.join(androidHome, "platforms/android-35/source.properties"),
+        "Pkg.Revision=2\nAndroidVersion.ApiLevel=35\n")
+      await writeFile(path.join(androidHome, "build-tools/35.0.0/source.properties"), "Pkg.Revision=35.0.0\n")
+      await writeFile(path.join(androidHome, "emulator/source.properties"),
+        "Pkg.Revision=35.6.11\nPkg.BuildId=13610412\n")
+      await writeFile(path.join(systemImageDirectory, "source.properties"),
+        "Pkg.Revision=9\nAndroidVersion.ApiLevel=35\nSystemImage.Abi=x86_64\nSystemImage.TagId=google_apis\n")
+      const environment = {
+        LANG: "C.UTF-8", LC_ALL: "C.UTF-8", PATH: `${binaryDirectory}:/usr/bin:/bin`,
+        SEMANTIFOLD_ANDROID_HOME: androidHome, SEMANTIFOLD_ANDROID_MODE: "offline-build",
+        SEMANTIFOLD_GRADLE_HOME: gradleHome, SEMANTIFOLD_GRADLE_USER_HOME: gradleUserHome,
+        SEMANTIFOLD_KOTLIN_HOME: kotlinHome, JAVA_HOME: javaHome
+      }
+      const acceptedRoot = path.join(root, "accepted")
+      const accepted = await executeFile(process.execPath, ["scripts/android-acceptance.js"], {
+        cwd: new URL("../", import.meta.url), env: {...environment, SEMANTIFOLD_ANDROID_ACCEPTANCE_ROOT: acceptedRoot}
+      })
+
+      expect(JSON.parse(accepted.stdout).projectDirectory)
+        .toEqual(path.join(acceptedRoot, "generated/android-app"))
+      const rejectedRoot = path.join(root, "rejected")
+
+      await assert.rejects(executeFile(process.execPath, ["scripts/android-acceptance.js"], {
+        cwd: new URL("../", import.meta.url), env: {...environment, SEMANTIFOLD_ANDROID_ACCEPTANCE_ROOT: rejectedRoot,
+          SEMANTIFOLD_FAKE_PROJECT_ENTRY: "project :forbidden"}
+      }), error => error?.code == 1 && /project/u.test(String(error.stderr)))
+    } finally {
+      await rm(root, {force: true, recursive: true})
+    }
+  })
+
   it("fails missing local tools and caches with an infrastructure classification", async () => {
     await assert.rejects(
       executeFile(process.execPath, ["scripts/android-acceptance.js", "--check"], {
