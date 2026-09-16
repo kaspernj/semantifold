@@ -85,6 +85,22 @@ console.log(flag("or-left", true) || flag("or-right", false));`)
       "first\nsecond\nthird\n7\nleft\nright\n9\nand-left\nfalse\nor-left\ntrue\n")
   })
 
+  it("stops at the first failing eager helper or call argument before later effects in every mode", {timeoutMs: 600_000}, async () => {
+    const definitions = `function mark(label: string, value: number): number { console.log(label); return value; }
+function sum(left: number, right: number): number { return left + right; }
+function select(first: number, second: number): number { return first; }
+const maximum: number = sum(9007199254740991 * 1024, 1023);`
+    const expressions = [
+      "sum(sum(mark(\"first\", maximum), 1), mark(\"late\", 0))",
+      "select(sum(mark(\"first\", maximum), 1), mark(\"late\", 0))"
+    ]
+
+    for (const [index, expression] of expressions.entries()) {
+      check(await executeZig(moduleFrom(`${definitions}\nconsole.log(${expression});`),
+        {expectedStatus: 70, label: `first-failure-${index}`}), "first\n", "semantifold: integer overflow\n", 70)
+    }
+  })
+
   it("prints i64 extrema and exits 70 on every dynamic overflow in all modes", {timeoutMs: 600_000}, async () => {
     const definitions = `function product(left: number, right: number): number { return left * right; }
 function sum(left: number, right: number): number { return left + right; }

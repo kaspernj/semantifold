@@ -3,6 +3,7 @@
 import assert from "node:assert/strict"
 import {describe, expect, it} from "@velocious/testing"
 import {generateArtifactSet, parse, SemantifoldDiagnostic} from "../index.js"
+import {executeZigArtifacts} from "./support/zig-toolchain.js"
 
 const meaning = value => JSON.parse(JSON.stringify(value, (key, nested) =>
   ["location", "provenance", "sourceProvenance"].includes(key) ? undefined : nested))
@@ -32,6 +33,46 @@ function sum3(a: number, b: number, c: number): number { announce("call"); noop(
 console.log(sum3(1, 2, 3));`)
 
     expect(meaning(parse({language: "zig", filename: "program.zig", source}))).toEqual(meaning(module))
+  })
+
+  it("rejects compiler-invalid native slice operators and cross-family helpers at their source occurrence", {timeoutMs: 180_000}, async () => {
+    const cases = [
+      {
+        source: "function join(left: string, right: string): string { return left + right; } console.log(join(\"a\", \"b\"));",
+        from: "semantifold_string_concat(left, right)", to: "left + right", token: "+"
+      },
+      {
+        source: "function join(left: string, right: string): string { return left + right; } console.log(join(\"a\", \"b\"));",
+        from: "semantifold_string_concat(left, right)", to: "semantifold_integer_add(left, right)", token: "semantifold_integer_add"
+      },
+      {
+        source: "function add(left: number, right: number): number { return left + right; } console.log(add(1, 2));",
+        from: "semantifold_integer_add(left, right)", to: "semantifold_string_concat(left, right)", token: "semantifold_string_concat"
+      },
+      {
+        source: "function equal(left: string, right: string): boolean { return left === right; } console.log(equal(\"a\", \"b\"));",
+        from: "semantifold_string_equal(left, right)", to: "left == right", token: "=="
+      },
+      {
+        source: "function equal(left: number, right: number): boolean { return left === right; } console.log(equal(1, 2));",
+        from: "left == right", to: "semantifold_string_equal(left, right)", token: "semantifold_string_equal"
+      }
+    ]
+
+    for (const [index, testCase] of cases.entries()) {
+      const module = parse({language: "typescript", filename: "source.ts", source: testCase.source})
+      const set = structuredClone(generateArtifactSet({language: "zig", module}))
+      const entry = set.artifacts[1]
+
+      entry.content = String(entry.content).replace(testCase.from, testCase.to)
+      assert.notEqual(entry.content, generateArtifactSet({language: "zig", module}).artifacts[1].content)
+      await assert.rejects(() => executeZigArtifacts(set, {label: `invalid-source-operation-${index}`}),
+        error => error instanceof Error && /"stage":"Debug-(?:test|build)"/u.test(error.message))
+      assert.throws(() => parse({language: "zig", filename: "program.zig", source: String(entry.content)}),
+        error => rejected(error) && error.code == "UNSUPPORTED_SYNTAX" &&
+          String(entry.content).slice(error.location.start.offset, error.location.end.offset) == testCase.token,
+        testCase.to)
+    }
   })
 
   it("rejects recovery, inferred locals and every excluded low-level feature with a location", () => {
@@ -91,6 +132,6 @@ console.log(sum3(1, 2, 3));`)
 
     assert.throws(() => parse({language: "zig", filename: "program.zig", source: baseline + "//" + "x".repeat(1_000_001)}), rejected)
     assert.throws(() => parse({language: "zig", filename: "program.zig",
-      source: baseline.replace("semantifold_print_integer(keep(1, 2));", `semantifold_print_integer(${deep});`)}), rejected)
+      source: baseline.replace("keep(1, 2)", deep)}), rejected)
   })
 })

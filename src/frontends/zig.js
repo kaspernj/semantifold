@@ -1,6 +1,7 @@
 // @ts-check
 
 import {isZigIdentifier} from "../backends/identifiers.js"
+import {generateZigProject} from "../backends/zig.js"
 import {zigRuntime} from "../backends/zig-runtime.js"
 import {maximumZigSourceLength} from "../backends/zig-validation.js"
 import {missingType, SemantifoldDiagnostic, unsupportedSyntax} from "../diagnostic.js"
@@ -28,6 +29,15 @@ const helperOperations = new Map([
   ["semantifold_integer_multiply", "Multiply"], ["semantifold_string_concat", "Add"],
   ["semantifold_string_equal", "Equal"], ["semantifold_string_not_equal", "NotEqual"]
 ])
+const operationSpellings = new Map([
+  ["IntegerAdd", "semantifold_integer_add"], ["IntegerSubtract", "semantifold_integer_subtract"],
+  ["IntegerMultiply", "semantifold_integer_multiply"], ["IntegerNegate", "semantifold_integer_negate"],
+  ["IntegerEqual", "=="], ["IntegerNotEqual", "!="], ["IntegerLessThan", "<"],
+  ["IntegerLessThanOrEqual", "<="], ["IntegerGreaterThan", ">"], ["IntegerGreaterThanOrEqual", ">="],
+  ["BooleanEqual", "=="], ["BooleanNotEqual", "!="], ["BooleanAnd", "and"], ["BooleanOr", "or"], ["BooleanNot", "!"],
+  ["StringConcat", "semantifold_string_concat"], ["StringEqual", "semantifold_string_equal"],
+  ["StringNotEqual", "semantifold_string_not_equal"]
+])
 
 /** Consumes the complete qualified Zig CST and retains exact generated-shell constraints. */
 class ZigReader {
@@ -40,6 +50,13 @@ class ZigReader {
     this.filename = filename
     this.source = source
     this.coordinates = createCoordinateIndex(source)
+    this.generated = false
+    /** @type {Map<string, Expression> | undefined} */
+    this.temporaryExpressions = undefined
+    /** @type {Set<string> | undefined} */
+    this.temporaryNames = undefined
+    /** @type {Map<Expression, {node: CstNode, spelling: string}>} */
+    this.operations = new Map()
     /** @type {Map<Statement, {node: CstNode, type: string}>} */
     this.prints = new Map()
     /** @type {Map<string, Scalar>} */
@@ -64,6 +81,15 @@ class ZigReader {
    */
   text(node) {
     return this.source.slice(node.startIndex, node.endIndex)
+  }
+
+  /**
+   * Reads one generated line-comment marker independent of the source newline convention.
+   * @param {CstNode} node - Marker comment node.
+   * @returns {string} Marker spelling without a parser-owned trailing carriage return.
+   */
+  marker(node) {
+    return this.text(node).replace(/\r$/u, "")
   }
 
   /**
@@ -100,6 +126,16 @@ class ZigReader {
    */
   parts(node) {
     return node.children.map(({node: child}) => child).filter(child => child.type != "comment")
+  }
+
+  /**
+   * Retains compiler-owned scaffold markers while ignoring ordinary inert comments.
+   * @param {CstNode} node - Parent parser node.
+   * @returns {CstNode[]} Complete significant child list.
+   */
+  significant(node) {
+    return node.children.map(({node: child}) => child).filter(child =>
+      child.type != "comment" || /semantifold:/u.test(this.text(child)))
   }
 
   /**
@@ -238,7 +274,15 @@ class ZigReader {
       this.shape(node, ["(", parts[1], ")"])
       return this.expression(parts[1])
     }
-    if (node.type == "identifier") return withParserRanges({kind: "IdentifierExpression", location, name: this.identifier(node)}, {name: location})
+    if (node.type == "identifier") {
+      const temporary = this.temporaryExpressions?.get(this.text(node))
+
+      if (temporary) {
+        this.temporaryExpressions?.delete(this.text(node))
+        return temporary
+      }
+      return withParserRanges({kind: "IdentifierExpression", location, name: this.identifier(node)}, {name: location})
+    }
     if (node.type == "integer") {
       const spelling = this.text(node)
       const value = Number(spelling)
@@ -307,8 +351,11 @@ class ZigReader {
    * @returns {Expression} Adapted semantic expression.
    */
   binary(node, intent, left, right, operator) {
-    return /** @type {Expression} */ (withAdaptedOperation(withParserRanges({kind: "BinaryExpression", location: this.location(node), left, right},
+    const expression = /** @type {Expression} */ (withAdaptedOperation(withParserRanges({kind: "BinaryExpression", location: this.location(node), left, right},
       {operator: this.location(operator)}), /** @type {import("../semantic/operators.js").AdaptedOperation} */ (intent)))
+
+    this.operations.set(expression, {node: operator, spelling: this.text(operator)})
+    return expression
   }
 
   /**
@@ -320,8 +367,11 @@ class ZigReader {
    * @returns {Expression} Adapted semantic expression.
    */
   unary(node, intent, operand, operator) {
-    return /** @type {Expression} */ (withAdaptedOperation(withParserRanges({kind: "UnaryExpression", location: this.location(node), operand},
+    const expression = /** @type {Expression} */ (withAdaptedOperation(withParserRanges({kind: "UnaryExpression", location: this.location(node), operand},
       {operator: this.location(operator)}), intent))
+
+    this.operations.set(expression, {node: operator, spelling: this.text(operator)})
+    return expression
   }
 
   /**
@@ -434,7 +484,19 @@ class ZigReader {
     const parts = this.parts(node)
 
     this.shape(node, ["{", ...parts.slice(1, -1), "}"])
-    const sourceStatements = parts.slice(1 + skip, -1)
+    const sourceStatements = this.significant(node).slice(1 + skip, -1)
+    return {kind: "Block", location: this.location(node), statements: this.generated
+      ? this.generatedStatements(sourceStatements, parameters)
+      : this.directStatements(sourceStatements, parameters)}
+  }
+
+  /**
+   * Converts the legacy direct statement shape when diagnosing a missing generated marker.
+   * @param {CstNode[]} sourceStatements - Ordered direct children.
+   * @param {import("../semantic/types.js").Parameter[]} parameters - Function parameters.
+   * @returns {Statement[]} Semantic statements.
+   */
+  directStatements(sourceStatements, parameters) {
     let cursor = 0
 
     for (const parameter of parameters) {
@@ -458,7 +520,161 @@ class ZigReader {
         if (kind) cursor += 1
       }
     }
-    return {kind: "Block", location: this.location(node), statements}
+    return statements
+  }
+
+  /**
+   * Reconstructs complete generated statement regions before canonical whole-CST verification.
+   * @param {CstNode[]} sourceStatements - Significant direct block children.
+   * @param {import("../semantic/types.js").Parameter[]} parameters - Function parameters.
+   * @returns {Statement[]} Reconstructed semantic statements.
+   */
+  generatedStatements(sourceStatements, parameters) {
+    /** @type {Statement[]} */
+    const statements = []
+    let cursor = 0
+
+    for (const parameter of parameters) {
+      const kind = sourceStatements[cursor] ? this.useScaffold(sourceStatements[cursor], parameter.name) : undefined
+
+      this.scaffolds.set(parameter, kind ?? "none")
+      if (kind) cursor += 1
+    }
+    while (cursor < sourceStatements.length) {
+      const begin = sourceStatements[cursor++]
+      const match = begin.type == "comment" &&
+        /^\/\/ semantifold:ordered-expression:zig:v1 begin ([0-9]{6}) ([0-9a-f]{64})$/u.exec(this.marker(begin))
+
+      if (!match) this.fail(begin, "complete generated ordered statement region required")
+      const outerExpressions = this.temporaryExpressions
+      const outerNames = this.temporaryNames
+
+      this.temporaryExpressions = new Map()
+      this.temporaryNames = new Set()
+      while (cursor < sourceStatements.length && this.temporaryDeclaration(sourceStatements[cursor])) {
+        cursor = this.readTemporary(sourceStatements, cursor)
+      }
+      const consumer = sourceStatements[cursor++]
+
+      if (!consumer) this.fail(begin, "missing generated ordered consumer")
+      const statement = this.statement(consumer)
+
+      if (this.temporaryExpressions.size != 0) this.fail(consumer, "unconsumed generated ordered temporary")
+      if (statement.kind == "LocalDeclaration") {
+        const kind = sourceStatements[cursor] ? this.useScaffold(sourceStatements[cursor], statement.name) : undefined
+
+        this.scaffolds.set(statement, kind ?? "none")
+        if (kind) cursor += 1
+      }
+      const end = sourceStatements[cursor++]
+
+      if (!end || end.type != "comment" || this.marker(end) !=
+        `// semantifold:ordered-expression:zig:v1 end ${match[1]} ${match[2]}`) this.fail(end ?? begin, "generated ordered marker pair")
+      this.temporaryExpressions = outerExpressions
+      this.temporaryNames = outerNames
+      statements.push(statement)
+    }
+    return statements
+  }
+
+  /**
+   * Identifies a reserved ordered temporary declaration at the current region level.
+   * @param {CstNode} node - Candidate direct child.
+   * @returns {boolean} Whether it declares a reserved ordered temporary.
+   */
+  temporaryDeclaration(node) {
+    const parts = this.parts(node)
+
+    return node.type == "variable_declaration" && ["const", "var"].includes(parts[0]?.type) &&
+      parts[1]?.type == "identifier" && this.text(parts[1]).startsWith("semantifold_ordered_")
+  }
+
+  /**
+   * Expands one typed ordered temporary and an optional conditional Boolean RHS.
+   * @param {CstNode[]} nodes - Current region children.
+   * @param {number} cursor - Temporary declaration position.
+   * @returns {number} Next unconsumed position.
+   */
+  readTemporary(nodes, cursor) {
+    const node = nodes[cursor++]
+    const parts = this.parts(node)
+    const nameNode = parts[1]
+    const name = this.text(nameNode)
+    const typeNode = this.field(node, "type")
+    const value = parts[5]
+
+    this.shape(node, [parts[0], nameNode, ":", typeNode, "=", value, ";"])
+    this.type(typeNode)
+    if (!/^semantifold_ordered_[0-9]{6}$/u.test(name) || this.temporaryNames?.has(name)) {
+      this.fail(nameNode, "generated ordered temporary declaration")
+    }
+    this.temporaryNames?.add(name)
+    let expression = this.expression(value)
+    const branch = nodes[cursor]
+
+    if (branch && this.shortCircuitBranch(branch, name)) {
+      const condition = this.field(branch, "condition")
+      const body = this.field(branch, "body")
+      const conditionParts = this.parts(condition)
+      const isOr = conditionParts[0]?.type == "!"
+      const target = isOr ? this.field(condition, condition.type == "unary_expression" ? "argument" : "ok") : condition
+
+      this.shape(branch, ["if", "(", condition, ")", body])
+      if (target.type != "identifier" || this.text(target) != name) this.fail(target, "generated short-circuit temporary test")
+      if (isOr) this.shape(condition, [conditionParts[0], target])
+      if (isOr && conditionParts[0]?.type != "!") this.fail(conditionParts[0] ?? condition, "generated short-circuit negation")
+      if (body.type != "block_expression") this.fail(body, "generated short-circuit block")
+      const block = this.parts(body)[0]
+
+      this.shape(body, [block])
+      if (block.type != "block") this.fail(block, "generated short-circuit block")
+      const inside = this.significant(block).slice(1, -1)
+      let offset = 0
+
+      while (offset < inside.length && this.temporaryDeclaration(inside[offset])) offset = this.readTemporary(inside, offset)
+      if (offset != inside.length - 1) this.fail(block, "generated short-circuit final assignment")
+      const assignment = inside[offset]
+      const assignmentParts = this.parts(assignment)
+      const left = assignmentParts[0]
+      const right = assignmentParts[2]
+
+      this.shape(assignment, [left, "=", right, ";"])
+      if (left.type != "identifier" || this.text(left) != name) this.fail(left, "generated short-circuit result write")
+      if (right.type != "binary_expression") this.fail(right, "generated short-circuit result expression")
+      const repeated = this.field(right, "left")
+      const operand = this.field(right, "right")
+      const operator = this.field(right, "operator")
+      const spelling = isOr ? "or" : "and"
+
+      this.shape(right, [repeated, spelling, operand])
+      if (repeated.type != "identifier" || this.text(repeated) != name) this.fail(repeated, "generated short-circuit consumed value")
+      expression = this.binary(right, isOr ? "Or" : "And", expression, this.expression(operand), operator)
+      cursor += 1
+    }
+    this.temporaryExpressions?.set(name, expression)
+    return cursor
+  }
+
+  /**
+   * Distinguishes an internal conditional RHS from the following semantic `if` consumer using only direct CST structure.
+   * @param {CstNode} node - Candidate conditional.
+   * @param {string} name - Ordered Boolean result name.
+   * @returns {boolean} Whether the node has the complete outer shape of a short-circuit update.
+   */
+  shortCircuitBranch(node, name) {
+    if (node.type != "if_statement" || this.parts(node).some(child => child.type == "else_clause")) return false
+    const body = node.children.find(({field}) => field == "body")?.node
+
+    if (body?.type != "block_expression") return false
+    const block = this.parts(body)[0]
+
+    if (block?.type != "block") return false
+    const inside = this.significant(block).slice(1, -1)
+    const final = inside.at(-1)
+    const finalParts = final ? this.parts(final) : []
+
+    return inside.length > 0 && !inside.some(child => child.type == "comment") && final?.type == "variable_declaration" &&
+      finalParts[0]?.type == "identifier" && this.text(finalParts[0]) == name && finalParts[1]?.type == "="
   }
 
   /**
@@ -518,11 +734,16 @@ class ZigReader {
    */
   compareTree(actual, expected, canonical) {
     if (actual.type != expected.type || actual.named != expected.named || actual.extra != expected.extra) this.fail(actual, "modified Zig support node")
-    const left = this.parts(actual)
-    const right = canonical.parts(expected)
+    const left = this.significant(actual)
+    const right = canonical.significant(expected)
 
     if (left.length != right.length) this.fail(actual, "modified Zig support children")
-    if (!left.length && this.text(actual) != canonical.text(expected)) this.fail(actual, "modified Zig support token")
+    if (!left.length) {
+      const actualText = actual.type == "comment" && /semantifold:/u.test(this.text(actual)) ? this.marker(actual) : this.text(actual)
+      const expectedText = expected.type == "comment" && /semantifold:/u.test(canonical.text(expected)) ? canonical.marker(expected) : canonical.text(expected)
+
+      if (actualText != expectedText) this.fail(actual, "modified Zig support token")
+    }
     left.forEach((child, index) => {
       const expectedChild = right[index]
 
@@ -549,6 +770,54 @@ class ZigReader {
 
     if (!type) throw new Error("Validated Zig expression lost its scalar binding.")
     return type
+  }
+
+  /**
+   * Requires each typed operation to retain the one exact Zig operator/helper spelling that implements it.
+   * @param {Expression} expression - Resolved scalar expression.
+   */
+  validateOperationExpression(expression) {
+    if (expression.kind == "CallExpression") {
+      expression.arguments.forEach(argument => this.validateOperationExpression(argument))
+      return
+    }
+    if (expression.kind == "UnaryExpression") {
+      const identity = this.operations.get(expression)
+      const expected = operationSpellings.get(expression.operation)
+
+      if (!identity) throw new Error("Resolved Zig unary operation lost its parser identity.")
+      if (identity.spelling != expected) this.fail(identity.node, `exact ${expression.operation} Zig operator/helper required`)
+      this.validateOperationExpression(expression.operand)
+      return
+    }
+    if (expression.kind == "BinaryExpression") {
+      const identity = this.operations.get(expression)
+      const expected = operationSpellings.get(expression.operation)
+
+      if (!identity) throw new Error("Resolved Zig binary operation lost its parser identity.")
+      if (identity.spelling != expected) this.fail(identity.node, `exact ${expression.operation} Zig operator/helper required`)
+      this.validateOperationExpression(expression.left)
+      this.validateOperationExpression(expression.right)
+    }
+  }
+
+  /**
+   * Validates operation identity throughout one lexical block.
+   * @param {import("../semantic/types.js").Block} block - Block whose expressions must retain exact Zig identity.
+   */
+  validateOperations(block) {
+    for (const statement of block.statements) {
+      if (statement.kind == "LocalDeclaration") this.validateOperationExpression(statement.initializer)
+      else if (statement.kind == "AssignmentStatement" || statement.kind == "ExpressionStatement" || statement.kind == "PrintStatement") {
+        this.validateOperationExpression(statement.expression)
+      } else if (statement.kind == "ReturnStatement") {
+        if (statement.expression) this.validateOperationExpression(statement.expression)
+      } else if (statement.kind == "IfStatement") {
+        this.validateOperationExpression(statement.condition)
+        this.validateOperations(statement.consequent)
+        if (statement.alternate) this.validateOperations(statement.alternate)
+      }
+    }
   }
 
   /**
@@ -616,12 +885,18 @@ class ZigReader {
     this.validateTree(root)
     if (root.type != "source_file") this.fail(root, "Zig source root required")
     const canonical = new ZigReader(this.filename, zigRuntime)
-    const support = canonical.parts(parseZigCst(zigRuntime).root)
-    const nodes = this.parts(root)
+    const support = canonical.significant(parseZigCst(zigRuntime).root)
+    const nodes = this.significant(root)
 
-    if (nodes.length < support.length + 1) this.fail(root, "complete Zig runtime and main shell required")
+    if (nodes.length < support.length + 2) this.fail(root, "complete Zig runtime, ordered marker, and main shell required")
     support.forEach((expected, index) => this.compareTree(nodes[index], expected, canonical))
-    const definitions = nodes.slice(support.length)
+    const programMarker = nodes[support.length]
+
+    if (programMarker.type != "comment" || this.marker(programMarker) != "// semantifold:program:zig:v1") {
+      this.fail(programMarker, "exact generated Zig ordered-expression marker required")
+    }
+    this.generated = true
+    const definitions = nodes.slice(support.length + 1)
     /** @type {CstNode | undefined} */
     let main
     /** @type {CstNode[]} */
@@ -666,11 +941,17 @@ class ZigReader {
 
     this.functions = new Map(module.functions.map(declaration => [declaration.name,
       /** @type {import("../semantic/types.js").TypeReference} */ (declaration.returnType).name]))
+    for (const declaration of module.functions) this.validateOperations(declaration.body)
+    this.validateOperations(module.entryPoint.body)
     for (const declaration of module.functions) this.validatePrints(declaration.body, new Map(declaration.parameters.map(parameter => [parameter.name,
       /** @type {import("../semantic/types.js").TypeReference} */ (parameter.type).name])))
     this.validatePrints(module.entryPoint.body, new Map())
     for (const declaration of module.functions) this.validateScaffolds(declaration)
     this.validateScaffolds(module.entryPoint)
+    const canonicalSource = generateZigProject({module}).artifacts[1]?.content
+
+    if (typeof canonicalSource != "string") throw new Error("Zig backend returned a nontext entry artifact.")
+    this.compareTree(root, parseZigCst(canonicalSource).root, new ZigReader(this.filename, canonicalSource))
     return module
   }
 }
@@ -699,5 +980,15 @@ export function parseZig({filename, source}) {
     throw new SemantifoldDiagnostic({code: "PARSE_ERROR", language: "zig", location,
       cause: error instanceof Error ? error : undefined, message: "The qualified Zig parser could not produce a complete CST."})
   }
-  return new ZigReader(filename, source).module(snapshot.root)
+  const reader = new ZigReader(filename, source)
+
+  try {
+    return reader.module(snapshot.root)
+  } catch (error) {
+    if (reader.generated && error instanceof SemantifoldDiagnostic && error.language == "zig" &&
+      error.code != "PARSE_ERROR" && error.code != "UNSUPPORTED_SYNTAX") {
+      return unsupportedSyntax("zig", `invalid generated ordered scaffold: ${error.code}`, error.location ?? location)
+    }
+    throw error
+  }
 }

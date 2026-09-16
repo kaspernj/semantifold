@@ -9,6 +9,8 @@ const moduleFrom = source => parse({language: "typescript", filename: "source.ts
 const meaning = value => JSON.parse(JSON.stringify(value, (key, nested) =>
   ["location", "provenance", "sourceProvenance"].includes(key) ? undefined : nested))
 const failure = error => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_CAPABILITY" && error.language == "zig"
+const sourceFailure = error => error instanceof SemantifoldDiagnostic && error.language == "zig" &&
+  ["UNSUPPORTED_SYNTAX", "PARSE_ERROR"].includes(error.code) && error.location?.filename == "src/main.zig"
 
 describe("Zig transactional native project backend", () => {
   it("protects every Zig 0.15.2 primitive spelling during preflight", () => {
@@ -49,6 +51,46 @@ announce("ready"); noop(); console.log(sum3(zero(), 2, 3));`)
     const entry = generateArtifactSet({language: "zig", module}).artifacts[1]
 
     expect(meaning(parse({language: "zig", filename: entry.path, source: entry.content}))).toEqual(meaning(module))
+  })
+
+  it("emits complete typed ordered regions and rejects malformed or partial scaffold variants", () => {
+    const module = moduleFrom(`function mark(label: string, value: number): number { console.log(label); return value; }
+function flag(label: string, value: boolean): boolean { console.log(label); return value; }
+function combine(first: number, second: number, third: number): number { return first + second * third; }
+console.log(combine(mark("first", 1), mark("second", 2), mark("third", 3)));
+console.log(mark("left", 4) + mark("right", 5));
+console.log(flag("and-left", false) && flag("and-right", true));`)
+    const source = String(generateArtifactSet({language: "zig", module}).artifacts[1].content)
+    const first = source.match(/^(\s*)const (semantifold_ordered_[0-9]{6}): i64 = mark\("first", 1\);$/mu)
+    const second = source.match(/^(\s*)const (semantifold_ordered_[0-9]{6}): i64 = mark\("second", 2\);$/mu)
+    const shortCircuitLeft = source.match(/^(\s*)const (semantifold_ordered_[0-9]{6}): bool = flag\("and-left", false\);$/mu)
+    const shortCircuit = shortCircuitLeft && source.match(new RegExp(
+      `^\\s*var (semantifold_ordered_[0-9]{6}): bool = ${shortCircuitLeft[2]};$`, "mu"))
+
+    assert.match(source, /^\/\/ semantifold:program:zig:v1$/mu)
+    assert.match(source, /^\s*\/\/ semantifold:ordered-expression:zig:v1 begin [0-9]{6} [0-9a-f]{64}$/mu)
+    assert.ok(first && second && shortCircuitLeft && shortCircuit)
+    assert.ok(source.indexOf(first[0]) < source.indexOf(second[0]))
+    assert.match(source, new RegExp(`combine\\(${first[2]}, ${second[2]}, semantifold_ordered_[0-9]{6}\\)`))
+    assert.match(source, new RegExp(`if \\(${shortCircuit[1]}\\) \\{`))
+    assert.doesNotMatch(source, /combine\(mark\(/u)
+    assert.doesNotMatch(source, /semantifold_integer_add\(mark\(/u)
+    expect(meaning(parse({language: "zig", filename: "src/main.zig", source}))).toEqual(meaning(module))
+
+    const begin = source.match(/^\s*\/\/ semantifold:ordered-expression:zig:v1 begin [^\n]+\n/mu)?.[0]
+    const inverted = `if (!${shortCircuit[1]}) {`
+    const reordered = first && second ? source.replace(first[0], "__FIRST__").replace(second[0], first[0]).replace("__FIRST__", second[0]) : source
+    const mutations = [
+      begin ? source.replace(begin, "") : source,
+      first ? source.replace(first[0], first[0].replace(": i64", ": bool")) : source,
+      source.replace(`if (${shortCircuit[1]}) {`, inverted),
+      reordered
+    ]
+
+    for (const mutation of mutations) {
+      assert.notEqual(mutation, source)
+      assert.throws(() => parse({language: "zig", filename: "src/main.zig", source: mutation}), sourceFailure)
+    }
   })
 
   it("accepts exact known i64 extrema and rejects literal-only overflow before emission", () => {
