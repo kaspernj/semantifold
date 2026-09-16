@@ -269,7 +269,7 @@ fun main() {
     expect(acceptance).toContain("kotlin/collections/")
   })
 
-  it("ignores only Gradle's structural self project in the unit-test dependency report", {timeoutMs: 30_000}, async () => {
+  it("ignores only Gradle's structural self project and reports exact rejected dependency descriptions", {timeoutMs: 30_000}, async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "semantifold-android-dependency-report-"))
     const androidHome = path.join(root, "android")
     const binaryDirectory = path.join(root, "bin")
@@ -344,7 +344,7 @@ done
       await assert.rejects(executeFile(process.execPath, ["scripts/android-acceptance.js"], {
         cwd: new URL("../", import.meta.url), env: {...environment, SEMANTIFOLD_ANDROID_ACCEPTANCE_ROOT: rejectedRoot,
           SEMANTIFOLD_FAKE_PROJECT_ENTRY: "project :forbidden"}
-      }), error => error?.code == 1 && /project/u.test(String(error.stderr)))
+      }), error => error?.code == 1 && /project :forbidden/u.test(String(error.stderr)))
     } finally {
       await rm(root, {force: true, recursive: true})
     }
