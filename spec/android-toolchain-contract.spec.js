@@ -288,7 +288,7 @@ elif printf ' %s ' "$*" | grep -q ' lintDebug '; then
   : > "$project/debug/app-debug.apk"
   : > "$project/androidTest/debug/app-debug-androidTest.apk"
 elif printf ' %s ' "$*" | grep -q ' debugUnitTestRuntimeClasspath '; then
-  printf '%s\\n' '+--- junit:junit:4.13.2' '+--- org.hamcrest:hamcrest-core:1.3' "\\--- \${SEMANTIFOLD_FAKE_PROJECT_ENTRY:-project}"
+  printf '%s\\n' "+--- \${SEMANTIFOLD_FAKE_PROJECT_ENTRY:-project :}" '+--- junit:junit:4.13.2' '\\--- org.hamcrest:hamcrest-core:1.3'
 fi`],
         [path.join(javaHome, "bin/java"), "printf 'openjdk version \"21.0.8\"\\n' >&2"],
         [path.join(javaHome, "bin/keytool"), `while [ "$#" -gt 0 ]; do
