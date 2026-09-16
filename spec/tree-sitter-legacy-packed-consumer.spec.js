@@ -33,6 +33,7 @@ const executeFile = async (executable, args, options = {}) => {
 }
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url))
 const internalPackageName = "semantifold-tree-sitter-legacy-internal"
+const internalZigPackageName = "semantifold-tree-sitter-zig-internal"
 const retiredPackageName = "@kaspernj/semantifold-tree-sitter-legacy"
 const modernTreeSitterRoot = "node_modules/tree-sitter"
 const kotlinGrammarRoot = "node_modules/tree-sitter-kotlin"
@@ -42,10 +43,13 @@ const dartGrammarIntegrity = "sha512-dO4hyC6eCz7tnXNWk7ZZ/CVzorvWQKRhxRYUT/uwAnA
 const kotlinGrammarCommit = "57c35ad1a80ccd2a0ebd8fffe852f0d13a20acd0"
 const kotlinGrammarSource = `https://github.com/kaspernj/tree-sitter-kotlin/archive/${kotlinGrammarCommit}.tar.gz`
 const internalPackageRoot = `node_modules/${internalPackageName}`
+const internalZigPackageRoot = `node_modules/${internalZigPackageName}`
 const legacyTreeSitterRoot = `${internalPackageRoot}/node_modules/tree-sitter`
 const cGrammarRoot = `${internalPackageRoot}/node_modules/tree-sitter-c`
 const rustGrammarRoot = `${internalPackageRoot}/node_modules/tree-sitter-rust`
 const cppGrammarRoot = `${internalPackageRoot}/node_modules/tree-sitter-cpp`
+const zigRuntimeRoot = `${internalZigPackageRoot}/node_modules/tree-sitter`
+const zigGrammarRoot = `${internalZigPackageRoot}/node_modules/@tree-sitter-grammars/tree-sitter-zig`
 const requiredPackedFiles = [
   `${rustGrammarRoot}/LICENSE`, `${rustGrammarRoot}/package.json`, `${rustGrammarRoot}/binding.gyp`,
   `${rustGrammarRoot}/bindings/node/index.d.ts`, `${rustGrammarRoot}/src/parser.c`, `${rustGrammarRoot}/src/scanner.c`,
@@ -70,7 +74,12 @@ const requiredPackedFiles = [
   `${cGrammarRoot}/LICENSE`,
   `${cGrammarRoot}/binding.gyp`,
   `${cGrammarRoot}/package.json`,
-  `${cGrammarRoot}/src/parser.c`
+  `${cGrammarRoot}/src/parser.c`,
+  `${internalZigPackageRoot}/LICENSE`, `${internalZigPackageRoot}/README.md`, `${internalZigPackageRoot}/package.json`,
+  `${internalZigPackageRoot}/src/zig.js`, `${zigRuntimeRoot}/LICENSE`, `${zigRuntimeRoot}/binding.gyp`,
+  `${zigRuntimeRoot}/package.json`, `${zigRuntimeRoot}/vendor/tree-sitter/lib/src/lib.c`, `${zigGrammarRoot}/LICENSE`,
+  `${zigGrammarRoot}/binding.gyp`, `${zigGrammarRoot}/package.json`, `${zigGrammarRoot}/bindings/node/index.d.ts`,
+  `${zigGrammarRoot}/src/node-types.json`, `${zigGrammarRoot}/src/parser.c`
 ]
 const requiredPrebuilds = [
   ...platformPrebuilds(rustGrammarRoot, "tree-sitter-rust", [
@@ -86,6 +95,12 @@ const requiredPrebuilds = [
     "darwin-arm64", "darwin-x64", "linux-x64", "win32-x64"
   ]),
   ...platformPrebuilds(cGrammarRoot, "tree-sitter-c", [
+    "darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-arm64", "win32-x64"
+  ]),
+  ...platformPrebuilds(zigRuntimeRoot, "tree-sitter", [
+    "darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-arm64", "win32-x64"
+  ]),
+  ...platformPrebuilds(zigGrammarRoot, "@tree-sitter-grammars+tree-sitter-zig", [
     "darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-arm64", "win32-x64"
   ])
 ]
@@ -152,7 +167,7 @@ describe("packed Semantifold legacy Tree-sitter boundary", () => {
       const bundledPackages = new Set(packResult.bundled)
 
       expect({name: packResult.name, version: packResult.version}).toEqual({name: "semantifold", version: sourceManifest.version})
-      for (const packageName of [internalPackageName, "node-addon-api", "node-gyp-build", "tree-sitter"]) {
+      for (const packageName of [internalPackageName, internalZigPackageName, "node-addon-api", "node-gyp-build", "tree-sitter"]) {
         expect(bundledPackages.has(packageName)).toBeTrue()
       }
       expect(bundledPackages.has("tree-sitter-kotlin")).toBeFalse()
@@ -161,6 +176,7 @@ describe("packed Semantifold legacy Tree-sitter boundary", () => {
         expect(packedFiles.includes(filename)).toBeTrue()
       }
       expect(packedFiles.some((filename) => filename.startsWith("packages/tree-sitter-legacy/"))).toBeFalse()
+      expect(packedFiles.some((filename) => filename.startsWith("packages/tree-sitter-zig/"))).toBeFalse()
       expect(packedFiles.some((filename) => filename.startsWith(`${kotlinGrammarRoot}/`))).toBeFalse()
       expect(packedFiles.includes(".npmrc")).toBeFalse()
       expect(packedFiles.some((filename) => /node_modules\/[^/]+\/build\/(?:Debug|Release)\//u.test(filename))).toBeFalse()
@@ -183,6 +199,16 @@ describe("packed Semantifold legacy Tree-sitter boundary", () => {
         })
 
         assert.deepEqual(extracted.stdout, source, `Bundled runtime payload differs: ${relative}`)
+      }
+      for (const filename of packedFiles.filter((filename) => filename.startsWith(`${internalZigPackageRoot}/`) &&
+        !filename.startsWith(`${internalZigPackageRoot}/node_modules/`))) {
+        const relative = filename.slice(internalZigPackageRoot.length + 1)
+        const source = await readFile(path.join(repositoryRoot, "packages/tree-sitter-zig/runtime", relative))
+        const extracted = await executeFile("tar", ["-xOf", tarball, `package/${filename}`], {
+          encoding: "buffer", maxBuffer: 10 * 1024 * 1024
+        })
+
+        assert.deepEqual(extracted.stdout, source, `Bundled Zig runtime payload differs: ${relative}`)
       }
 
       await writeFile(path.join(consumerDirectory, "package.json"), `${JSON.stringify({
@@ -227,6 +253,7 @@ describe("packed Semantifold legacy Tree-sitter boundary", () => {
         const dependencyTree = JSON.parse(listed.stdout)
         const semantifold = dependencyTree.dependencies.semantifold
         const internalPackage = semantifold.dependencies[internalPackageName]
+        const internalZigPackage = semantifold.dependencies[internalZigPackageName]
 
         expect(dependencyTree.problems).toEqual(undefined)
         expect(semantifold.version).toEqual(sourceManifest.version)
@@ -238,12 +265,15 @@ describe("packed Semantifold legacy Tree-sitter boundary", () => {
         expect(internalPackage.dependencies["tree-sitter-c"].version).toEqual("0.23.2")
         expect(internalPackage.dependencies["tree-sitter-cpp"].version).toEqual("0.23.4")
         expect(internalPackage.dependencies["tree-sitter-rust"].version).toEqual("0.23.1")
+        expect(internalZigPackage.version).toEqual("0.1.0")
+        expect(internalZigPackage.dependencies["tree-sitter"].version).toEqual("0.22.4")
+        expect(internalZigPackage.dependencies["@tree-sitter-grammars/tree-sitter-zig"].version).toEqual("1.1.2")
         expect(semantifold.dependencies[retiredPackageName]).toEqual(undefined)
         const installedLock = JSON.parse(await readFile(path.join(consumerDirectory, "package-lock.json"), "utf8"))
         const installedPackagePaths = Object.keys(installedLock.packages)
 
         for (const packageRoot of [modernTreeSitterRoot, internalPackageRoot, legacyTreeSitterRoot, cGrammarRoot, cppGrammarRoot,
-          rustGrammarRoot]) {
+          rustGrammarRoot, internalZigPackageRoot, zigRuntimeRoot, zigGrammarRoot]) {
           const entry = installedLock.packages[`node_modules/semantifold/${packageRoot}`]
 
           expect(entry.inBundle).toBeTrue()
@@ -271,6 +301,7 @@ describe("packed Semantifold legacy Tree-sitter boundary", () => {
         expect(installedPackagePaths.some((filename) => filename.includes(retiredPackageName))).toBeFalse()
         expect(JSON.stringify(installedLock)).not.toMatch(/git\+ssh/u)
         expect(installedPackagePaths.some((filename) => filename.includes("packages/tree-sitter-legacy"))).toBeFalse()
+        expect(installedPackagePaths.some((filename) => filename.includes("packages/tree-sitter-zig"))).toBeFalse()
         const executed = await executeFile(process.execPath, ["consumer.mjs"], {
           cwd: consumerDirectory, env: consumerEnvironment, maxBuffer: 10 * 1024 * 1024
         })
@@ -296,6 +327,13 @@ describe("packed Semantifold legacy Tree-sitter boundary", () => {
           rustRoundTrip: true,
           rustNativeModes: ["debug", "release"],
           rustArtifactsStable: true,
+          zigGrammarVersion: "1.1.2",
+          zigGrammarIsInternal: true,
+          zigSnapshotIsPlainFrozenData: true,
+          zigRoundTrip: true,
+          zigRuntimeIsInternal: true,
+          zigRuntimeVersion: "0.22.4",
+          zigInternalPackageIsPrivate: true,
           cppGrammarVersion: "0.23.4",
           cppGrammarIsInternal: true,
           cppSnapshotIsPlainFrozenData: true,
@@ -333,7 +371,7 @@ describe("packed Semantifold legacy Tree-sitter boundary", () => {
       const requests = decodeURIComponent(cache.stdout).split("\n").filter((line) => line.includes("request-cache:"))
 
       expect(requests.some((line) => line.includes("https://registry.npmjs.org/"))).toBeTrue()
-      expect(requests.some((line) => line.includes(internalPackageName) || line.includes(retiredPackageName))).toBeFalse()
+      expect(requests.some((line) => line.includes(internalPackageName) || line.includes(internalZigPackageName) || line.includes(retiredPackageName))).toBeFalse()
       expect((await readdir(cacheDirectory)).length > 0).toBeTrue()
       expect((await readdir(repositoryRoot)).some((filename) => filename.endsWith(".tgz"))).toBeFalse()
     } finally {

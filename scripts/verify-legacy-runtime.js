@@ -14,8 +14,34 @@ const executeFile = promisify(execFile)
  * @returns {Promise<void>} Resolves only when every shipped file matches byte for byte.
  */
 export async function verifyLegacyRuntime(repositoryRoot) {
-  const sourceRoot = path.join(repositoryRoot, "packages/tree-sitter-legacy/runtime")
-  const installedRoot = path.join(repositoryRoot, "node_modules/semantifold-tree-sitter-legacy-internal")
+  await verifyRuntime(repositoryRoot, {
+    label: "Legacy",
+    packageName: "semantifold-tree-sitter-legacy-internal",
+    sourcePath: "packages/tree-sitter-legacy/runtime"
+  })
+}
+
+/**
+ * Rejects a materialized Zig parser dependency whose payload no longer matches its source.
+ * @param {string} repositoryRoot - Root containing the source and npm-installed dependency.
+ * @returns {Promise<void>} Resolves only when every shipped file matches byte for byte.
+ */
+export async function verifyZigRuntime(repositoryRoot) {
+  await verifyRuntime(repositoryRoot, {
+    label: "Zig",
+    packageName: "semantifold-tree-sitter-zig-internal",
+    sourcePath: "packages/tree-sitter-zig/runtime"
+  })
+}
+
+/**
+ * @param {string} repositoryRoot
+ * @param {{label: string, packageName: string, sourcePath: string}} runtime
+ * @returns {Promise<void>}
+ */
+async function verifyRuntime(repositoryRoot, runtime) {
+  const sourceRoot = path.join(repositoryRoot, runtime.sourcePath)
+  const installedRoot = path.join(repositoryRoot, "node_modules", runtime.packageName)
   const packed = await executeFile("npm", ["pack", "--dry-run", "--ignore-scripts", "--json"], {
     cwd: sourceRoot, maxBuffer: 10 * 1024 * 1024
   })
@@ -41,7 +67,7 @@ export async function verifyLegacyRuntime(repositoryRoot) {
       if (!source.equals(installed)) throw new Error(filename)
     }
   } catch (error) {
-    throw new Error(`Legacy runtime payload differs: ${error instanceof Error ? error.message : error}. ${recovery}`, {
+    throw new Error(`${runtime.label} runtime payload differs: ${error instanceof Error ? error.message : error}. ${recovery}`, {
       cause: error
     })
   }
@@ -69,5 +95,8 @@ async function payloadFiles(directory, relative = "") {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) == fileURLToPath(import.meta.url)) {
-  await verifyLegacyRuntime(fileURLToPath(new URL("../", import.meta.url)))
+  const repositoryRoot = fileURLToPath(new URL("../", import.meta.url))
+
+  await verifyLegacyRuntime(repositoryRoot)
+  await verifyZigRuntime(repositoryRoot)
 }

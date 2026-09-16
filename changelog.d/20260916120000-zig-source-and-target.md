@@ -1,0 +1,1 @@
+Add strict Zig 0.15.2 source and deterministic native-project target support through Task 005, including a qualified private Tree-sitter route, checked `i64` arithmetic, immutable UTF-8 slices, rich provenance, and offline Debug/ReleaseSafe/ReleaseFast acceptance.

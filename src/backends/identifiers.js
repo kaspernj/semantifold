@@ -9,6 +9,7 @@ const identifierPatterns = {
   kotlin: /^(?:_|\p{L})(?:_|\p{L}|\p{Nd})*$/u,
   swift: /^(?:_|\p{XID_Start})(?:_|\p{XID_Continue})*$/u,
   rust: /^[A-Za-z_][A-Za-z0-9_]*$/u,
+  zig: /^[A-Za-z_][A-Za-z0-9_]*$/u,
   cpp: /^[A-Za-z][A-Za-z0-9_]*$/u,
   c: /^[A-Za-z][A-Za-z0-9_]*$/u,
   csharp: /^[A-Za-z_][A-Za-z0-9_]*$/u,
@@ -59,6 +60,18 @@ const reservedWords = {
     "let", "loop", "match", "mod", "move", "mut", "pub", "ref", "return", "self", "Self", "static", "struct", "super", "trait", "true", "type",
     "unsafe", "use", "where", "while", "abstract", "become", "box", "do", "final", "macro", "override", "priv", "typeof", "unsized", "virtual",
     "yield", "try", "union", "_", "main", "String", "std", "i64", "bool"
+  ]),
+  zig: new Set([
+    "addrspace", "align", "allowzero", "and", "anyerror", "anyframe", "anyopaque", "anytype", "asm", "async", "await", "break", "callconv",
+    "catch", "comptime", "const", "continue", "defer", "else", "enum", "errdefer", "error", "export", "extern", "false",
+    "fn", "for", "if", "inline", "linksection", "noalias", "noinline", "nosuspend", "null", "opaque", "or", "orelse",
+    "packed", "pub", "resume", "return", "struct", "suspend", "switch", "test", "threadlocal", "true", "try", "union",
+    "unreachable", "usingnamespace", "var", "volatile", "while", "_", "main", "std", "bool", "c_char", "c_int", "c_long",
+    "c_longdouble", "c_longlong", "c_short", "c_uint", "c_ulong", "c_ulonglong", "c_ushort", "comptime_float",
+    "comptime_int", "f16", "f32", "f64", "f80", "f128", "isize", "noreturn", "type", "undefined", "usize", "void",
+    "semantifold_arena", "semantifold_fail", "semantifold_integer_add", "semantifold_integer_subtract",
+    "semantifold_integer_multiply", "semantifold_integer_negate", "semantifold_string_concat", "semantifold_string_equal",
+    "semantifold_string_not_equal", "semantifold_print_integer", "semantifold_print_boolean", "semantifold_print_string"
   ]),
   cpp: new Set([
     "alignas", "alignof", "and", "and_eq", "asm", "auto", "bitand", "bitor", "bool", "break", "case", "catch", "char", "char8_t", "char16_t", "char32_t", "class", "compl", "concept", "const", "consteval", "constexpr", "constinit", "const_cast", "continue", "co_await", "co_return", "co_yield", "decltype", "default", "delete", "do", "double", "dynamic_cast", "else", "enum", "explicit", "export", "extern", "false", "float", "for", "friend", "goto", "if", "inline", "int", "long", "mutable", "namespace", "new", "noexcept", "not", "not_eq", "nullptr", "operator", "or", "or_eq", "private", "protected", "public", "register", "reinterpret_cast", "requires", "return", "short", "signed", "sizeof", "static", "static_assert", "static_cast", "struct", "switch", "template", "this", "thread_local", "throw", "true", "try", "typedef", "typeid", "typename", "union", "unsigned", "using", "virtual", "void", "volatile", "wchar_t", "while", "xor", "xor_eq", "std", "string", "numeric_limits",
@@ -229,6 +242,7 @@ export function validateTargetIdentifier(language, name, role, location) {
     language == "python" && name.normalize("NFKC") != name ||
     language == "c" && !isCIdentifier(name) ||
     language == "rust" && !isRustIdentifier(name) ||
+    language == "zig" && !isZigIdentifier(name) ||
     language == "cpp" && !isCppIdentifier(name) ||
     language == "dart" && !isDartIdentifier(name) ||
     language == "swift" && (!isSwiftIdentifier(name) || name.normalize("NFC") != name) ||
@@ -305,6 +319,16 @@ export function isCppIdentifier(name) {
  */
 export function isRustIdentifier(name) {
   return identifierPatterns.rust.test(name) && !reservedWords.rust.has(name) && !name.startsWith("semantifold_")
+}
+
+/**
+ * Protects Zig keywords, scalar names, entry plumbing, builtins, and the support namespace.
+ * @param {string} name - Caller-owned function or binding name.
+ * @returns {boolean} Whether ordinary unquoted Zig syntax can preserve the name.
+ */
+export function isZigIdentifier(name) {
+  return identifierPatterns.zig.test(name) && !reservedWords.zig.has(name) && !/^[iu][0-9]+$/u.test(name) &&
+    !name.startsWith("semantifold_")
 }
 
 /**

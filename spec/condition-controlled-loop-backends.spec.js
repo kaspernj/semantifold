@@ -14,7 +14,7 @@ import {
 } from "../index.js"
 
 const cohort = ["php", "ruby", "javascript", "typescript", "java"]
-const deferred = ["kotlin", "python", "csharp", "go", "c", "cpp", "rust", "swift", "wasm"]
+const deferred = ["kotlin", "python", "csharp", "go", "c", "cpp", "rust", "swift", "zig", "wasm"]
 
 describe("condition-controlled loop backends", () => {
   it("emits direct pre-condition loops, reparses resolved controls, and maps every loop-owned node", async () => {
@@ -84,7 +84,7 @@ describe("condition-controlled loop backends", () => {
     for (const language of deferred) {
       const emit = language == "wasm"
         ? () => generateArtifactSet({language, module, role: "binary"})
-        : ["csharp", "go", "c", "rust"].includes(language)
+        : ["csharp", "go", "c", "rust", "zig"].includes(language)
           ? () => generateArtifactSet({language, module})
           : () => generate({language, module})
 

@@ -12,6 +12,7 @@ import {describe, expect, it} from "@velocious/testing"
 const executeFile = promisify(execFile)
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url))
 const internalName = "semantifold-tree-sitter-legacy-internal"
+const internalZigName = "semantifold-tree-sitter-zig-internal"
 const runtimePath = "packages/tree-sitter-legacy/runtime"
 
 describe("installed legacy runtime consistency", () => {
@@ -51,10 +52,12 @@ describe("installed legacy runtime consistency", () => {
           acceptDependencies: rootManifest.acceptDependencies,
           dependencies: {
             [internalName]: rootManifest.dependencies[internalName],
+            [internalZigName]: rootManifest.dependencies[internalZigName],
             "tree-sitter": rootManifest.dependencies["tree-sitter"]
           },
           devDependencies: {
             "semantifold-tree-sitter-legacy-workspace": "0.1.0",
+            "semantifold-tree-sitter-zig-workspace": "0.1.0",
             "@types/node": rootManifest.devDependencies["@types/node"],
             typescript: rootManifest.devDependencies.typescript
           }
@@ -64,6 +67,11 @@ describe("installed legacy runtime consistency", () => {
         await cp(path.join(repositoryRoot, ".npmrc"), path.join(fixtureRoot, ".npmrc"))
         await cp(path.join(repositoryRoot, "packages/tree-sitter-legacy"),
           path.join(fixtureRoot, "packages/tree-sitter-legacy"), {
+            recursive: true,
+            filter: (filename) => !["build", "node_modules"].includes(path.basename(filename))
+          })
+        await cp(path.join(repositoryRoot, "packages/tree-sitter-zig"),
+          path.join(fixtureRoot, "packages/tree-sitter-zig"), {
             recursive: true,
             filter: (filename) => !["build", "node_modules"].includes(path.basename(filename))
           })

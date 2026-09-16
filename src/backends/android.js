@@ -17,7 +17,7 @@ const projectRoot = "generated/android-app"
 const generatorVersion = "0.4.0"
 /** @type {Readonly<Set<import("../semantic/types.js").SemanticLanguage>>} */
 const androidSourceLanguages = new Set([
-  "php", "ruby", "javascript", "typescript", "java", "kotlin", "python", "csharp", "go", "c", "cpp", "rust", "swift", "dart"
+  "php", "ruby", "javascript", "typescript", "java", "kotlin", "python", "csharp", "go", "c", "cpp", "rust", "swift", "dart", "zig"
 ])
 const requestFields = new Set(["assets", "configuration", "language", "module", "program", "resources", "role"])
 const configurationFields = new Set([

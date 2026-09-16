@@ -7,7 +7,7 @@ import {generate, generateArtifactSet, parse, SemantifoldDiagnostic} from "../in
 import {semanticMeaning} from "./support/semantic-meaning.js"
 
 const cohort = ["php", "ruby", "javascript", "typescript", "java"]
-const deferred = ["kotlin", "python", "csharp", "go", "c", "cpp", "rust", "swift", "wasm"]
+const deferred = ["kotlin", "python", "csharp", "go", "c", "cpp", "rust", "swift", "zig", "wasm"]
 
 describe("reference class backends", () => {
   it("emits reparsable native reference classes for every adopted target", async () => {
