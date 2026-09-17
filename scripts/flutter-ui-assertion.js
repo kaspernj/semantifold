@@ -11,17 +11,77 @@ import {pathToFileURL} from "node:url"
  */
 export function assertFlutterUiDump(source, expectedOutput) {
   if (typeof source != "string" || typeof expectedOutput != "string" || expectedOutput.length == 0) failure()
-  const nodes = [...source.matchAll(/<node\b[^>]*>/gu)].map(match => attributes(match[0]))
-  const labels = nodes.filter(node => node.get("content-desc") == "semantifold-output")
-  const outputs = nodes.filter(node => node.get("text") == expectedOutput)
-  const combined = nodes.filter(node => node.get("content-desc") == `semantifold-output\n${expectedOutput}`)
-  const separateMatch = combined.length == 0 && labels.length == 1 && outputs.length == 1
-  const combinedMatch = combined.length == 1 && labels.length == 0 &&
-    (outputs.length == 0 || outputs.length == 1 && outputs[0] === combined[0])
+  const nodes = parseNodes(source)
+  const labels = indexes(nodes, "content-desc", "semantifold-output")
+  const textOutputs = indexes(nodes, "text", expectedOutput)
+  const semanticOutputs = indexes(nodes, "content-desc", expectedOutput)
+  const combined = indexes(nodes, "content-desc", `semantifold-output\n${expectedOutput}`)
+  const nativeTextMatch = combined.length == 0 && labels.length == 1 && textOutputs.length == 1 &&
+    semanticOutputs.length == 0 && labels[0] == textOutputs[0]
+  const flutterSemanticMatch = combined.length == 0 && labels.length == 1 && textOutputs.length == 0 &&
+    semanticOutputs.length == 1 && isDescendant(nodes, semanticOutputs[0], labels[0])
+  const combinedMatch = combined.length == 1 && labels.length == 0 && textOutputs.length == 0 &&
+    semanticOutputs.length == 0
 
-  if (!separateMatch && !combinedMatch) failure()
+  if (!nativeTextMatch && !flutterSemanticMatch && !combinedMatch) failure(nodes)
 
   return {label: "semantifold-output", output: expectedOutput}
+}
+
+/**
+ * Parses UIAutomator's nested node subset while retaining ancestry.
+ * @param {string} source Complete XML dump.
+ * @returns {{attributes: Map<string, string>, parent: number | undefined}[]} Parsed nodes.
+ */
+function parseNodes(source) {
+  /** @type {{attributes: Map<string, string>, parent: number | undefined}[]} */
+  const nodes = []
+  /** @type {number[]} */
+  const stack = []
+
+  for (const match of source.matchAll(/<node\b[^>]*\/?>|<\/node\s*>/gu)) {
+    const token = match[0]
+
+    if (token.startsWith("</")) {
+      if (stack.pop() === undefined) return []
+      continue
+    }
+    const index = nodes.length
+
+    nodes.push({attributes: attributes(token), parent: stack.at(-1)})
+    if (!token.endsWith("/>")) stack.push(index)
+  }
+
+  return stack.length == 0 ? nodes : []
+}
+
+/**
+ * Finds nodes whose exact attribute value matches.
+ * @param {{attributes: Map<string, string>}[]} nodes Parsed nodes.
+ * @param {string} name Attribute name.
+ * @param {string} value Required value.
+ * @returns {number[]} Matching indexes.
+ */
+function indexes(nodes, name, value) {
+  return nodes.flatMap((node, index) => node.attributes.get(name) == value ? [index] : [])
+}
+
+/**
+ * Reports whether one node is a strict descendant of another.
+ * @param {{parent: number | undefined}[]} nodes Parsed nodes.
+ * @param {number} child Child index.
+ * @param {number} ancestor Ancestor index.
+ * @returns {boolean} Whether the relationship is exact.
+ */
+function isDescendant(nodes, child, ancestor) {
+  let parent = nodes[child]?.parent
+
+  while (parent !== undefined) {
+    if (parent == ancestor) return true
+    parent = nodes[parent]?.parent
+  }
+
+  return false
 }
 
 /** @param {string} node @returns {Map<string, string>} */
@@ -47,8 +107,22 @@ function decodeXml(value) {
   })
 }
 
-function failure() {
-  throw new Error("Android UI dump does not contain one exact labelled Flutter output.")
+/** @param {{attributes: Map<string, string>}[]} [nodes] Parsed nodes. */
+function failure(nodes = []) {
+  const observedDescriptions = observed(nodes, "content-desc")
+  const observedText = observed(nodes, "text")
+
+  throw new Error("Android UI dump does not contain one exact labelled Flutter output. " +
+    `Observed content-desc values: ${JSON.stringify(observedDescriptions)}; text values: ${JSON.stringify(observedText)}.`)
+}
+
+/** @param {{attributes: Map<string, string>}[]} nodes @param {string} name @returns {string[]} */
+function observed(nodes, name) {
+  return nodes.flatMap(({attributes: node}) => {
+    const value = node.get(name)
+
+    return value ? [value.slice(0, 256)] : []
+  })
 }
 
 if (process.argv[1] && import.meta.url == pathToFileURL(process.argv[1]).href) {

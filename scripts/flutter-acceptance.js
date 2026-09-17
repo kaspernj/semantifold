@@ -24,7 +24,7 @@ const sources = [{
   language: /** @type {const} */ ("ruby"),
   source: `require_relative "math_tools"
 module Main
-  puts MathTools.decorate(MathTools.decorate("hé😀", "!"), "?")
+  puts MathTools.decorate(MathTools.decorate(MathTools.formatter_canonical_zero_argument_function, "!"), "?")
 end
 `
 }, {
@@ -33,6 +33,11 @@ end
   language: /** @type {const} */ ("ruby"),
   source: `module MathTools
   module_function
+  # @return [String]
+  def formatter_canonical_zero_argument_function
+    return "hé😀"
+  end
+
   # @param value [String]
   # @param suffix [String]
   # @return [String]

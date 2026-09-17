@@ -200,8 +200,10 @@ function emitStatement(writer, statement, indent, path, unreadLocals, printTarge
     const expandedPrint = multilinePrint && writer.column - 1 + printTarget.length +
       flatDartExpression(writer, statement.expression).length + 3 > 80
 
-    writer.synthetic(`${printTarget}(${expandedPrint ? `\n${indent}  ` : ""}`,
-      "Dart print plumbing", [statement], [path])
+    if (printTarget == "print") {
+      writer.mapped(printTarget, {mappingKind: "anchor", name: "print", node: statement, path, role: "callee"})
+    } else writer.synthetic(printTarget, "Dart print plumbing", [statement], [path])
+    writer.synthetic(`(${expandedPrint ? `\n${indent}  ` : ""}`, "Dart print plumbing", [statement], [path])
     emitExpression(writer, statement.expression, `${path}/expression`, "dart", identity)
     writer.synthetic(expandedPrint ? `,\n${indent});` : ");", "Dart print plumbing", [statement], [path])
     writer.synthetic("\n", "line break", [statement], [path])

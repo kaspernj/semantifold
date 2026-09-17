@@ -7,6 +7,8 @@ import {
   generateArtifactSet,
   generateProgramArtifactSet,
   languageCapabilities,
+  mappingFromSourceMap,
+  originalPositionFor,
   parse,
   parseProgram,
   SemantifoldDiagnostic
@@ -20,6 +22,20 @@ const dartSource = `String decorate(String value, String suffix) {
 
 void main() {
   print(decorate(decorate("hé😀", "!"), "?"));
+}
+`
+
+const longZeroArgumentFunction = "formatterCanonicalZeroArgumentFunction"
+const longZeroArgumentSource = `String ${longZeroArgumentFunction}() {
+  return "value";
+}
+
+String passthrough(String value) {
+  return value;
+}
+
+void main() {
+  print(passthrough(${longZeroArgumentFunction}()));
 }
 `
 
@@ -160,6 +176,61 @@ describe("Flutter application artifact target", () => {
     expect(runner?.provenance.kind).toEqual("synthetic")
   })
 
+  it("keeps zero-argument sink declarations and calls formatter-canonical", () => {
+    const module = parse({filename: "wide.dart", language: "dart", source: longZeroArgumentSource})
+    const set = generateArtifactSet({language: "flutter", module, role: "application"})
+    const semantic = String(set.artifacts.find(({content, path}) => path.includes("/lib/src/semantic/") &&
+      String(content).includes(longZeroArgumentFunction))?.content)
+
+    expect(semantic).toContain(`${longZeroArgumentFunction}(\n    _SemantifoldOutputSink semantifoldOutput,\n  ) {`)
+    expect(semantic).toContain(`${longZeroArgumentFunction}(\n          semantifoldOutput,\n        )`)
+    expect(semantic).toContain(`\n  }\n\n  static String passthrough(`)
+  })
+
+  it("keeps ordinary Dart print source-mapped while Flutter output plumbing stays synthetic", () => {
+    const source = `String identity(String value) {
+  return value;
+}
+
+void main() {
+  print(identity("mapped"));
+}
+`
+    const module = parse({filename: "mapped.dart", language: "dart", source})
+    const dartSet = generateArtifactSet({language: "dart", module})
+    const dartEntry = dartSet.artifacts.find(({path}) => path == "bin/program.dart")
+
+    assert.ok(dartEntry && dartEntry.provenance.kind == "text" && typeof dartEntry.content == "string")
+    const dartPrintOffset = dartEntry.content.indexOf("print(identity(\"mapped\"))")
+    const richPrint = originalPositionFor(dartEntry.provenance.mapping, {offset: dartPrintOffset})
+    const projectedPrint = originalPositionFor(mappingFromSourceMap(dartEntry.provenance.sourceMap, {
+      content: dartEntry.content,
+      filename: dartEntry.path,
+      language: "dart"
+    }), {offset: dartPrintOffset})
+
+    expect(richPrint.mappingKind).not.toEqual("synthetic")
+    expect(richPrint.role).toEqual("callee")
+    expect(richPrint.location?.start.offset).toEqual(source.indexOf("print"))
+    expect(projectedPrint.location?.start.offset).toEqual(source.indexOf("print"))
+
+    const flutterSet = generateArtifactSet({language: "flutter", module, role: "application"})
+    const flutterEntry = flutterSet.artifacts.find(({content, path}) => path.includes("/lib/src/semantic/") &&
+      String(content).includes("identity"))
+
+    assert.ok(flutterEntry && flutterEntry.provenance.kind == "text" && typeof flutterEntry.content == "string")
+    const sinkOffset = flutterEntry.content.indexOf("semantifoldOutput.write")
+    const sink = originalPositionFor(flutterEntry.provenance.mapping, {offset: sinkOffset})
+    const projectedSink = originalPositionFor(mappingFromSourceMap(flutterEntry.provenance.sourceMap, {
+      content: flutterEntry.content,
+      filename: flutterEntry.path,
+      language: "dart"
+    }), {offset: sinkOffset})
+
+    expect(sink.mappingKind).toEqual("synthetic")
+    expect(projectedSink.location).toEqual(undefined)
+  })
+
   it("emits a pub-plugin-free Flutter package and dependency-closed Android contract", () => {
     const module = parse({filename: "program.dart", language: "dart", source: dartSource})
     const set = generateArtifactSet({language: "flutter", module, role: "application"})
@@ -170,12 +241,23 @@ describe("Flutter application artifact target", () => {
     const build = content[`${root}/android/app/build.gradle.kts`]
     const properties = content[`${root}/android/gradle.properties`]
     const manifest = content[`${root}/android/app/src/main/AndroidManifest.xml`]
+    const lock = content[`${root}/pubspec.lock`]
+    const lockedPackageNames = [...lock.matchAll(/^ {2}([a-z][a-z0-9_]*):$/gmu)].map(([, name]) => name)
 
     expect(pubspec).toContain("sdk: 3.13.3")
     expect(pubspec).toContain("flutter: 3.47.4")
     expect(pubspec).toContain("flutter:\n    sdk: flutter")
     expect(pubspec).toContain("flutter_test:\n    sdk: flutter")
     expect(pubspec).not.toMatch(/cupertino_icons|flutter_lints|integration_test|hosted:|git:|path:/u)
+    expect(lockedPackageNames).toContain("async")
+    expect(lockedPackageNames).toContain("collection")
+    for (const packageName of lockedPackageNames) {
+      assert.throws(
+        () => generateArtifactSet({configuration: {packageName}, language: "flutter", module, role: "application"}),
+        error => error instanceof SemantifoldDiagnostic && error.code == "INVALID_APPLICATION_CONFIGURATION",
+        packageName
+      )
+    }
     expect(settings).toContain('id("com.android.application") version "8.11.1" apply false')
     expect(settings).toContain('id("dev.flutter.flutter-plugin-loader") version "1.0.0"')
     expect(settings).toContain('id("org.jetbrains.kotlin.android") version "2.2.20" apply false')
@@ -272,9 +354,12 @@ describe("Flutter application artifact target", () => {
     const invalid = [
       {configuration: {packageName: "Bad-Name"}},
       {configuration: {packageName: "flutter"}},
+      {configuration: {packageName: "async"}},
+      {configuration: {packageName: "collection"}},
       {configuration: {organization: "Bad.Org"}},
       {configuration: {applicationId: "dev.other.application"}},
       {configuration: {activityClassName: "main.activity"}},
+      {configuration: {activityClassName: "FlutterActivity"}},
       {configuration: {displayName: "two\u2028lines"}},
       {configuration: {compileSdk: 36}},
       {configuration: {minimumSdk: 24}},
@@ -295,7 +380,8 @@ describe("Flutter application artifact target", () => {
       assert.throws(
         () => generateArtifactSet({...candidate, language: "flutter", module, role: "application"}),
         error => error instanceof SemantifoldDiagnostic && error.language == "flutter" &&
-          ["INVALID_APPLICATION_CONFIGURATION", "INVALID_APPLICATION_INPUT"].includes(error.code)
+          ["INVALID_APPLICATION_CONFIGURATION", "INVALID_APPLICATION_INPUT"].includes(error.code),
+        JSON.stringify(candidate)
       )
     }
   })

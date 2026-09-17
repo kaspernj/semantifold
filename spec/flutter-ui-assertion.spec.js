@@ -19,5 +19,16 @@ describe("Flutter emulator UI assertion", () => {
 
     expect(assertFlutterUiDump(combined, output)).toEqual({label: "semantifold-output", output})
     assert.throws(() => assertFlutterUiDump(`${combined}${exact}`, output), /exact labelled Flutter output/u)
+
+    const androidFlutter = `<hierarchy><node text="" content-desc="semantifold-output">
+  <node text="" content-desc="hé😀&#10;hé😀!&#10;hé😀!?" />
+</node></hierarchy>`
+
+    expect(assertFlutterUiDump(androidFlutter, output)).toEqual({label: "semantifold-output", output})
+    assert.throws(() => assertFlutterUiDump(androidFlutter.replace("</node></hierarchy>",
+      `<node text="" content-desc="hé😀&#10;hé😀!&#10;hé😀!?" /></node></hierarchy>`), output),
+    /exact labelled Flutter output/u)
+    assert.throws(() => assertFlutterUiDump(androidFlutter.replace("hé😀!?", "unexpected"), output),
+      /observed content-desc.*unexpected/iu)
   })
 })

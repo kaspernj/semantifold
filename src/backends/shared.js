@@ -2257,7 +2257,7 @@ export function emitExpression(writer, expression, path, language, emitIdentifie
       if (dartMultiline) writer.synthetic(",\n", "Dart formatter argument separator", [expression], [path])
     })
     if (callArgumentSuffix) {
-      writer.synthetic(dartMultiline ? `${dartIndent}  ${callArgumentSuffix},\n` :
+      writer.synthetic(dartMultiline ? `${expression.arguments.length ? "" : "\n"}${dartIndent}  ${callArgumentSuffix},\n` :
         `${expression.arguments.length ? ", " : ""}${callArgumentSuffix}`,
       "target-container semantic call argument", [expression], [path])
     }

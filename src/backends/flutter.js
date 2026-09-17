@@ -58,6 +58,12 @@ const flutterLockedHostedPackages = Object.freeze([
   ["vector_math", "2.4.2", "f36f9f3be64c6198714492bb455c11056e33e2f85d9a0b676a48301e44fdcf47"],
   ["vm_service", "15.3.0", "5f37239c4851efcef929cea7824e76df7f2f0970aef85d66bbc430afa40e72f0"]
 ])
+/** @type {readonly (readonly [string, "direct main" | "direct dev" | "transitive"])[]} */
+const flutterLockedSdkPackages = Object.freeze([
+  ["flutter", "direct main"],
+  ["flutter_test", "direct dev"],
+  ["sky_engine", "transitive"]
+])
 /** @type {Readonly<Set<import("../semantic/types.js").SemanticLanguage>>} */
 const flutterSourceLanguages = new Set([
   "php", "ruby", "javascript", "typescript", "java", "kotlin", "python", "csharp", "go", "c", "cpp", "rust", "swift", "dart", "zig"
@@ -83,7 +89,13 @@ const javaKeywords = new Set([
   "return", "short", "static", "strictfp", "super", "switch", "synchronized", "this", "throw", "throws", "transient",
   "try", "void", "volatile", "while"
 ])
-const forbiddenPackageNames = new Set(["flutter", "flutter_test", "integration_test", "semantifold"])
+const forbiddenPackageNames = new Set([
+  ...flutterLockedHostedPackages.map(([name]) => name),
+  ...flutterLockedSdkPackages.map(([name]) => name),
+  "integration_test",
+  "semantifold"
+])
+const androidRunnerBaseClassNames = new Set(["FlutterActivity"])
 const semanticVersionPattern = /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[A-Za-z-][A-Za-z0-9-]*)(?:\.(?:0|[1-9][0-9]*|[A-Za-z-][A-Za-z0-9-]*))*)?(?:\+[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*)?$/u
 const mediaTypePattern = /^[A-Za-z0-9!#$&^_.+-]+\/[A-Za-z0-9!#$&^_.+-]+(?:[\u0020-\u007e]+)?$/u
 const excludedPathPatterns = Object.freeze([
@@ -327,7 +339,7 @@ function emitSemanticModule(writer, module, moduleId, entry, sinkName) {
       writer.mapped(parameter.name, {mappingKind: "exact", node: parameter, path: parameterPath, role: "name"})
       if (multiline) writer.synthetic(",\n", "Dart formatter parameter separator", [parameter], [parameterPath])
     })
-    if (multiline) writer.synthetic(`    _SemantifoldOutputSink ${sinkName},\n  `,
+    if (multiline) writer.synthetic(`${declaration.parameters.length ? "" : "\n"}    _SemantifoldOutputSink ${sinkName},\n  `,
       "Flutter output sink parameter", [declaration], [path])
     else writer.synthetic(`${declaration.parameters.length ? ", " : ""}_SemantifoldOutputSink ${sinkName}`,
       "Flutter output sink parameter", [declaration], [path])
@@ -335,6 +347,9 @@ function emitSemanticModule(writer, module, moduleId, entry, sinkName) {
     writer.synthetic(" {\n", "Dart function body scaffold", [declaration], [path])
     emitDartBlock(writer, declaration.body, "    ", `${path}/body`, unreadLocals, `${sinkName}.write`, true)
     writer.synthetic("  }\n", "Dart function body scaffold", [declaration], [path])
+    if (functionIndex + 1 < module.functions.length || entry) {
+      writer.synthetic("\n", "Dart formatter declaration separator", [declaration], [path])
+    }
   })
   if (entry) {
     writer.synthetic("  static List<String> semantifoldEntry() {\n", "Flutter semantic entry scaffold",
@@ -409,7 +424,7 @@ function renderPubspec(prepared, spans) {
  */
 function renderPubspecLock() {
   const hosted = new Map(flutterLockedHostedPackages.map(package_ => [package_[0], package_]))
-  const sdk = new Map([["flutter", "direct main"], ["flutter_test", "direct dev"], ["sky_engine", "transitive"]])
+  const sdk = new Map(flutterLockedSdkPackages)
   const packageNames = [...hosted.keys(), ...sdk.keys()].sort()
   const packages = packageNames.map(name => {
     const sdkDependency = sdk.get(name)
@@ -981,6 +996,9 @@ function normalizeConfiguration(candidate) {
   }
   if (typeof activityClassName != "string" || !/^[A-Z][A-Za-z0-9]*$/u.test(activityClassName) ||
     javaKeywords.has(activityClassName)) invalidConfiguration("Activity class name must be an ASCII upper-camel Java identifier.")
+  if (androidRunnerBaseClassNames.has(activityClassName)) {
+    invalidConfiguration("Activity class name must not collide with the imported Flutter launcher base class.")
+  }
   if (typeof displayName != "string" || displayName.length == 0 || displayName.trim() != displayName ||
     [...displayName].length > 64 || !hasOnlyUnicodeScalars(displayName) || /[\p{Cc}\p{Zl}\p{Zp}\uFFFE\uFFFF]/u.test(displayName)) {
     invalidConfiguration("Display name must be a non-empty single-line Unicode scalar string of at most 64 characters.")
