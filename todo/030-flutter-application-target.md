@@ -1,6 +1,6 @@
 # 030 — Dart/Flutter application artifact target
 
-- Status: `todo`
+- Status: `in progress — bounded Android slice implemented; exact-head TensorBuzz/review/merge pending; iOS/macOS acceptance deferred`
 - Phase/priority: Phase P / P2
 - Dependencies: [010-multifile-modules-and-names.md](010-multifile-modules-and-names.md), [028-android-application-target.md](028-android-application-target.md), [029-dart-source-and-target.md](029-dart-source-and-target.md)
 
@@ -48,3 +48,13 @@ Document the project/template ownership, supported Flutter SDK and offline cache
 ## Non-goals
 
 Arbitrary Flutter widgets/state/navigation, plugins/platform channels, web/desktop Flutter, host APIs, external pub packages, CocoaPods dependencies, physical devices, release signing, or App Store/Play Store delivery.
+
+## Bounded implementation record — 2026-09-17
+
+The current Task 030 candidate implements the dependency-ready Linux/Android slice without claiming the dual-platform completion criteria above. `flutter` is an application-only registry role; it has no frontend, text backend, binary backend, source round trip, or public materializer. Any Task 010 project accepted by the Dart backend lowers to mapped namespaced Dart parts, a resettable output sink, a synthetic stateless Material shell with exact `semantifold-output` key/semantics label, an exact SDK-only pubspec/lock, a Java Flutter activity, and a permission-free Task 028-compatible Android project below `generated/flutter-app`.
+
+The emitted template owns Flutter stable 3.47.4 at revision `9584c6713b324636289d067944a46fd6b49df14b`, Dart 3.13.3, every artifact path/hash, normalized configuration, source/module identities, assets, mappings, synthetic scaffolding, and explicit platform status. The checksum-qualified official archive supplies the complete offline pub preload cache. Generation never invokes `flutter create`; public requests cannot select paths, overwrite behavior, SDKs, signing, or permissions. Traversal, collisions, unsafe identities/versions/assets, unsupported Dart semantics, and malformed projects fail before a set is returned.
+
+Flutter 3.47.4 rejects the prior Gradle 8.13 baseline. The single shared Task 028 installation/cache therefore advances to official checksum-pinned Gradle 8.14 while preserving AGP 8.11.1, JDK 21.0.8, API 35, Build Tools 35.0.0, emulator 35.6.11, KVM isolation, ephemeral keys, offline acceptance, and exactly two fresh boots. Dependency validation is not bypassed and no second Android lane exists. Focused tests cover registry/API separation, deterministic Ruby and Dart projects, multiple modules and Unicode, exact ownership/provenance, assets, invalid configuration/paths/collisions, unsupported semantics, private materialization, packed consumers, toolchain contracts, and UI-dump rejection. Real local Flutter 3.47.4 offline restore/format/analyze/widget tests qualify the emitted project; Android APK/emulator proof remains the exact-head TensorBuzz gate.
+
+No `ios/` artifact is emitted. macOS, Xcode, Apple SDK, CocoaPods, signing, iOS Simulator build/launch/UI behavior, and the original dual-platform completion criteria remain deferred under owner direction. This is a visible incomplete platform boundary, not a silent skip or a claim that Task 026's deferred Apple proof has been supplied. See [the Flutter application target documentation](../docs/flutter.md).

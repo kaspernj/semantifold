@@ -2,9 +2,9 @@
 
 ## Purpose and current baseline
 
-This folder is Semantifold's durable, dependency-ordered implementation backlog and delivered design record. The released baseline is `semantifold@0.5.0` / `v0.5.0` at commit `f8ed12f85be7762eab4b0200a3a4aeae66099d84`; Task 031 starts from that exact clean merged baseline. Earlier delivery history and external evidence remain recorded in [SOURCES.md](SOURCES.md).
+This folder is Semantifold's durable, dependency-ordered implementation backlog and delivered design record. The released baseline is `semantifold@0.6.0` / annotated `v0.6.0` at commit `f76e6d64b388d65959e77f747ae2d60a999d61f5`; the public package reports that exact `gitHead`, and Task 030 starts from that exact clean merged baseline. Earlier delivery history and external evidence remain recorded in [SOURCES.md](SOURCES.md).
 
-Tasks 001–025, 029, and 032–037 are delivered; their exact PR, commit, CI, and acceptance history remains in the task records and [SOURCES.md](SOURCES.md). Task 026 has deterministic generation/provenance while Apple materialization and acceptance remain deferred. Task 028 is implemented locally with its exact-head TensorBuzz offline build/KVM emulator proof and merge pending. Tasks 027 and 030 remain roadmap work. Task 031 is implemented on its feature branch with independent review, exact-head TensorBuzz CI, merge, and any release pending.
+Tasks 001–025, 028, 029, 031, and 032–037 are delivered; their exact PR, commit, CI, and acceptance history remains in the task records and [SOURCES.md](SOURCES.md). Task 028 merged in PR #51, Task 031 merged in PR #52, and both are in `semantifold@0.6.0`. Task 026 has deterministic generation/provenance while Apple materialization and acceptance remain deferred. Task 027 remains roadmap work. Task 030 now has a bounded Android-qualified implementation candidate; exact-head TensorBuzz proof, review, and merge remain, while all iOS/macOS acceptance stays explicitly deferred.
 
 The delivered language-baseline expansion keeps its small Tasks 001–004 IR contract. Tasks 005–008 are bounded original-five semantic layers; none makes every platform, legacy bridge, or later language block semantic progress.
 
@@ -123,10 +123,10 @@ Phase S implements the [standard-library portability design](../docs/standard-li
 - [021 — Browser-oriented WebAssembly target](021-browser-webassembly-target.md) — delivered
 - [026 — Apple/iOS application artifact target](026-apple-ios-application-target.md) — deterministic generation/provenance implemented; materialization and Apple acceptance deferred
 - [027 — Objective-C interoperability bridge](027-objective-c-interoperability.md)
-- [028 — Kotlin/Android application artifact target](028-android-application-target.md) — implemented locally; TensorBuzz offline build/KVM emulator acceptance and merge pending
+- [028 — Kotlin/Android application artifact target](028-android-application-target.md) — delivered through merged PR #51 and `v0.6.0`
 - [029 — Dart source and target support](029-dart-source-and-target.md) — delivered through merged PR #50 and `v0.4.0`
-- [030 — Dart/Flutter application artifact target](030-flutter-application-target.md)
-- [031 — Zig source and target support](031-zig-source-and-target.md) — implemented; review/CI/merge pending
+- [030 — Dart/Flutter application artifact target](030-flutter-application-target.md) — bounded Android slice implemented; exact-head TensorBuzz/review/merge pending, iOS/macOS proof deferred
+- [031 — Zig source and target support](031-zig-source-and-target.md) — delivered through merged PR #52 and `v0.6.0`
 
 These tasks do not gate Task 005. Browser Wasm depends only on Task 015 and remains target-only. iOS and Android app artifacts require their language backend plus Task 010's project model. Objective-C is a lower-priority Swift interoperability/legacy-host bridge, not a full frontend/backend. Dart follows Task 005 and supplies the typed language backend required by Flutter. Flutter then reuses the Android emulator lane and shared project model. Zig follows the initial native cohort and Task 005 without delaying either.
 
@@ -154,7 +154,7 @@ Legend: **implemented** describes the baseline, **core** gates Task 025, **later
 | Objective-C | none | later interop bridge 027 | `.m` host + generated Swift interface | Clang/Xcode interoperability | bounded legacy host bridge |
 | Android | any registered project frontend | implemented application target 028 | Kotlin/Gradle Android app | pinned offline Gradle/SDK + TensorBuzz KVM emulator | Kotlin-supported Task 010 project to native labelled UI |
 | Dart | implemented 029 | implemented VM/native text 029 | `pubspec.yaml`, `pubspec.lock`, `bin/program.dart` | `tree-sitter-dart-orchard@0.7.0` + Dart SDK 3.13.3 | Tasks 001–005 |
-| Flutter | Dart and any registered project frontend | later application target 030 | Flutter app project | Flutter SDK + simulator/emulator | Task 010 project to widget shell |
+| Flutter | Dart and any registered project frontend | implemented Android-qualified application slice 030; iOS deferred | owned SDK-only Flutter/Android app project | Flutter 3.47.4 + shared TensorBuzz KVM emulator; Apple proof deferred | Dart-supported Task 010 project to labelled stateless widget shell |
 | Zig | implemented 031 | implemented native project 031 | `build.zig`, `src/main.zig` | private exact grammar 1.1.2 + Zig 0.15.2 | Tasks 001–005 |
 
 An application target consumes semantic projects; it does not make Ruby, Python, or another source runtime part of the app. In particular, Ruby-to-iOS means Ruby source is parsed by Semantifold, normalized to the shared project IR, and lowered to generated Swift plus Xcode-compatible app artifacts. No Ruby interpreter, gems, native extensions, `eval`, monkey-patching, or other rejected Ruby behavior ships in or runs on iOS.
@@ -248,10 +248,10 @@ Dependencies in task files are authoritative. Existing IDs remain stable; numeri
 | [021](021-browser-webassembly-target.md) | delivered (P) | — | Browser Wasm binary target | 015 |
 | [026](026-apple-ios-application-target.md) | in progress (P; Apple proof deferred) | P1 | Swift/Xcode iOS application artifacts | 010, 022 |
 | [027](027-objective-c-interoperability.md) | P | P2 | Objective-C legacy-host bridge | 005, 026 |
-| [028](028-android-application-target.md) | implemented locally (P; exact-head CI/merge pending) | P1 | Kotlin Android application artifacts | 010, 023 |
+| [028](028-android-application-target.md) | delivered (P; PR #51, `v0.6.0`) | P1 | Kotlin Android application artifacts | 010, 023 |
 | [029](029-dart-source-and-target.md) | delivered (P; PR #50, `v0.4.0`) | P1 | Dart frontend/backend/package | 005, 015 |
-| [030](030-flutter-application-target.md) | P | P2 | Flutter application artifacts | 010, 028, 029 |
-| [031](031-zig-source-and-target.md) | implemented (P; review/CI/merge pending) | P2 | Zig frontend/backend/project | 005, 015, 018, 020 |
+| [030](030-flutter-application-target.md) | implemented Android slice (P; exact-head CI/review/merge pending; Apple proof deferred) | P2 | Flutter application artifacts | 010, 028, 029 |
+| [031](031-zig-source-and-target.md) | delivered (P; PR #52, `v0.6.0`) | P2 | Zig frontend/backend/project | 005, 015, 018, 020 |
 | [032](032-condition-controlled-loops-and-break.md) | delivered (S) | P1 | Strict-Boolean loops and resolved break/continue; delivered through PR #42 at `8ad60e381f14ab5dab85d6d1996e58de7e3f84bc`, merge `e6889212a57d4d0820b9c5cd3ad21b0ef8cc2c9e` | 004, 005 |
 | [033](033-reference-classes-methods-and-constructors.md) | delivered (S) | P1 | Bounded nominal reference classes; PR #43 head `98a9fa5bb1048fbe44e798acdefd65b9d6d2560e`, merge `f2e7f44aa8065f785c314b66e1f1d55992b7c998` | 005, 009 |
 | [034](034-effectful-capabilities-and-resource-lifetime.md) | delivered (S) | P1 | Compiler-authorized effects and explicit owned-resource lifetime; delivered through PR #44, merged as `c15e0874c054b6c462304eb29538d72ed43829d6` | 005, 007, 011, 033 |

@@ -18,6 +18,7 @@ import {generateTypeScript} from "./backends/typescript.js"
 import {generateBrowserWasm} from "./backends/wasm.js"
 import {generateIosApplication} from "./backends/ios.js"
 import {generateAndroidApplication} from "./backends/android.js"
+import {generateFlutterApplication} from "./backends/flutter.js"
 import {parseJava} from "./frontends/java.js"
 import {parseKotlin} from "./frontends/kotlin.js"
 import {parseCSharp} from "./frontends/csharp.js"
@@ -547,6 +548,15 @@ const records = [
     artifactMultiplicity: "multiple",
     features: {closedRecords: false, conditionControlledLoops: false, effectfulCapabilitiesAndResources: false, generalFunctionsAndCalls: false, immutableCollections: false, optionalValues: false, orderedListIteration: false, orderedMapIteration: false, referenceClasses: false, typedErrors: false, typeParametersAndGenerics: false},
     id: "ios",
+    mapping: {binaryRanges: true, richText: true, sourceMapV3: true},
+    roundTrip: false
+  },
+  {
+    acceptance: {stages: ["generate", "restore", "compile", "validate", "instantiate", "execute"], toolchains: ["flutter", "android"]},
+    applicationBackend: generateFlutterApplication,
+    artifactMultiplicity: "multiple",
+    features: {closedRecords: false, conditionControlledLoops: false, effectfulCapabilitiesAndResources: false, generalFunctionsAndCalls: false, immutableCollections: false, optionalValues: false, orderedListIteration: false, orderedMapIteration: false, referenceClasses: false, typedErrors: false, typeParametersAndGenerics: false},
+    id: "flutter",
     mapping: {binaryRanges: true, richText: true, sourceMapV3: true},
     roundTrip: false
   }

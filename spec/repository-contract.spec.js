@@ -480,7 +480,7 @@ describe("repository delivery contracts", () => {
     expect(task).toContain("AC07 and AC12–AC14 remain deferred")
     expect(roadmap).toContain("deterministic generation/provenance implemented; materialization and Apple acceptance deferred")
     expect(roadmap).toContain("| [027](027-objective-c-interoperability.md) | P | P2 | Objective-C legacy-host bridge | 005, 026 |")
-    expect(roadmap).toContain("| [028](028-android-application-target.md) | implemented locally (P; exact-head CI/merge pending) | P1 | Kotlin Android application artifacts | 010, 023 |")
+    expect(roadmap).toContain("| [028](028-android-application-target.md) | delivered (P; PR #51, `v0.6.0`) | P1 | Kotlin Android application artifacts | 010, 023 |")
     expect(changelog).toContain("iOS")
     expect(changelog).toContain("Materialization remains deferred")
     expect(changelog).toContain("Apple acceptance remains deferred")

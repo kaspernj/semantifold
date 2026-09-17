@@ -176,7 +176,7 @@ async function checkInfrastructure(mode) {
   const emulatorVersion = await infrastructureCommand(
     path.join(androidHome, "emulator/emulator"), ["-version"], environment, "Android emulator")
 
-  if (!/^Gradle 8\.13$/mu.test(gradleVersion.stdout)) infrastructure("Gradle is not exact version 8.13.")
+  if (!/^Gradle 8\.14$/mu.test(gradleVersion.stdout)) infrastructure("Gradle is not exact version 8.14.")
   if (!/version "21\.0\.8"/u.test(javaVersion.stderr)) infrastructure("Java is not exact version 21.0.8.")
   if (!/kotlinc-jvm 2\.2\.10/u.test(kotlinVersion.stderr)) infrastructure("Kotlin is not exact version 2.2.10.")
   if (!/Android emulator version 35\.6\.11/u.test(`${emulatorVersion.stdout}\n${emulatorVersion.stderr}`)) {

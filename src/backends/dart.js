@@ -2,7 +2,7 @@
 
 import {unsupportedCapability} from "../diagnostic.js"
 import {finalizeMapping, toSourceMapV3} from "../mapping.js"
-import {emitExpression, validateBackendModule} from "./shared.js"
+import {emitExpression, flatDartExpression, validateBackendModule} from "./shared.js"
 import {dartRuntime} from "./dart-runtime.js"
 import {emitScalarType} from "./scalars.js"
 import {SourceWriter} from "./writer.js"
@@ -23,7 +23,7 @@ export function generateDartPackage({filename, mapDirective, module, sourceMapFi
   if (mapDirective !== undefined || sourceMapFilename !== undefined) {
     unsupportedCapability("dart", "source-map filename or directive option", module.location)
   }
-  const unreadLocals = findUnreadLocals(module)
+  const unreadLocals = findUnreadDartLocals(module)
   const writer = new SourceWriter({filename: "bin/program.dart", language: "dart", module, sources})
 
   emitProgram(module, writer, unreadLocals)
@@ -113,12 +113,12 @@ function emitProgram(module, writer, unreadLocals) {
     writer.synthetic(" ", "body spacing", [declaration], [path])
     writer.mapped("{", {mappingKind: "anchor", node: declaration.body, path: `${path}/body`})
     writer.synthetic("\n", "line break", [declaration], [path])
-    emitBlock(writer, declaration.body, "  ", `${path}/body`, unreadLocals)
+    emitDartBlock(writer, declaration.body, "  ", `${path}/body`, unreadLocals)
     writer.mapped("}", {mappingKind: "anchor", node: declaration.body, path: `${path}/body`})
     writer.synthetic("\n", "line break", [declaration], [path])
   }
   writer.synthetic("\nvoid main() {\n", "Dart generated main scaffold", [module.entryPoint], ["/entryPoint"])
-  emitBlock(writer, module.entryPoint.body, "  ", "/entryPoint/body", unreadLocals)
+  emitDartBlock(writer, module.entryPoint.body, "  ", "/entryPoint/body", unreadLocals)
   writer.synthetic("}\n", "Dart generated main scaffold", [module.entryPoint], ["/entryPoint"])
 }
 
@@ -129,11 +129,13 @@ function emitProgram(module, writer, unreadLocals) {
  * @param {string} indent Current indentation.
  * @param {string} path Exact semantic path.
  * @param {Set<import("../semantic/types.js").LocalDeclaration>} unreadLocals Locals requiring an analyzer-only read.
+ * @param {string} [printTarget] Target-owned output function spelling.
+ * @param {boolean} [multilinePrint] Whether target plumbing requires trailing-comma multiline calls.
  * @returns {void}
  */
-function emitBlock(writer, block, indent, path, unreadLocals) {
+export function emitDartBlock(writer, block, indent, path, unreadLocals, printTarget = "print", multilinePrint = false) {
   block.statements.forEach((statement, index) =>
-    emitStatement(writer, statement, indent, `${path}/statements/${index}`, unreadLocals))
+    emitStatement(writer, statement, indent, `${path}/statements/${index}`, unreadLocals, printTarget, multilinePrint))
 }
 
 /**
@@ -143,9 +145,11 @@ function emitBlock(writer, block, indent, path, unreadLocals) {
  * @param {string} indent Current indentation.
  * @param {string} path Exact semantic path.
  * @param {Set<import("../semantic/types.js").LocalDeclaration>} unreadLocals Locals requiring an analyzer-only read.
+ * @param {string} printTarget Target-owned output function spelling.
+ * @param {boolean} multilinePrint Whether target plumbing requires trailing-comma multiline calls.
  * @returns {void}
  */
-function emitStatement(writer, statement, indent, path, unreadLocals) {
+function emitStatement(writer, statement, indent, path, unreadLocals, printTarget, multilinePrint) {
   writer.synthetic(indent, "indentation", [statement], [path])
   if (statement.kind == "LocalDeclaration") {
     if (!statement.mutable) writer.mapped("final", {mappingKind: "anchor", node: statement, path})
@@ -181,7 +185,7 @@ function emitStatement(writer, statement, indent, path, unreadLocals) {
     writer.synthetic("\n", "line break", [statement], [path])
     return
   }
-  if (statement.kind == "IfStatement") return emitIf(writer, statement, indent, path, unreadLocals)
+  if (statement.kind == "IfStatement") return emitIf(writer, statement, indent, path, unreadLocals, printTarget, multilinePrint)
   if (statement.kind == "ReturnStatement") {
     writer.mapped("return", {mappingKind: "anchor", node: statement, path})
     if (statement.expression) {
@@ -193,10 +197,13 @@ function emitStatement(writer, statement, indent, path, unreadLocals) {
     return
   }
   if (statement.kind == "PrintStatement") {
-    writer.mapped("print", {mappingKind: "anchor", node: statement, path})
-    writer.mapped("(", {mappingKind: "anchor", node: statement, path})
+    const expandedPrint = multilinePrint && writer.column - 1 + printTarget.length +
+      flatDartExpression(writer, statement.expression).length + 3 > 80
+
+    writer.synthetic(`${printTarget}(${expandedPrint ? `\n${indent}  ` : ""}`,
+      "Dart print plumbing", [statement], [path])
     emitExpression(writer, statement.expression, `${path}/expression`, "dart", identity)
-    writer.mapped(");", {mappingKind: "anchor", node: statement, path})
+    writer.synthetic(expandedPrint ? `,\n${indent});` : ");", "Dart print plumbing", [statement], [path])
     writer.synthetic("\n", "line break", [statement], [path])
     return
   }
@@ -216,23 +223,27 @@ function emitStatement(writer, statement, indent, path, unreadLocals) {
  * @param {string} indent Current indentation.
  * @param {string} path Exact semantic path.
  * @param {Set<import("../semantic/types.js").LocalDeclaration>} unreadLocals Locals requiring an analyzer-only read.
+ * @param {string} printTarget Target-owned output function spelling.
+ * @param {boolean} multilinePrint Whether target plumbing requires trailing-comma multiline calls.
  * @returns {void}
  */
-function emitIf(writer, statement, indent, path, unreadLocals) {
+function emitIf(writer, statement, indent, path, unreadLocals, printTarget, multilinePrint) {
   writer.mapped("if", {mappingKind: "anchor", node: statement, path})
   writer.synthetic(" (", "Dart conditional scaffold", [statement], [path])
   emitExpression(writer, statement.condition, `${path}/condition`, "dart", identity)
   writer.synthetic(") ", "Dart conditional scaffold", [statement], [path])
   writer.mapped("{", {mappingKind: "anchor", node: statement.consequent, path: `${path}/consequent`})
   writer.synthetic("\n", "line break", [statement], [path])
-  emitBlock(writer, statement.consequent, `${indent}  `, `${path}/consequent`, unreadLocals)
+  emitDartBlock(writer, statement.consequent, `${indent}  `, `${path}/consequent`, unreadLocals, printTarget,
+    multilinePrint)
   writer.synthetic(indent, "indentation", [statement], [path])
   writer.mapped("}", {mappingKind: "anchor", node: statement.consequent, path: `${path}/consequent`})
   if (statement.alternate) {
     writer.synthetic(" else ", "Dart alternate scaffold", [statement], [path])
     writer.mapped("{", {mappingKind: "anchor", node: statement.alternate, path: `${path}/alternate`})
     writer.synthetic("\n", "line break", [statement], [path])
-    emitBlock(writer, statement.alternate, `${indent}  `, `${path}/alternate`, unreadLocals)
+    emitDartBlock(writer, statement.alternate, `${indent}  `, `${path}/alternate`, unreadLocals, printTarget,
+      multilinePrint)
     writer.synthetic(indent, "indentation", [statement], [path])
     writer.mapped("}", {mappingKind: "anchor", node: statement.alternate, path: `${path}/alternate`})
   }
@@ -244,7 +255,7 @@ function emitIf(writer, statement, indent, path, unreadLocals) {
  * @param {import("../semantic/types.js").SemanticModule} module Validated semantic module.
  * @returns {Set<import("../semantic/types.js").LocalDeclaration>} Unread declaration identities.
  */
-function findUnreadLocals(module) {
+export function findUnreadDartLocals(module) {
   /** @type {Set<import("../semantic/types.js").LocalDeclaration>} */
   const unread = new Set()
 

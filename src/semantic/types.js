@@ -2,7 +2,7 @@
 
 /** @typedef {"php" | "ruby" | "javascript" | "typescript" | "java" | "kotlin" | "python" | "csharp" | "go" | "c" | "cpp" | "rust" | "swift" | "dart" | "zig"} SemanticLanguage */
 /** @typedef {SemanticLanguage} TextBackendLanguage */
-/** @typedef {TextBackendLanguage | "wasm" | "ios" | "android"} BackendLanguage */
+/** @typedef {TextBackendLanguage | "wasm" | "ios" | "android" | "flutter"} BackendLanguage */
 /** @typedef {SemanticLanguage | "html"} GeneratedTextLanguage */
 /** @typedef {"integer" | "boolean" | "string"} SemanticTypeName */
 /** @typedef {SemanticTypeName | "void"} FunctionReturnTypeName */
@@ -98,6 +98,45 @@
 /**
  * @typedef AndroidApplicationInputFile
  * @property {string} path - Safe path relative to the selected fixed Android resource or asset root.
+ * @property {string | Uint8Array} content - Exact caller-provided text or bytes.
+ * @property {string} mediaType - Explicit artifact media type.
+ * @property {string} sha256 - Lowercase SHA-256 of exact UTF-8 text or bytes.
+ */
+
+/**
+ * @typedef FlutterApplicationConfigurationInput
+ * @property {string} [packageName] - Lowercase Dart package identity.
+ * @property {string} [organization] - Lowercase reverse-DNS owning organization.
+ * @property {string} [applicationId] - Lowercase reverse-DNS Android application identity extending the organization.
+ * @property {string} [activityClassName] - Generated Java launcher Activity class name.
+ * @property {string} [displayName] - User-visible application label.
+ * @property {23} [minimumSdk] - Qualified minimum Android API.
+ * @property {35} [targetSdk] - Qualified target Android API.
+ * @property {35} [compileSdk] - Qualified compile Android API.
+ * @property {"35.0.0"} [buildToolsVersion] - Qualified Android Build Tools version.
+ * @property {number} [versionCode] - Positive Android/Flutter build number.
+ * @property {string} [versionName] - Canonical application version name.
+ * @property {unknown[]} [permissions] - Validated as the closed empty permission set.
+ */
+
+/**
+ * @typedef FlutterApplicationConfiguration
+ * @property {string} packageName - Validated Dart package identity.
+ * @property {string} organization - Validated owning organization.
+ * @property {string} applicationId - Validated Android application identity.
+ * @property {string} activityClassName - Generated Java launcher Activity class name.
+ * @property {string} displayName - User-visible application label.
+ * @property {23} minimumSdk - Qualified minimum Android API.
+ * @property {35} targetSdk - Qualified target Android API.
+ * @property {35} compileSdk - Qualified compile Android API.
+ * @property {"35.0.0"} buildToolsVersion - Qualified Android Build Tools version.
+ * @property {number} versionCode - Positive Android/Flutter build number.
+ * @property {string} versionName - Canonical application version name.
+ */
+
+/**
+ * @typedef FlutterApplicationAssetInput
+ * @property {string} path - Safe path below the generated Flutter assets root.
  * @property {string | Uint8Array} content - Exact caller-provided text or bytes.
  * @property {string} mediaType - Explicit artifact media type.
  * @property {string} sha256 - Lowercase SHA-256 of exact UTF-8 text or bytes.

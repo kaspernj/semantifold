@@ -20,8 +20,8 @@ describe("Android toolchain and TensorBuzz acceptance contract", () => {
       readFile(new URL("../scripts/android-acceptance.js", import.meta.url), "utf8")
     ])
 
-    expect(bootstrap).toContain("gradle-8.13-bin.zip")
-    expect(bootstrap).toContain("20f1b1176237254a6fc204d8434196fa11a4cfb387567519c61556e8710aed78")
+    expect(bootstrap).toContain("gradle-8.14-bin.zip")
+    expect(bootstrap).toContain("61ad310d3c7d3e5da131b76bbf22b5a4c0786e9d892dae8c1658d4b484de3caa")
     expect(bootstrap).toContain("commandlinetools-linux-11076708_latest.zip")
     expect(bootstrap).toContain("2d2d50857e4eb553af5a6dc3ad507a17adf43d115264b1afc116f95c92e5e258")
     expect(bootstrap).toContain("kotlin-compiler-2.2.10.zip")
@@ -31,7 +31,9 @@ describe("Android toolchain and TensorBuzz acceptance contract", () => {
       ["platform-35_r02.zip", "0988cacad01b38a18a47bac14a0695f246bc76c1b06c0eeb8eb0dc825ab0c8e0"],
       ["build-tools_r35_linux.zip", "bd3a4966912eb8b30ed0d00b0cda6b6543b949d5ffe00bea54c04c81e1561d88"],
       ["emulator-linux_x64-13610412.zip", "2fe2b56fe93ce75e1d478a40162131381d911c355efeaedb54dd1e0d0897a5cf"],
-      ["x86_64-35_r09.zip", "c67b9ba0ff5bc0eb6d046871bfa228af14d4d47b02f0cdae94f048e511b7566e"]
+      ["x86_64-35_r09.zip", "c67b9ba0ff5bc0eb6d046871bfa228af14d4d47b02f0cdae94f048e511b7566e"],
+      ["android-ndk-r27-linux.zip", "2f17eb8bcbfdc40201c0b36e9a70826fcd2524ab7a2a235e2c71186c302da1dc"],
+      ["cmake-3.22.1-linux.zip", "9196644852a978012caf7a4067ba1898debf6cc204c3341562771e31080d6869"]
     ]
 
     for (const [archive, hash] of androidArchives) {
@@ -46,7 +48,7 @@ describe("Android toolchain and TensorBuzz acceptance contract", () => {
     )].map(match => match[1])
     const archiveChecksums = [...directChecksums, ...helperChecksums]
 
-    expect(archiveChecksums.length).toEqual(9)
+    expect(archiveChecksums.length).toEqual(11)
     for (const checksum of archiveChecksums) expect(checksum).toMatch(/^[0-9a-f]{64}$/u)
     expect(bootstrap).not.toMatch(/\bsdkmanager\b/u)
     expect(bootstrap).toContain("Pkg.Revision=35.6.11")
@@ -100,7 +102,7 @@ describe("Android toolchain and TensorBuzz acceptance contract", () => {
 
     try {
       const executableSources = new Map([
-        [path.join(gradleHome, "bin/gradle"), "printf 'Gradle 8.13\\n'"],
+        [path.join(gradleHome, "bin/gradle"), "printf 'Gradle 8.14\\n'"],
         [path.join(javaHome, "bin/java"), "printf 'openjdk version \"21.0.8\"\\n' >&2"],
         [path.join(javaHome, "bin/keytool"), ":"],
         [path.join(kotlinHome, "bin/kotlinc"), "printf 'info: kotlinc-jvm 2.2.10\\n' >&2"],
@@ -236,9 +238,12 @@ fi
     const lane = config.builds.android
 
     expect(lane.devices).toEqual(["/dev/kvm:/dev/kvm"])
-    expect(lane.script).toEqual(["scripts/bootstrap-android.sh", "scripts/accept-android.sh", "scripts/android-emulator-acceptance.sh"])
+    expect(lane.script).toEqual([
+      "scripts/bootstrap-android.sh", "scripts/bootstrap-flutter.sh", "scripts/accept-android.sh",
+      "scripts/accept-flutter.sh", "scripts/android-emulator-acceptance.sh"
+    ])
     expect(config.environment.SEMANTIFOLD_ANDROID_HOME).toEqual("/opt/semantifold-android-sdk")
-    expect(config.environment.SEMANTIFOLD_GRADLE_HOME).toEqual("/opt/gradle-8.13")
+    expect(config.environment.SEMANTIFOLD_GRADLE_HOME).toEqual("/opt/gradle-8.14")
     expect(config.environment.SEMANTIFOLD_ANDROID_AVD).toEqual("semantifold-api35")
     expect(config.environment.SEMANTIFOLD_KOTLIN_HOME).toEqual("/opt/kotlinc-2.2.10")
     expect(emulator).toContain("test -c /dev/kvm")
@@ -282,7 +287,7 @@ fi
 
     assert.ok(androidRow)
     expect(androidRow.split("|")[7].trim()).toEqual("no")
-    expect(android).toContain("distribution SHA-256 `20f1b1176237254a6fc204d8434196fa11a4cfb387567519c61556e8710aed78`")
+    expect(android).toContain("distribution SHA-256 `61ad310d3c7d3e5da131b76bbf22b5a4c0786e9d892dae8c1658d4b484de3caa`")
     expect(android).toContain("https://dl.google.com/android/repository/repository2-3.xml")
     expect(android).toContain("https://dl.google.com/android/repository/sys-img/google_apis/sys-img2-3.xml")
     expect(android).toContain("https://developer.android.com/studio/emulator_archive")
@@ -339,7 +344,7 @@ fun main() {
     try {
       const executableSources = new Map([
         [path.join(gradleHome, "bin/gradle"), `if [ "\${1:-}" = --version ]; then
-  printf 'Gradle 8.13\\n'
+  printf 'Gradle 8.14\\n'
 elif printf ' %s ' "$*" | grep -q ' lintDebug '; then
   project="$SEMANTIFOLD_ANDROID_ACCEPTANCE_ROOT/generated/android-app/app/build/outputs/apk"
   mkdir -p "$project/debug" "$project/androidTest/debug"

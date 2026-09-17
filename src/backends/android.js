@@ -74,7 +74,7 @@ const toolchain = Object.freeze({
   commandLineTools: "11076708",
   compileSdk: 35,
   emulator: "35.6.11",
-  gradle: "8.13",
+  gradle: "8.14",
   java: "21.0.8",
   kotlin: "2.2.10",
   kotlinCompilerSha256: "302d1d8e671e5c3207e6ed62ff11fb555462a628e22a1158254dcaaf7e7394bc",

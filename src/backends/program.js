@@ -23,7 +23,7 @@ import {programImportName, SourceWriter} from "./writer.js"
 /** @type {Readonly<Set<import("../semantic/types.js").SemanticLanguage>>} */
 const programTargets = new Set(["php", "ruby", "javascript", "typescript", "java"])
 /** @type {Readonly<Set<import("../semantic/types.js").BackendLanguage>>} */
-const programApplicationTargets = new Set(["android", "ios"])
+const programApplicationTargets = new Set(["android", "ios", "flutter"])
 
 /**
  * Validates and prepares a complete semantic program for a non-text backend without allocating a writer.
@@ -68,8 +68,8 @@ export function preflightSemanticProgram({backendLanguage, diagnosticLanguage, p
  * @param {import("../semantic/types.js").BackendLanguage} input.language - Registered program target.
  * @param {import("../semantic/types.js").SemanticProgram} input.program - Complete semantic program.
  * @param {"text" | "application"} [input.role] - Explicit artifact role; omitted preserves text generation.
- * @param {import("../semantic/types.js").IosApplicationConfigurationInput | import("../semantic/types.js").AndroidApplicationConfigurationInput} [input.configuration] - Application configuration.
- * @param {import("../semantic/types.js").IosApplicationAssetInput[] | import("../semantic/types.js").AndroidApplicationInputFile[]} [input.assets] - Exact caller assets.
+ * @param {import("../semantic/types.js").IosApplicationConfigurationInput | import("../semantic/types.js").AndroidApplicationConfigurationInput | import("../semantic/types.js").FlutterApplicationConfigurationInput} [input.configuration] - Application configuration.
+ * @param {import("../semantic/types.js").IosApplicationAssetInput[] | import("../semantic/types.js").AndroidApplicationInputFile[] | import("../semantic/types.js").FlutterApplicationAssetInput[]} [input.assets] - Exact caller assets.
  * @param {import("../semantic/types.js").AndroidApplicationInputFile[]} [input.resources] - Exact Android caller resources.
  * @returns {import("../semantic/types.js").GeneratedArtifactSet} Transactionally validated artifact set.
  */
