@@ -440,7 +440,11 @@ val semantifoldKotlinHome = providers.environmentVariable("SEMANTIFOLD_KOTLIN_HO
   ?: throw GradleException("SEMANTIFOLD_ANDROID_INFRASTRUCTURE: SEMANTIFOLD_KOTLIN_HOME is required")
 val semantifoldKotlinStdlib = file("$semantifoldKotlinHome/lib/kotlin-stdlib.jar")
 if (!semantifoldKotlinStdlib.isFile) {
-  throw GradleException("SEMANTIFOLD_ANDROID_INFRASTRUCTURE: pinned Kotlin compile library is missing")
+  throw GradleException("SEMANTIFOLD_ANDROID_INFRASTRUCTURE: pinned Kotlin stdlib is missing")
+}
+
+dependencies {
+  androidTestImplementation(files(semantifoldKotlinStdlib))
 }
 val semantifoldAcceptanceRoot = providers.environmentVariable("SEMANTIFOLD_ANDROID_ACCEPTANCE_ROOT").orNull
   ?: throw GradleException("SEMANTIFOLD_ANDROID_INFRASTRUCTURE: SEMANTIFOLD_ANDROID_ACCEPTANCE_ROOT is required")

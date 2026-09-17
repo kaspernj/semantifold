@@ -290,7 +290,7 @@ fi
     expect(ios).not.toContain("currently only `ios`")
   })
 
-  it("allows only exact non-transitive JUnit implementation and Hamcrest runtime test dependencies", async () => {
+  it("keeps unit dependencies exact and packages only the pinned instrumentation runtime", async () => {
     const module = parse({
       filename: "program.kt",
       language: "kotlin",
@@ -309,11 +309,12 @@ fun main() {
 
     expect(build.match(
       /(?:api|compileOnly|implementation|runtimeOnly|testImplementation|testRuntimeOnly|androidTestImplementation)\s*\(/gu
-    )).toEqual(["testRuntimeOnly(", "testImplementation("])
+    )).toEqual(["testRuntimeOnly(", "androidTestImplementation(", "testImplementation("])
     expect(build).toContain('testImplementation("junit:junit:4.13.2") {\n    isTransitive = false\n  }')
     expect(build).toContain('testRuntimeOnly("org.hamcrest:hamcrest-core:1.3") {\n    isTransitive = false\n  }')
     expect(properties).toContain("kotlin.stdlib.default.dependency=false")
     expect(build).toContain("libraries.from(files(semantifoldKotlinStdlib))")
+    expect(build).toContain("androidTestImplementation(files(semantifoldKotlinStdlib))")
     expect(acceptance).toContain("debugRuntimeClasspath")
     expect(acceptance).toContain("debugUnitTestRuntimeClasspath")
     expect(acceptance).toContain("Runtime dependency graph must be empty")
@@ -323,9 +324,10 @@ fun main() {
     expect(acceptance).toContain("org/hamcrest/")
     expect(acceptance).toContain("kotlin/jvm/internal/")
     expect(acceptance).toContain("kotlin/collections/")
+    expect(acceptance).toContain('requireApkDependency(testApk, "kotlin/jvm/internal/Intrinsics")')
   })
 
-  it("ignores only Gradle's structural self project and reports exact rejected dependency descriptions", {timeoutMs: 30_000}, async () => {
+  it("validates exact dependency reports and the required instrumentation runtime payload", {timeoutMs: 30_000}, async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "semantifold-android-dependency-report-"))
     const androidHome = path.join(root, "android")
     const binaryDirectory = path.join(root, "bin")
@@ -356,7 +358,13 @@ done
         [path.join(androidHome, "platform-tools/adb"), ":"],
         [path.join(androidHome, "emulator/emulator"), "printf 'Android emulator version 35.6.11.0\\n'"],
         [path.join(androidHome, "build-tools/35.0.0/aapt2"), ":"],
-        [path.join(binaryDirectory, "unzip"), ":"]
+        [path.join(binaryDirectory, "unzip"), `case "\${2:-}" in
+  *androidTest*)
+    if [ "\${SEMANTIFOLD_FAKE_TEST_APK_STDLIB:-present}" = present ]; then
+      printf '%s\\n' 'kotlin/jvm/internal/Intrinsics'
+    fi
+    ;;
+esac`]
       ])
 
       for (const [filename, source] of executableSources) {
@@ -395,6 +403,13 @@ done
 
       expect(JSON.parse(accepted.stdout).projectDirectory)
         .toEqual(path.join(acceptedRoot, "generated/android-app"))
+      const missingRuntimeRoot = path.join(root, "missing-runtime")
+
+      await assert.rejects(executeFile(process.execPath, ["scripts/android-acceptance.js"], {
+        cwd: new URL("../", import.meta.url), env: {...environment,
+          SEMANTIFOLD_ANDROID_ACCEPTANCE_ROOT: missingRuntimeRoot, SEMANTIFOLD_FAKE_TEST_APK_STDLIB: "missing"}
+      }), error => error?.code == 1 &&
+        String(error.stderr).includes("Instrumentation APK is missing required runtime marker 'kotlin/jvm/internal/Intrinsics'."))
       const rejectedEntries = ["project :", "project :forbidden", "project :app", "project :forbidden (*)"]
 
       for (const [index, projectEntry] of rejectedEntries.entries()) {

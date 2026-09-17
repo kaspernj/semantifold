@@ -100,7 +100,7 @@ try {
       await rejectApkDependency(apk, "org/hamcrest/")
       await rejectApkDependency(apk, "kotlin/jvm/internal/")
       await rejectApkDependency(apk, "kotlin/collections/")
-      await readFile(testApk)
+      await requireApkDependency(testApk, "kotlin/jvm/internal/Intrinsics")
       process.stdout.write(`${JSON.stringify({
         acceptanceRoot: root,
         apk,
@@ -162,10 +162,10 @@ async function checkInfrastructure(mode) {
   }
   try {
     if (!(await stat(path.join(kotlinHome, "lib/kotlin-stdlib.jar"))).isFile()) {
-      infrastructure("Pinned Kotlin compile library is not a file.")
+      infrastructure("Pinned Kotlin stdlib is not a file.")
     }
   } catch (error) {
-    infrastructure("Pinned Kotlin compile library is missing.", error)
+    infrastructure("Pinned Kotlin stdlib is missing.", error)
   }
   if (mode != "prepare" && (await readdir(gradleUserHome)).length == 0) {
     infrastructure("The declared offline Gradle cache is empty.")
@@ -276,6 +276,14 @@ async function rejectApkDependency(apk, marker) {
   const archive = await executeFile("unzip", ["-p", apk, "classes*.dex"], {encoding: "buffer", maxBuffer: 100 * 1024 * 1024})
 
   if (archive.stdout.includes(Buffer.from(marker, "utf8"))) throw new Error(`Runtime APK contains forbidden dependency marker '${marker}'.`)
+}
+
+async function requireApkDependency(apk, marker) {
+  const archive = await executeFile("unzip", ["-p", apk, "classes*.dex"], {encoding: "buffer", maxBuffer: 100 * 1024 * 1024})
+
+  if (!archive.stdout.includes(Buffer.from(marker, "utf8"))) {
+    throw new Error(`Instrumentation APK is missing required runtime marker '${marker}'.`)
+  }
 }
 
 /**
