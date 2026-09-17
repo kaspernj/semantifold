@@ -303,7 +303,7 @@ async function createDebugKeystore(keytool, root, environment) {
  */
 function dependencyEntries(output) {
   return [...output.matchAll(/^[| ]*(?:\+---|\\---) ((\S+)(?: [^\r\n]*)?)$/gmu)]
-    .flatMap(([, description, coordinate]) => description == "project :" ? [] : [{coordinate, description}])
+    .flatMap(([, description, coordinate]) => description == "project :app (*)" ? [] : [{coordinate, description}])
 }
 
 /**

@@ -288,7 +288,7 @@ elif printf ' %s ' "$*" | grep -q ' lintDebug '; then
   : > "$project/debug/app-debug.apk"
   : > "$project/androidTest/debug/app-debug-androidTest.apk"
 elif printf ' %s ' "$*" | grep -q ' debugUnitTestRuntimeClasspath '; then
-  printf '%s\\n' "+--- \${SEMANTIFOLD_FAKE_PROJECT_ENTRY:-project :}" '+--- junit:junit:4.13.2' '\\--- org.hamcrest:hamcrest-core:1.3'
+  printf '%s\\n' "+--- \${SEMANTIFOLD_FAKE_PROJECT_ENTRY:-project :app (*)}" '+--- junit:junit:4.13.2' '\\--- org.hamcrest:hamcrest-core:1.3'
 fi`],
         [path.join(javaHome, "bin/java"), "printf 'openjdk version \"21.0.8\"\\n' >&2"],
         [path.join(javaHome, "bin/keytool"), `while [ "$#" -gt 0 ]; do
@@ -339,12 +339,16 @@ done
 
       expect(JSON.parse(accepted.stdout).projectDirectory)
         .toEqual(path.join(acceptedRoot, "generated/android-app"))
-      const rejectedRoot = path.join(root, "rejected")
+      const rejectedEntries = ["project :", "project :forbidden", "project :app", "project :forbidden (*)"]
 
-      await assert.rejects(executeFile(process.execPath, ["scripts/android-acceptance.js"], {
-        cwd: new URL("../", import.meta.url), env: {...environment, SEMANTIFOLD_ANDROID_ACCEPTANCE_ROOT: rejectedRoot,
-          SEMANTIFOLD_FAKE_PROJECT_ENTRY: "project :forbidden"}
-      }), error => error?.code == 1 && /project :forbidden/u.test(String(error.stderr)))
+      for (const [index, projectEntry] of rejectedEntries.entries()) {
+        const rejectedRoot = path.join(root, `rejected-${index}`)
+
+        await assert.rejects(executeFile(process.execPath, ["scripts/android-acceptance.js"], {
+          cwd: new URL("../", import.meta.url), env: {...environment, SEMANTIFOLD_ANDROID_ACCEPTANCE_ROOT: rejectedRoot,
+            SEMANTIFOLD_FAKE_PROJECT_ENTRY: projectEntry}
+        }), error => error?.code == 1 && String(error.stderr).includes(projectEntry))
+      }
     } finally {
       await rm(root, {force: true, recursive: true})
     }
