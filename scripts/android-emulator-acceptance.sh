@@ -59,6 +59,7 @@ capture_failure() {
   exit "$status"
 }
 trap capture_failure EXIT HUP INT TERM
+. ./scripts/android-ui-dump-readiness.sh
 
 test -c /dev/kvm || { EXIT_REASON='KVM character device is unavailable'; exit 2; }
 test -r /dev/kvm && test -w /dev/kvm || { EXIT_REASON='KVM is not readable and writable by the TensorBuzz user'; exit 2; }
@@ -95,8 +96,7 @@ run_emulator_acceptance() {
   timeout 30 "$ADB" -s "$SERIAL" shell am force-stop dev.semantifold.generated
   timeout 30 "$ADB" -s "$SERIAL" shell am start -W -n dev.semantifold.generated/.MainActivity
   EXIT_REASON="emulator $sequence UI artifact capture failed"
-  timeout 30 "$ADB" -s "$SERIAL" shell uiautomator dump "/sdcard/semantifold-$sequence.xml"
-  timeout 30 "$ADB" -s "$SERIAL" pull "/sdcard/semantifold-$sequence.xml" "$ARTIFACTS/ui-$sequence.xml"
+  android_wait_for_ui_dump "$ADB" "$SERIAL" "/sdcard/semantifold-$sequence.xml" "$ARTIFACTS/ui-$sequence.xml"
   timeout 30 "$ADB" -s "$SERIAL" exec-out screencap -p > "$ARTIFACTS/screenshot-$sequence.png"
   EXIT_REASON="emulator $sequence instrumentation assertion failed"
   timeout 60 "$ADB" -s "$SERIAL" shell am instrument -w \
