@@ -184,6 +184,49 @@ exit 23
     }
   })
 
+  it("prints bounded captured emulator diagnostics without replacing the original failure status", {timeoutMs: 30_000}, async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "semantifold-android-emulator-diagnostics-"))
+    const androidHome = path.join(root, "android")
+    const adb = path.join(androidHome, "platform-tools/adb")
+    const acceptanceRoot = "/tmp/semantifold-android-acceptance"
+    const artifacts = path.join(acceptanceRoot, "emulator-artifacts")
+    let ownsAcceptanceRoot = false
+
+    try {
+      await mkdir(acceptanceRoot, {mode: 0o700})
+      ownsAcceptanceRoot = true
+      await mkdir(artifacts)
+      await mkdir(path.dirname(adb), {recursive: true})
+      await writeFile(adb, `#!/bin/sh
+if [ "\${1:-}" = devices ]; then
+  printf '%s\\n' 'List of devices attached' 'emulator-5580 offline product:semantifold'
+elif [ "\${3:-}" = logcat ]; then
+  printf '%s\\n' 'bounded fake logcat evidence'
+fi
+`)
+      await chmod(adb, 0o700)
+      await writeFile(path.join(artifacts, "accel-check.txt"),
+        `ACCEL_PREFIX_MUST_BE_TRUNCATED\n${"x".repeat(20_000)}\nacceleration-tail-evidence\n`)
+      const header = "SEMANTIFOLD_ANDROID_EMULATOR_FAILURE: KVM character device is unavailable (exit status 2)"
+
+      await assert.rejects(executeFile("sh", ["scripts/android-emulator-acceptance.sh"], {
+        cwd: new URL("../", import.meta.url),
+        env: {...process.env, SEMANTIFOLD_ANDROID_HOME: androidHome}
+      }), error => {
+        const stderr = String(error?.stderr)
+
+        return error?.code == 2 && stderr.split(header).length == 2 &&
+          stderr.includes("--- accel-check.txt (last 16384 bytes) ---") &&
+          stderr.includes("acceleration-tail-evidence") && !stderr.includes("ACCEL_PREFIX_MUST_BE_TRUNCATED") &&
+          stderr.includes("--- adb-state.txt (last 16384 bytes) ---") &&
+          stderr.includes("emulator-5580 offline product:semantifold")
+      })
+    } finally {
+      if (ownsAcceptanceRoot) await rm(acceptanceRoot, {force: true, recursive: true})
+      await rm(root, {force: true, recursive: true})
+    }
+  })
+
   it("routes real emulator acceptance only through TensorBuzz KVM without privileged adb or permission changes", async () => {
     const [source, emulator] = await Promise.all([
       readFile(new URL("../tensorbuzz.yml", import.meta.url), "utf8"),

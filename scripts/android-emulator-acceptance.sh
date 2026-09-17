@@ -22,6 +22,14 @@ LOCK=/tmp/semantifold-android-5580-5581.lock
 
 mkdir -p "$ARTIFACTS"
 
+print_failure_artifact() {
+  artifact=$1
+  test -f "$ARTIFACTS/$artifact" || return 0
+  printf '%s\n' "--- $artifact (last 16384 bytes) ---" >&2
+  tail -c 16384 "$ARTIFACTS/$artifact" >&2
+  printf '\n' >&2
+}
+
 capture_failure() {
   status=$?
   trap - EXIT HUP INT TERM
@@ -40,6 +48,11 @@ capture_failure() {
   timeout 15 "$ADB" kill-server >/dev/null 2>&1
   rm -rf "$ACCEPTANCE_ROOT/generated"
   rm -f "$ACCEPTANCE_ROOT/debug.keystore"
+  printf 'SEMANTIFOLD_ANDROID_EMULATOR_FAILURE: %s (exit status %s)\n' "$EXIT_REASON" "$status" >&2
+  for artifact in accel-check.txt adb-state.txt emulator-first.log instrumentation-first.txt \
+    emulator-second.log instrumentation-second.txt logcat.txt; do
+    print_failure_artifact "$artifact"
+  done
   exit "$status"
 }
 trap capture_failure EXIT HUP INT TERM
