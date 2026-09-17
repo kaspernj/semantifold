@@ -184,6 +184,49 @@ exit 23
     }
   })
 
+  it("prints bounded captured emulator diagnostics without replacing the original failure status", {timeoutMs: 30_000}, async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "semantifold-android-emulator-diagnostics-"))
+    const androidHome = path.join(root, "android")
+    const adb = path.join(androidHome, "platform-tools/adb")
+    const acceptanceRoot = "/tmp/semantifold-android-acceptance"
+    const artifacts = path.join(acceptanceRoot, "emulator-artifacts")
+    let ownsAcceptanceRoot = false
+
+    try {
+      await mkdir(acceptanceRoot, {mode: 0o700})
+      ownsAcceptanceRoot = true
+      await mkdir(artifacts)
+      await mkdir(path.dirname(adb), {recursive: true})
+      await writeFile(adb, `#!/bin/sh
+if [ "\${1:-}" = devices ]; then
+  printf '%s\\n' 'List of devices attached' 'emulator-5580 offline product:semantifold'
+elif [ "\${3:-}" = logcat ]; then
+  printf '%s\\n' 'bounded fake logcat evidence'
+fi
+`)
+      await chmod(adb, 0o700)
+      await writeFile(path.join(artifacts, "accel-check.txt"),
+        `ACCEL_PREFIX_MUST_BE_TRUNCATED\n${"x".repeat(20_000)}\nacceleration-tail-evidence\n`)
+      const header = "SEMANTIFOLD_ANDROID_EMULATOR_FAILURE: KVM character device is unavailable (exit status 2)"
+
+      await assert.rejects(executeFile("sh", ["scripts/android-emulator-acceptance.sh"], {
+        cwd: new URL("../", import.meta.url),
+        env: {...process.env, SEMANTIFOLD_ANDROID_HOME: androidHome}
+      }), error => {
+        const stderr = String(error?.stderr)
+
+        return error?.code == 2 && stderr.split(header).length == 2 &&
+          stderr.includes("--- accel-check.txt (last 16384 bytes) ---") &&
+          stderr.includes("acceleration-tail-evidence") && !stderr.includes("ACCEL_PREFIX_MUST_BE_TRUNCATED") &&
+          stderr.includes("--- adb-state.txt (last 16384 bytes) ---") &&
+          stderr.includes("emulator-5580 offline product:semantifold")
+      })
+    } finally {
+      if (ownsAcceptanceRoot) await rm(acceptanceRoot, {force: true, recursive: true})
+      await rm(root, {force: true, recursive: true})
+    }
+  })
+
   it("routes real emulator acceptance only through TensorBuzz KVM without privileged adb or permission changes", async () => {
     const [source, emulator] = await Promise.all([
       readFile(new URL("../tensorbuzz.yml", import.meta.url), "utf8"),
@@ -204,7 +247,20 @@ exit 23
     expect(emulator).toContain("-no-snapshot")
     expect(emulator).toContain("-wipe-data")
     expect(emulator).toContain("emulator-5580")
-    expect(emulator).toContain("ANDROID_ADB_SERVER_PORT=5581")
+    const consolePortMatch = emulator.match(/^PORT=(\d+)$/mu)
+    const adbServerPortMatch = emulator.match(/^ANDROID_ADB_SERVER_PORT=(\d+)$/mu)
+
+    assert.ok(consolePortMatch && adbServerPortMatch)
+    const consolePort = Number(consolePortMatch[1])
+    const transportPort = consolePort + 1
+    const adbServerPort = Number(adbServerPortMatch[1])
+
+    expect(adbServerPort).not.toEqual(consolePort)
+    expect(adbServerPort).not.toEqual(transportPort)
+    const lockMatch = emulator.match(/^LOCK=\/tmp\/semantifold-android-(\d+)-(\d+)-(\d+)\.lock$/mu)
+
+    assert.ok(lockMatch)
+    expect(lockMatch.slice(1).map(Number)).toEqual([consolePort, transportPort, adbServerPort])
     expect(emulator).toContain('"$ADB" kill-server')
     expect(emulator).toContain("command -v timeout")
     expect(emulator).toContain('timeout 180 "$ADB"')
@@ -234,7 +290,7 @@ exit 23
     expect(ios).not.toContain("currently only `ios`")
   })
 
-  it("allows only exact non-transitive JUnit implementation and Hamcrest runtime test dependencies", async () => {
+  it("keeps unit dependencies exact and packages only the pinned instrumentation runtime", async () => {
     const module = parse({
       filename: "program.kt",
       language: "kotlin",
@@ -253,11 +309,12 @@ fun main() {
 
     expect(build.match(
       /(?:api|compileOnly|implementation|runtimeOnly|testImplementation|testRuntimeOnly|androidTestImplementation)\s*\(/gu
-    )).toEqual(["testRuntimeOnly(", "testImplementation("])
+    )).toEqual(["testRuntimeOnly(", "androidTestImplementation(", "testImplementation("])
     expect(build).toContain('testImplementation("junit:junit:4.13.2") {\n    isTransitive = false\n  }')
     expect(build).toContain('testRuntimeOnly("org.hamcrest:hamcrest-core:1.3") {\n    isTransitive = false\n  }')
     expect(properties).toContain("kotlin.stdlib.default.dependency=false")
     expect(build).toContain("libraries.from(files(semantifoldKotlinStdlib))")
+    expect(build).toContain("androidTestImplementation(files(semantifoldKotlinStdlib))")
     expect(acceptance).toContain("debugRuntimeClasspath")
     expect(acceptance).toContain("debugUnitTestRuntimeClasspath")
     expect(acceptance).toContain("Runtime dependency graph must be empty")
@@ -267,6 +324,105 @@ fun main() {
     expect(acceptance).toContain("org/hamcrest/")
     expect(acceptance).toContain("kotlin/jvm/internal/")
     expect(acceptance).toContain("kotlin/collections/")
+    expect(acceptance).toContain('requireApkDependency(testApk, "kotlin/jvm/internal/Intrinsics")')
+  })
+
+  it("validates exact dependency reports and the required instrumentation runtime payload", {timeoutMs: 30_000}, async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "semantifold-android-dependency-report-"))
+    const androidHome = path.join(root, "android")
+    const binaryDirectory = path.join(root, "bin")
+    const gradleHome = path.join(root, "gradle")
+    const gradleUserHome = path.join(root, "gradle-cache")
+    const javaHome = path.join(root, "java")
+    const kotlinHome = path.join(root, "kotlin")
+
+    try {
+      const executableSources = new Map([
+        [path.join(gradleHome, "bin/gradle"), `if [ "\${1:-}" = --version ]; then
+  printf 'Gradle 8.13\\n'
+elif printf ' %s ' "$*" | grep -q ' lintDebug '; then
+  project="$SEMANTIFOLD_ANDROID_ACCEPTANCE_ROOT/generated/android-app/app/build/outputs/apk"
+  mkdir -p "$project/debug" "$project/androidTest/debug"
+  : > "$project/debug/app-debug.apk"
+  : > "$project/androidTest/debug/app-debug-androidTest.apk"
+elif printf ' %s ' "$*" | grep -q ' debugUnitTestRuntimeClasspath '; then
+  printf '%s\\n' "+--- \${SEMANTIFOLD_FAKE_PROJECT_ENTRY:-project :app (*)}" '+--- junit:junit:4.13.2' '\\--- org.hamcrest:hamcrest-core:1.3'
+fi`],
+        [path.join(javaHome, "bin/java"), "printf 'openjdk version \"21.0.8\"\\n' >&2"],
+        [path.join(javaHome, "bin/keytool"), `while [ "$#" -gt 0 ]; do
+  if [ "$1" = -keystore ]; then shift; destination=$1; fi
+  shift
+done
+: > "$destination"`],
+        [path.join(kotlinHome, "bin/kotlinc"), "printf 'info: kotlinc-jvm 2.2.10\\n' >&2"],
+        [path.join(androidHome, "platform-tools/adb"), ":"],
+        [path.join(androidHome, "emulator/emulator"), "printf 'Android emulator version 35.6.11.0\\n'"],
+        [path.join(androidHome, "build-tools/35.0.0/aapt2"), ":"],
+        [path.join(binaryDirectory, "unzip"), `case "\${2:-}" in
+  *androidTest*)
+    if [ "\${SEMANTIFOLD_FAKE_TEST_APK_STDLIB:-present}" = present ]; then
+      printf '%s\\n' 'kotlin/jvm/internal/Intrinsics'
+    fi
+    ;;
+esac`]
+      ])
+
+      for (const [filename, source] of executableSources) {
+        await mkdir(path.dirname(filename), {recursive: true})
+        await writeFile(filename, `#!/bin/sh\nset -eu\n${source}\n`)
+        await chmod(filename, 0o700)
+      }
+      await mkdir(gradleUserHome)
+      await writeFile(path.join(gradleUserHome, "cache-marker"), "prepared\n")
+      await mkdir(path.join(kotlinHome, "lib"))
+      await writeFile(path.join(kotlinHome, "lib/kotlin-stdlib.jar"), "")
+      await mkdir(path.join(androidHome, "platforms/android-35"), {recursive: true})
+      await writeFile(path.join(androidHome, "platforms/android-35/android.jar"), "")
+      const systemImageDirectory = path.join(androidHome, "system-images/android-35/google_apis/x86_64")
+
+      await mkdir(systemImageDirectory, {recursive: true})
+      await writeFile(path.join(systemImageDirectory, "system.img"), "")
+      await writeFile(path.join(androidHome, "platform-tools/source.properties"), "Pkg.Revision=37.0.1\n")
+      await writeFile(path.join(androidHome, "platforms/android-35/source.properties"),
+        "Pkg.Revision=2\nAndroidVersion.ApiLevel=35\n")
+      await writeFile(path.join(androidHome, "build-tools/35.0.0/source.properties"), "Pkg.Revision=35.0.0\n")
+      await writeFile(path.join(androidHome, "emulator/source.properties"),
+        "Pkg.Revision=35.6.11\nPkg.BuildId=13610412\n")
+      await writeFile(path.join(systemImageDirectory, "source.properties"),
+        "Pkg.Revision=9\nAndroidVersion.ApiLevel=35\nSystemImage.Abi=x86_64\nSystemImage.TagId=google_apis\n")
+      const environment = {
+        LANG: "C.UTF-8", LC_ALL: "C.UTF-8", PATH: `${binaryDirectory}:/usr/bin:/bin`,
+        SEMANTIFOLD_ANDROID_HOME: androidHome, SEMANTIFOLD_ANDROID_MODE: "offline-build",
+        SEMANTIFOLD_GRADLE_HOME: gradleHome, SEMANTIFOLD_GRADLE_USER_HOME: gradleUserHome,
+        SEMANTIFOLD_KOTLIN_HOME: kotlinHome, JAVA_HOME: javaHome
+      }
+      const acceptedRoot = path.join(root, "accepted")
+      const accepted = await executeFile(process.execPath, ["scripts/android-acceptance.js"], {
+        cwd: new URL("../", import.meta.url), env: {...environment, SEMANTIFOLD_ANDROID_ACCEPTANCE_ROOT: acceptedRoot}
+      })
+
+      expect(JSON.parse(accepted.stdout).projectDirectory)
+        .toEqual(path.join(acceptedRoot, "generated/android-app"))
+      const missingRuntimeRoot = path.join(root, "missing-runtime")
+
+      await assert.rejects(executeFile(process.execPath, ["scripts/android-acceptance.js"], {
+        cwd: new URL("../", import.meta.url), env: {...environment,
+          SEMANTIFOLD_ANDROID_ACCEPTANCE_ROOT: missingRuntimeRoot, SEMANTIFOLD_FAKE_TEST_APK_STDLIB: "missing"}
+      }), error => error?.code == 1 &&
+        String(error.stderr).includes("Instrumentation APK is missing required runtime marker 'kotlin/jvm/internal/Intrinsics'."))
+      const rejectedEntries = ["project :", "project :forbidden", "project :app", "project :forbidden (*)"]
+
+      for (const [index, projectEntry] of rejectedEntries.entries()) {
+        const rejectedRoot = path.join(root, `rejected-${index}`)
+
+        await assert.rejects(executeFile(process.execPath, ["scripts/android-acceptance.js"], {
+          cwd: new URL("../", import.meta.url), env: {...environment, SEMANTIFOLD_ANDROID_ACCEPTANCE_ROOT: rejectedRoot,
+            SEMANTIFOLD_FAKE_PROJECT_ENTRY: projectEntry}
+        }), error => error?.code == 1 && String(error.stderr).includes(projectEntry))
+      }
+    } finally {
+      await rm(root, {force: true, recursive: true})
+    }
   })
 
   it("fails missing local tools and caches with an infrastructure classification", async () => {

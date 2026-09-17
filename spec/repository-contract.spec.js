@@ -20,18 +20,23 @@ const bareProviderPackages = Object.freeze([
 const qwenCodePackage = "@qwen-code/qwen-code@0.23.3"
 const activeProviderExecutables = Object.freeze(["codex", "opencode"])
 const internalLegacyPackage = "semantifold-tree-sitter-legacy-internal"
+const internalZigPackage = "semantifold-tree-sitter-zig-internal"
 const retiredLegacyPackage = "@kaspernj/semantifold-tree-sitter-legacy"
 const kotlinGrammarCommit = "57c35ad1a80ccd2a0ebd8fffe852f0d13a20acd0"
 const kotlinGrammarSource = `https://github.com/kaspernj/tree-sitter-kotlin/archive/${kotlinGrammarCommit}.tar.gz`
 
 describe("repository delivery contracts", () => {
-  it("owns and bundles the private legacy Tree-sitter workspace in the root package", async () => {
-    const [rootManifest, workspaceManifest, internalManifest, workspaceConfig, npmConfig, lockfile, tensorbuzz,
+  it("owns and bundles the private compatible Tree-sitter workspaces in the root package", async () => {
+    const [rootManifest, workspaceManifest, internalManifest, zigWorkspaceManifest, zigInternalManifest, workspaceConfig,
+      zigWorkspaceConfig, npmConfig, lockfile, tensorbuzz,
       instructions] = await Promise.all([
       readFile(new URL("../package.json", import.meta.url), "utf8").then(JSON.parse),
       readFile(new URL("../packages/tree-sitter-legacy/package.json", import.meta.url), "utf8").then(JSON.parse),
       readFile(new URL("../packages/tree-sitter-legacy/runtime/package.json", import.meta.url), "utf8").then(JSON.parse),
+      readFile(new URL("../packages/tree-sitter-zig/package.json", import.meta.url), "utf8").then(JSON.parse),
+      readFile(new URL("../packages/tree-sitter-zig/runtime/package.json", import.meta.url), "utf8").then(JSON.parse),
       readFile(new URL("../packages/tree-sitter-legacy/tsconfig.json", import.meta.url), "utf8").then(JSON.parse),
+      readFile(new URL("../packages/tree-sitter-zig/tsconfig.json", import.meta.url), "utf8").then(JSON.parse),
       readFile(new URL("../.npmrc", import.meta.url), "utf8"),
       readFile(new URL("../package-lock.json", import.meta.url), "utf8").then(JSON.parse),
       readFile(new URL("../tensorbuzz.yml", import.meta.url), "utf8").then(parseYaml),
@@ -40,15 +45,18 @@ describe("repository delivery contracts", () => {
     const rootPack = "npm pack --dry-run --json"
     const buildCommands = Object.values(tensorbuzz.builds).flatMap((build) => build.script)
 
-    expect(rootManifest.workspaces).toEqual(["packages/tree-sitter-legacy"])
+    expect(rootManifest.workspaces).toEqual(["packages/tree-sitter-legacy", "packages/tree-sitter-zig"])
     assert.match(rootManifest.version, /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u)
     expect(lockfile.version).toEqual(rootManifest.version)
     expect(lockfile.packages[""].version).toEqual(rootManifest.version)
     expect(rootManifest.dependencies[internalLegacyPackage]).toEqual("file:packages/tree-sitter-legacy/runtime")
-    expect(rootManifest.acceptDependencies).toEqual({[internalLegacyPackage]: "0.1.0"})
+    expect(rootManifest.dependencies[internalZigPackage]).toEqual("file:packages/tree-sitter-zig/runtime")
+    expect(rootManifest.acceptDependencies).toEqual({[internalLegacyPackage]: "0.1.0", [internalZigPackage]: "0.1.0"})
     expect(rootManifest.devDependencies[workspaceManifest.name]).toEqual("0.1.0")
+    expect(rootManifest.devDependencies[zigWorkspaceManifest.name]).toEqual("0.1.0")
     expect(rootManifest.devDependencies[retiredLegacyPackage]).toEqual(undefined)
-    expect(rootManifest.bundleDependencies).toEqual([internalLegacyPackage, "tree-sitter"])
+    expect(rootManifest.bundleDependencies).toEqual([internalLegacyPackage, internalZigPackage, "tree-sitter"])
+    expect(rootManifest.scripts.pretest).toContain("npm run build --workspace=semantifold-tree-sitter-zig-workspace")
     expect(rootManifest.dependencies["tree-sitter-kotlin"]).toEqual(kotlinGrammarSource)
     expect(rootManifest.files.includes("packages/**")).toBeFalse()
     expect(rootManifest.exports).toEqual({
@@ -59,6 +67,12 @@ describe("repository delivery contracts", () => {
     })
     expect({name: internalManifest.name, private: internalManifest.private, version: internalManifest.version}).toEqual({
       name: internalLegacyPackage, private: true, version: "0.1.0"
+    })
+    expect({name: zigWorkspaceManifest.name, private: zigWorkspaceManifest.private, version: zigWorkspaceManifest.version}).toEqual({
+      name: "semantifold-tree-sitter-zig-workspace", private: true, version: "0.1.0"
+    })
+    expect({name: zigInternalManifest.name, private: zigInternalManifest.private, version: zigInternalManifest.version}).toEqual({
+      name: internalZigPackage, private: true, version: "0.1.0"
     })
     expect(workspaceManifest.exports).toEqual(undefined)
     expect(workspaceManifest.publishConfig).toEqual(undefined)
@@ -72,12 +86,20 @@ describe("repository delivery contracts", () => {
     })
     expect(workspaceConfig.compilerOptions.rootDir).toEqual("runtime/src")
     expect(workspaceConfig.include).toEqual(["runtime/src/**/*"])
+    expect(zigWorkspaceConfig.compilerOptions.rootDir).toEqual("runtime/src")
+    expect(zigWorkspaceConfig.include).toEqual(["runtime/src/**/*"])
+    expect(zigWorkspaceManifest.devDependencies).toEqual({
+      "@tree-sitter-grammars/tree-sitter-zig": "1.1.2", "@types/node": "^24.3.0", "tree-sitter": "0.22.4", typescript: "^7.0.0"
+    })
     expect(npmConfig).toEqual("install-links=true\n")
     expect(internalManifest.exports).toEqual(undefined)
     expect(internalManifest.main).toEqual("./src/c.js")
     expect(internalManifest.publishConfig).toEqual(undefined)
     expect(internalManifest.files).toEqual(["src/c.js", "LICENSE", "README.md"])
     expect(internalManifest.dependencies).toEqual({"tree-sitter": "0.21.1", "tree-sitter-c": "0.23.2", "tree-sitter-cpp": "0.23.4", "tree-sitter-rust": "0.23.1"})
+    expect(zigInternalManifest.main).toEqual("./src/zig.js")
+    expect(zigInternalManifest.files).toEqual(["src/zig.js", "LICENSE", "README.md"])
+    expect(zigInternalManifest.dependencies).toEqual({"@tree-sitter-grammars/tree-sitter-zig": "1.1.2", "tree-sitter": "0.22.4"})
     expect(internalManifest.bundleDependencies).toEqual(undefined)
     expect(lockfile.packages[`node_modules/${workspaceManifest.name}`]).toEqual({
       link: true, resolved: "packages/tree-sitter-legacy"
@@ -88,6 +110,16 @@ describe("repository delivery contracts", () => {
     expect(lockfile.packages[`node_modules/${internalLegacyPackage}`].inBundle).toBeTrue()
     expect(lockfile.packages[""].acceptDependencies).toEqual(rootManifest.acceptDependencies)
     expect(lockfile.packages[`node_modules/${internalLegacyPackage}`].link).toEqual(undefined)
+    expect(lockfile.packages[`node_modules/${zigWorkspaceManifest.name}`]).toEqual({link: true, resolved: "packages/tree-sitter-zig"})
+    expect(lockfile.packages[`node_modules/${internalZigPackage}`].resolved).toEqual("file:packages/tree-sitter-zig/runtime")
+    expect(lockfile.packages[`node_modules/${internalZigPackage}`].inBundle).toBeTrue()
+    expect(lockfile.packages[`node_modules/${internalZigPackage}/node_modules/tree-sitter`].version).toEqual("0.22.4")
+    expect(lockfile.packages[`node_modules/${internalZigPackage}/node_modules/@tree-sitter-grammars/tree-sitter-zig`]).toMatchObject({
+      version: "1.1.2",
+      integrity: "sha512-J0L31HZ2isy3F5zb2g5QWQOv2r/pbruQNL9ADhuQv2pn5BQOzxt80WcEJaYXBeuJ8GHxVT42slpCna8k1c8LOw==",
+      inBundle: true,
+      license: "MIT"
+    })
     expect(lockfile.packages["node_modules/tree-sitter"].version).toEqual("0.25.1")
     expect(lockfile.packages["node_modules/tree-sitter"].inBundle).toBeTrue()
     expect(lockfile.packages["node_modules/tree-sitter-kotlin"].resolved).toEqual(kotlinGrammarSource)
@@ -168,6 +200,7 @@ describe("repository delivery contracts", () => {
     expect(config.environment.SEMANTIFOLD_GO).toEqual("/usr/local/bin/go")
     expect(config.environment.SEMANTIFOLD_KOTLINC).toEqual("/opt/kotlinc/bin/kotlinc")
     expect(config.environment.SEMANTIFOLD_SWIFTC).toEqual(swiftExecutable)
+    expect(config.environment.SEMANTIFOLD_ZIG).toEqual("/opt/zig-0.15.2/zig")
     expect(config.environment.PATH).toEqual(undefined)
     expect(config.environment.SEMANTIFOLD_CLANG).toEqual("/usr/bin/clang-21")
     for (const pin of ["clang-21=1:21.1.8~++20251221032922+2078da43e25a-1~exp1~20251221153059.70", "libclang-rt-21-dev=1:21.1.8~++20251221032922+2078da43e25a-1~exp1~20251221153059.70"]) assert.ok(beforeInstall.includes(pin))
@@ -233,6 +266,11 @@ describe("repository delivery contracts", () => {
     expect(config.environment.SEMANTIFOLD_WASM_VALIDATE).toEqual("/usr/bin/wasm-validate")
     expect(config.environment.SEMANTIFOLD_CHROMIUM).toEqual("/usr/local/bin/chromium")
     for (const probe of ["wasm-validate --version", chromiumVersionProbe]) assert.ok(config.before_install.includes(probe), probe)
+    for (const value of ["https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz",
+      "02aa270f183da276e5b5920b1dac44a63f1a49e55050ebde3aecc9eb82f93239", "53733924",
+      "2858dc89dbbfdd08cceda1b841e7fd0a793a1a67b49f150bc3d0d1de44ed7f51", 'test "$(zig version)" = "0.15.2"']) {
+      assert.ok(beforeInstall.includes(value), value)
+    }
     assert.ok(buildCommands.includes("npm run lint"))
     assert.ok(buildCommands.includes("npm run typecheck"))
     assert.ok(buildCommands.includes("npm run build"))
@@ -246,7 +284,7 @@ describe("repository delivery contracts", () => {
       'test -r "$(clang++-21 -print-file-name=libstdc++.so)"', "dpkg-query -W libstdc++-13-dev"]) {
       assert.ok(config.before_install.includes(probe), probe)
     }
-    expect(config.builds.end_to_end.name).toEqual("Fourteen-language tests with Dart VM/native, Kotlin/JVM, Rust debug/release and C/CPP O0/O2 sanitizers")
+    expect(config.builds.end_to_end.name).toEqual("Fifteen-language tests with Zig Debug/ReleaseSafe/ReleaseFast, Dart VM/native, Kotlin/JVM, Rust debug/release and C/CPP O0/O2 sanitizers")
     await assert.rejects(access(new URL("../.github/workflows", import.meta.url)))
   })
 
@@ -293,6 +331,11 @@ describe("repository delivery contracts", () => {
     assert.match(runs, /google-chrome-stable_152\.0\.7977\.82-1_amd64\.deb/u)
     assert.match(runs, /4d25e4a028c78a7ae910683551c2f234792cc5595e7e3e34939f599342ada446/u)
     for (const probe of ["wasm-validate --version", chromiumVersionProbe]) assert.ok(runs.includes(probe), probe)
+    for (const value of ["https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz",
+      "02aa270f183da276e5b5920b1dac44a63f1a49e55050ebde3aecc9eb82f93239", "53733924",
+      "2858dc89dbbfdd08cceda1b841e7fd0a793a1a67b49f150bc3d0d1de44ed7f51", 'test "$(zig version)" = "0.15.2"']) {
+      assert.ok(runs.includes(value), value)
+    }
     assert.match(runs, /Swift version 6\.3\.3 \(swift-6\.3\.3-RELEASE\)/u)
     assert.match(runs, /x86_64-unknown-linux-gnu/u)
     assert.ok(instructions.some((instruction) => instruction.getKeyword() == "USER" && instruction.getArgumentsContent() == "dev"))

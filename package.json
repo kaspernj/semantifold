@@ -21,17 +21,18 @@
     "tsconfig.json"
   ],
   "workspaces": [
-    "packages/tree-sitter-legacy"
+    "packages/tree-sitter-legacy",
+    "packages/tree-sitter-zig"
   ],
   "scripts": {
     "all-checks": "npm run lint && npm test",
-    "build": "node scripts/clean-build.js && tsc && npm run build --workspace=semantifold-tree-sitter-legacy-workspace",
+    "build": "node scripts/clean-build.js && tsc && npm run build --workspace=semantifold-tree-sitter-legacy-workspace && npm run build --workspace=semantifold-tree-sitter-zig-workspace",
     "eslint": "eslint --max-warnings 0 .",
     "lint": "npm run verify:legacy-runtime && npm run eslint && npm run typecheck",
     "prepack": "npm run verify:legacy-runtime && npm run build",
-    "pretest": "npm run verify:legacy-runtime && npm run build --workspace=semantifold-tree-sitter-legacy-workspace",
+    "pretest": "npm run verify:legacy-runtime && npm run build --workspace=semantifold-tree-sitter-legacy-workspace && npm run build --workspace=semantifold-tree-sitter-zig-workspace",
     "test": "velocious-test spec",
-    "typecheck": "tsc --noEmit && npm run typecheck --workspace=semantifold-tree-sitter-legacy-workspace",
+    "typecheck": "tsc --noEmit && npm run typecheck --workspace=semantifold-tree-sitter-legacy-workspace && npm run typecheck --workspace=semantifold-tree-sitter-zig-workspace",
     "verify:legacy-runtime": "node scripts/verify-legacy-runtime.js"
   },
   "engines": {
@@ -58,6 +59,7 @@
     "comment-parser": "^1.4.1",
     "php-parser": "^3.7.0",
     "semantifold-tree-sitter-legacy-internal": "file:packages/tree-sitter-legacy/runtime",
+    "semantifold-tree-sitter-zig-internal": "file:packages/tree-sitter-zig/runtime",
     "tree-sitter": "0.25.1",
     "tree-sitter-c-sharp": "0.23.5",
     "tree-sitter-dart-orchard": "0.7.0",
@@ -68,10 +70,12 @@
   },
   "bundleDependencies": [
     "semantifold-tree-sitter-legacy-internal",
+    "semantifold-tree-sitter-zig-internal",
     "tree-sitter"
   ],
   "acceptDependencies": {
-    "semantifold-tree-sitter-legacy-internal": "0.1.0"
+    "semantifold-tree-sitter-legacy-internal": "0.1.0",
+    "semantifold-tree-sitter-zig-internal": "0.1.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -84,6 +88,7 @@
     "eslint-plugin-jsdoc-tag-lines": "^1.0.1",
     "globals": "^17.0.0",
     "semantifold-tree-sitter-legacy-workspace": "0.1.0",
+    "semantifold-tree-sitter-zig-workspace": "0.1.0",
     "typescript": "^7.0.0",
     "yaml": "^2.9.0"
   }

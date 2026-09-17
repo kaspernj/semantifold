@@ -35,7 +35,7 @@ All Tree-sitter languages use the official `tree-sitter` Node binding. The langu
 | 023 | Kotlin/JVM | community grammar through the exact Semantifold packaging fork plus differential `kotlinc` checks | passed for immutable tag `v0.4.0-semantifold.1`, commit `57c35ad1a80ccd2a0ebd8fffe852f0d13a20acd0`, ABI 14, Node24, and Kotlin/JVM 2.4.20; see below |
 | 024 | Go | official [`tree-sitter/tree-sitter-go`](https://github.com/tree-sitter/tree-sitter-go) grammar package | passed for exact `tree-sitter-go@0.25.0`; see the checked-in record below |
 | 029 | Dart | exact public registry grammar plus differential Dart SDK checks | passed for `tree-sitter-dart-orchard@0.7.0`, Node 24/Tree-sitter 0.25.1, packed consumers, and exact Dart 3.13.3 Linux x64 format/analyze/VM/native acceptance |
-| 031 | Zig | candidate selected and qualified by Task 031 | intentionally deferred |
+| 031 | Zig | exact public registry grammar in a private compatible runtime plus official Zig differential | passed for `@tree-sitter-grammars/tree-sitter-zig@1.1.2`, isolated Tree-sitter 0.22.4, Node 24/ABI 14, packed consumers, and exact Zig 0.15.2 Linux x86-64 |
 
 Swift or Kotlin qualification failure leaves Task 022 or 023 blocked until its roadmap/source decision is explicitly revised. Parser archives produced by CI or release pages are not an alternative dependency route. Tasks022 and 023 record narrow amendments: the selected registry packages lack the required install-safe Node24 contract, so Semantifold uses full-SHA GitHub source archives from its public packaging forks rather than generated release assets or mutable Git references.
 
@@ -79,6 +79,36 @@ The retained corpus SHA-256 values are:
 | `spec/fixtures/functions/program.dart` | `64c7eaec72b624781c102a1a6740cbbbc653148f6778f4282e5b3c187ea4bd4c` |
 
 Run `npx velocious-test spec/dart-parser-qualification.spec.js` for retained Node/CST evidence, `npx velocious-test spec/tree-sitter-legacy-packed-consumer.spec.js` for ordinary-install plus clean-`npm ci` packed-consumer proof, and the individual `spec/dart-cross-language-acceptance.spec.js` and `spec/dart-native-execution.spec.js` files for the real SDK differential. All pass in the rebuilt canonical lane; review, exact-head CI, merge, and post-merge verification remain separate delivery gates.
+
+## Task 031 Zig grammar qualification — 2026-09-16
+
+The Task 031 hard gate completed in an isolated scratch installation before the feature branch or tracked-file mutation. Exact `@tree-sitter-grammars/tree-sitter-zig@1.1.2` is a real maintained native Node grammar, but its optional peer requires Tree-sitter `^0.22.1`; root 0.25.1 cannot satisfy that contract. The selected route therefore uses an ordinary private `file:` production dependency with its own exact Tree-sitter 0.22.4 subtree, following the established runtime-isolation boundary without exposing a parser package publicly. No force/legacy-peer override, mutable source dependency, compiler-output AST, `zig ast-check`, source scan, runtime fetch, or vendored parser payload is used.
+
+| Evidence | Qualified result |
+| --- | --- |
+| npm distribution | Exact registry package `@tree-sitter-grammars/tree-sitter-zig@1.1.2`, tarball `https://registry.npmjs.org/@tree-sitter-grammars/tree-sitter-zig/-/tree-sitter-zig-1.1.2.tgz`, integrity `sha512-J0L31HZ2isy3F5zb2g5QWQOv2r/pbruQNL9ADhuQv2pn5BQOzxt80WcEJaYXBeuJ8GHxVT42slpCna8k1c8LOw==`. Its exact compatible binding is registry `tree-sitter@0.22.4`, integrity `sha512-usbHZP9/oxNsUY65MQUsduGRqDHQOou1cagUSwjhoSYAmSahjQDAVsh9s+SlZkn8X8+O1FULRGwHu7AFP3kjzg==`. Both are bundled only beneath the private runtime. |
+| upstream identity | Authoritative [`tree-sitter-grammars/tree-sitter-zig`](https://github.com/tree-sitter-grammars/tree-sitter-zig) lightweight tag `v1.1.2` resolves to full commit `b670c8df85a1568f498aa5c8cae42f51a90473c0`. The package repository metadata names that upstream. Registry signature/provenance verification passed during the credential-free scratch audit. |
+| legal and lifecycle | Grammar and binding declare MIT and retain their licenses. Each native package uses the standard local `node-gyp-build` install route with shipped prebuilds/source fallback; load/install code contains no tool or package downloader. Semantifold ships only the npm-installed dependency payload inside its root bundle, not a copied archive or hand-built native binary. |
+| ABI and typed Node API | The generated parser declares grammar ABI 14; Tree-sitter 0.22.4 accepts and loads it on Node 24. The grammar declaration exports its language handle and 242 typed node descriptions. `Parser#setLanguage`, parse, indexed child access, and `fieldNameForChild` work through one narrow grammar-handle assertion contained entirely inside the private package; public code receives only frozen plain data. |
+| corpus and traversal | Seven checked-in fixtures cover Tasks 001–005 function/parameter/void forms, exact scalar/slice types, typed `const`/`var`, assignment, calls, returns, output/helper shapes, all operators, nested/fallthrough branches, comments, support builtins/fields/indexing, unused/unmutated scaffolds, Unicode, escapes, and CRLF. Every named/anonymous/extra node and field-bearing edge is serialized; malformed braces, parameters, imports, and calls preserve explicit error/missing/propagated recovery state. |
+| coordinates and bounds | The boundary normalizes native parser offsets/points to UTF-16 and independently verifies every UTF-8 byte boundary. An astral comment plus CRLF places the following declaration at UTF-16 offset 7 while nine UTF-8 bytes precede it. Lone surrogates reject before adaptation. The product owns a 1,000,000-UTF-16 source limit and a 512-level CST traversal limit rather than inferring capacity from compiler acceptance. |
+| syntax version and compiler differential | The grammar release parses the complete selected Zig 0.15.2 Task-031 corpus. Upstream has later open Zig 0.16 grammar work, so the implementation does not claim moving 0.16 coverage. The official exact compiler reports `0.15.2`; generated projects pass canonical format, test, build, and execution in Debug, ReleaseSafe, and ReleaseFast with identical status/output/overflow boundaries. Compiler diagnostics are acceptance evidence only and never supply syntax trees or semantic recovery. |
+| official tool distribution | Official Linux x86-64 archive `https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz`, size `53733924`, SHA-256 `02aa270f183da276e5b5920b1dac44a63f1a49e55050ebde3aecc9eb82f93239`; qualified executable SHA-256 `2858dc89dbbfdd08cceda1b841e7fd0a793a1a67b49f150bc3d0d1de44ed7f51`. Docker and TensorBuzz verify those values and install source-independently; tests use isolated caches and never fetch a compiler or package. |
+| package/consumer boundary | Root scripts build and typecheck the private workspace, compare every installed shipped byte with its `file:` source, and bundle the complete isolated dependency subtree. The credential-free packed consumer proves default `install-links=false`, ordinary install, full dependency listing, clean `npm ci`, simultaneous root/legacy/Zig binding loading, strict public typing, frozen Zig parsing, and Zig frontend/backend round trip. |
+
+Retained corpus hashes are:
+
+| Corpus path | SHA-256 |
+| --- | --- |
+| `spec/fixtures/zig-qualification/base.zig` | `5394714b6b08f1352cf93aa12c5e94ab4270f51c864bb9e3c5f1c0e9a43d313a` |
+| `spec/fixtures/zig-qualification/scalars.zig` | `f5a9a9a17df3c8597ba5510f638226d3703ce72d4ea704740c30dea36c31ea08` |
+| `spec/fixtures/zig-qualification/locals.zig` | `ee7dd618a362945de52529258945e3205f33e9060cfbbb483e3aa8e05d94d489` |
+| `spec/fixtures/zig-qualification/operators.zig` | `cd3c11c84bdc49abb453c8eb9fd5110f19f309d2248f311121c081491745ee9d` |
+| `spec/fixtures/zig-qualification/statements.zig` | `b39c89b2c414f7dfdb7221c1ccf788dc3d68e47f75095840f7e9bc05539d874f` |
+| `spec/fixtures/zig-qualification/scaffolds.zig` | `d2db6d9059e25a431fe6491bb192b3d0a6f94846c85689e6d64f5e6b1cec0825` |
+| `spec/fixtures/zig-qualification/coordinates.zig` | `59ea9c03ec5b50c9c246354fa44f2283ed2b2af86f49e5d94768474ffe87c68f` |
+
+Run `npx velocious-test spec/zig-parser-qualification.spec.js` for the retained package/ABI/CST/coordinate proof and exact `zig fmt --check` plus `zig test` acceptance of every corpus file, `npx velocious-test spec/tree-sitter-zig-install-consistency.spec.js` and the packed-consumer spec for the distribution boundary, and the Zig native/cross-language specs for generated-project compiler execution.
 
 ## Task 016 Python qualification
 

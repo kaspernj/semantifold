@@ -8,7 +8,7 @@ import {parserRangeFor} from "./provenance.js"
 import {validateEffectGraph} from "./effects.js"
 import {validateResourceLifetimes} from "./lifetime.js"
 
-const task005Languages = new Set(["php", "ruby", "javascript", "typescript", "java", "dart"])
+const task005Languages = new Set(["php", "ruby", "javascript", "typescript", "java", "dart", "zig"])
 
 /** @typedef {Map<string, import("./types.js").RecordDeclaration>} RecordRegistry */
 /** @typedef {Map<string, import("./types.js").ClassDeclaration>} ClassRegistry */

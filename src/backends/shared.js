@@ -27,7 +27,7 @@ const binaryOperationSyntax = Object.freeze({
   StringEqual: Object.freeze({default: "==", strict: "==="}),
   StringNotEqual: Object.freeze({default: "!=", strict: "!=="})
 })
-const task005Languages = new Set(["php", "ruby", "javascript", "typescript", "java", "dart"])
+const task005Languages = new Set(["php", "ruby", "javascript", "typescript", "java", "dart", "zig"])
 const task006Languages = new Set(["php", "ruby", "javascript", "typescript", "java"])
 const task007Languages = new Set(["php", "ruby", "javascript", "typescript", "java"])
 const task008Languages = new Set(["php", "ruby", "javascript", "typescript", "java"])
@@ -1952,9 +1952,9 @@ function validateKnownTargetInteger(expression, language, location) {
   if (language == "java" && value !== undefined && (value < -2147483648n || value > 2147483647n)) {
     unsupportedCapability(language, "compile-time-known integer operation outside signed 32-bit int range", location)
   }
-  if ((language == "csharp" || language == "go" || language == "c" || language == "cpp" || language == "rust" || language == "swift" || language == "wasm") && value !== undefined &&
+  if ((language == "csharp" || language == "go" || language == "c" || language == "cpp" || language == "rust" || language == "swift" || language == "wasm" || language == "zig") && value !== undefined &&
     (value < -9223372036854775808n || value > 9223372036854775807n)) {
-    const scalar = language == "wasm" ? "i64" : language == "swift" ? "Int64" : "long"
+    const scalar = language == "wasm" || language == "zig" ? "i64" : language == "swift" ? "Int64" : "long"
 
     unsupportedCapability(language, `compile-time-known integer operation outside signed 64-bit ${scalar} range`, location)
   }

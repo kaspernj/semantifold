@@ -7,7 +7,7 @@ import {generate, generateArtifactSet, parse, SemantifoldDiagnostic} from "../in
 import {semanticMeaning} from "./support/semantic-meaning.js"
 
 const cohort = ["php", "ruby", "javascript", "typescript", "java"]
-const deferred = ["kotlin", "python", "csharp", "go", "c", "cpp", "rust", "swift", "wasm"]
+const deferred = ["kotlin", "python", "csharp", "go", "c", "cpp", "rust", "swift", "zig", "wasm"]
 
 describe("closed record backends", () => {
   it("emits reparsable native closed immutable records for every cohort target", async () => {
@@ -41,7 +41,7 @@ describe("closed record backends", () => {
     for (const language of deferred) {
       const generateDeferred = language == "wasm"
         ? () => generateArtifactSet({language, module, role: "binary"})
-        : ["csharp", "go", "c", "rust"].includes(language)
+        : ["csharp", "go", "c", "rust", "zig"].includes(language)
           ? () => generateArtifactSet({language, module})
           : () => generate({language: /** @type {import("../src/semantic/types.js").SemanticLanguage} */ (language), module})
 

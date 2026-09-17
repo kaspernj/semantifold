@@ -7,7 +7,7 @@ import {generate, generateArtifactSet, languageCapabilities, parse, SemantifoldD
 import {semanticMeaning} from "./support/semantic-meaning.js"
 
 const cohort = ["php", "ruby", "javascript", "typescript", "java"]
-const deferred = ["kotlin", "python", "csharp", "go", "c", "cpp", "rust", "swift", "wasm"]
+const deferred = ["kotlin", "python", "csharp", "go", "c", "cpp", "rust", "swift", "zig", "wasm"]
 
 async function moduleFromFixture() {
   const source = await readFile(new URL("fixtures/generics/program.ts", import.meta.url), "utf8")
@@ -53,7 +53,7 @@ describe("type parameter backends", () => {
     for (const language of deferred) {
       const action = language == "wasm"
         ? () => generateArtifactSet({language, module, role: "binary"})
-        : ["csharp", "go", "c", "rust"].includes(language)
+        : ["csharp", "go", "c", "rust", "zig"].includes(language)
           ? () => generateArtifactSet({language, module})
           : () => generate({language, module})
 

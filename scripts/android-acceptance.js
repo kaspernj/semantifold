@@ -79,19 +79,19 @@ try {
         [...common, "--offline", ":app:dependencies", "--configuration", "debugRuntimeClasspath"], buildEnvironment)
       const tests = await gradle(tools.gradle, materialized.projectDirectory,
         [...common, "--offline", ":app:dependencies", "--configuration", "debugUnitTestRuntimeClasspath"], buildEnvironment)
-      const runtimeDependencies = dependencyCoordinates(runtime.stdout)
-      const testDependencies = dependencyCoordinates(tests.stdout)
+      const runtimeDependencies = dependencyEntries(runtime.stdout)
+      const testDependencies = dependencyEntries(tests.stdout)
 
       if (runtimeDependencies.length != 0) {
-        throw new Error(`Runtime dependency graph must be empty, received: ${runtimeDependencies.join(", ")}.`)
+        throw new Error(`Runtime dependency graph must be empty, received: ${dependencyDescriptions(runtimeDependencies)}.`)
       }
       const expectedTestDependencies = new Set(["junit:junit:4.13.2", "org.hamcrest:hamcrest-core:1.3"])
-      const testDependencySet = new Set(testDependencies)
+      const testDependencySet = new Set(testDependencies.map(({coordinate}) => coordinate))
 
       if (testDependencies.length != expectedTestDependencies.size ||
         testDependencySet.size != expectedTestDependencies.size ||
         [...expectedTestDependencies].some(coordinate => !testDependencySet.has(coordinate))) {
-        throw new Error(`Unit-test dependency graph differs from exact non-transitive junit:junit:4.13.2 and org.hamcrest:hamcrest-core:1.3: ${testDependencies.join(", ")}.`)
+        throw new Error(`Unit-test dependency graph differs from exact non-transitive junit:junit:4.13.2 and org.hamcrest:hamcrest-core:1.3: ${dependencyDescriptions(testDependencies)}.`)
       }
       const apk = path.join(materialized.projectDirectory, "app/build/outputs/apk/debug/app-debug.apk")
       const testApk = path.join(materialized.projectDirectory, "app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk")
@@ -100,7 +100,7 @@ try {
       await rejectApkDependency(apk, "org/hamcrest/")
       await rejectApkDependency(apk, "kotlin/jvm/internal/")
       await rejectApkDependency(apk, "kotlin/collections/")
-      await readFile(testApk)
+      await requireApkDependency(testApk, "kotlin/jvm/internal/Intrinsics")
       process.stdout.write(`${JSON.stringify({
         acceptanceRoot: root,
         apk,
@@ -162,10 +162,10 @@ async function checkInfrastructure(mode) {
   }
   try {
     if (!(await stat(path.join(kotlinHome, "lib/kotlin-stdlib.jar"))).isFile()) {
-      infrastructure("Pinned Kotlin compile library is not a file.")
+      infrastructure("Pinned Kotlin stdlib is not a file.")
     }
   } catch (error) {
-    infrastructure("Pinned Kotlin compile library is missing.", error)
+    infrastructure("Pinned Kotlin stdlib is missing.", error)
   }
   if (mode != "prepare" && (await readdir(gradleUserHome)).length == 0) {
     infrastructure("The declared offline Gradle cache is empty.")
@@ -278,6 +278,14 @@ async function rejectApkDependency(apk, marker) {
   if (archive.stdout.includes(Buffer.from(marker, "utf8"))) throw new Error(`Runtime APK contains forbidden dependency marker '${marker}'.`)
 }
 
+async function requireApkDependency(apk, marker) {
+  const archive = await executeFile("unzip", ["-p", apk, "classes*.dex"], {encoding: "buffer", maxBuffer: 100 * 1024 * 1024})
+
+  if (!archive.stdout.includes(Buffer.from(marker, "utf8"))) {
+    throw new Error(`Instrumentation APK is missing required runtime marker '${marker}'.`)
+  }
+}
+
 /**
  * Creates the acceptance-only debug signing key below the private root.
  * @param {string} keytool - Qualified JDK keytool executable.
@@ -297,12 +305,22 @@ async function createDebugKeystore(keytool, root, environment) {
 }
 
 /**
- * Extracts resolved external coordinates from one Gradle dependency report.
+ * Extracts resolved external entries from one Gradle dependency report.
  * @param {string} output - Gradle dependency report output.
- * @returns {string[]} Resolved coordinates in report order.
+ * @returns {{coordinate: string, description: string}[]} Resolved entries in report order.
  */
-function dependencyCoordinates(output) {
-  return [...output.matchAll(/^[| ]*(?:\+---|\\---) ([^\s]+).*$/gmu)].map(([, coordinate]) => coordinate)
+function dependencyEntries(output) {
+  return [...output.matchAll(/^[| ]*(?:\+---|\\---) ((\S+)(?: [^\r\n]*)?)$/gmu)]
+    .flatMap(([, description, coordinate]) => description == "project :app (*)" ? [] : [{coordinate, description}])
+}
+
+/**
+ * Formats only dependency descriptions already selected by the report parser.
+ * @param {{description: string}[]} entries - Parsed dependency entries.
+ * @returns {string} Full matched descriptions in report order.
+ */
+function dependencyDescriptions(entries) {
+  return entries.map(({description}) => description).join(", ")
 }
 
 function infrastructure(message, cause) {

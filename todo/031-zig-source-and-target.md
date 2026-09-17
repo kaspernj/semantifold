@@ -1,6 +1,6 @@
 # 031 — Zig source and target support
 
-- Status: `todo`
+- Status: `implemented (P; independent review, exact-head CI, merge, and release remain coordinator-owned)`
 - Phase/priority: Phase P / P2
 - Dependencies: [005-general-function-signatures-and-calls.md](005-general-function-signatures-and-calls.md), [015-language-expansion-foundation.md](015-language-expansion-foundation.md), [018-c-source-and-target.md](018-c-source-and-target.md), [020-rust-source-and-target.md](020-rust-source-and-target.md)
 
@@ -48,6 +48,10 @@ Document the exact Zig/compiler profile, project layout, allocator/string lifeti
 - A qualified parser route exists and Zig is truthfully registered as frontend/native project backend for Tasks 001–005.
 - Generated projects reparse, format, build, test, and run deterministically across required optimization modes without network dependencies or undefined behavior.
 - Ownership/string, diagnostics, provenance, cross-language, docs/changelog, and repository gates pass.
+
+## Implementation delivery record — 2026-09-16
+
+The implementation qualifies exact grammar 1.1.2 through a private isolated Tree-sitter 0.22.4 runtime and selects official Zig 0.15.2 on Linux x86-64 after integrity, ABI/tree, recovery, UTF-16, syntax-version, formatting, and compiler differential checks. It registers Zig as the fifteenth frontend/text backend, implements Tasks 001–005 through immutable `[]const u8`, a whole-execution arena, checked `i64` helpers, strict typed source traversal, exact post-resolution source operator/helper identity, signed typed left-to-right eager-evaluation regions with conditional short-circuit right sides, deterministic `build.zig`/`src/main.zig`, rich/v3 provenance, final reparse, and isolated offline Debug/ReleaseSafe/ReleaseFast acceptance. The feature branch and pull request deliver implementation evidence; independent review, exact-head TensorBuzz convergence, merge, and any separately authorized release remain outside the implementation owner route.
 
 ## Non-goals
 

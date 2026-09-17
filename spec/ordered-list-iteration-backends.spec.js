@@ -6,7 +6,7 @@ import {describe, expect, it} from "@velocious/testing"
 import {generate, generateArtifactSet, parse, SemantifoldDiagnostic} from "../index.js"
 
 const cohort = ["ruby", "javascript", "typescript", "php", "java"]
-const deferred = ["kotlin", "python", "csharp", "go", "c", "cpp", "rust", "swift", "wasm"]
+const deferred = ["kotlin", "python", "csharp", "go", "c", "cpp", "rust", "swift", "zig", "wasm"]
 
 describe("ordered list iteration backends", () => {
   it("emits native loops with one collection evaluation and reparses control nodes", async () => {
@@ -39,7 +39,7 @@ describe("ordered list iteration backends", () => {
     for (const language of deferred) {
       const emit = language == "wasm"
         ? () => generateArtifactSet({language, module, role: "binary"})
-        : ["csharp", "go", "c", "rust"].includes(language)
+        : ["csharp", "go", "c", "rust", "zig"].includes(language)
           ? () => generateArtifactSet({language, module})
           : () => generate({language, module})
 

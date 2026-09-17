@@ -9,6 +9,7 @@ import {generateGoModule} from "./backends/go.js"
 import {generateRustProject} from "./backends/rust.js"
 import {generateSwift} from "./backends/swift.js"
 import {generateDartPackage} from "./backends/dart.js"
+import {generateZigProject} from "./backends/zig.js"
 import {generateJavaScript} from "./backends/javascript.js"
 import {generatePhp} from "./backends/php.js"
 import {generatePython} from "./backends/python.js"
@@ -24,6 +25,7 @@ import {parseGo} from "./frontends/go.js"
 import {parseRust} from "./frontends/rust.js"
 import {parseSwift} from "./frontends/swift.js"
 import {parseDart} from "./frontends/dart.js"
+import {parseZig} from "./frontends/zig.js"
 import {parseCpp} from "./frontends/cpp.js"
 import {generateCpp} from "./backends/cpp.js"
 import {parseC} from "./frontends/c.js"
@@ -373,6 +375,12 @@ const goFrontend = ({filename, source}) => parseGo({filename, source})
  */
 const dartFrontend = ({filename, source}) => parseDart({filename, source})
 
+/**
+ * Zig registry frontend wrapper.
+ * @type {Frontend}
+ */
+const zigFrontend = ({filename, source}) => parseZig({filename, source})
+
 const records = [
   language({
     acceptance: {stages: ["parse", "generate", "execute"], toolchains: ["php82"]},
@@ -489,6 +497,28 @@ const records = [
     id: "dart",
     mediaType: "text/x-dart",
     textBackend: generateDartPackage
+  }),
+  language({
+    acceptance: {stages: ["parse", "generate", "compile", "validate", "execute"], toolchains: ["zig"]},
+    artifactMultiplicity: "multiple",
+    defaultFilename: "src/main.zig",
+    features: {
+      closedRecords: false,
+      conditionControlledLoops: false,
+      effectfulCapabilitiesAndResources: false,
+      generalFunctionsAndCalls: true,
+      immutableCollections: false,
+      optionalValues: false,
+      orderedListIteration: false,
+      orderedMapIteration: false,
+      referenceClasses: false,
+      typedErrors: false,
+      typeParametersAndGenerics: false
+    },
+    frontend: zigFrontend,
+    id: "zig",
+    mediaType: "text/x-zig",
+    textBackend: generateZigProject
   }),
   {
     acceptance: {stages: ["generate", "validate", "instantiate", "execute"], toolchains: ["wasm-validate", "node", "chromium"]},

@@ -159,6 +159,22 @@ RUN test "$(dpkg --print-architecture)" = "amd64" \
   && test "$(cargo --version --verbose | sed -n 's/^commit-hash: //p')" = '797e8a9bca276c1c9f9f738d2a20f484fa4eea9d' \
   && rm -rf /tmp/semantifold-rust
 
+ENV SEMANTIFOLD_ZIG=/opt/zig-0.15.2/zig
+
+RUN test "$(dpkg --print-architecture)" = "amd64" \
+  && curl --fail --silent --show-error --location \
+    https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz \
+    --output /tmp/zig-x86_64-linux-0.15.2.tar.xz \
+  && test "$(stat --format=%s /tmp/zig-x86_64-linux-0.15.2.tar.xz)" = "53733924" \
+  && echo '02aa270f183da276e5b5920b1dac44a63f1a49e55050ebde3aecc9eb82f93239  /tmp/zig-x86_64-linux-0.15.2.tar.xz' | sha256sum --check - \
+  && tar -xJf /tmp/zig-x86_64-linux-0.15.2.tar.xz -C /opt \
+  && mv /opt/zig-x86_64-linux-0.15.2 /opt/zig-0.15.2 \
+  && ln --symbolic /opt/zig-0.15.2/zig /usr/local/bin/zig \
+  && test "$(zig version)" = "0.15.2" \
+  && test "$(readlink -f "$(command -v zig)")" = "/opt/zig-0.15.2/zig" \
+  && echo '2858dc89dbbfdd08cceda1b841e7fd0a793a1a67b49f150bc3d0d1de44ed7f51  /opt/zig-0.15.2/zig' | sha256sum --check - \
+  && rm -f /tmp/zig-x86_64-linux-0.15.2.tar.xz
+
 RUN swiftc --version \
   && test "$(swiftc --version | sed -n '1p')" = "Swift version 6.3.3 (swift-6.3.3-RELEASE)" \
   && test "$(swiftc --version | sed -n 's/^Target: //p')" = "x86_64-unknown-linux-gnu"

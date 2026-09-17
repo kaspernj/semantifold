@@ -1,6 +1,7 @@
 // @ts-check
 
 const internalPackageName = "semantifold-tree-sitter-legacy-internal"
+const internalZigPackageName = "semantifold-tree-sitter-zig-internal"
 const retiredPackageName = "@kaspernj/semantifold-tree-sitter-legacy"
 
 export const typeConsumerSource = `
@@ -28,6 +29,11 @@ const dartModule = parse({language: "dart", filename: "program.dart", source:
   "int add(int left, int right) { return left + right; }\\nvoid main() { print(add(1, 2)); }\\n"})
 const dartArtifacts = generateArtifactSet({language: "dart", module: dartModule})
 void dartArtifacts
+const zigArtifacts = generateArtifactSet({language: "zig", module: dartModule})
+const zigSource = zigArtifacts.artifacts[1]?.content
+if (typeof zigSource !== "string") throw new TypeError("Expected the Zig source artifact")
+const zigModule = parse({language: "zig", filename: "src/main.zig", source: zigSource})
+void zigModule
 `
 
 export const consumerSource = `
@@ -42,6 +48,7 @@ import {fileURLToPath, pathToFileURL} from "node:url"
 import * as semantifold from "semantifold"
 
 const internalPackageName = "${internalPackageName}"
+const internalZigPackageName = "${internalZigPackageName}"
 const retiredPackageName = "${retiredPackageName}"
 const consumerRequire = createRequire(import.meta.url)
 const semantifoldEntry = fileURLToPath(import.meta.resolve("semantifold"))
@@ -50,8 +57,16 @@ const semantifoldRequire = createRequire(semantifoldEntry)
 const internalEntry = semantifoldRequire.resolve(internalPackageName)
 const internalDirectory = path.dirname(path.dirname(internalEntry))
 const internalRequire = createRequire(internalEntry)
+const internalZigEntry = semantifoldRequire.resolve(internalZigPackageName)
+const internalZigDirectory = path.dirname(path.dirname(internalZigEntry))
+const internalZigRequire = createRequire(internalZigEntry)
 const modernRuntimePath = semantifoldRequire.resolve("tree-sitter")
 const legacyRuntimePath = internalRequire.resolve("tree-sitter")
+const zigRuntimePath = internalZigRequire.resolve("tree-sitter")
+const zigGrammarPath = internalZigRequire.resolve("@tree-sitter-grammars/tree-sitter-zig")
+const zigGrammar = JSON.parse(await readFile(internalZigRequire.resolve("@tree-sitter-grammars/tree-sitter-zig/package.json"), "utf8"))
+const zigRuntime = JSON.parse(await readFile(internalZigRequire.resolve("tree-sitter/package.json"), "utf8"))
+const internalZigManifest = JSON.parse(await readFile(path.join(internalZigDirectory, "package.json"), "utf8"))
 const rustGrammarPath = internalRequire.resolve("tree-sitter-rust")
 const rustGrammar = JSON.parse(await readFile(internalRequire.resolve("tree-sitter-rust/package.json"), "utf8"))
 const cppGrammarPath = internalRequire.resolve("tree-sitter-cpp")
@@ -69,10 +84,11 @@ const internalManifest = JSON.parse(await readFile(path.join(internalDirectory, 
 const consumerModules = path.join(process.cwd(), "node_modules") + path.sep
 
 for (const filename of [semantifoldEntry, internalEntry, modernRuntimePath, legacyRuntimePath, cGrammarPath, cppGrammarPath,
-  rustGrammarPath, kotlinGrammarPath, dartGrammarPath]) {
+  rustGrammarPath, kotlinGrammarPath, dartGrammarPath, internalZigEntry, zigRuntimePath, zigGrammarPath]) {
   assert.ok((await realpath(filename)).startsWith(consumerModules))
 }
 const {parseCst} = await import(pathToFileURL(internalEntry).href)
+const {parseCst: parseZigCst} = await import(pathToFileURL(internalZigEntry).href)
 const {default: Parser} = await import(pathToFileURL(modernRuntimePath).href)
 const {default: GoLanguage} = await import(pathToFileURL(goGrammarPath).href)
 const {default: DartLanguage} = await import(pathToFileURL(dartGrammarPath).href)
@@ -84,6 +100,7 @@ dartParser.setLanguage(DartLanguage)
 const goTree = goParser.parse("package main\\nfunc main() {}\\n")
 const dartTree = dartParser.parse("void main() {}\\n")
 const cSnapshot = parseCst("/* 😀 */\\r\\nint main(void) { return 0; }\\r\\n")
+const zigSnapshot = parseZigCst("// 😀\\r\\nfn main() void {}\\r\\n")
 
 function isPlainFrozenData(value) {
   if (value == null || ["boolean", "number", "string"].includes(typeof value)) return true
@@ -102,6 +119,9 @@ assert.equal(goTree.rootNode.hasError, false)
 assert.equal(dartTree.rootNode.hasError, false)
 assert.equal(cSnapshot.root.hasError, false)
 assert.equal(cSnapshot.root.endIndex, "/* 😀 */\\r\\nint main(void) { return 0; }\\r\\n".length)
+assert.equal(zigSnapshot.language, "zig")
+assert.equal(zigSnapshot.root.hasError, false)
+assert.equal(zigSnapshot.root.endIndex, "// 😀\\r\\nfn main() void {}\\r\\n".length)
 assert.deepEqual(JSON.parse(JSON.stringify(cSnapshot)), cSnapshot)
 const semanticC = semantifold.parse({language: "c", filename: "program.c", source:
   '#include "semantifold_runtime.h"\\nstatic int64_t add(int64_t left, int64_t right) { return left + right; }\\n' +
@@ -114,6 +134,7 @@ const cppModule = semantifold.parse({language: "cpp", filename: "program.cpp", s
 assert.equal(cppModule.functions[0].name, "add")
 assert.equal(semantifold.generate({language: "cpp", module: cppModule}), cppArtifact.code)
 assert.throws(() => consumerRequire.resolve(internalPackageName), {code: "MODULE_NOT_FOUND"})
+assert.throws(() => consumerRequire.resolve(internalZigPackageName), {code: "MODULE_NOT_FOUND"})
 assert.throws(() => semantifoldRequire.resolve(retiredPackageName), {code: "MODULE_NOT_FOUND"})
 const rustArtifacts = semantifold.generateArtifactSet({language: "rust", module: semanticC})
 assert.deepEqual(rustArtifacts.artifacts.map(({path: artifactPath}) => artifactPath), ["Cargo.toml", "Cargo.lock", "src/main.rs"])
@@ -121,6 +142,12 @@ const rustModule = semantifold.parse({language: "rust", filename: "src/main.rs",
 assert.equal(rustModule.functions[0].name, "add")
 assert.deepEqual(semantifold.generateArtifactSet({language: "rust", module: rustModule}).artifacts.map(({content}) => content),
   rustArtifacts.artifacts.map(({content}) => content))
+const zigArtifacts = semantifold.generateArtifactSet({language: "zig", module: semanticC})
+assert.deepEqual(zigArtifacts.artifacts.map(({path: artifactPath}) => artifactPath), ["build.zig", "src/main.zig"])
+const zigModule = semantifold.parse({language: "zig", filename: "src/main.zig", source: zigArtifacts.artifacts[1].content})
+assert.equal(zigModule.functions[0].name, "add")
+assert.deepEqual(semantifold.generateArtifactSet({language: "zig", module: zigModule}).artifacts.map(({content}) => content),
+  zigArtifacts.artifacts.map(({content}) => content))
 const nativeProof = []
 const rustc = await semantifold.discoverCanonicalToolchain("rustc")
 const cargo = await semantifold.discoverCanonicalToolchain("cargo")
@@ -215,6 +242,13 @@ process.stdout.write(JSON.stringify({
   rustRoundTrip: true,
   rustNativeModes: ["debug", "release"],
   rustArtifactsStable: true,
+  zigGrammarVersion: zigGrammar.version,
+  zigGrammarIsInternal: zigGrammarPath.startsWith(internalZigDirectory + path.sep),
+  zigSnapshotIsPlainFrozenData: isPlainFrozenData(zigSnapshot),
+  zigRoundTrip: true,
+  zigRuntimeIsInternal: zigRuntimePath.startsWith(internalZigDirectory + path.sep),
+  zigRuntimeVersion: zigRuntime.version,
+  zigInternalPackageIsPrivate: internalZigManifest.private === true && internalZigManifest.exports === undefined,
   cppGrammarVersion: cppGrammar.version,
   cppGrammarIsInternal: cppGrammarPath.startsWith(internalDirectory + path.sep),
   cppSnapshotIsPlainFrozenData: isPlainFrozenData(cppSnapshot),
@@ -235,7 +269,7 @@ process.stdout.write(JSON.stringify({
   legacyRuntimeVersion: legacyRuntime.version,
   modernRuntimeIsBundled: modernRuntimePath.startsWith(semantifoldDirectory + path.sep),
   modernRuntimeVersion: modernRuntime.version,
-  pathsAreDistinct: modernRuntimePath !== legacyRuntimePath,
+  pathsAreDistinct: modernRuntimePath !== legacyRuntimePath && modernRuntimePath !== zigRuntimePath && legacyRuntimePath !== zigRuntimePath,
   retiredPackageIsAbsent: true,
   rootApiIsPrivate: !("parseCst" in semantifold),
   snapshotIsPlainFrozenData: isPlainFrozenData(cSnapshot)

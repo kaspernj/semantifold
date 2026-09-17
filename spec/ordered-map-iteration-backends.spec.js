@@ -52,10 +52,10 @@ describe("ordered map iteration backends", () => {
     const source = await readFile(new URL("fixtures/ordered-map-iteration/program.ts", import.meta.url), "utf8")
     const module = parse({filename: "program.ts", language: "typescript", source})
 
-    for (const language of ["kotlin", "python", "csharp", "go", "c", "cpp", "rust", "swift", "wasm"]) {
+    for (const language of ["kotlin", "python", "csharp", "go", "c", "cpp", "rust", "swift", "zig", "wasm"]) {
       const emit = language == "wasm"
         ? () => generateArtifactSet({language, module, role: "binary"})
-        : ["csharp", "go", "c", "rust"].includes(language)
+        : ["csharp", "go", "c", "rust", "zig"].includes(language)
           ? () => generateArtifactSet({language, module})
           : () => generate({language, module})
 

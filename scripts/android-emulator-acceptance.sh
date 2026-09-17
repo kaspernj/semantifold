@@ -8,7 +8,7 @@ EMULATOR="$ANDROID_HOME/emulator/emulator"
 AVD_NAME="${SEMANTIFOLD_ANDROID_AVD:-semantifold-api35}"
 SERIAL=emulator-5580
 PORT=5580
-ANDROID_ADB_SERVER_PORT=5581
+ANDROID_ADB_SERVER_PORT=5038
 export ANDROID_ADB_SERVER_PORT
 ACCEPTANCE_ROOT=/tmp/semantifold-android-acceptance
 PROJECT="$ACCEPTANCE_ROOT/generated/android-app"
@@ -18,9 +18,17 @@ ARTIFACTS="$ACCEPTANCE_ROOT/emulator-artifacts"
 EXPECTED_OUTPUT_BASE64='aMOp8J+YgApow6nwn5iAIQpow6nwn5iAIT8='
 EMULATOR_PID=
 EXIT_REASON=unclassified
-LOCK=/tmp/semantifold-android-5580-5581.lock
+LOCK=/tmp/semantifold-android-5580-5581-5038.lock
 
 mkdir -p "$ARTIFACTS"
+
+print_failure_artifact() {
+  artifact=$1
+  test -f "$ARTIFACTS/$artifact" || return 0
+  printf '%s\n' "--- $artifact (last 16384 bytes) ---" >&2
+  tail -c 16384 "$ARTIFACTS/$artifact" >&2
+  printf '\n' >&2
+}
 
 capture_failure() {
   status=$?
@@ -40,6 +48,11 @@ capture_failure() {
   timeout 15 "$ADB" kill-server >/dev/null 2>&1
   rm -rf "$ACCEPTANCE_ROOT/generated"
   rm -f "$ACCEPTANCE_ROOT/debug.keystore"
+  printf 'SEMANTIFOLD_ANDROID_EMULATOR_FAILURE: %s (exit status %s)\n' "$EXIT_REASON" "$status" >&2
+  for artifact in accel-check.txt adb-state.txt emulator-first.log instrumentation-first.txt \
+    emulator-second.log instrumentation-second.txt logcat.txt; do
+    print_failure_artifact "$artifact"
+  done
   exit "$status"
 }
 trap capture_failure EXIT HUP INT TERM
@@ -52,8 +65,8 @@ test -f "$APK" && test -f "$TEST_APK" || { EXIT_REASON='offline Android APK outp
 command -v flock >/dev/null 2>&1 || { EXIT_REASON='flock is unavailable for fixed emulator port ownership'; exit 2; }
 command -v timeout >/dev/null 2>&1 || { EXIT_REASON='timeout is unavailable for bounded Android commands'; exit 2; }
 exec 9>"$LOCK"
-flock -n 9 || { EXIT_REASON='fixed Android port pair 5580/5581 is already owned'; exit 2; }
-EXIT_REASON='fixed adb server port 5581 could not start'
+flock -n 9 || { EXIT_REASON='fixed Android port set 5580/5581/5038 is already owned'; exit 2; }
+EXIT_REASON='fixed adb server port 5038 could not start'
 timeout 30 "$ADB" start-server >/dev/null
 if timeout 30 "$ADB" devices | grep -q "$SERIAL"; then EXIT_REASON='fixed emulator port 5580 is already owned'; exit 2; fi
 

@@ -195,6 +195,7 @@ fun main() {
     expect(build).toContain('testImplementation("junit:junit:4.13.2") {\n    isTransitive = false\n  }')
     expect(build).toContain('testRuntimeOnly("org.hamcrest:hamcrest-core:1.3") {\n    isTransitive = false\n  }')
     expect(build).toContain("libraries.from(files(semantifoldKotlinStdlib))")
+    expect(build).toContain("androidTestImplementation(files(semantifoldKotlinStdlib))")
     expect(build).toContain('storeFile = semantifoldDebugKeystore')
     expect(build).toContain('SEMANTIFOLD_ANDROID_ACCEPTANCE_ROOT')
     expect(build).not.toMatch(/(?:implementation|runtimeOnly)\s*\(/u)

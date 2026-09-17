@@ -13,7 +13,7 @@ import {SourceWriter} from "./writer.js"
 
 /** @type {Readonly<Set<import("../semantic/types.js").SemanticLanguage>>} */
 const iosSourceLanguages = new Set([
-  "php", "ruby", "javascript", "typescript", "java", "kotlin", "python", "csharp", "go", "c", "cpp", "rust", "swift", "dart"
+  "php", "ruby", "javascript", "typescript", "java", "kotlin", "python", "csharp", "go", "c", "cpp", "rust", "swift", "dart", "zig"
 ])
 const configurationFields = new Set([
   "bundleIdentifier", "capabilities", "deploymentTarget", "displayName", "entitlements", "infoPlist", "lifecycle",

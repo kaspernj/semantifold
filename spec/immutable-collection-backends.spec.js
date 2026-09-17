@@ -6,7 +6,7 @@ import {describe, expect, it} from "@velocious/testing"
 import {generate, generateArtifactSet, parse, SemantifoldDiagnostic} from "../index.js"
 
 const cohort = ["ruby", "javascript", "typescript", "php", "java"]
-const deferred = ["kotlin", "python", "csharp", "go", "c", "cpp", "rust", "swift", "wasm"]
+const deferred = ["kotlin", "python", "csharp", "go", "c", "cpp", "rust", "swift", "zig", "wasm"]
 
 describe("immutable collection backends", () => {
   it("emits recursive types, construction, total access, and size for every cohort target", async () => {
@@ -33,7 +33,7 @@ describe("immutable collection backends", () => {
     for (const language of deferred) {
       const generateDeferred = language == "wasm"
         ? () => generateArtifactSet({language, module, role: "binary"})
-        : ["csharp", "go", "c", "rust"].includes(language)
+        : ["csharp", "go", "c", "rust", "zig"].includes(language)
           ? () => generateArtifactSet({language, module})
           : () => generate({language: /** @type {import("../src/semantic/types.js").SemanticLanguage} */ (language), module})
 

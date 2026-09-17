@@ -17,13 +17,13 @@ function backendFailure(language) {
 
 describe("optional value backend validation", () => {
   it("rejects optional IR transactionally for every registered non-cohort target", () => {
-    const deferred = ["kotlin", "python", "csharp", "go", "c", "cpp", "rust", "swift", "wasm"]
+    const deferred = ["kotlin", "python", "csharp", "go", "c", "cpp", "rust", "swift", "zig", "wasm"]
 
     for (const language of deferred) {
       const module = optionalModule()
       const emit = language == "wasm"
         ? () => generateArtifactSet({language, module, role: "binary"})
-        : ["csharp", "go", "c", "rust"].includes(language)
+        : ["csharp", "go", "c", "rust", "zig"].includes(language)
           ? () => generateArtifactSet({language, module})
           : () => generate({language, module})
 
