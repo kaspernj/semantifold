@@ -2241,7 +2241,8 @@ export function emitExpression(writer, expression, path, language, emitIdentifie
     return
   }
   if (expression.kind == "CallExpression") {
-    const dartMultiline = language == "dart" && expression.arguments.length > 0 &&
+    const callArgumentSuffix = writer.callArgumentSuffixFor(expression)
+    const dartMultiline = language == "dart" && (expression.arguments.length > 0 || Boolean(callArgumentSuffix)) &&
       dartExpressionExceedsPageWidth(writer, expression)
     const dartIndent = dartMultiline ? currentLineIndent(writer) : ""
 
@@ -2255,11 +2256,10 @@ export function emitExpression(writer, expression, path, language, emitIdentifie
       emitExpression(writer, argument, `${path}/arguments/${index}`, language, emitIdentifier)
       if (dartMultiline) writer.synthetic(",\n", "Dart formatter argument separator", [expression], [path])
     })
-    const callArgumentSuffix = writer.callArgumentSuffixFor(expression)
-
     if (callArgumentSuffix) {
-      writer.synthetic(`${expression.arguments.length ? ", " : ""}${callArgumentSuffix}`,
-        "target-container semantic call argument", [expression], [path])
+      writer.synthetic(dartMultiline ? `${expression.arguments.length ? "" : "\n"}${dartIndent}  ${callArgumentSuffix},\n` :
+        `${expression.arguments.length ? ", " : ""}${callArgumentSuffix}`,
+      "target-container semantic call argument", [expression], [path])
     }
     if (dartMultiline) writer.synthetic(dartIndent, "Dart call closing indentation", [expression], [path])
     writer.mapped(")", {mappingKind: "anchor", node: expression, path})
@@ -2558,14 +2558,18 @@ function currentLineIndent(writer) {
  * @param {import("../semantic/types.js").Expression} expression Semantic expression.
  * @returns {string} Flat canonical spelling.
  */
-function flatDartExpression(writer, expression) {
+export function flatDartExpression(writer, expression) {
   if (expression.kind == "IdentifierExpression") return expression.name
   if (expression.kind == "IntegerLiteral") return String(expression.value)
   if (expression.kind == "BooleanLiteral") return `_semantifoldBoolean(${expression.value ? "true" : "false"})`
   if (expression.kind == "StringLiteral") return emitStringLiteral("dart", expression.value)
   if (expression.kind == "CallExpression") {
-    return `${writer.callNameFor(expression)}(${expression.arguments.map((argument) =>
-      flatDartExpression(writer, argument)).join(", ")})`
+    const arguments_ = expression.arguments.map((argument) => flatDartExpression(writer, argument))
+    const callArgumentSuffix = writer.callArgumentSuffixFor(expression)
+
+    if (callArgumentSuffix) arguments_.push(callArgumentSuffix)
+
+    return `${writer.callNameFor(expression)}(${arguments_.join(", ")})`
   }
   if (expression.kind == "UnaryExpression") {
     const operand = flatDartExpression(writer, expression.operand)

@@ -13,7 +13,7 @@ import {createLanguageRegistry} from "../src/language-registry.js"
 
 const originalFive = ["php", "ruby", "javascript", "typescript", "java"]
 const allLanguages = [...originalFive, "kotlin", "python", "csharp", "go", "c", "cpp", "rust", "swift", "dart", "zig"]
-const allTargets = [...allLanguages, "wasm", "android", "ios"]
+const allTargets = [...allLanguages, "wasm", "android", "ios", "flutter"]
 
 describe("language role registry", () => {
   it("derives stable immutable public discovery from the dispatch registry", () => {
@@ -27,7 +27,7 @@ describe("language role registry", () => {
       expect(Object.isFrozen(descriptor.features)).toBeTrue()
       expect(Object.isFrozen(descriptor.mapping)).toBeTrue()
       expect(Object.isFrozen(descriptor.acceptance)).toBeTrue()
-      if (["wasm", "android", "ios"].includes(descriptor.id)) {
+      if (["wasm", "android", "ios", "flutter"].includes(descriptor.id)) {
         expect(descriptor.features).toEqual({
           closedRecords: false,
           conditionControlledLoops: false,
@@ -58,6 +58,9 @@ describe("language role registry", () => {
         } : descriptor.id == "android" ? {
           stages: ["generate", "compile", "validate", "instantiate", "execute"],
           toolchains: ["android"]
+        } : descriptor.id == "flutter" ? {
+          stages: ["generate", "restore", "compile", "validate", "instantiate", "execute"],
+          toolchains: ["flutter", "android"]
         } : {stages: ["generate"], toolchains: []})
         continue
       }

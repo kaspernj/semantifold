@@ -14,6 +14,8 @@ ACCEPTANCE_ROOT=/tmp/semantifold-android-acceptance
 PROJECT="$ACCEPTANCE_ROOT/generated/android-app"
 APK="$PROJECT/app/build/outputs/apk/debug/app-debug.apk"
 TEST_APK="$PROJECT/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk"
+FLUTTER_ACCEPTANCE_ROOT=/tmp/semantifold-flutter-acceptance
+FLUTTER_APK="$FLUTTER_ACCEPTANCE_ROOT/generated/flutter-app/build/app/outputs/flutter-apk/app-debug.apk"
 ARTIFACTS="$ACCEPTANCE_ROOT/emulator-artifacts"
 EXPECTED_OUTPUT_BASE64='aMOp8J+YgApow6nwn5iAIQpow6nwn5iAIT8='
 EMULATOR_PID=
@@ -47,6 +49,7 @@ capture_failure() {
   fi
   timeout 15 "$ADB" kill-server >/dev/null 2>&1
   rm -rf "$ACCEPTANCE_ROOT/generated"
+  rm -rf "$FLUTTER_ACCEPTANCE_ROOT/generated"
   rm -f "$ACCEPTANCE_ROOT/debug.keystore"
   printf 'SEMANTIFOLD_ANDROID_EMULATOR_FAILURE: %s (exit status %s)\n' "$EXIT_REASON" "$status" >&2
   for artifact in accel-check.txt adb-state.txt emulator-first.log instrumentation-first.txt \
@@ -61,7 +64,8 @@ test -c /dev/kvm || { EXIT_REASON='KVM character device is unavailable'; exit 2;
 test -r /dev/kvm && test -w /dev/kvm || { EXIT_REASON='KVM is not readable and writable by the TensorBuzz user'; exit 2; }
 "$EMULATOR" -accel-check > "$ARTIFACTS/accel-check.txt" 2>&1 || { EXIT_REASON='emulator -accel-check failed'; exit 2; }
 grep -Eiq 'accel|KVM.*(usable|installed|working)' "$ARTIFACTS/accel-check.txt" || { EXIT_REASON='KVM acceleration was not affirmed'; exit 2; }
-test -f "$APK" && test -f "$TEST_APK" || { EXIT_REASON='offline Android APK outputs are missing'; exit 2; }
+test -f "$APK" && test -f "$TEST_APK" && test -f "$FLUTTER_APK" || \
+  { EXIT_REASON='offline Android or Flutter APK outputs are missing'; exit 2; }
 command -v flock >/dev/null 2>&1 || { EXIT_REASON='flock is unavailable for fixed emulator port ownership'; exit 2; }
 command -v timeout >/dev/null 2>&1 || { EXIT_REASON='timeout is unavailable for bounded Android commands'; exit 2; }
 exec 9>"$LOCK"
@@ -100,6 +104,23 @@ run_emulator_acceptance() {
     dev.semantifold.generated.test/dev.semantifold.generated.SemantifoldUiInstrumentation \
     > "$ARTIFACTS/instrumentation-$sequence.txt"
   grep -q 'INSTRUMENTATION_CODE: -1' "$ARTIFACTS/instrumentation-$sequence.txt"
+  EXIT_REASON="emulator $sequence Flutter APK installation failed"
+  timeout 120 "$ADB" -s "$SERIAL" install --no-streaming -r "$FLUTTER_APK"
+  EXIT_REASON="emulator $sequence Flutter application launch failed"
+  timeout 30 "$ADB" -s "$SERIAL" shell am force-stop dev.semantifold.flutter.generated
+  timeout 30 "$ADB" -s "$SERIAL" shell am start -W -n dev.semantifold.flutter.generated/.MainActivity
+  EXIT_REASON="emulator $sequence exact labelled Flutter UI assertion failed"
+  attempts=0
+  while :; do
+    timeout 30 "$ADB" -s "$SERIAL" shell uiautomator dump "/sdcard/semantifold-flutter-$sequence.xml"
+    timeout 30 "$ADB" -s "$SERIAL" pull "/sdcard/semantifold-flutter-$sequence.xml" \
+      "$ARTIFACTS/flutter-ui-$sequence.xml"
+    if node scripts/flutter-ui-assertion.js "$ARTIFACTS/flutter-ui-$sequence.xml" "$EXPECTED_OUTPUT_BASE64"; then break; fi
+    attempts=$((attempts + 1))
+    test "$attempts" -lt 30 || return 1
+    sleep 1
+  done
+  timeout 30 "$ADB" -s "$SERIAL" exec-out screencap -p > "$ARTIFACTS/flutter-screenshot-$sequence.png"
   EXIT_REASON="emulator $sequence teardown failed"
   timeout 30 "$ADB" -s "$SERIAL" emu kill
   attempts=0
@@ -126,4 +147,5 @@ EXIT_REASON=success
 trap - EXIT HUP INT TERM
 timeout 15 "$ADB" kill-server >/dev/null
 rm -rf "$ACCEPTANCE_ROOT/generated"
+rm -rf "$FLUTTER_ACCEPTANCE_ROOT/generated"
 rm -f "$ACCEPTANCE_ROOT/debug.keystore"

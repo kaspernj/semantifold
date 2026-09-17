@@ -2,7 +2,7 @@
 set -eu
 
 export SEMANTIFOLD_ANDROID_HOME="${SEMANTIFOLD_ANDROID_HOME:-/opt/semantifold-android-sdk}"
-export SEMANTIFOLD_GRADLE_HOME="${SEMANTIFOLD_GRADLE_HOME:-/opt/gradle-8.13}"
+export SEMANTIFOLD_GRADLE_HOME="${SEMANTIFOLD_GRADLE_HOME:-/opt/gradle-8.14}"
 export SEMANTIFOLD_GRADLE_USER_HOME="${SEMANTIFOLD_GRADLE_USER_HOME:-/opt/semantifold-gradle-cache}"
 export SEMANTIFOLD_KOTLIN_HOME="${SEMANTIFOLD_KOTLIN_HOME:-/opt/kotlinc-2.2.10}"
 export JAVA_HOME="${SEMANTIFOLD_JAVA_HOME:-/opt/semantifold-jdk-21.0.8}"

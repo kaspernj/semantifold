@@ -2,7 +2,7 @@
 
 import {unsupportedCapability} from "../diagnostic.js"
 
-/** @type {Record<Exclude<import("../semantic/types.js").BackendLanguage, "ios">, RegExp>} */
+/** @type {Record<Exclude<import("../semantic/types.js").BackendLanguage, "ios" | "flutter">, RegExp>} */
 const identifierPatterns = {
   android: /^(?:_|\p{L})(?:_|\p{L}|\p{Nd})*$/u,
   dart: /^(?:_|\p{L})(?:_|\p{L}|\p{Nd})*$/u,
@@ -23,7 +23,7 @@ const identifierPatterns = {
   wasm: /^(?:[$_]|\p{XID_Start})(?:[$_]|\p{XID_Continue})*$/u
 }
 
-/** @type {Record<Exclude<import("../semantic/types.js").BackendLanguage, "ios">, Set<string>>} */
+/** @type {Record<Exclude<import("../semantic/types.js").BackendLanguage, "ios" | "flutter">, Set<string>>} */
 const reservedWords = {
   android: new Set([
     "as", "break", "class", "continue", "do", "else", "false", "for", "fun", "if", "in", "interface", "is", "null",
@@ -236,7 +236,7 @@ export function validateTargetIdentifier(language, name, role, location) {
   if (typeof name != "string") unsupportedCapability(language, `${role} identifier`, location)
 
   const reservedName = language == "php" ? name.toLowerCase() : name
-  const syntaxLanguage = language == "ios" ? "swift" : language
+  const syntaxLanguage = language == "ios" ? "swift" : language == "flutter" ? "dart" : language
 
   if (!identifierPatterns[syntaxLanguage].test(name) || reservedWords[syntaxLanguage].has(reservedName) ||
     language == "python" && name.normalize("NFKC") != name ||
@@ -296,7 +296,7 @@ export function validateTargetTypeIdentifier(language, name, location) {
     unsupportedCapability(language, `record type identifier '${String(name)}'`, location)
   }
   const reservedName = language == "php" ? name.toLowerCase() : name
-  const syntaxLanguage = language == "ios" ? "swift" : language
+  const syntaxLanguage = language == "ios" ? "swift" : language == "flutter" ? "dart" : language
 
   if (reservedWords[syntaxLanguage].has(reservedName) || reservedTypeNames[language]?.has(reservedName)) {
     unsupportedCapability(language, `record type identifier '${name}'`, location)

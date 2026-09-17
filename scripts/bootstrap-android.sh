@@ -2,7 +2,7 @@
 set -eu
 
 ANDROID_HOME="${SEMANTIFOLD_ANDROID_HOME:-/opt/semantifold-android-sdk}"
-GRADLE_HOME="${SEMANTIFOLD_GRADLE_HOME:-/opt/gradle-8.13}"
+GRADLE_HOME="${SEMANTIFOLD_GRADLE_HOME:-/opt/gradle-8.14}"
 GRADLE_USER_HOME="${SEMANTIFOLD_GRADLE_USER_HOME:-/opt/semantifold-gradle-cache}"
 JAVA_HOME="${SEMANTIFOLD_JAVA_HOME:-/opt/semantifold-jdk-21.0.8}"
 KOTLIN_HOME="${SEMANTIFOLD_KOTLIN_HOME:-/opt/kotlinc-2.2.10}"
@@ -10,7 +10,7 @@ BOOTSTRAP_ROOT="$(mktemp -d)"
 trap 'rm -rf "$BOOTSTRAP_ROOT"' EXIT HUP INT TERM
 
 test "$ANDROID_HOME" = /opt/semantifold-android-sdk
-test "$GRADLE_HOME" = /opt/gradle-8.13
+test "$GRADLE_HOME" = /opt/gradle-8.14
 test "$GRADLE_USER_HOME" = /opt/semantifold-gradle-cache
 test "$JAVA_HOME" = /opt/semantifold-jdk-21.0.8
 test "$KOTLIN_HOME" = /opt/kotlinc-2.2.10
@@ -39,12 +39,12 @@ sudo mv "$BOOTSTRAP_ROOT/kotlin/kotlinc" "$KOTLIN_HOME"
 test "$(JAVA_HOME="$JAVA_HOME" "$KOTLIN_HOME/bin/kotlinc" -version 2>&1 | sed -n 's/^info: kotlinc-jvm \([^ ]*\).*/\1/p')" = 2.2.10
 
 curl --fail --silent --show-error --location --retry 5 --retry-delay 5 --retry-all-errors \
-  https://services.gradle.org/distributions/gradle-8.13-bin.zip --output "$BOOTSTRAP_ROOT/gradle-8.13-bin.zip"
-printf '%s  %s\n' '20f1b1176237254a6fc204d8434196fa11a4cfb387567519c61556e8710aed78' \
-  "$BOOTSTRAP_ROOT/gradle-8.13-bin.zip" | sha256sum --check -
+  https://services.gradle.org/distributions/gradle-8.14-bin.zip --output "$BOOTSTRAP_ROOT/gradle-8.14-bin.zip"
+printf '%s  %s\n' '61ad310d3c7d3e5da131b76bbf22b5a4c0786e9d892dae8c1658d4b484de3caa' \
+  "$BOOTSTRAP_ROOT/gradle-8.14-bin.zip" | sha256sum --check -
 sudo rm -rf "$GRADLE_HOME"
-sudo unzip -q "$BOOTSTRAP_ROOT/gradle-8.13-bin.zip" -d /opt
-test "$GRADLE_HOME/bin/gradle" = /opt/gradle-8.13/bin/gradle
+sudo unzip -q "$BOOTSTRAP_ROOT/gradle-8.14-bin.zip" -d /opt
+test "$GRADLE_HOME/bin/gradle" = /opt/gradle-8.14/bin/gradle
 
 curl --fail --silent --show-error --location --retry 5 --retry-delay 5 --retry-all-errors \
   https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip \
@@ -77,8 +77,14 @@ download_android_archive emulator-linux_x64-13610412.zip \
 download_android_archive x86_64-35_r09.zip \
   c67b9ba0ff5bc0eb6d046871bfa228af14d4d47b02f0cdae94f048e511b7566e \
   https://dl.google.com/android/repository/sys-img/google_apis/x86_64-35_r09.zip
+download_android_archive android-ndk-r27-linux.zip \
+  2f17eb8bcbfdc40201c0b36e9a70826fcd2524ab7a2a235e2c71186c302da1dc \
+  https://dl.google.com/android/repository/android-ndk-r27-linux.zip
+download_android_archive cmake-3.22.1-linux.zip \
+  9196644852a978012caf7a4067ba1898debf6cc204c3341562771e31080d6869 \
+  https://dl.google.com/android/repository/cmake-3.22.1-linux.zip
 
-for directory in cmdline platform-tools platform build-tools emulator system-image; do
+for directory in cmdline platform-tools platform build-tools emulator system-image ndk cmake; do
   mkdir "$BOOTSTRAP_ROOT/$directory"
 done
 unzip -q "$BOOTSTRAP_ROOT/commandlinetools-linux-11076708_latest.zip" -d "$BOOTSTRAP_ROOT/cmdline"
@@ -87,6 +93,8 @@ unzip -q "$BOOTSTRAP_ROOT/platform-35_r02.zip" -d "$BOOTSTRAP_ROOT/platform"
 unzip -q "$BOOTSTRAP_ROOT/build-tools_r35_linux.zip" -d "$BOOTSTRAP_ROOT/build-tools"
 unzip -q "$BOOTSTRAP_ROOT/emulator-linux_x64-13610412.zip" -d "$BOOTSTRAP_ROOT/emulator"
 unzip -q "$BOOTSTRAP_ROOT/x86_64-35_r09.zip" -d "$BOOTSTRAP_ROOT/system-image"
+unzip -q "$BOOTSTRAP_ROOT/android-ndk-r27-linux.zip" -d "$BOOTSTRAP_ROOT/ndk"
+unzip -q "$BOOTSTRAP_ROOT/cmake-3.22.1-linux.zip" -d "$BOOTSTRAP_ROOT/cmake"
 
 sudo rm -rf "$ANDROID_HOME"
 sudo install -d -m 0755 "$ANDROID_HOME/cmdline-tools" "$ANDROID_HOME/platforms" "$ANDROID_HOME/build-tools" \
@@ -97,6 +105,10 @@ sudo mv "$BOOTSTRAP_ROOT/platform/android-35" "$ANDROID_HOME/platforms/android-3
 sudo mv "$BOOTSTRAP_ROOT/build-tools/android-15" "$ANDROID_HOME/build-tools/35.0.0"
 sudo mv "$BOOTSTRAP_ROOT/emulator/emulator" "$ANDROID_HOME/emulator"
 sudo mv "$BOOTSTRAP_ROOT/system-image/x86_64" "$ANDROID_HOME/system-images/android-35/google_apis/x86_64"
+sudo install -d -m 0755 "$ANDROID_HOME/ndk"
+sudo mv "$BOOTSTRAP_ROOT/ndk/android-ndk-r27" "$ANDROID_HOME/ndk/27.0.12077973"
+sudo install -d -m 0755 "$ANDROID_HOME/cmake"
+sudo mv "$BOOTSTRAP_ROOT/cmake" "$ANDROID_HOME/cmake/3.22.1"
 sudo chown -R "$(id -u):$(id -g)" "$ANDROID_HOME"
 install -m 0644 scripts/android-emulator-package.xml "$ANDROID_HOME/emulator/package.xml"
 
@@ -110,6 +122,9 @@ grep -Fqx 'Pkg.Revision=9' "$ANDROID_HOME/system-images/android-35/google_apis/x
 grep -Fqx 'AndroidVersion.ApiLevel=35' "$ANDROID_HOME/system-images/android-35/google_apis/x86_64/source.properties"
 grep -Fqx 'SystemImage.Abi=x86_64' "$ANDROID_HOME/system-images/android-35/google_apis/x86_64/source.properties"
 grep -Fqx 'SystemImage.TagId=google_apis' "$ANDROID_HOME/system-images/android-35/google_apis/x86_64/source.properties"
+grep -Fqx 'Pkg.Revision = 27.0.12077973' "$ANDROID_HOME/ndk/27.0.12077973/source.properties"
+grep -Fqx 'Pkg.Revision = 3.22.1' "$ANDROID_HOME/cmake/3.22.1/source.properties"
+test "$("$ANDROID_HOME/cmake/3.22.1/bin/cmake" --version | sed -n '1p')" = 'cmake version 3.22.1-g37088a8'
 test "$("$ANDROID_HOME/emulator/emulator" -version 2>&1 | sed -n 's/^Android emulator version \([^ ]*\).*/\1/p')" = 35.6.11.0
 
 AVD_NAME="${SEMANTIFOLD_ANDROID_AVD:-semantifold-api35}"
