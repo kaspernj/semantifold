@@ -247,7 +247,20 @@ fi
     expect(emulator).toContain("-no-snapshot")
     expect(emulator).toContain("-wipe-data")
     expect(emulator).toContain("emulator-5580")
-    expect(emulator).toContain("ANDROID_ADB_SERVER_PORT=5581")
+    const consolePortMatch = emulator.match(/^PORT=(\d+)$/mu)
+    const adbServerPortMatch = emulator.match(/^ANDROID_ADB_SERVER_PORT=(\d+)$/mu)
+
+    assert.ok(consolePortMatch && adbServerPortMatch)
+    const consolePort = Number(consolePortMatch[1])
+    const transportPort = consolePort + 1
+    const adbServerPort = Number(adbServerPortMatch[1])
+
+    expect(adbServerPort).not.toEqual(consolePort)
+    expect(adbServerPort).not.toEqual(transportPort)
+    const lockMatch = emulator.match(/^LOCK=\/tmp\/semantifold-android-(\d+)-(\d+)-(\d+)\.lock$/mu)
+
+    assert.ok(lockMatch)
+    expect(lockMatch.slice(1).map(Number)).toEqual([consolePort, transportPort, adbServerPort])
     expect(emulator).toContain('"$ADB" kill-server')
     expect(emulator).toContain("command -v timeout")
     expect(emulator).toContain('timeout 180 "$ADB"')

@@ -8,7 +8,7 @@ EMULATOR="$ANDROID_HOME/emulator/emulator"
 AVD_NAME="${SEMANTIFOLD_ANDROID_AVD:-semantifold-api35}"
 SERIAL=emulator-5580
 PORT=5580
-ANDROID_ADB_SERVER_PORT=5581
+ANDROID_ADB_SERVER_PORT=5038
 export ANDROID_ADB_SERVER_PORT
 ACCEPTANCE_ROOT=/tmp/semantifold-android-acceptance
 PROJECT="$ACCEPTANCE_ROOT/generated/android-app"
@@ -18,7 +18,7 @@ ARTIFACTS="$ACCEPTANCE_ROOT/emulator-artifacts"
 EXPECTED_OUTPUT_BASE64='aMOp8J+YgApow6nwn5iAIQpow6nwn5iAIT8='
 EMULATOR_PID=
 EXIT_REASON=unclassified
-LOCK=/tmp/semantifold-android-5580-5581.lock
+LOCK=/tmp/semantifold-android-5580-5581-5038.lock
 
 mkdir -p "$ARTIFACTS"
 
@@ -65,8 +65,8 @@ test -f "$APK" && test -f "$TEST_APK" || { EXIT_REASON='offline Android APK outp
 command -v flock >/dev/null 2>&1 || { EXIT_REASON='flock is unavailable for fixed emulator port ownership'; exit 2; }
 command -v timeout >/dev/null 2>&1 || { EXIT_REASON='timeout is unavailable for bounded Android commands'; exit 2; }
 exec 9>"$LOCK"
-flock -n 9 || { EXIT_REASON='fixed Android port pair 5580/5581 is already owned'; exit 2; }
-EXIT_REASON='fixed adb server port 5581 could not start'
+flock -n 9 || { EXIT_REASON='fixed Android port set 5580/5581/5038 is already owned'; exit 2; }
+EXIT_REASON='fixed adb server port 5038 could not start'
 timeout 30 "$ADB" start-server >/dev/null
 if timeout 30 "$ADB" devices | grep -q "$SERIAL"; then EXIT_REASON='fixed emulator port 5580 is already owned'; exit 2; fi
 
