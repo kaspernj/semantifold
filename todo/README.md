@@ -2,9 +2,9 @@
 
 ## Purpose and current baseline
 
-This folder is Semantifold's durable, dependency-ordered implementation backlog and delivered design record. The released baseline is `semantifold@0.6.0` / annotated `v0.6.0` at commit `f76e6d64b388d65959e77f747ae2d60a999d61f5`; the public package reports that exact `gitHead`, and Task 030 starts from that exact clean merged baseline. Earlier delivery history and external evidence remain recorded in [SOURCES.md](SOURCES.md).
+This folder is Semantifold's durable, dependency-ordered implementation backlog and delivered design record. The released baseline is `semantifold@0.7.0` / annotated `v0.7.0` at commit `8cd70c5a6c7de98df2d4a183d6555ad4f3d5ba5a`; the public package reports that exact `gitHead`. The watch/build roadmap was researched from this exact clean merged baseline. Earlier delivery history and external evidence remain recorded in [SOURCES.md](SOURCES.md).
 
-Tasks 001–025, 028, 029, 031, and 032–037 are delivered; their exact PR, commit, CI, and acceptance history remains in the task records and [SOURCES.md](SOURCES.md). Task 028 merged in PR #51, Task 031 merged in PR #52, and both are in `semantifold@0.6.0`. Task 026 has deterministic generation/provenance while Apple materialization and acceptance remain deferred. Task 027 remains roadmap work. Task 030 now has a bounded Android-qualified implementation candidate; exact-head TensorBuzz proof, review, and merge remain, while all iOS/macOS acceptance stays explicitly deferred.
+Tasks 001–025 and 028–037 are delivered; their exact PR, commit, CI, and acceptance history remains in the task records and [SOURCES.md](SOURCES.md). Task 037 merged through PRs #47/#48, Task 028 merged in PR #51, Task 031 merged in PR #52, and Task 030 merged in PR #53 before the `semantifold@0.7.0` release. Task 026 has deterministic generation/provenance while Apple materialization and acceptance remain deferred. Task 027 remains deferred roadmap work. Tasks 038–046 are planned watch/build/check work and grant no implementation authority by themselves.
 
 The delivered language-baseline expansion keeps its small Tasks 001–004 IR contract. Tasks 005–008 are bounded original-five semantic layers; none makes every platform, legacy bridge, or later language block semantic progress.
 
@@ -114,9 +114,9 @@ Generic declarations follow concrete collection and record types. No frontend/ba
 - [034 — Effectful capabilities and resource lifetime](034-effectful-capabilities-and-resource-lifetime.md) — delivered through PR #44, merged as `c15e0874c054b6c462304eb29538d72ed43829d6`
 - [035 — Versioned standard-library contracts and provider linking](035-versioned-standard-library-contracts-and-provider-linking.md) — delivered through PR #45, merged as `a2aad9d4932bfc6087adc4ff8bca43678c92413c`
 - [036 — Language compatibility stdlib/facades](036-language-compatibility-stdlib-facades.md) — delivered through PR #46, merged as `9aba48f9d48bcef4fd4c9275aec14bfcc4f0904c`
-- [037 — Blocking TCP client stdlib vertical slice](037-blocking-tcp-client-stdlib-vertical-slice.md) — implemented on topic branch; independent review / exact-head CI / merge remain
+- [037 — Blocking TCP client stdlib vertical slice](037-blocking-tcp-client-stdlib-vertical-slice.md) — delivered through PRs #47/#48
 
-Phase S implements the [standard-library portability design](../docs/standard-library-portability.md) in dependency order. Tasks 032–036 are delivered, including the canonical contract/provider hub and neutral original-five facade foundation. Task 037 implements the separate Ruby `TCPSocket` and bounded `puts` to protected PHP provider proof on its topic branch. No Phase S task claims complete or all-language stdlib support. See the [implementation plan](../docs/plans/2026-09-05-standard-library-portability.md).
+Phase S implements the [standard-library portability design](../docs/standard-library-portability.md) in dependency order. Tasks 032–036 are delivered, including the canonical contract/provider hub and neutral original-five facade foundation. Task 037 delivered the separate Ruby `TCPSocket` and bounded `puts` to protected PHP provider proof through PRs #47/#48. No Phase S task claims complete or all-language stdlib support. See the [implementation plan](../docs/plans/2026-09-05-standard-library-portability.md).
 
 ### Phase P — non-blocking deployment and later-language lanes
 
@@ -125,10 +125,24 @@ Phase S implements the [standard-library portability design](../docs/standard-li
 - [027 — Objective-C interoperability bridge](027-objective-c-interoperability.md)
 - [028 — Kotlin/Android application artifact target](028-android-application-target.md) — delivered through merged PR #51 and `v0.6.0`
 - [029 — Dart source and target support](029-dart-source-and-target.md) — delivered through merged PR #50 and `v0.4.0`
-- [030 — Dart/Flutter application artifact target](030-flutter-application-target.md) — bounded Android slice implemented; exact-head TensorBuzz/review/merge pending, iOS/macOS proof deferred
+- [030 — Dart/Flutter application artifact target](030-flutter-application-target.md) — delivered through merged PR #53 and `v0.7.0`; iOS/macOS proof deferred
 - [031 — Zig source and target support](031-zig-source-and-target.md) — delivered through merged PR #52 and `v0.6.0`
 
 These tasks do not gate Task 005. Browser Wasm depends only on Task 015 and remains target-only. iOS and Android app artifacts require their language backend plus Task 010's project model. Objective-C is a lower-priority Swift interoperability/legacy-host bridge, not a full frontend/backend. Dart follows Task 005 and supplies the typed language backend required by Flutter. Flutter then reuses the Android emulator lane and shared project model. Zig follows the initial native cohort and Task 005 without delaying either.
+
+### Phase W — project build, watch, and target checks
+
+- [038 — Transactional generated-artifact publication](038-transactional-generated-artifact-publication.md)
+- [039 — Project manifest and one-shot build CLI](039-project-manifest-and-build-cli.md)
+- [040 — Target check-plan contract and Java `javac` slice](040-target-check-plan-and-java-javac.md)
+- [041 — Interpreted and managed text-target check plans](041-interpreted-managed-target-check-plans.md)
+- [042 — Native and project text-target check plans](042-native-project-target-check-plans.md)
+- [043 — Deterministic watch coordinator](043-deterministic-watch-coordinator.md)
+- [044 — JavaScript/JSDoc-to-Java watch vertical slice](044-jsdoc-java-watch-vertical-slice.md)
+- [045 — All-text-language watch/check terminal acceptance](045-all-text-language-watch-check-acceptance.md)
+- [046 — Binary and application-target watch policies](046-binary-application-watch-policies.md) — later, non-blocking
+
+Phase W follows the [watch/build/check design](../docs/watch-build-pipeline.md). The existing one-shot public composition already parses JavaScript/JSDoc, generates `Main.java`, and can run caller-supplied `javac`; it does not yet provide a persistent materializer, project CLI, target-owned check plan, or watcher. Tasks 038–045 deliver the text-language chain in dependency order, with Task 045 as its single terminal acceptance task. Task 046 later defines truthful policies for Wasm and application targets without reopening deferred Apple/Xcode work.
 
 ## Language and artifact role matrix
 
@@ -178,6 +192,7 @@ An application target consumes semantic projects; it does not make Ruby, Python,
 | Android/Flutter delivery | none | Kotlin 023/Android 028 and Dart 029/Flutter 030 | automatic signing/store submission |
 | Task 013 compatibility | original five only | new-language acceptance stays in 025/owning tasks | expanded all-pairs coverage |
 | Standard-library portability | none in `0.2.0` | Tasks 032–037 after their prerequisites | arbitrary stdlibs, applications, or pairwise adapters |
+| Project build/watch/check | existing pure parse/generate/toolchain primitives | Tasks 038–045 for all current text languages; Task 046 later for non-text targets | quadratic all-pairs semantics, runtime hot reload, package downloads, or Apple acceptance |
 
 ## Dependency graph
 
@@ -213,6 +228,14 @@ An application target consumes semantic projects; it does not make Ruby, Python,
 023 + 010 ── 028 Android ─┐
 015 + 005 ── 029 Dart ────┴── 030 Flutter (also 010)
 015 + 005 + 018 + 020 ── 031 Zig
+
+015 ── 038 transactional publication ── 039 project build CLI (also 010)
+                                            └── 040 target check contract + Java
+                                                ├── 041 managed/interpreted plans ─┐
+                                                ├── 042 native/project plans ──────┤
+                                                └── 043 watcher ── 044 JS/JSDoc→Java slice
+                                                                                  └── 045 terminal text matrix
+                                                                                       └── 046 later non-text policies
 ```
 
 Dependencies in task files are authoritative. Existing IDs remain stable; numerical order does not override dependency order.
@@ -250,14 +273,23 @@ Dependencies in task files are authoritative. Existing IDs remain stable; numeri
 | [027](027-objective-c-interoperability.md) | P | P2 | Objective-C legacy-host bridge | 005, 026 |
 | [028](028-android-application-target.md) | delivered (P; PR #51, `v0.6.0`) | P1 | Kotlin Android application artifacts | 010, 023 |
 | [029](029-dart-source-and-target.md) | delivered (P; PR #50, `v0.4.0`) | P1 | Dart frontend/backend/package | 005, 015 |
-| [030](030-flutter-application-target.md) | implemented Android slice (P; exact-head CI/review/merge pending; Apple proof deferred) | P2 | Flutter application artifacts | 010, 028, 029 |
+| [030](030-flutter-application-target.md) | delivered (P; PR #53, `v0.7.0`; Apple proof deferred) | P2 | Flutter application artifacts | 010, 028, 029 |
 | [031](031-zig-source-and-target.md) | delivered (P; PR #52, `v0.6.0`) | P2 | Zig frontend/backend/project | 005, 015, 018, 020 |
 | [032](032-condition-controlled-loops-and-break.md) | delivered (S) | P1 | Strict-Boolean loops and resolved break/continue; delivered through PR #42 at `8ad60e381f14ab5dab85d6d1996e58de7e3f84bc`, merge `e6889212a57d4d0820b9c5cd3ad21b0ef8cc2c9e` | 004, 005 |
 | [033](033-reference-classes-methods-and-constructors.md) | delivered (S) | P1 | Bounded nominal reference classes; PR #43 head `98a9fa5bb1048fbe44e798acdefd65b9d6d2560e`, merge `f2e7f44aa8065f785c314b66e1f1d55992b7c998` | 005, 009 |
 | [034](034-effectful-capabilities-and-resource-lifetime.md) | delivered (S) | P1 | Compiler-authorized effects and explicit owned-resource lifetime; delivered through PR #44, merged as `c15e0874c054b6c462304eb29538d72ed43829d6` | 005, 007, 011, 033 |
 | [035](035-versioned-standard-library-contracts-and-provider-linking.md) | delivered (S) | P1 | Canonical stdlib contracts/provider linking; PR #45 merge `a2aad9d4932bfc6087adc4ff8bca43678c92413c` | 010, 034 |
 | [036](036-language-compatibility-stdlib-facades.md) | delivered (S) | P1 | Versioned executable source-language qualification facades; PR #46 merge `9aba48f9d48bcef4fd4c9275aec14bfcc4f0904c` | 035 |
-| [037](037-blocking-tcp-client-stdlib-vertical-slice.md) | implemented on topic branch (S) | P1 proof | Ruby-to-PHP blocking TCP slice; review / exact-head CI / merge remain | 032, 036 |
+| [037](037-blocking-tcp-client-stdlib-vertical-slice.md) | delivered (S; PRs #47/#48) | P1 proof | Ruby-to-PHP blocking TCP slice | 032, 036 |
+| [038](038-transactional-generated-artifact-publication.md) | roadmap (W) | P0 | Transactional owned artifact publication/recovery | 015 |
+| [039](039-project-manifest-and-build-cli.md) | roadmap (W) | P0 | Strict project manifest and one-shot build CLI | 010, 038 |
+| [040](040-target-check-plan-and-java-javac.md) | roadmap (W) | P0 | Generic check-plan contract plus Java/`javac` | 039 |
+| [041](041-interpreted-managed-target-check-plans.md) | roadmap (W) | P1 | PHP/Ruby/JS/TS/Kotlin/Python/C# checks | 040 |
+| [042](042-native-project-target-check-plans.md) | roadmap (W) | P1 | Go/C/C++/Rust/Swift/Dart/Zig checks | 040 |
+| [043](043-deterministic-watch-coordinator.md) | roadmap (W) | P0 | Serialized hash-reconciled project watcher | 039, 040 |
+| [044](044-jsdoc-java-watch-vertical-slice.md) | roadmap (W) | P0 | JS/JSDoc edit → Java → `javac` recovery slice | 043 |
+| [045](045-all-text-language-watch-check-acceptance.md) | roadmap (W) | P1 terminal | All current frontends/text targets bounded matrix | 041, 042, 044 |
+| [046](046-binary-application-watch-policies.md) | roadmap (W; later) | P2 | Wasm/Android/Flutter policies; iOS generation-only | 021, 028, 030, 043, 045 |
 
 ## Researched candidates deliberately deferred
 
@@ -286,12 +318,13 @@ A task is complete only when its own criteria and these repository-wide rules ho
 - text, binary, and application artifacts are deterministic before signing/build-system mutation and preserve rich semantic/synthetic provenance plus interoperable maps where the ecosystem defines them;
 - applicable tests invoke every real compiler/runtime/validator/browser/simulator/emulator declared by the task. Platform-specific jobs fail when their configured tools are unavailable; Linux tests do not pretend to execute Xcode/iOS Simulator;
 - generated projects declare ownership of exact files and reject unsafe overwrite/path traversal. Credentials, provisioning profiles, stores, and caller assets are never discovered, mutated, uploaded, or silently synthesized;
+- planned watch/build work publishes only complete staged generations, derives compiler behavior from target-owned plans, serializes cycles and child processes, retains last-good outputs on failure, and proves recovery with real filesystem/toolchain tests;
 - README and `docs/language-support.md` distinguish implemented behavior, per-feature roles, artifact shapes, platform constraints, and exclusions; each behavior change has focused specs and a changelog fragment, while this planning-only change needs none;
 - `npm test`, lint, typecheck, build, audit/dependency/package gates, and `git diff --check` pass as required by `AGENTS.md`.
 
 ## Explicit exclusions
 
-The roadmap document itself grants no implementation authority. Delivered and implemented task records above describe their bounded behavior; the roadmap continues to exclude source-text fallbacks, parser AST exposure, bundled parser/tool archives, runtime downloads during tests, user package-manager resolution, lossless formatting, macro/preprocessor systems, reflection, FFI/unsafe code, native extensions, automatic credentials/signing/provisioning, device registration, TestFlight/App Store/Play Store submission, and a compiler-framework rewrite.
+The roadmap document itself grants no implementation authority. In particular, Tasks 038–046 describe planned commands/capabilities that do not yet exist. Delivered and implemented task records above describe their bounded behavior; the roadmap continues to exclude source-text fallbacks, parser AST exposure, bundled parser/tool archives, runtime downloads during tests, user package-manager resolution, lossless formatting, macro/preprocessor systems, reflection, FFI/unsafe code, native extensions, automatic credentials/signing/provisioning, device registration, TestFlight/App Store/Play Store submission, and a compiler-framework rewrite.
 
 Ruby-to-iOS is semantic translation into generated Swift application code, never an embedded Ruby VM. Objective-C++ and Metal remain outside the Objective-C bridge. Android and Flutter lanes do not make platform APIs semantic nodes. Browser Wasm remains distinct from WASI and Wasm source input.
 

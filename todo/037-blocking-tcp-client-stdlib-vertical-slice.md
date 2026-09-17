@@ -1,6 +1,6 @@
 # 037 — Blocking TCP client stdlib vertical slice
 
-- Status: `implemented on topic branch; independent review, exact-head TensorBuzz CI, and merge remain outstanding`
+- Status: `delivered through PR #47 and bounded acceptance follow-up PR #48`
 - Phase/priority: Phase S / P1 proof
 - Dependencies: [032-condition-controlled-loops-and-break.md](032-condition-controlled-loops-and-break.md), [036-language-compatibility-stdlib-facades.md](036-language-compatibility-stdlib-facades.md)
 
@@ -12,7 +12,7 @@ This is one Ruby-source-to-PHP-target vertical slice. It does not promise all la
 
 ## Current evidence and gap
 
-The published `semantifold@0.3.0` package predates this work. Tasks 032–036 are delivered, culminating in Task 036 PR #46 and merge `9aba48f9d48bcef4fd4c9275aec14bfcc4f0904c`. The Task 037 topic branch implements the bounded socket slice through the facade/canonical/provider link path; review, exact-head TensorBuzz CI, and merge remain delivery gates. A backend shortcut or handwritten Ruby-on-PHP shim does not satisfy the task.
+The published `semantifold@0.7.0` baseline includes this work. Tasks 032–036 culminated in Task 036 PR #46 and merge `9aba48f9d48bcef4fd4c9275aec14bfcc4f0904c`. Task 037 delivered the bounded socket slice through the facade/canonical/provider link path in PR #47, merged as `fb5d9603d59c420ab333713e4b51ba5234deb326`; the bounded rotating-Go acceptance follow-up merged in PR #48 as `35acea7fc2fc4dbc5b39a25d47ba94a7b5d833bf`. A backend shortcut or handwritten Ruby-on-PHP shim does not satisfy the task.
 
 ## Canonical v1 capabilities and precise semantics
 
@@ -76,4 +76,4 @@ The topic branch adds the four exact `1.0.0` canonical modules `semantifold.sock
 
 The Ruby program frontend recognizes only literal `require "socket"`, genuine two-argument `TCPSocket.new`, zero-argument receiver `gets`/`close`, and one-string unqualified `puts` or `Kernel.puts` under that proved profile. It selects executable compiler-owned socket and output facades under `semantifold/facade/ruby/`; those modules compile through semantic IR and call exact canonical operations directly. Application modules receive no operation authority, ordinary Task 010 class modules remain rejected, and source mutation/shadowing/reopening/dynamic or unsupported forms retain located fail-loud diagnostics. Task 037 `puts` is an Output canonical call, not a `PrintStatement`.
 
-The PHP provider hides native handles, validates host and port, captures native warnings within each call, normalizes connect/read/decode/write/close failures, distinguishes clean EOF, incrementally validates UTF-8, retains LF/CRLF and a final unterminated line once, completes short stdout writes, and makes the first close attempt terminal on either outcome. Real-tool acceptance uses separate event-driven loopback servers for Ruby reference and generated PHP runs, genuine `fsockopen`/`fgets`/`feof`/`fclose`/stdout behavior, a refused connection, and protected real-PHP seams for deterministic failure/chunk/write cases. Focused suites reached 52/52 static/link/artifact checks and 5/5 runtime checks before documentation reconciliation; aggregate/local/Compose and external delivery evidence are intentionally not claimed here before they exist.
+The PHP provider hides native handles, validates host and port, captures native warnings within each call, normalizes connect/read/decode/write/close failures, distinguishes clean EOF, incrementally validates UTF-8, retains LF/CRLF and a final unterminated line once, completes short stdout writes, and makes the first close attempt terminal on either outcome. Real-tool acceptance uses separate event-driven loopback servers for Ruby reference and generated PHP runs, genuine `fsockopen`/`fgets`/`feof`/`fclose`/stdout behavior, a refused connection, and protected real-PHP seams for deterministic failure/chunk/write cases. Focused suites reached 52/52 static/link/artifact checks and 5/5 runtime checks before documentation reconciliation. PR #47 merged the reviewed slice, and PR #48 merged the bounded rotating-Go acceptance correction; both are ancestors of `v0.7.0`.

@@ -1,6 +1,6 @@
 # Roadmap research sources
 
-Access date for existing semantic-roadmap sources: **2026-09-02**. Language-expansion sources were checked **2026-09-04**; Task 017 registry/.NET and Task 024 registry/Go evidence were rechecked **2026-09-05**.
+Access date for existing semantic-roadmap sources: **2026-09-02**. Language-expansion sources were checked **2026-09-04**; Task 017 registry/.NET and Task 024 registry/Go evidence were rechecked **2026-09-05**. Watch/build/check evidence and official watcher/toolchain references were checked **2026-09-17**.
 
 ## Repository baseline and inspected evidence
 
@@ -14,6 +14,20 @@ Access date for existing semantic-roadmap sources: **2026-09-02**. Language-expa
 - Packaging/tooling: [`../package.json`](../package.json), [`../package-lock.json`](../package-lock.json), [`../tsconfig.json`](../tsconfig.json), [`../Dockerfile`](../Dockerfile), [`../compose.yml`](../compose.yml), and [`../tensorbuzz.yml`](../tensorbuzz.yml).
 
 Evidence note: the original schema had only `integer` and the minimal fixture shape. By the language-expansion baseline it also has Boolean/string scalars, typed locals/assignment, typed operators, ordered blocks, nested/optional conditionals, explicit flow validation, and rich provenance, while functions/calls still have exact two-parameter/two-argument shape. Frontends enumerate or structurally select accepted parser children; backend validation separately enforces shape, identifiers, scalar payloads, flow, safe literals, and Java `int` range.
+
+## Watch/build/check research — 2026-09-17
+
+- Exact repository baseline: `semantifold@0.7.0`, annotated `v0.7.0`, commit `8cd70c5a6c7de98df2d4a183d6555ad4f3d5ba5a`. PR #53 merged Task 030 as `70aab5d9fb1bc9c4ced87559192a44873a4075f5`; open PR readback returned none during research.
+- Inspected implementation surfaces: [`../package.json`](../package.json), [`../index.js`](../index.js), [`../src/language-registry.js`](../src/language-registry.js), [`../src/artifacts.js`](../src/artifacts.js), [`../src/toolchains.js`](../src/toolchains.js), [`../src/acceptance.js`](../src/acceptance.js), program backends, cross-language acceptance specs, and [`../docs/testing.md`](../docs/testing.md).
+- Observed repository behavior: no package `bin`, product CLI, project manifest, public persistent materializer, incremental cache, or long-lived watcher exists. The only file-change watcher is test support. `runAcceptanceStages` privately materializes to a temporary root and requires caller-supplied stage argv; target acceptance metadata names stages/toolchains but does not create compile/check plans.
+- Direct proof: `spec/fixtures/compatibility/program.js` (2,648 UTF-8 bytes; SHA-256 `caa9216d3dfdc97ecbee88457c5bab99de989ffa444aee0d64ef4e6948fad455`) parsed as JavaScript/JSDoc and generated the sole 2,720-byte artifact `Main.java` (SHA-256 `fdb88a7e0cf4b1ca32084d429f1b6db325699da8bce3eb3fed5f3f95de494d61`), which compiled with configured `javac 25.0.4` and executed with Java 25.0.4. The observed output was `compat\nbranch-ok!\npresent\nabsent\n7\n2\n3\n5\n4\n`. This proves the one-shot component composition, not watch mode.
+- [TypeScript watch configuration](https://www.typescriptlang.org/docs/handbook/configuring-watch.html) documents that `--watch` combines `fs.watch`/`fs.watchFile`, native event behavior is OS-dependent, recursive native directory watching differs on Linux, polling costs CPU, and fallback/coalescing/exclusions are explicit policy. Semantifold therefore treats events as hints and reconciles complete declared snapshots.
+- [Node filesystem API](https://nodejs.org/api/fs.html#fswatchfilename-options-listener) documents `fs.watch` availability/caveats. [Node child-process API](https://nodejs.org/api/child_process.html#child_processspawncommand-args-options) supplies exact-array subprocess execution and distinct `exit`/`close` lifecycle signals. The roadmap requires no shell strings, one owned child, and settlement after `close`.
+- [JDK 25 `javac`](https://docs.oracle.com/en/java/javase/25/docs/specs/man/javac.html) documents source-file/group compilation and `-d` destination output; its complete option reference contains no watch mode. Semantifold owns the watch loop and invokes one-shot `javac` against a staged coherent generation.
+- Existing authoritative target references remain grouped below: PHP/Ruby/JavaScript/TypeScript/Java; Python; C#/.NET; Go; C/Clang; C++/Clang; Rust/Cargo; Swift; Kotlin/JVM; Dart; and Zig. These already document each real compiler/runtime/project route used to design Tasks 041–042.
+- No new parser/compiler/runtime dependency was selected by this planning change. Task implementation must revalidate current repository/tool versions and use the existing canonical discovery/qualification contracts rather than downloading tools in watch mode.
+
+Recommendations are recorded in [`../docs/watch-build-pipeline.md`](../docs/watch-build-pipeline.md) and Tasks 038–046. Proposed commands/APIs in those files are planned, not observed current behavior.
 
 ## Selected parser-distribution route for expansion
 
