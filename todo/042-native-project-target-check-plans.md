@@ -16,14 +16,14 @@ These targets already generate deterministic source/project artifact sets and pr
 ## Target mappings
 
 - **Go:** use the qualified local Go toolchain with generated module files, cgo disabled, isolated caches, and deterministic build/vet checks without executing the program.
-- **C:** compile/link the complete generated C/header set with the existing strict Clang C17 profile into the isolated build root; preserve required ordinary/sanitizer qualification in CI without making every watch edit run every expensive profile.
+- **C:** compile/link the complete generated C/header set with the existing strict Clang C17 profile into the candidate generation's isolated target build subtree; preserve required ordinary/sanitizer qualification in CI without making every watch edit run every expensive profile.
 - **C++:** compile/link generated C++ with the existing Clang/C++20/libstdc++ profile and isolated outputs.
 - **Rust:** use the generated dependency-free Cargo project and lockfile with isolated `CARGO_HOME`/target output and offline locked check/build behavior; do not fetch crates.
 - **Swift:** compile/type-check generated Swift with the qualified `swiftc` profile and isolated output, without running the executable.
 - **Dart:** format verification/analyze plus the selected VM/native compile check in isolated pub/cache/build state; restore only when declared generated package/lock inputs change and never contact the network.
-- **Zig:** invoke the generated project through the qualified Zig build/check profile with isolated global/local cache and output roots.
+- **Zig:** invoke the generated project through the qualified Zig build/check profile with isolated global/local cache and a generation-scoped target build subtree.
 
-Plans use the same exact-array, immutable-plan, canonical-discovery, transactional-publication, diagnostic, cancellation, and child-close contracts as Task 040. Platform-specific optimization/sanitizer variants stay explicit CI profiles rather than hidden watcher branches.
+Plans use the same exact-array, immutable-plan, canonical-discovery, single-pointer project-publication, diagnostic, cancellation, and child-close contracts as Task 040. Platform-specific optimization/sanitizer variants stay explicit CI profiles rather than hidden watcher branches.
 
 ## Diagnostics and lifecycle
 
@@ -32,7 +32,7 @@ Distinguish unavailable toolchain, invalid plan, offline dependency/restore viol
 ## Tests
 
 - One focused real-tool check per target from generated Tasks 001–004-compatible source.
-- Invalid staged source/project fixtures prove failure reporting and unchanged last-good source/build outputs.
+- Invalid staged source/project fixtures prove failure reporting and an unchanged last-good active generation.
 - Generated manifests/lockfiles are consumed offline and no command resolves a user-global dependency or writes outside owned roots.
 - C/C++ compile+link, Go vet/build, Rust locked/offline, Swift compile, Dart analyze/compile, and Zig build/check use the repository's qualified versions/profiles.
 - Repeated checks are deterministic; registry descriptors report check support exactly.
@@ -48,5 +48,5 @@ Filesystem watch orchestration, runtime execution on every edit, cross-compilati
 ## Completion criteria
 
 - All seven named targets provide generic check plans without language switches in the CLI/runner.
-- Real tools run offline and write only to declared owned roots; failure preserves prior generations and leaks no resources.
+- Real tools run offline and write only inside declared candidate-generation subtrees; failure preserves the prior active generation and leaks no resources.
 - Focused real-tool specs, registry contracts, lint/typecheck, docs, changelog, and package gates pass.

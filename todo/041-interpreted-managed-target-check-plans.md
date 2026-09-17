@@ -20,10 +20,10 @@ Each target already declares real acceptance stages/toolchain IDs and has focuse
 - **JavaScript:** parse/check generated JavaScript with the configured Node CLI without running program logic.
 - **TypeScript:** compile/type-check the complete generated set using the exact installed TypeScript compiler profile and an isolated output/no-emit policy appropriate to the generated artifact contract.
 - **Kotlin/JVM:** compile all generated Kotlin together to an isolated class/JAR root using the qualified `kotlinc`/JVM profile, without executing the JAR.
-- **Python:** run the configured interpreter's real compile check with bytecode/cache output redirected to the owned build root; never write `__pycache__` beside generated source.
+- **Python:** run the configured interpreter's real compile check with bytecode/cache output redirected to the candidate generation's owned target build subtree; never write `__pycache__` beside generated source.
 - **C#:** restore only in isolated offline state when declared project/lock inputs require it, then build with the qualified .NET profile. Ordinary unchanged watch cycles must not perform network access or unconditional restore.
 
-Every plan uses exact arrays, isolated homes/caches/output roots where applicable, deterministic locale, no shell, no implicit PATH fallback beyond canonical tool discovery, and the same transactional publication callback from Task 040.
+Every plan uses exact arrays, isolated homes/caches and generation-scoped source/build subtrees where applicable, deterministic locale, no shell, no implicit PATH fallback beyond canonical tool discovery, and the same single-pointer project publication contract from Task 040.
 
 ## Diagnostics and lifecycle
 
@@ -32,8 +32,8 @@ Normalize plan/tool/stage ownership but preserve native compiler output. Missing
 ## Tests
 
 - One focused real-tool check per target from a generated supported fixture.
-- Invalid generated-source fixtures at each plan boundary produce non-zero structured results and leave last-good generated/build roots untouched.
-- Multi-artifact/project targets pass all generated files in deterministic order and place by-products only under the owned build root.
+- Invalid generated-source fixtures at each plan boundary produce non-zero structured results and leave the last-good active generation untouched.
+- Multi-artifact/project targets pass all generated files in deterministic order and place by-products only under their candidate generation's owned build subtree.
 - C# restore-input hashing/offline isolation and Python bytecode isolation are explicit regressions.
 - Repeated checks are deterministic and no child, cache lock, temporary home, or staging root leaks.
 - Registry descriptors accurately report check support for exactly the adopted targets.

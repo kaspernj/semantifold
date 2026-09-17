@@ -7,7 +7,7 @@
 
 ## Objective
 
-Add a public, filesystem-safe publisher for one complete generated project generation. It stages and validates immutable `GeneratedArtifactSet` values, records exact ownership, and promotes only a complete candidate while retaining the previous successful generation on any failure.
+Add a public, filesystem-safe publisher for one complete generated project generation. It stages and validates immutable `GeneratedArtifactSet` values beneath one owned publication root, records exact ownership, and commits only a complete candidate through one atomic active-generation pointer replacement.
 
 ## Current evidence and gap
 
@@ -17,31 +17,32 @@ Writing each returned artifact directly with `writeFile` would expose mixed gene
 
 ## Planned contract
 
-- Introduce one importable JavaScript class/module that accepts already validated artifact sets plus explicit project/target/output identity. Do not embed implementation in a CLI string or backend.
-- Require a canonical project root and a target-owned output directory. Reject absolute artifact paths, `..`, empty/non-canonical segments, separator aliases, case-fold collisions where relevant, source/output overlap, symlink traversal, and any resolved path outside the owned root.
-- Stage every artifact, mapping, and versioned ownership manifest under a unique sibling staging root. Verify bytes, declared media type/role, stable order, provenance/mapping references, and cryptographic content hashes before promotion.
-- The committed manifest records schema version, target ID/role, cycle/generation identity, ordered owned paths, byte lengths, and hashes. It is the sole authority for later stale-file removal; unlisted files are never deleted or overwritten.
-- Promote a complete directory generation transactionally with a recovery journal. A failed preflight, stage write, check callback, rename, or cleanup retains/restores the last committed generation and reports the exact recovery state.
-- Support a validator callback over the staged candidate so Task 040 can compile/check before promotion. The callback receives exact staged paths and no mutation authority outside the declared build root.
-- Support coordinated source-output and compiler-output ownership under one cycle identity without presenting a half-new pair as successful.
-- Reconcile abandoned task-owned staging/journal state on the next invocation. Fail closed on ambiguous ownership or a malformed/tampered manifest.
+- Introduce one importable JavaScript class/module that accepts a complete set of already validated artifact sets plus explicit project/target identity and one project publication root. Do not embed implementation in a CLI string or backend.
+- Require a canonical project root and a dedicated publisher-owned publication directory on one filesystem. Generated-source and compiler-output locations are normalized target-relative subpaths inside each project generation, never absolute or independently promoted authorities. Reject `..`, empty/non-canonical segments, separator aliases, case-fold collisions where relevant, source/publication overlap, projection overlap/nesting, symlink traversal, and any resolved path outside the owned root.
+- Stage every target artifact, mapping, compiler by-product, and versioned generation manifest under a unique `<publication-root>/generations/<generation-id>/...` candidate. Verify bytes, declared media type/role, stable order, provenance/mapping references, and cryptographic content hashes before the generation becomes reachable.
+- The immutable generation manifest records schema version, all target IDs/roles, cycle/generation identity, ordered generated/build projection paths, byte lengths, and hashes. A separately stored active-generation pointer is the sole mutable publication authority. Stale files disappear by selecting a new immutable generation rather than by in-place deletion.
+- Commit the complete project generation with exactly one same-directory active-pointer replacement after the candidate and pointer temporary have been synced, then sync the pointer's parent directory before reporting success. Require a host filesystem with atomic same-directory regular-file replacement and fail before publication when that contract is unavailable; never fall back to copying, truncating, or rewriting the live pointer in place. An interruption before replacement leaves the prior pointer authoritative; after replacement recovery may observe the old or new complete pointer, never a composite state. Never claim a sequence of source-root, build-root, or target-root renames is atomic.
+- Support validator callbacks over the staged candidate so Task 040 can compile/check before publication. Each callback receives exact generation-scoped source/build paths and no mutation authority outside that candidate generation.
+- Publish every target's generated source and compiler output under the same generation identity and active pointer, so a reader that resolves the pointer once cannot observe a half-new pair or mixed targets.
+- Reconcile abandoned unpublished candidates and temporary-pointer cleanup on the next invocation. Recovery may delete only a task-owned candidate proven never to have been committed; publication never deletes a committed generation because a reader may already hold that resolved snapshot. Retention/garbage collection for committed generations remains a separate explicit policy, and the journal is not the commit mechanism. Fail closed on ambiguous ownership or a malformed/tampered manifest.
 
 ## Diagnostics
 
-Use stable diagnostics for invalid output roots/paths, collision, source/output overlap, symlink escape, unowned overwrite/delete, malformed ownership manifest, stage write/hash mismatch, validation failure, promotion failure, and unrecoverable journal state. Preserve the underlying filesystem error as `cause` without leaking unrelated environment data.
+Use stable diagnostics for invalid publication roots/projections, collision, source/publication overlap, symlink escape, unowned overwrite/delete, malformed generation manifest or active pointer, stage write/hash mismatch, validation failure, pointer publication failure, and unrecoverable journal state. Preserve the underlying filesystem error as `cause` without leaking unrelated environment data.
 
 ## Tests
 
-- Publish a multi-artifact candidate, read back exact bytes/manifest/order, and publish an updated candidate that removes one previously owned stale file.
-- Prove unowned files remain untouched and collisions, traversal, symlink escape, malformed manifests, and output/source overlap fail before mutation.
-- Inject failure at each stage/write/validation/promotion boundary and assert the previous generation remains byte-for-byte usable.
-- Simulate interruption states described by the journal and prove deterministic forward completion or rollback without deleting ambiguous data.
-- Generate twice and assert deterministic manifest content apart from an explicitly modeled generation identity.
+- Publish a multi-target, multi-artifact candidate, resolve the active pointer once, read back exact generated/build bytes and manifest order from that generation, then publish an updated generation that omits one previously owned stale file.
+- Prove unowned files outside the publication root remain untouched and collisions, traversal, symlink escape, malformed manifests/pointers, and publication/source overlap fail before commit.
+- Inject failure at each stage/write/validation/pointer-publication boundary. Before pointer replacement the previous generation remains authoritative and byte-for-byte usable; after replacement the new generation is authoritative and cleanup failure cannot roll it back.
+- Run a concurrent-reader regression that repeatedly resolves one active pointer and reads source plus compiler outputs while publication occurs; every read set must come entirely from the old or new immutable generation, never a mixture.
+- Simulate interruption states described by the cleanup journal and prove deterministic reconciliation without deleting any committed or ambiguous generation.
+- Generate twice and assert deterministic generation-manifest content apart from an explicitly modeled generation identity.
 - Exercise real temporary directories on supported host filesystems; do not replace behavior proof with source-string assertions.
 
 ## Documentation
 
-Document the ownership manifest, output-root constraints, publication state machine, recovery procedure, and caller obligations in the public API/architecture docs. Add a behavior changelog fragment when implemented.
+Document the generation manifest, single publication-root/projection constraints, active-pointer state machine, reader snapshot obligation, recovery procedure, and caller obligations in the public API/architecture docs. Add a behavior changelog fragment when implemented.
 
 ## Non-goals
 
@@ -50,6 +51,7 @@ Project configuration, source discovery, CLI commands, filesystem watching, comp
 ## Completion criteria
 
 - A caller can safely persist any existing generated artifact set without language-specific filesystem code.
-- Failed validation or publication cannot replace or corrupt the last committed generation.
-- Stale generated files are removed only through an authenticated prior ownership manifest; caller-owned files remain untouched.
+- Failed validation or pre-commit publication cannot replace or corrupt the active generation; once the single pointer replacement succeeds, that new immutable generation is the truthful committed state.
+- Every reader can resolve the active pointer once and obtain all target generated/build paths from exactly one immutable generation.
+- Stale generated files disappear from the active view only by selecting an authenticated new generation; prior committed generations remain immutable until a separately specified safe-retention policy, and caller-owned files outside the publication root remain untouched.
 - Recovery, path safety, deterministic output, focused tests, lint/typecheck, documentation, and changelog satisfy repository gates.

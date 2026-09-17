@@ -18,12 +18,12 @@ The current system therefore already proves **JavaScript/JSDoc â†’ semantic IR â
 
 ## Product outcome
 
-A project can declare explicit source modules, one or more generated targets, owned output directories, and whether each target is checked with its real toolchain. It can then run:
+A project can declare explicit source modules, one or more generated targets, one publisher-owned project publication root, target-relative generated/build projections, and whether each target is checked with its real toolchain. It can then run:
 
 - a planned one-shot `semantifold build`; or
 - a planned long-lived `semantifold watch`.
 
-For the first end-to-end slice, changing a JSDoc-typed JavaScript source regenerates Java and compiles the staged candidate with `javac`. A successful cycle publishes one coherent generated-source/compiler-output generation. A parse, semantic, generation, tool-discovery, compiler, or publication failure reports a located diagnostic, keeps the process alive in watch mode, and leaves the previous successful generation usable. A later valid edit recovers without restarting the watcher.
+For the first end-to-end slice, changing a JSDoc-typed JavaScript source regenerates Java and compiles the staged candidate with `javac`. A successful cycle publishes one coherent generated-source/compiler-output generation through one active-generation pointer switch. A parse, semantic, generation, tool-discovery, compiler, or publication failure reports a located diagnostic, keeps the process alive in watch mode, and leaves the previous successful generation usable. A later valid edit recovers without restarting the watcher.
 
 The architecture is target-neutral. Every current text backend eventually supplies one target-owned check plan. Every current source frontend participates through the existing parser/project APIs; the watcher never contains language syntax logic.
 
@@ -31,9 +31,9 @@ The architecture is target-neutral. Every current text backend eventually suppli
 
 ### Project manifest and loader
 
-A versioned, strict manifest declares ordered source modules and target entries. Source language, module identity, entry identity, target language/role, output root, and optional check/build root are explicit. Version 1 uses explicit file paths rather than introducing a glob language or package-manager resolution.
+A versioned, strict manifest declares ordered source modules and target entries. Source language, module identity, entry identity, target language/role, one project publication root, and each target's generated/check subpaths inside an immutable project generation are explicit. These target paths are logical projections, not independently promoted filesystem roots. Version 1 uses explicit file paths rather than introducing a glob language or package-manager resolution.
 
-The loader owns path normalization and rejects unknown fields, duplicate module/target identities, ambiguous target roles, source/output overlap, output paths outside the project root, and symlink/path traversal across an owned root. It returns an immutable project request and never parses language syntax.
+The loader owns path normalization and rejects unknown fields, duplicate module/target identities, ambiguous target roles, source/publication overlap, publication roots outside the project root, colliding or nested target projections, and symlink/path traversal across the owned publication root. It returns an immutable project request and never parses language syntax.
 
 ### Snapshot builder
 
@@ -47,15 +47,17 @@ Frontends, semantic validation, linking, and backends remain pure with respect t
 
 ### Transactional artifact publication
 
-A publisher stages complete candidate artifact sets outside their final owned directories. It validates paths, mappings, hashes, collisions, ownership, and manifests before touching the last successful generation.
+A publisher stages one complete project candidate as a new immutable generation beneath the publisher-owned publication root. Every target's generated artifacts, mappings, and optional compiler outputs live in generation-relative subtrees on the same filesystem. The publisher validates paths, mappings, hashes, collisions, ownership, and manifests before touching committed state.
 
-When checking is enabled, target checks run against the staged candidate. Only a fully generated and successfully checked candidate may be promoted. The publisher owns an explicit versioned manifest of files it created; it never removes an unowned file. Interrupted publication is recoverable deterministically from the journal and last committed manifest. A failed candidate is removed without changing the committed generation.
+When checking is enabled, target checks run against those staged generation subtrees. Only a fully generated and successfully checked project candidate may be published. The generation manifest is the explicit versioned authority for files the publisher created; it never authorizes mutation outside the publication root.
 
-Compiler by-products use a separate owned build root. The generated-source output and compiler-output generation share one cycle identity so clients never mistake new source plus old classes for one successful cycle.
+Publication commits exactly one small active-generation pointer by writing and syncing a sibling temporary pointer, atomically replacing the prior pointer on the same filesystem, and syncing the parent directory before reporting success. A host filesystem that cannot provide atomic same-directory regular-file replacement is rejected before publication; copying, truncating, or rewriting the live pointer in place is never a fallback. Readers resolve that pointer once and consume all generated/build paths from the referenced immutable generation. Configured generated-source and compiler-output names are logical projections returned from that resolved generation; they are never independent directories, symlinks, or manifests promoted one after another. The same rule covers every target in a multi-target cycle.
+
+An interruption before the pointer replacement leaves the previous generation active; an interruption after it leaves either the old or new complete pointer durably recoverable, never a composite state. A recovery journal may finish cleanup of unpublished candidates and temporary pointer files, but it is not used to claim atomicity across multiple filesystem operations. Publication never removes a committed generation, because a reader may already hold its resolved snapshot; committed-generation retention/garbage collection is a separate explicit policy. A failed candidate is removed without changing the active pointer.
 
 ### Target check-plan registry
 
-The existing language registry remains authoritative for target identity, roles, declared acceptance stages, and required toolchain IDs. A planned target-check capability derives exact stage requests from a validated staged artifact set and isolated build root.
+The existing language registry remains authoritative for target identity, roles, declared acceptance stages, and required toolchain IDs. A planned target-check capability derives exact stage requests from a validated staged artifact set and its generation-scoped target build subtree.
 
 The generic runner owns process lifecycle, locale/timezone normalization, output capture, timeout/cancellation, and close observation. A target check plan owns filenames, exact argv, toolchain IDs, offline/cache policy, and which stages constitute a non-executing developer check. The watcher does not switch on language IDs.
 
@@ -83,7 +85,7 @@ any live state -- SIGINT/SIGTERM --> stopping --> stopped
 
 `failed` means the last candidate failed; it does not discard the last successful output or terminate watch mode. A watcher event during `building`/`rebuilding` sets one dirty generation marker. The coordinator starts exactly one follow-up after the owned child closes. It never starts a retry while prior compiler work is still live.
 
-Native filesystem events require a bounded reconciliation strategy because Node and TypeScript both document platform-dependent watcher behavior. Version 1 watches the explicit manifest/source files and relevant parent directories, re-scans the declared graph after each hint, supports a documented polling fallback, and suppresses no-op cycles by content hash. Generated and build roots are rejected as source roots and are never watched.
+Native filesystem events require a bounded reconciliation strategy because Node and TypeScript both document platform-dependent watcher behavior. Version 1 watches the explicit manifest/source files and relevant parent directories, re-scans the declared graph after each hint, supports a documented polling fallback, and suppresses no-op cycles by content hash. The publication root and every generated/build projection are rejected as source roots and are never watched.
 
 ### Reporting contract
 
@@ -98,10 +100,10 @@ Exactly one terminal cycle record is emitted per cycle. Process exit is non-zero
 3. Content hashes, not timestamps alone, decide whether a cycle is a no-op.
 4. Parse/generation failure never starts a target checker and never publishes.
 5. Tool discovery/check failure never publishes the staged generated source or build products.
-6. Publication failure restores or retains the previous committed manifest and reports recovery state.
+6. Publication failure before the active-pointer replacement leaves the previous generation active; failure after that replacement reports the new generation as committed and limits recovery to cleanup.
 7. A valid edit after failure performs a fresh complete cycle and may publish normally.
 8. Deleted or renamed declared sources are ordinary invalid snapshots until the manifest is updated; stale owned outputs are not silently treated as current.
-9. Multiple target entries are staged from one source snapshot. The manifest defines whether the project requires all targets to pass before the cycle is committed; version 1 defaults to one all-or-nothing project generation.
+9. Multiple target entries are staged from one source snapshot beneath one immutable project generation. The manifest defines whether all targets must pass before the single active pointer is switched; version 1 defaults to one all-or-nothing project generation.
 10. No shell command strings, compiler-specific branches in the watcher, implicit network access, or arbitrary user hooks are introduced.
 
 ## Cross-language scope
@@ -117,10 +119,10 @@ Binary and application targets use the same generation watcher only after explic
 
 ## Test strategy
 
-- Unit contracts cover strict manifest validation, snapshot hashing, event coalescing, dirty-during-build behavior, no-op suppression, ownership manifests, staged publication, recovery journals, and exact check-plan construction.
+- Unit contracts cover strict manifest validation, snapshot hashing, event coalescing, dirty-during-build behavior, no-op suppression, generation manifests, single-pointer publication, recovery journals, reader snapshot resolution, and exact check-plan construction.
 - Real temporary-directory tests cover create/change/delete/rename behavior and ensure generated roots do not self-trigger.
 - Real-child lifecycle tests cover spawn failure, non-zero compiler close, late output, signal forwarding, shutdown during an active check, and no leaked child/staging directory.
-- Real `javac` acceptance proves the initial JavaScript/JSDoc-to-Java cycle, compiler failure reporting at the check boundary, unchanged last-good outputs, recovery after a valid edit, and class execution from the committed generation.
+- Real `javac` acceptance proves the initial JavaScript/JSDoc-to-Java cycle, compiler failure reporting at the check boundary, an unchanged last-good active pointer, recovery after a valid edit, and source/class execution from one resolved committed generation.
 - The terminal text-target matrix invokes every declared real checker/compiler in CI and fails rather than skips when a configured tool is unavailable.
 - Focused local tests remain small; full language/toolchain matrices run only in the existing CI lanes.
 

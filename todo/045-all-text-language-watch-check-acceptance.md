@@ -35,9 +35,9 @@ The matrix records exact target/tool identity and fails rather than skips when a
 
 ## Failure/recovery acceptance
 
-- For every target family, a failed real check leaves prior source/build outputs unchanged and a later valid change recovers in the same watcher process.
+- For every target family, a failed real check leaves the prior active generation's source/build outputs unchanged and a later valid change recovers in the same watcher process.
 - Representative frontend parse/semantic failures prove the checker is not started.
-- Multi-target projects stage from one source snapshot and obey all-or-nothing project publication.
+- Multi-target projects stage from one source snapshot under one immutable project generation and become visible all-or-nothing through one active-pointer replacement.
 - Deleted/recreated source, no-op touch, edit burst during a check, and signal shutdown preserve the generic cycle/lifecycle contract.
 - Toolchain restore/cache policies stay offline and isolated; no lane discovers user-global packages or writes outside owned roots.
 - Machine-readable cycle records are schema-validated and contain one terminal record per cycle across every lane.

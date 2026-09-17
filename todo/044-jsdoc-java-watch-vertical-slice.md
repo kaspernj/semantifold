@@ -17,25 +17,25 @@ On `v0.7.0`, the component path already works one shot: the 2,648-byte JavaScrip
 
 Check in a small public-consumer-style project containing:
 
-- `semantifold.json` with explicit JavaScript source and Java text target/check roots;
+- `semantifold.json` with explicit JavaScript source, one project publication root, and Java generated/build projection subpaths;
 - JSDoc declarations covering representative portable scalar/function/control behavior already supported by both languages;
 - expected generated-source/provenance ownership and runtime output;
 - no repository-internal imports, generated fixture bytes, shell wrapper, Gradle/Maven project, or network dependency.
 
 ## End-to-end behavior
 
-- Starting watch performs and reports cycle 1, publishes generated Java, compiles classes under the owned build root, and leaves the watcher ready.
+- Starting watch performs and reports cycle 1, stages generated Java and compiled classes inside one immutable project generation, switches the active pointer once, and leaves the watcher ready.
 - A semantic source edit produces exactly one later successful generation after event coalescing. Committed Java/classes share the new cycle/source hash.
 - A timestamp-only/no-content edit does not rebuild.
-- An invalid JSDoc/type/syntax edit reports the located frontend diagnostic, does not invoke `javac`, does not alter the prior Java/classes, and leaves watch mode active.
-- A controlled invalid staged-Java check fixture reports real `javac` diagnostics through the generic check boundary, retains prior outputs, and leaves no compiler process. This does not introduce a production hook that mutates backend output.
+- An invalid JSDoc/type/syntax edit reports the located frontend diagnostic, does not invoke `javac`, does not alter the prior active pointer or its Java/classes, and leaves watch mode active.
+- A controlled invalid staged-Java check fixture reports real `javac` diagnostics through the generic check boundary, retains the prior active generation, and leaves no compiler process. This does not introduce a production hook that mutates backend output.
 - The next valid source edit recovers, reports a successful cycle, and replaces the generation coherently.
 - A burst of edits during a controlled active check leads to one latest-state follow-up and no overlapping `javac` processes.
 - SIGINT during idle and active-check states closes the watcher and child cleanly with one terminal watcher result.
 
 ## Acceptance
 
-Use real filesystem changes and real canonical `javac`/`java`. Execute only the committed class generation in the acceptance harness after each successful check to prove it is runnable and corresponds to expected output. Assert bytes/hashes/manifest/cycle identity rather than only checking that files exist.
+Use real filesystem changes and real canonical `javac`/`java`. After each successful check, resolve the active-generation pointer once and execute only that snapshot's committed classes in the acceptance harness to prove source/classes are coherent and produce the expected output. Assert pointer, bytes, hashes, generation manifest, and cycle identity rather than only checking that files exist.
 
 Run the same scenario from a packed, credential-free consumer install so package bin/export boundaries are proven. Missing `javac` fails the declared check instead of silently switching to generation-only.
 

@@ -18,30 +18,30 @@ A direct baseline proof on `v0.7.0` parsed the 2,648-byte JavaScript/JSDoc compa
 ## Planned check-plan contract
 
 - Extend the authoritative target capability model with an explicit immutable check-plan factory/capability. Public descriptors must distinguish generation-only from check-capable targets without claiming execution.
-- A plan receives only a validated staged artifact set, isolated owned build root, exact project/target identity, and discovered immutable tool records. It returns ordered stage requests with exact executable/argv/cwd/environment/output ownership and no shell strings.
-- Validate that plan stages/toolchain IDs agree with the target's declared acceptance metadata and that every artifact argument resolves inside the staged/build roots.
+- A plan receives only a validated staged artifact set, its isolated generation-scoped target build subtree, exact project/target identity, and discovered immutable tool records. It returns ordered stage requests with exact executable/argv/cwd/environment/output ownership and no shell strings.
+- Validate that plan stages/toolchain IDs agree with the target's declared acceptance metadata and that every artifact argument resolves inside the candidate generation's staged source/build subtrees.
 - The generic runner owns spawn, stdout/stderr capture, locale/timezone, deadline/cancellation, first-failure preservation, signal forwarding, and settlement on child `close`. The Java plan owns Java filenames and `javac` arguments.
 - A developer check does not execute generated code. Execution remains a separate acceptance-test concern.
 
 ## Java slice
 
 - Add Java text-target check capability using the configured canonical `javac` identity and the repository's already qualified Java profile.
-- Compile every staged `.java` artifact together into the isolated target build root; never emit `.class` files beside generated source.
+- Compile every staged `.java` artifact together into the candidate generation's isolated Java build subtree; never emit `.class` files beside generated source.
 - Match the existing accepted Java compiler profile and diagnostics. Do not silently add a different language release or warning policy.
-- Add `build --check` and manifest check/build-root configuration. A successful cycle publishes one coherent source/class generation; missing/ambiguous `javac`, spawn failure, timeout, non-zero close, or publication failure leaves both prior roots unchanged.
+- Add `build --check` and manifest generated/build projection configuration. A successful cycle publishes one coherent source/class project generation through one active-pointer replacement; missing/ambiguous `javac`, spawn failure, timeout, non-zero close, or pre-pointer publication failure leaves the prior generation active.
 - Report tool identity, exact stage, exit status/signal, bounded stdout/stderr, timing, and structured Semantifold context without flattening compiler diagnostics.
 
 ## Tests
 
 - Check-plan schema/immutability and rejection of undeclared toolchains, invalid stage order, path escape, mutable argv/environment, and execution stages in developer-check mode.
 - Real JavaScript/JSDoc-to-Java `build --check` with `javac`, followed by execution of committed classes only in acceptance code to prove the compiled output is usable.
-- Deliberately invalid staged Java at the check boundary produces a compiler failure and leaves previous generated/class outputs byte-for-byte unchanged; a later valid candidate succeeds.
+- Deliberately invalid staged Java at the check boundary produces a compiler failure and leaves the previous active generation's Java/class outputs byte-for-byte unchanged; a later valid candidate succeeds.
 - Spawn failure, non-zero close, timeout/cancellation, late stdout/stderr, and signal handling settle only after the child closes and leak no process or staging root.
 - JSON/human reporting and exit status remain truthful and deterministic.
 
 ## Documentation
 
-Document target check capabilities, Java requirements, build-root ownership, diagnostics, `build --check`, and the difference between check and execute. Add a behavior changelog fragment when implemented.
+Document target check capabilities, Java requirements, generation-scoped build ownership, diagnostics, `build --check`, and the difference between check and execute. Add a behavior changelog fragment when implemented.
 
 ## Non-goals
 
@@ -50,5 +50,5 @@ Filesystem watch mode, Java incremental compilation servers, Gradle/Maven, annot
 ## Completion criteria
 
 - The Java compiler command comes from a target-owned plan rather than a Java branch in the CLI.
-- `build --check` uses real `javac` and commits source/classes together only on success.
+- `build --check` uses real `javac` and makes source/classes visible together only through the successful project-generation pointer switch.
 - Compiler failure/recovery, process lifecycle, diagnostics, focused tests, lint/typecheck, docs, changelog, and packed-consumer behavior satisfy repository gates.

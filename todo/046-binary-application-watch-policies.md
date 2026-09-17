@@ -27,7 +27,7 @@ A text-target compiler default would misrepresent these costs and host constrain
 - **Android:** generation watch is supported. Gradle compile/package and emulator/instrumentation checks are explicit opt-in profiles with longer coalescing and the existing pinned offline SDK/Gradle/KVM lane. No store/release signing.
 - **Flutter:** generation watch is supported. Offline restore/build and Android device checks are explicit opt-in profiles; plugin/platform-channel discovery remains prohibited.
 - **iOS:** generation-only disposition is public and fail-loud when a compile/device check is requested. Do not add `xcodebuild`, Simulator, signing, or Objective-C work until Kasper explicitly resumes the Apple task.
-- Application target checks reuse the generic exact-plan/process/reporting contracts but may declare higher cost and host/platform prerequisites. The coordinator still permits only one active child and retains last-good artifacts on failure.
+- Application target checks reuse the generic exact-plan/process/reporting contracts but may declare higher cost and host/platform prerequisites. The coordinator still permits only one active child and leaves the last-good project-generation pointer unchanged on failure.
 
 ## Tests
 

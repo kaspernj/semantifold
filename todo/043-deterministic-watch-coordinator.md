@@ -19,9 +19,9 @@ The product has no watcher. One test helper waits for a file change, but it is n
 - Perform a real initial build on startup. Startup/configuration failure exits; an ordinary later parse/generation/check failure records a failed cycle and keeps watching.
 - Treat events as hints. After a bounded quiet period, re-read the full explicit manifest/source graph in stable order and hash content. Skip a cycle when the complete content/config hash is unchanged.
 - Watch declared files plus required parent directories so deletion/atomic-save/recreation can be observed. Provide a documented polling fallback/reconciliation path. Do not depend on recursive `fs.watch` being reliable on Linux.
-- Reject generated/build roots that overlap watched sources and never subscribe to owned outputs, preventing feedback loops.
+- Reject a publication root or generated/build projection that overlaps watched sources and never subscribe to owned publication state, preventing feedback loops.
 - Permit only one cycle at a time. Events during an active cycle set one dirty marker; after the owned checker child closes, immediately snapshot once more and run at most one follow-up for the latest state.
-- Do not terminate a healthy in-flight compiler merely because a new edit arrived in version 1. Superseded work may finish but cannot publish if its source snapshot is no longer current; the follow-up owns the latest candidate.
+- Do not terminate a healthy in-flight compiler merely because a new edit arrived in version 1. Superseded work may finish but cannot replace the active-generation pointer if its source snapshot is no longer current; the follow-up owns the latest candidate.
 - Reuse Tasks 038–040 unchanged: the watcher asks the project builder for a staged cycle and never parses syntax, selects a compiler, or writes artifacts itself.
 
 ## Process and shutdown lifecycle
@@ -35,8 +35,8 @@ The product has no watcher. One test helper waits for a file change, but it is n
 
 - Real temporary-directory create/change/delete/rename and editor-style atomic replacement; every event causes a full snapshot rather than partial event-driven compilation.
 - Burst coalescing, no-op touch suppression, dirty-during-build single follow-up, and stale completed candidate refusal.
-- Failed parse/generation/check retains last-good outputs, process stays alive, and a later valid edit recovers.
-- Output writes do not self-trigger. Source/output overlap and unsupported watch topology fail at startup.
+- Failed parse/generation/check leaves the last-good generation pointer and immutable outputs unchanged, the process stays alive, and a later valid edit recovers.
+- Publication writes do not self-trigger. Source/publication overlap and unsupported watch topology fail at startup.
 - Event-backend failure exercises fallback/reconciliation without busy looping.
 - Real child fixtures prove spawn failure, non-zero close, late output, ignored TERM/forced bounded cleanup where required, Ctrl-C during compile, exactly-once terminal reporting, and no leaked child/watcher/timer/staging root.
 - Tests synchronize on events/markers rather than production sleeps; every fixture has unconditional cleanup.
