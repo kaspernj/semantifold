@@ -14,7 +14,7 @@ The inspected baseline is `semantifold@0.7.0`, annotated tag `v0.7.0`, commit `8
 - `package.json` has no `bin` entry. The public API does not persist generated artifacts, load a project manifest, derive compiler arguments from a target, or watch source files.
 - The only repository file-change watcher is a test helper; there is no product watch coordinator, incremental dependency graph, event coalescing policy, or long-lived compiler owner.
 
-The current system therefore already proves **JavaScript/JSDoc → semantic IR → Java → `javac`** as a one-shot composition. The roadmap below turns that composition into a safe project workflow without moving filesystem or process lifecycle concerns into parsers or backends.
+The released baseline therefore already proves **JavaScript/JSDoc → semantic IR → Java → `javac`** as a one-shot composition. Task 038 now adds the public language-neutral `GeneratedArtifactPublisher`, immutable generation manifests, one atomic active pointer, pointer-once resolution, and journal-bounded recovery described below. Project configuration, target-owned check plans, CLI behavior, and watching remain Tasks 039 and later.
 
 ## Product outcome
 
@@ -45,9 +45,9 @@ A snapshot is immutable for the cycle. Edits arriving during parse/generation/ch
 
 Frontends, semantic validation, linking, and backends remain pure with respect to the project filesystem. They consume the immutable snapshot and return complete `GeneratedArtifactSet` values. No frontend or backend starts watchers, writes files, spawns a compiler, or reads undeclared project files.
 
-### Transactional artifact publication
+### Transactional artifact publication (Task 038 implemented)
 
-A publisher stages one complete project candidate as a new immutable generation beneath the publisher-owned publication root. Every target's generated artifacts, mappings, and optional compiler outputs live in generation-relative subtrees on the same filesystem. The publisher validates paths, mappings, hashes, collisions, ownership, and manifests before touching committed state.
+`GeneratedArtifactPublisher` stages one complete project candidate as a new immutable generation beneath the publisher-owned publication root. Every target's generated artifacts, mappings, and optional validator/compiler outputs live in generation-relative subtrees on the same filesystem. The publisher validates paths, mappings, hashes, collisions, ownership, and manifests before touching committed state. Its public contract and caller obligations are documented in [transactional generated-artifact publication](generated-artifact-publication.md).
 
 When checking is enabled, target checks run against those staged generation subtrees. Only a fully generated and successfully checked project candidate may be published. The generation manifest is the explicit versioned authority for files the publisher created; it never authorizes mutation outside the publication root.
 
@@ -147,7 +147,7 @@ Binary and application targets use the same generation watcher only after explic
                   046 later binary/application policies
 ```
 
-Tasks 038–045 are the selected text-language delivery chain. Task 045 is the single terminal acceptance task for that chain. Task 046 is a non-blocking later extension.
+Task 038 is the implemented publication foundation. Tasks 039–045 are the remaining selected text-language delivery chain, with Task 045 as its single terminal acceptance task. Task 046 is a non-blocking later extension.
 
 ## Non-goals
 
