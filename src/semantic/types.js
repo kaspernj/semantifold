@@ -396,6 +396,104 @@
  */
 
 /**
+ * @typedef PublicationBuildArtifactInput
+ * @property {string} path - Normalized path relative to the target build projection.
+ * @property {string} mediaType - Stable media type for the validator/compiler output.
+ * @property {string} role - Stable language-neutral role for the validator/compiler output.
+ */
+
+/**
+ * @typedef PublicationValidatorContext
+ * @property {string} targetId - Explicit target identity.
+ * @property {string} sourcePath - Exact generation-scoped generated-source directory.
+ * @property {string} buildPath - Exact generation-scoped compiler-output directory.
+ */
+
+/** @typedef {(context: Readonly<PublicationValidatorContext>) => Promise<PublicationBuildArtifactInput[] | void> | PublicationBuildArtifactInput[] | void} PublicationValidator */
+
+/** @typedef {"text" | "binary" | "application"} PublicationTargetRole */
+
+/**
+ * @typedef PublicationTargetInput
+ * @property {string} id - Explicit project target identity.
+ * @property {GeneratedArtifactSet} artifactSet - Complete already-validated generated artifacts.
+ * @property {PublicationTargetRole} role - Explicit language-neutral target role.
+ * @property {string} sourceProjection - Generation-relative generated-source projection.
+ * @property {string} buildProjection - Generation-relative compiler-output projection.
+ * @property {readonly PublicationValidator[]} [validators] - Ordered candidate validators.
+ */
+
+/**
+ * @typedef PublicationRequest
+ * @property {string} generationId - Unique explicit generation/cycle identity.
+ * @property {readonly PublicationTargetInput[]} targets - Complete ordered project targets.
+ */
+
+/**
+ * @typedef GenerationContentHash
+ * @property {"sha256"} algorithm - Hash algorithm.
+ * @property {string} value - Lowercase hexadecimal digest.
+ */
+
+/**
+ * @typedef GenerationArtifactManifest
+ * @property {string} path - Artifact-set-relative path.
+ * @property {"text" | "binary"} contentKind - Original artifact content representation.
+ * @property {string} mediaType - Declared artifact media type.
+ * @property {GeneratedArtifactRole} role - Declared artifact role.
+ * @property {ArtifactProvenance} provenance - Complete persisted rich, byte, or synthetic provenance.
+ * @property {number} byteLength - Exact staged byte length.
+ * @property {GenerationContentHash} hash - Exact staged byte hash.
+ */
+
+/**
+ * @typedef GenerationBuildArtifactManifest
+ * @property {string} path - Build-projection-relative path.
+ * @property {string} mediaType - Declared validator/compiler output media type.
+ * @property {string} role - Declared language-neutral validator/compiler output role.
+ * @property {number} byteLength - Exact staged byte length.
+ * @property {GenerationContentHash} hash - Exact staged byte hash.
+ */
+
+/**
+ * @typedef GenerationTargetManifest
+ * @property {string} id - Explicit project target identity.
+ * @property {PublicationTargetRole} role - Explicit language-neutral target role.
+ * @property {string} target - Artifact-set backend target identity.
+ * @property {{source: string, build: string}} projections - Disjoint generation-relative projections.
+ * @property {readonly GenerationArtifactManifest[]} artifacts - Ordered generated artifacts.
+ * @property {readonly GenerationBuildArtifactManifest[]} buildArtifacts - Ordered validator/compiler outputs.
+ * @property {Readonly<Record<string, unknown>>} [metadata] - Persisted target-specific artifact-set metadata.
+ */
+
+/**
+ * @typedef GenerationManifest
+ * @property {"SemantifoldGenerationManifest"} schema - Schema discriminator.
+ * @property {1} version - Manifest schema version.
+ * @property {string} projectId - Explicit project identity.
+ * @property {string} generationId - Explicit generation/cycle identity.
+ * @property {readonly GenerationTargetManifest[]} targets - Complete ordered target records.
+ */
+
+/**
+ * @typedef PublishedTargetPaths
+ * @property {string} id - Explicit project target identity.
+ * @property {PublicationTargetRole} role - Explicit language-neutral target role.
+ * @property {string} sourcePath - Exact immutable generated-source directory.
+ * @property {string} buildPath - Exact immutable compiler-output directory.
+ */
+
+/**
+ * @typedef PublishedGeneration
+ * @property {string} generationId - Resolved generation identity.
+ * @property {string} generationPath - Exact immutable generation directory.
+ * @property {string} manifestPath - Exact generation manifest path.
+ * @property {GenerationManifest} manifest - Verified immutable generation manifest.
+ * @property {readonly PublishedTargetPaths[]} targets - Exact generation-scoped target paths.
+ * @property {boolean} cleanupPending - Whether post-commit journal cleanup remains for recovery.
+ */
+
+/**
  * @typedef DiscoveredToolchain
  * @property {string} id - Toolchain ID.
  * @property {string} command - Documented canonical command.

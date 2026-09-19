@@ -1,6 +1,6 @@
 # 038 — Transactional generated-artifact publication
 
-- Status: `roadmap`
+- Status: `implemented in PR #55; coordinator review/CI/merge pending`
 - Phase/priority: Phase W / P0 foundation
 - Dependencies: [015-language-expansion-foundation.md](015-language-expansion-foundation.md)
 - Design: [Watch, build, and target-check pipeline](../docs/watch-build-pipeline.md)
@@ -9,13 +9,13 @@
 
 Add a public, filesystem-safe publisher for one complete generated project generation. It stages and validates immutable `GeneratedArtifactSet` values beneath one owned publication root, records exact ownership, and commits only a complete candidate through one atomic active-generation pointer replacement.
 
-## Current evidence and gap
+## Delivered implementation
 
-Task 015 delivered deterministic immutable artifact sets, rich provenance, exact toolchain discovery, and an acceptance runner that materializes artifacts only in a private temporary directory. Application backends separately validate their logical artifact paths before returning in-memory sets. There is no public persistent materializer, output ownership manifest, staged promotion contract, or interrupted-publication recovery path.
+Task 015 delivered deterministic immutable artifact sets, rich provenance, exact toolchain discovery, and an acceptance runner that materializes artifacts only in a private temporary directory. Task 038 adds the public language-neutral `GeneratedArtifactPublisher` above those pure backends. It persists complete role-bearing target sets and validator/compiler by-products beneath a dedicated publication directory inside one canonical project root, verifies a deterministic versioned manifest, complete filesystem inventory, hard-link safety, and SHA-256 hashes, and makes exactly one immutable generation active through a synchronized same-directory regular-file pointer replacement.
 
-Writing each returned artifact directly with `writeFile` would expose mixed generations, leave stale generated files, and risk deleting caller-owned files. The publisher belongs above every backend; individual language emitters must remain filesystem-pure.
+The implementation includes pointer-once reader resolution and journal-bounded recovery. Pre-replacement failures retain the prior generation; post-replacement failures retain the new truthful authority; cleanup never deletes committed or ambiguous generations. Backends remain filesystem-pure. The public contract, layout, reader obligation, diagnostics, and single-writer/retention boundaries are documented in [transactional generated-artifact publication](../docs/generated-artifact-publication.md).
 
-## Planned contract
+## Delivered contract
 
 - Introduce one importable JavaScript class/module that accepts a complete set of already validated artifact sets plus explicit project/target identity and one project publication root. Do not embed implementation in a CLI string or backend.
 - Require a canonical project root and a dedicated publisher-owned publication directory on one filesystem. Generated-source and compiler-output locations are normalized target-relative subpaths inside each project generation, never absolute or independently promoted authorities. Reject `..`, empty/non-canonical segments, separator aliases, case-fold collisions where relevant, source/publication overlap, projection overlap/nesting, symlink traversal, and any resolved path outside the owned root.
@@ -55,3 +55,10 @@ Project configuration, source discovery, CLI commands, filesystem watching, comp
 - Every reader can resolve the active pointer once and obtain all target generated/build paths from exactly one immutable generation.
 - Stale generated files disappear from the active view only by selecting an authenticated new generation; prior committed generations remain immutable until a separately specified safe-retention policy, and caller-owned files outside the publication root remain untouched.
 - Recovery, path safety, deterministic output, focused tests, lint/typecheck, documentation, and changelog satisfy repository gates.
+
+## Implementation delivery record
+
+- Implementation branch: `feature/task038-transactional-publication`, based on released `v0.8.0` commit `2e21976656a1ffd534f5146d9ee9cb14c676be39`.
+- Public surface: `GeneratedArtifactPublisher` with `publish(request)` and pointer-once `resolveActive()`.
+- Focused real-filesystem coverage: initial/update publication, stale omission, unowned-file preservation, deterministic manifests with target roles, rich mapping persistence, complete generation inventory, hard-link rejection, concurrent old/new readers, native-path identity/projection/collision/symlink/overlap failures, normalized committed-state filesystem failures, durable cleanup ordering, truthful pending cleanup, byte tampering, stage/validator/pointer/cleanup failures, malformed state, and interrupted-state reconciliation.
+- Pull request: [#55](https://github.com/kaspernj/semantifold/pull/55). Coordinator-owned review, TensorBuzz CI, merge, and release remain pending.

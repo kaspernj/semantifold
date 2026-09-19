@@ -16,6 +16,7 @@ import {
   generateArtifact,
   generateArtifactSet,
   generateProgramArtifactSet,
+  GeneratedArtifactPublisher,
   generatedPositionFor,
   getNodeProvenance,
   getSymbolProvenance,
@@ -66,6 +67,7 @@ describe("public API", () => {
       .toEqual(["php", "ruby", "javascript", "typescript", "java"])
     expect(typeof canonicalToolchains).toEqual("object")
     expect(typeof SemantifoldDiagnostic).toEqual("function")
+    expect(typeof GeneratedArtifactPublisher).toEqual("function")
     for (const api of [
       composeMappings,
       composeSourceMaps,
