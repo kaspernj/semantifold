@@ -173,6 +173,13 @@ describe("Semantifold project manifest", () => {
         ]}
       },
       {
+        code: "PROJECT_SOURCE_ALIAS",
+        overrides: {sources: [
+          {entry: true, id: "main", language: "javascript", path: "src/Café file.js"},
+          {entry: false, id: "other", language: "javascript", path: "src/café file.js"}
+        ]}
+      },
+      {
         code: "PROJECT_SOURCE_PUBLICATION_OVERLAP",
         overrides: {
           publicationRoot: "src",

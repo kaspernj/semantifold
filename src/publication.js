@@ -209,55 +209,80 @@ export class GeneratedArtifactPublisher {
     const tempPointerName = `.active-generation.${validated.generationId}.tmp`
     const tempPointerPath = path.join(this.#publicationRoot, tempPointerName)
     const journalPath = path.join(this.#publicationRoot, journalName, `${validated.generationId}.json`)
+    const retainedGeneration = await optionalStatus(generationPath, this.#projectId, "retained generation") !== null
     let committed = false
     let journalCreated = false
     let generationCreated = false
     let tempPointerCreated = false
     let failureCode = "PUBLICATION_STAGE_WRITE_FAILED"
+    /** @type {import("./semantic/types.js").GenerationManifest | null} */
+    let manifest = null
+    /** @type {Buffer | null} */
+    let manifestBytes = null
 
     try {
-      await assertAbsent(generationPath, "PUBLICATION_UNOWNED_CONFLICT", this.#projectId,
-        "Generation identity is already owned or ambiguous.")
       await assertAbsent(tempPointerPath, "PUBLICATION_UNOWNED_CONFLICT", this.#projectId,
         "Temporary active pointer path is already owned or ambiguous.")
       await assertAbsent(journalPath, "PUBLICATION_UNOWNED_CONFLICT", this.#projectId,
         "Publication journal identity is already owned or ambiguous.")
-      const journal = {
-        generationId: validated.generationId,
-        projectId: this.#projectId,
-        schema: "SemantifoldPublicationJournal",
-        tempPointer: tempPointerName,
-        version: 1
+      if (retainedGeneration) {
+        const retained = await verifyRetainedGeneration(generationPath, validated, this.#projectId)
+
+        manifest = retained.manifest
+        manifestBytes = retained.manifestBytes
       }
+      const journal = retainedGeneration
+        ? {
+            generationId: validated.generationId,
+            operation: "reactivate",
+            projectId: this.#projectId,
+            schema: "SemantifoldPublicationJournal",
+            tempPointer: tempPointerName,
+            version: 2
+          }
+        : {
+            generationId: validated.generationId,
+            projectId: this.#projectId,
+            schema: "SemantifoldPublicationJournal",
+            tempPointer: tempPointerName,
+            version: 1
+          }
 
       await writeSyncedFile(journalPath, serializeJson(journal), "wx")
       journalCreated = true
       await syncDirectory(path.dirname(journalPath))
-      await mkdir(generationPath, {mode: 0o700})
-      generationCreated = true
-      await syncDirectory(path.dirname(generationPath))
+      if (!retainedGeneration) {
+        await mkdir(generationPath, {mode: 0o700})
+        generationCreated = true
+        await syncDirectory(path.dirname(generationPath))
 
-      /** @type {import("./semantic/types.js").GenerationTargetManifest[]} */
-      const targetManifests = []
+        /** @type {import("./semantic/types.js").GenerationTargetManifest[]} */
+        const targetManifests = []
 
-      for (const target of validated.targets) {
-        targetManifests.push(await stageTarget(generationPath, target, this.#projectId))
+        for (const target of validated.targets) {
+          targetManifests.push(await stageTarget(generationPath, target, this.#projectId))
+        }
+        const manifestCandidate = /** @type {import("./semantic/types.js").GenerationManifest} */ ({
+          generationId: validated.generationId,
+          projectId: this.#projectId,
+          schema: /** @type {const} */ ("SemantifoldGenerationManifest"),
+          targets: targetManifests,
+          version: /** @type {const} */ (1)
+        })
+
+        manifestBytes = serializeJson(manifestCandidate)
+        manifest = validateGenerationManifest(JSON.parse(manifestBytes.toString("utf8")), this.#projectId,
+          validated.generationId)
+
+        await writeSyncedFile(manifestPath, manifestBytes, "wx")
+        await syncTreeDirectories(generationPath)
+        await verifyManifestFiles(generationPath, manifest, this.#projectId)
+      }
+      if (manifest === null || manifestBytes === null) {
+        publicationFailure("PUBLICATION_STAGE_WRITE_FAILED", this.#projectId,
+          "Candidate generation manifest could not be prepared.")
       }
       reachPublicationBoundary(this, "after-stage")
-      const manifestCandidate = /** @type {import("./semantic/types.js").GenerationManifest} */ ({
-        generationId: validated.generationId,
-        projectId: this.#projectId,
-        schema: /** @type {const} */ ("SemantifoldGenerationManifest"),
-        targets: targetManifests,
-        version: /** @type {const} */ (1)
-      })
-      const manifestBytes = serializeJson(manifestCandidate)
-      const manifest = validateGenerationManifest(JSON.parse(manifestBytes.toString("utf8")), this.#projectId,
-        validated.generationId)
-
-      await writeSyncedFile(manifestPath, manifestBytes, "wx")
-      await syncTreeDirectories(generationPath)
-      await verifyManifestFiles(generationPath, manifest, this.#projectId)
       failureCode = "PUBLICATION_POINTER_FAILED"
 
       const pointer = {
@@ -434,8 +459,9 @@ async function reconcilePublication(publicationRoot, projectId, publisher) {
     const candidatePath = ownedPath(path.join(publicationRoot, generationsName), journal.generationId, projectId)
     const temporaryPointerPath = path.join(publicationRoot, journal.tempPointer)
     const committed = pointer?.generationId == journal.generationId
+    const candidateOwned = journal.version == 1
 
-    if (!committed) {
+    if (candidateOwned && !committed) {
       const candidateStatus = await optionalStatus(candidatePath, projectId, "candidate generation")
 
       if (candidateStatus) {
@@ -454,7 +480,7 @@ async function reconcilePublication(publicationRoot, projectId, publisher) {
       }
     }
     await removeJournalOwnedState({
-      ...(!committed ? {candidatePath} : {}),
+      ...(candidateOwned && !committed ? {candidatePath} : {}),
       journalPath,
       projectId,
       publicationRoot,
@@ -588,7 +614,7 @@ async function optionalStatus(filename, projectId, subject) {
  * Validates and snapshots one publication request before staging.
  * @param {unknown} request - Request candidate.
  * @param {string} projectId - Project diagnostic identity.
- * @returns {{generationId: string, targets: readonly ValidatedPublicationTarget[]}} Validated request.
+ * @returns {ValidatedPublicationRequest} Validated request.
  */
 function validatePublicationRequest(request, projectId) {
   if (!isPlainObject(request)) {
@@ -708,6 +734,56 @@ function validatePublicationRequest(request, projectId) {
 }
 
 /**
+ * Verifies that one retained immutable generation exactly represents a validator-free request.
+ * The retained directory is never modified or removed on either success or failure.
+ * @param {string} generationPath - Existing generation path.
+ * @param {ValidatedPublicationRequest} request - Validated candidate request.
+ * @param {string} projectId - Project diagnostic identity.
+ * @returns {Promise<{manifest: import("./semantic/types.js").GenerationManifest, manifestBytes: Buffer}>} Exact retained manifest.
+ */
+async function verifyRetainedGeneration(generationPath, request, projectId) {
+  if (request.targets.some(target => target.validators.length != 0)) {
+    publicationFailure("PUBLICATION_UNOWNED_CONFLICT", projectId,
+      "Retained generations can be reactivated only for exact validator-free candidates.")
+  }
+  const targetManifests = request.targets.map(target => Object.freeze({
+    artifacts: Object.freeze(target.artifactSet.artifacts.map(artifact => describeGeneratedArtifact(artifact).manifest)),
+    buildArtifacts: Object.freeze([]),
+    id: target.id,
+    ...(target.artifactSet.metadata === undefined ? {} : {metadata: target.artifactSet.metadata}),
+    projections: Object.freeze({build: target.buildProjection, source: target.sourceProjection}),
+    role: target.role,
+    target: target.artifactSet.target
+  }))
+  const candidate = {
+    generationId: request.generationId,
+    projectId,
+    schema: "SemantifoldGenerationManifest",
+    targets: targetManifests,
+    version: 1
+  }
+  const expectedBytes = serializeJson(candidate)
+  const manifest = validateGenerationManifest(JSON.parse(expectedBytes.toString("utf8")), projectId, request.generationId)
+  let manifestBytes
+
+  try {
+    manifestBytes = await readAndSyncRegularFile(path.join(generationPath, "manifest.json"), projectId,
+      "MALFORMED_GENERATION_MANIFEST", "Retained generation manifest must be a regular file.")
+    if (!manifestBytes.equals(expectedBytes)) {
+      publicationFailure("PUBLICATION_UNOWNED_CONFLICT", projectId,
+        "Retained generation does not exactly match the requested candidate.")
+    }
+    await verifyManifestFiles(generationPath, manifest, projectId)
+  } catch (error) {
+    if (error instanceof SemantifoldDiagnostic && error.code == "PUBLICATION_UNOWNED_CONFLICT") throw error
+    publicationFailure("PUBLICATION_UNOWNED_CONFLICT", projectId,
+      "Retained generation could not be verified as the exact requested candidate.", error)
+  }
+
+  return {manifest, manifestBytes}
+}
+
+/**
  * Stages one validated target and invokes its ordered validators.
  * @param {string} generationPath - Candidate generation path.
  * @param {ValidatedPublicationTarget} target - Validated target.
@@ -725,27 +801,17 @@ async function stageTarget(generationPath, target, projectId) {
 
   for (const artifact of target.artifactSet.artifacts) {
     const filename = ownedPath(sourcePath, artifact.path, projectId)
-    const bytes = artifact.contentKind == "text"
-      ? Buffer.from(/** @type {string} */ (artifact.content), "utf8")
-      : Buffer.from(/** @type {Uint8Array} */ (artifact.content))
+    const described = describeGeneratedArtifact(artifact)
 
     await mkdir(path.dirname(filename), {mode: 0o700, recursive: true})
     try {
-      await writeSyncedFile(filename, bytes, "wx")
+      await writeSyncedFile(filename, described.bytes, "wx")
     } catch (error) {
       if (error instanceof SemantifoldDiagnostic) throw error
       publicationFailure("PUBLICATION_STAGE_WRITE_FAILED", projectId,
         `Generated artifact '${artifact.path}' could not be staged.`, error)
     }
-    artifacts.push(Object.freeze({
-      byteLength: bytes.byteLength,
-      contentKind: artifact.contentKind,
-      hash: Object.freeze({algorithm: /** @type {const} */ ("sha256"), value: sha256(bytes)}),
-      mediaType: artifact.mediaType,
-      path: artifact.path,
-      provenance: artifact.provenance,
-      role: artifact.role
-    }))
+    artifacts.push(described.manifest)
   }
 
   /** @type {import("./semantic/types.js").PublicationBuildArtifactInput[]} */
@@ -809,6 +875,30 @@ async function stageTarget(generationPath, target, projectId) {
     role: target.role,
     target: target.artifactSet.target
   })
+}
+
+/**
+ * Derives exact staged bytes and their deterministic generation-manifest record.
+ * @param {import("./semantic/types.js").GeneratedSetArtifact} artifact - Validated generated artifact.
+ * @returns {{bytes: Buffer, manifest: import("./semantic/types.js").GenerationArtifactManifest}} Bytes and manifest record.
+ */
+function describeGeneratedArtifact(artifact) {
+  const bytes = artifact.contentKind == "text"
+    ? Buffer.from(/** @type {string} */ (artifact.content), "utf8")
+    : Buffer.from(/** @type {Uint8Array} */ (artifact.content))
+
+  return {
+    bytes,
+    manifest: Object.freeze({
+      byteLength: bytes.byteLength,
+      contentKind: artifact.contentKind,
+      hash: Object.freeze({algorithm: /** @type {const} */ ("sha256"), value: sha256(bytes)}),
+      mediaType: artifact.mediaType,
+      path: artifact.path,
+      provenance: artifact.provenance,
+      role: artifact.role
+    })
+  }
 }
 
 /**
@@ -1794,11 +1884,14 @@ function isActivePointer(value) {
  * @returns {value is PublicationJournal} Whether the value is strict and versioned.
  */
 function isPublicationJournal(value) {
-  return isPlainObject(value) && hasExactKeys(value, ["generationId", "projectId", "schema", "tempPointer", "version"]) &&
-    value.schema == "SemantifoldPublicationJournal" && value.version == 1 &&
-    typeof value.projectId == "string" && identityPattern.test(value.projectId) &&
-    typeof value.generationId == "string" && generationPattern.test(value.generationId) &&
-    value.tempPointer == `.active-generation.${value.generationId}.tmp`
+  if (!isPlainObject(value) || value.schema != "SemantifoldPublicationJournal" ||
+    typeof value.projectId != "string" || !identityPattern.test(value.projectId) ||
+    typeof value.generationId != "string" || !generationPattern.test(value.generationId) ||
+    value.tempPointer != `.active-generation.${value.generationId}.tmp`) return false
+
+  return value.version == 1 && hasExactKeys(value, ["generationId", "projectId", "schema", "tempPointer", "version"]) ||
+    value.version == 2 && value.operation == "reactivate" &&
+      hasExactKeys(value, ["generationId", "operation", "projectId", "schema", "tempPointer", "version"])
 }
 
 /**
@@ -1882,6 +1975,12 @@ function publicationFailure(code, projectId, message, error) {
  */
 
 /**
+ * @typedef ValidatedPublicationRequest
+ * @property {string} generationId - Snapshotted generation identity.
+ * @property {readonly ValidatedPublicationTarget[]} targets - Snapshotted ordered targets.
+ */
+
+/**
  * @typedef ActivePointer
  * @property {"SemantifoldActiveGeneration"} schema - Schema discriminator.
  * @property {1} version - Schema version.
@@ -1891,10 +1990,22 @@ function publicationFailure(code, projectId, message, error) {
  */
 
 /**
- * @typedef PublicationJournal
+ * @typedef CandidatePublicationJournal
  * @property {"SemantifoldPublicationJournal"} schema - Schema discriminator.
  * @property {1} version - Schema version.
  * @property {string} projectId - Project identity.
  * @property {string} generationId - Candidate generation identity.
  * @property {string} tempPointer - Owned sibling temporary-pointer filename.
  */
+
+/**
+ * @typedef ReactivationPublicationJournal
+ * @property {"SemantifoldPublicationJournal"} schema - Schema discriminator.
+ * @property {2} version - Schema version.
+ * @property {"reactivate"} operation - Retained-generation activation without candidate ownership.
+ * @property {string} projectId - Project identity.
+ * @property {string} generationId - Retained generation identity.
+ * @property {string} tempPointer - Owned sibling temporary-pointer filename.
+ */
+
+/** @typedef {CandidatePublicationJournal | ReactivationPublicationJournal} PublicationJournal */

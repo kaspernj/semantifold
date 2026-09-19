@@ -1,6 +1,6 @@
 // @ts-check
 
-import {mkdir, mkdtemp, readFile, readdir, rm, writeFile} from "node:fs/promises"
+import {mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile} from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import {describe, expect, it} from "@velocious/testing"
@@ -128,6 +128,62 @@ describe("Semantifold one-shot project build", () => {
       expect(result.status).toEqual("succeeded")
       expect(await readFile(path.join(result.generation.targets[0].sourcePath,
         "semantifold/generated/main/Main.java"), "utf8")).toContain("root source")
+    } finally {
+      await rm(root, {force: true, recursive: true})
+    }
+  })
+
+  it("builds a legal Unicode source path containing spaces", async () => {
+    const {manifestPath, root} = await buildFixture([
+      {id: "java-main", language: "java", role: "text", sourceProjection: "targets/java/source"}
+    ])
+    const unicodeSource = path.join(root, "src/café main.js")
+
+    try {
+      await rename(path.join(root, "src/main.js"), unicodeSource)
+      const manifest = JSON.parse(await readFile(manifestPath, "utf8"))
+
+      manifest.sources[0].path = "src/café main.js"
+      await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
+      const result = await new ProjectBuilder().build(manifestPath)
+
+      expect(result.status).toEqual("succeeded")
+      expect(await readFile(path.join(result.generation.targets[0].sourcePath,
+        "semantifold/generated/main/Main.java"), "utf8")).toContain("System.out.println(add(2, 3));")
+    } finally {
+      await rm(root, {force: true, recursive: true})
+    }
+  })
+
+  it("verifies and reactivates an exact retained deterministic generation after a source revert", async () => {
+    const {manifestPath, root} = await buildFixture([
+      {id: "java-main", language: "java", role: "text", sourceProjection: "targets/java/source"}
+    ])
+    const sourcePath = path.join(root, "src/main.js")
+
+    try {
+      const originalSource = await readFile(sourcePath)
+      const builder = new ProjectBuilder()
+      const first = await builder.build(manifestPath)
+      const firstManifest = await readFile(first.generation.manifestPath)
+      const firstJavaPath = path.join(first.generation.targets[0].sourcePath, "semantifold/generated/main/Main.java")
+      const firstJava = await readFile(firstJavaPath)
+
+      await writeFile(sourcePath, originalSource.toString("utf8").replace("add(2, 3)", "add(4, 5)"))
+      const second = await builder.build(manifestPath)
+
+      expect(second.generationId == first.generationId).toBeFalse()
+      await writeFile(sourcePath, originalSource)
+      const reverted = await builder.build(manifestPath)
+      const pointer = JSON.parse(await readFile(path.join(root, ".semantifold/active-generation.json"), "utf8"))
+
+      expect(reverted.generationId).toEqual(first.generationId)
+      expect(reverted.generation.generationPath).toEqual(first.generation.generationPath)
+      expect(pointer.generationId).toEqual(first.generationId)
+      assert.deepEqual(await readFile(first.generation.manifestPath), firstManifest)
+      assert.deepEqual(await readFile(firstJavaPath), firstJava)
+      expect((await readdir(path.join(root, ".semantifold/generations"))).sort())
+        .toEqual([first.generationId, second.generationId].sort())
     } finally {
       await rm(root, {force: true, recursive: true})
     }

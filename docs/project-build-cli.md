@@ -51,7 +51,7 @@ Version 1 has no globs, extension inference, package resolution, environment exp
 
 ## Paths and ownership
 
-Manifest paths use `/`, contain no empty, dot, or dot-dot segment, and are neither absolute nor drive-qualified. Source paths may use valid Unicode scalar filenames; publication and projection paths use the portable ASCII artifact alphabet. Portable case-fold aliases, duplicate module/target IDs, hard-linked source aliases, and colliding or nested projections are rejected.
+Manifest paths use `/`, contain no empty, dot, or dot-dot segment, and are neither absolute nor drive-qualified. Source paths may use valid Unicode scalar filenames, including spaces; their duplicate, prefix, and Unicode case-fold comparisons remain in that source-path domain. Publication and projection paths separately retain the portable ASCII artifact alphabet. Portable source aliases, duplicate module/target IDs, hard-linked source aliases, and colliding or nested projections are rejected.
 
 The manifest, every source, and every existing publication-root component must be real nonsymlink paths under the canonical project root. The publication root cannot contain a source or be a source. Source files may live directly in the project root because the publisher protects their exact paths rather than treating the entire parent directory as source-owned. `GeneratedArtifactPublisher` rechecks source/publication separation and symlink ownership before publication.
 
@@ -74,7 +74,9 @@ Readers resolve `active-generation.json` once and retain the returned immutable 
 
 The SHA-256 snapshot hash is length-framed over the exact manifest bytes and ordered source IDs, paths, languages, and UTF-8 content. Absolute host paths and wall-clock values are absent. The generation ID is `g-<snapshot-hash>`.
 
-`ProjectBuilder` parses and links the frozen sources once. It generates targets in manifest order through the existing program backend dispatch. Only after every target succeeds does it give the complete ordered set to `GeneratedArtifactPublisher`. The publisher stages all projections beneath the one generation and replaces `active-generation.json` once. A configuration, read, parse, link, semantic, generation, or pre-pointer publication failure leaves the prior active generation authoritative. Rebuilding identical inputs resolves and verifies the already-active deterministic generation.
+`ProjectBuilder` parses and links the frozen sources once. It generates targets in manifest order through the existing program backend dispatch. Only after every target succeeds does it give the complete ordered set to `GeneratedArtifactPublisher`. The publisher stages all projections beneath the one generation and replaces `active-generation.json` once. A configuration, read, parse, link, semantic, generation, or pre-pointer publication failure leaves the prior active generation authoritative.
+
+Rebuilding identical already-active inputs resolves and verifies that generation. If the same deterministic generation is retained but another generation is active, the publisher requires its canonical manifest bytes to equal the validator-free candidate exactly and revalidates the complete inventory, hashes, provenance, symlink boundaries, and hard-link identities before one atomic pointer replacement reactivates it. A mismatched or malformed existing directory is neither overwritten nor removed and fails with `PUBLICATION_UNOWNED_CONFLICT` while the previous pointer remains authoritative.
 
 ## Command and output
 

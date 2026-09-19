@@ -53,17 +53,46 @@ export function portableArtifactPathKey(value) {
 }
 
 /**
+ * Produces a deterministic case-fold comparison key for a validated source path.
+ * @param {string} value - Safe relative POSIX source path.
+ * @returns {string} Unicode case-fold comparison key.
+ */
+export function portableSourcePathKey(value) {
+  return value.toLowerCase()
+}
+
+/**
  * Finds the first unsafe, duplicate, portable case-fold, or file/directory-prefix conflict.
  * @param {readonly string[]} paths - Ordered candidate artifact paths.
  * @returns {{kind: "case-fold" | "duplicate" | "prefix" | "unsafe", path: string, other?: string} | null} First conflict.
  */
 export function findPortableArtifactPathConflict(paths) {
+  return findPortablePathConflict(paths, isSafeArtifactPath, portableArtifactPathKey)
+}
+
+/**
+ * Finds the first unsafe, duplicate, portable case-fold, or file/directory-prefix source conflict.
+ * @param {readonly string[]} paths - Ordered candidate source paths.
+ * @returns {{kind: "case-fold" | "duplicate" | "prefix" | "unsafe", path: string, other?: string} | null} First conflict.
+ */
+export function findPortableSourcePathConflict(paths) {
+  return findPortablePathConflict(paths, isSafeSourcePath, portableSourcePathKey)
+}
+
+/**
+ * Compares paths inside one explicitly selected validation domain.
+ * @param {readonly string[]} paths - Ordered candidate paths.
+ * @param {(value: unknown) => boolean} isSafe - Domain-specific path validator.
+ * @param {(value: string) => string} comparisonKey - Domain-specific portable comparison key.
+ * @returns {{kind: "case-fold" | "duplicate" | "prefix" | "unsafe", path: string, other?: string} | null} First conflict.
+ */
+function findPortablePathConflict(paths, isSafe, comparisonKey) {
   /** @type {{key: string, path: string}[]} */
   const accepted = []
 
   for (const path of paths) {
-    if (!isSafeArtifactPath(path)) return {kind: "unsafe", path: String(path)}
-    const key = portableArtifactPathKey(path)
+    if (!isSafe(path)) return {kind: "unsafe", path: String(path)}
+    const key = comparisonKey(path)
 
     for (const previous of accepted) {
       if (path == previous.path) return {kind: "duplicate", other: previous.path, path}

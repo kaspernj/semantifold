@@ -11,7 +11,7 @@ Add a strict versioned Semantifold project manifest and a real package CLI that 
 
 ## Starting evidence and delivered result
 
-The released `semantifold@0.9.0` starting point provided `parseProgram({entryModule, sources})`, `generateProgramArtifactSet({language, program})`, and Task 038 transactional publication but exposed no package bin or project manifest. Task 039 now adds the strict loader and immutable project value, bounded stable snapshot builder, one-shot builder, reporter, strict CLI, and packaged executable. The builder composes the existing semantic/backend dispatch and publishes all ordered targets through one deterministic immutable generation.
+The released `semantifold@0.9.0` starting point provided `parseProgram({entryModule, sources})`, `generateProgramArtifactSet({language, program})`, and Task 038 transactional publication but exposed no package bin or project manifest. Task 039 now adds the strict loader and immutable project value, bounded stable snapshot builder, one-shot builder, reporter, strict CLI, and packaged executable. The builder composes the existing semantic/backend dispatch and publishes all ordered targets through one deterministic immutable generation. Exact retained deterministic generations are fully revalidated and atomically reactivated after an ordinary source revert without overwriting conflicting state.
 
 ## Implemented manifest
 
@@ -37,9 +37,9 @@ Reject duplicate module/target identities, unsupported roles, feature-incompatib
 
 ## Tests
 
-- Strict manifest acceptance/rejection, including unknown keys, duplicate IDs, role mismatch, path aliases/escapes, source/publication overlap, independent-root configuration, and target-projection nesting.
+- Strict manifest acceptance/rejection, including unknown keys, duplicate IDs, role mismatch, path aliases/escapes, legal Unicode and space-containing source paths, source/publication overlap, independent-root configuration, and target-projection nesting.
 - One-file and Task 010 multi-file builds through real public frontends/backends, including JavaScript/JSDoc to Java and at least one multi-artifact target.
-- Multiple target entries stage from one source hash under one generation and become visible through one pointer switch; one late target failure leaves the prior active generation unchanged.
+- Multiple target entries stage from one source hash under one generation and become visible through one pointer switch; one late target failure leaves the prior active generation unchanged; an A→B→A source sequence verifies and reactivates the retained A generation without changing its bytes.
 - Snapshot mutation during load cannot mix source revisions.
 - Human and JSON output contain one truthful terminal result; exit status preserves the first failure.
 - Packed-consumer execution proves shebang/mode/bin mapping and no repository-relative imports.

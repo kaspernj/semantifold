@@ -213,6 +213,55 @@ describe("transactional generated-artifact publication", () => {
     }
   })
 
+  it("verifies and atomically reactivates an exact retained generation without overwriting conflicts", async () => {
+    const {publicationRoot, root, sourceRoot} = await temporaryLayout()
+    const publisher = new GeneratedArtifactPublisher({
+      projectId: "retained-project",
+      projectRoot: root,
+      publicationRoot,
+      sourceRoots: [sourceRoot]
+    })
+    const retainedRequest = sourceOnlyPublicationRequest("retained", "retained source\n")
+
+    try {
+      const retained = await publisher.publish(retainedRequest)
+      const retainedManifest = await readFile(retained.manifestPath)
+      const retainedSourcePath = path.join(retained.targets[0].sourcePath, "program.txt")
+      const retainedSource = await readFile(retainedSourcePath)
+      const replacement = await publisher.publish(sourceOnlyPublicationRequest("replacement", "replacement source\n"))
+
+      injectPublicationFailure(publisher, "before-pointer-replace", new Error("reactivation interruption"))
+      await assert.rejects(publisher.publish(retainedRequest), diagnostic("PUBLICATION_POINTER_FAILED"))
+      expect((await publisher.resolveActive()).generationId).toEqual(replacement.generationId)
+      assert.deepEqual(await readFile(retained.manifestPath), retainedManifest)
+      assert.deepEqual(await readFile(retainedSourcePath), retainedSource)
+      expect(await readdir(path.join(publicationRoot, ".semantifold-publication-journal"))).toEqual([])
+
+      injectPublicationFailure(publisher, "before-cleanup", new Error("reactivation cleanup interruption"))
+      const reactivated = await publisher.publish(retainedRequest)
+
+      expect(reactivated.generationPath).toEqual(retained.generationPath)
+      expect(reactivated.cleanupPending).toBeTrue()
+      expect((await publisher.resolveActive()).generationId).toEqual(retained.generationId)
+      expect(await readdir(path.join(publicationRoot, ".semantifold-publication-journal"))).toEqual(["retained.json"])
+      expect((await readdir(path.join(publicationRoot, "generations"))).sort()).toEqual(["replacement", "retained"])
+      assert.deepEqual(await readFile(retained.manifestPath), retainedManifest)
+      assert.deepEqual(await readFile(retainedSourcePath), retainedSource)
+
+      const current = await publisher.publish(sourceOnlyPublicationRequest("current", "current source\n"))
+
+      expect(await readdir(path.join(publicationRoot, ".semantifold-publication-journal"))).toEqual([])
+      assert.deepEqual(await readFile(retained.manifestPath), retainedManifest)
+      assert.deepEqual(await readFile(retainedSourcePath), retainedSource)
+      await writeFile(retainedSourcePath, "untrusted bytes\n")
+      await assert.rejects(publisher.publish(retainedRequest), diagnostic("PUBLICATION_UNOWNED_CONFLICT"))
+      expect((await publisher.resolveActive()).generationId).toEqual(current.generationId)
+      expect(await readFile(retainedSourcePath, "utf8")).toEqual("untrusted bytes\n")
+    } finally {
+      await rm(root, {force: true, recursive: true})
+    }
+  })
+
   it("persists rich mappings and revalidates their staged-byte references on pointer resolution", async () => {
     const {publicationRoot, root, sourceRoot} = await temporaryLayout()
     const publisher = new GeneratedArtifactPublisher({projectId: "mapping-project", projectRoot: root, publicationRoot, sourceRoots: [sourceRoot]})
@@ -907,6 +956,25 @@ function publicationRequest(generationId, source, build, pause) {
 
         return [{mediaType: "application/octet-stream", path: "program.bin", role: "compiler-output"}]
       }]
+    }]
+  }
+}
+
+/**
+ * Creates one source-only publication request suitable for retained-generation verification.
+ * @param {string} generationId - Explicit generation identity.
+ * @param {string} source - Generated source bytes.
+ * @returns {import("../src/semantic/types.js").PublicationRequest} Publication request.
+ */
+function sourceOnlyPublicationRequest(generationId, source) {
+  return {
+    generationId,
+    targets: [{
+      artifactSet: artifactSet("demo", [{content: source, path: "program.txt"}]),
+      buildProjection: "target/build",
+      id: "demo-target",
+      role: "text",
+      sourceProjection: "target/source"
     }]
   }
 }

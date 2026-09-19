@@ -2,7 +2,12 @@
 
 import {lstat, readFile, realpath} from "node:fs/promises"
 import path from "node:path"
-import {findPortableArtifactPathConflict, isSafeArtifactPath, isSafeSourcePath} from "./artifact-path.js"
+import {
+  findPortableArtifactPathConflict,
+  findPortableSourcePathConflict,
+  isSafeArtifactPath,
+  isSafeSourcePath
+} from "./artifact-path.js"
 import {supportsProgramArtifactRole} from "./backends/program.js"
 import {SemantifoldDiagnostic} from "./diagnostic.js"
 import {supportsProgramSourceLanguage} from "./frontends/program.js"
@@ -169,7 +174,7 @@ async function normalizeProject(candidate, context) {
   if (entryModule === undefined) {
     projectFailure("INVALID_PROJECT_MANIFEST", id, "Project sources must declare exactly one entry module.", manifestLocation())
   }
-  const sourceConflict = findPortableArtifactPathConflict(sourcePaths)
+  const sourceConflict = findPortableSourcePathConflict(sourcePaths)
 
   if (sourceConflict) {
     projectFailure("PROJECT_SOURCE_ALIAS", id, "Project source paths must be unique under portable comparison.", manifestLocation())
