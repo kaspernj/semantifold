@@ -411,10 +411,13 @@
 
 /** @typedef {(context: Readonly<PublicationValidatorContext>) => Promise<PublicationBuildArtifactInput[] | void> | PublicationBuildArtifactInput[] | void} PublicationValidator */
 
+/** @typedef {"text" | "binary" | "application"} PublicationTargetRole */
+
 /**
  * @typedef PublicationTargetInput
  * @property {string} id - Explicit project target identity.
  * @property {GeneratedArtifactSet} artifactSet - Complete already-validated generated artifacts.
+ * @property {PublicationTargetRole} role - Explicit language-neutral target role.
  * @property {string} sourceProjection - Generation-relative generated-source projection.
  * @property {string} buildProjection - Generation-relative compiler-output projection.
  * @property {readonly PublicationValidator[]} [validators] - Ordered candidate validators.
@@ -455,6 +458,7 @@
 /**
  * @typedef GenerationTargetManifest
  * @property {string} id - Explicit project target identity.
+ * @property {PublicationTargetRole} role - Explicit language-neutral target role.
  * @property {string} target - Artifact-set backend target identity.
  * @property {{source: string, build: string}} projections - Disjoint generation-relative projections.
  * @property {readonly GenerationArtifactManifest[]} artifacts - Ordered generated artifacts.
@@ -474,6 +478,7 @@
 /**
  * @typedef PublishedTargetPaths
  * @property {string} id - Explicit project target identity.
+ * @property {PublicationTargetRole} role - Explicit language-neutral target role.
  * @property {string} sourcePath - Exact immutable generated-source directory.
  * @property {string} buildPath - Exact immutable compiler-output directory.
  */

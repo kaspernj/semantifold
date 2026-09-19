@@ -17,15 +17,24 @@ const identityPattern = /^[a-z][a-z0-9-]*$/u
 const generationPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u
 const buildRolePattern = /^[a-z][a-z0-9-]*$/u
 const mediaTypePattern = /^[A-Za-z0-9!#$&^_.+-]+\/[A-Za-z0-9!#$&^_.+-]+(?:;[\u0020-\u007e]+)?$/u
-const publicationBoundaries = new Set(["after-stage", "before-pointer-replace", "after-pointer-replace", "before-cleanup"])
+const targetRoles = new Set(["application", "binary", "text"])
+const publicationBoundaries = new Set([
+  "after-stage",
+  "before-pointer-replace",
+  "after-pointer-replace",
+  "before-cleanup",
+  "before-journal-remove"
+])
 /** @type {WeakMap<GeneratedArtifactPublisher, {boundary: string, error: Error}>} */
 const injectedPublicationFailures = new WeakMap()
+/** @type {WeakMap<GeneratedArtifactPublisher, (operation: string) => void>} */
+const publicationFilesystemObservers = new WeakMap()
 
 /**
  * Installs one internal, one-shot deterministic failure used by real-filesystem interruption specs.
  * This helper is intentionally not part of the package root API.
  * @param {GeneratedArtifactPublisher} publisher - Publisher instance.
- * @param {"after-stage" | "before-pointer-replace" | "after-pointer-replace" | "before-cleanup"} boundary - Exact lifecycle boundary.
+ * @param {"after-stage" | "before-pointer-replace" | "after-pointer-replace" | "before-cleanup" | "before-journal-remove"} boundary - Exact lifecycle boundary.
  * @param {Error} error - Injected failure.
  * @returns {void}
  */
@@ -37,11 +46,27 @@ export function injectPublicationFailure(publisher, boundary, error) {
 }
 
 /**
- * Owns transactional publication beneath one canonical project publication root.
+ * Installs an internal deterministic filesystem-operation observer for durability specs.
+ * This helper is intentionally not part of the package root API.
+ * @param {GeneratedArtifactPublisher} publisher - Publisher instance.
+ * @param {(operation: string) => void} observer - Synchronous operation observer.
+ * @returns {void}
+ */
+export function observePublicationFilesystem(publisher, observer) {
+  if (!(publisher instanceof GeneratedArtifactPublisher) || typeof observer != "function") {
+    throw new TypeError("Invalid publication filesystem observer.")
+  }
+  publicationFilesystemObservers.set(publisher, observer)
+}
+
+/**
+ * Owns transactional publication in one dedicated directory beneath a canonical project root.
  */
 export class GeneratedArtifactPublisher {
   /** @type {string} */
   #projectId
+  /** @type {string} */
+  #projectRoot
   /** @type {string} */
   #publicationRoot
   /** @type {readonly string[]} */
@@ -53,20 +78,23 @@ export class GeneratedArtifactPublisher {
    * Creates a project-scoped publisher without touching the filesystem.
    * @param {object} options - Publisher identity and owned paths.
    * @param {string} options.projectId - Stable lowercase project identity.
-   * @param {string} options.publicationRoot - Canonical absolute publisher-owned root.
-   * @param {readonly string[]} options.sourceRoots - Canonical absolute source roots kept disjoint from publication.
+   * @param {string} options.projectRoot - Canonical absolute project root.
+   * @param {string} options.publicationRoot - Canonical absolute publisher-owned directory beneath the project root.
+   * @param {readonly string[]} options.sourceRoots - Canonical absolute project source roots kept disjoint from publication.
    */
   constructor(options) {
     if (!isPlainObject(options)) {
       publicationFailure("INVALID_PUBLICATION_REQUEST", "publication", "Publisher options must be a plain object.")
     }
-    const {projectId, publicationRoot, sourceRoots} = options
+    const {projectId, projectRoot, publicationRoot, sourceRoots} = options
 
     if (!identityPattern.test(projectId ?? "")) {
       publicationFailure("INVALID_PUBLICATION_REQUEST", "publication", "Project identity must be a stable lowercase ID.")
     }
-    if (!isCanonicalAbsolutePath(publicationRoot)) {
-      publicationFailure("INVALID_PUBLICATION_ROOT", projectId, "Publication root must be a canonical absolute path.")
+    if (!isCanonicalAbsolutePath(projectRoot) || !isCanonicalAbsolutePath(publicationRoot) ||
+      !isStrictPathDescendant(projectRoot, publicationRoot)) {
+      publicationFailure("INVALID_PUBLICATION_ROOT", projectId,
+        "Project and publication roots must be canonical absolute paths with publication strictly beneath the project root.")
     }
     if (!isDenseArray(sourceRoots) || sourceRoots.length == 0) {
       publicationFailure("INVALID_PUBLICATION_ROOT", projectId, "Source roots must be a non-empty array of canonical absolute paths.")
@@ -81,6 +109,10 @@ export class GeneratedArtifactPublisher {
         publicationFailure("INVALID_PUBLICATION_ROOT", projectId,
           "Source roots must be a non-empty array of canonical absolute paths.")
       }
+      if (!isPathWithin(projectRoot, sourceRoot)) {
+        publicationFailure("INVALID_PUBLICATION_ROOT", projectId,
+          "Source roots must remain within the canonical project root.")
+      }
       if (pathsOverlap(publicationRoot, sourceRoot)) {
         publicationFailure("PUBLICATION_SOURCE_OVERLAP", projectId,
           "Publication root and source roots must be disjoint.")
@@ -89,6 +121,7 @@ export class GeneratedArtifactPublisher {
     }
 
     this.#projectId = projectId
+    this.#projectRoot = projectRoot
     this.#publicationRoot = publicationRoot
     this.#sourceRoots = Object.freeze(validatedSourceRoots)
   }
@@ -131,8 +164,10 @@ export class GeneratedArtifactPublisher {
     const pointer = await readActivePointer(pointerPath, this.#projectId, false)
 
     if (!pointer) publicationFailure("ACTIVE_GENERATION_MISSING", this.#projectId, "No active generation has been published.")
+    const generation = await verifyPublishedGeneration(this.#publicationRoot, this.#projectId, pointer, false)
+    const cleanupPending = await hasCommittedCleanupJournal(this.#publicationRoot, this.#projectId, pointer.generationId)
 
-    return verifyPublishedGeneration(this.#publicationRoot, this.#projectId, pointer, false)
+    return publishedGeneration(this.#publicationRoot, generation.manifest, cleanupPending)
   }
 
   /**
@@ -144,7 +179,7 @@ export class GeneratedArtifactPublisher {
     const validated = validatePublicationRequest(request, this.#projectId)
 
     await this.#prepareRoot()
-    await reconcilePublication(this.#publicationRoot, this.#projectId)
+    await reconcilePublication(this.#publicationRoot, this.#projectId, this)
     await verifyAtomicReplacement(this.#publicationRoot, this.#projectId)
     await validateExistingPointer(this.#publicationRoot, this.#projectId)
 
@@ -212,8 +247,9 @@ export class GeneratedArtifactPublisher {
         version: 1
       }
 
-      await writeSyncedFile(tempPointerPath, serializeJson(pointer), "wx")
-      tempPointerCreated = true
+      await writeSyncedFile(tempPointerPath, serializeJson(pointer), "wx", () => {
+        tempPointerCreated = true
+      })
       reachPublicationBoundary(this, "before-pointer-replace")
       await rename(tempPointerPath, path.join(this.#publicationRoot, activePointerName))
       tempPointerCreated = false
@@ -225,8 +261,12 @@ export class GeneratedArtifactPublisher {
 
       try {
         reachPublicationBoundary(this, "before-cleanup")
-        await rm(journalPath)
-        await syncDirectory(path.dirname(journalPath))
+        await removeJournalOwnedState({
+          journalPath,
+          projectId: this.#projectId,
+          publicationRoot: this.#publicationRoot,
+          publisher: this
+        })
       } catch (_error) {
         cleanupPending = true
       }
@@ -235,10 +275,16 @@ export class GeneratedArtifactPublisher {
     } catch (error) {
       if (!committed) {
         try {
-          if (generationCreated) await rm(generationPath, {recursive: true})
-          if (tempPointerCreated) await rm(tempPointerPath, {force: true})
-          if (journalCreated) await rm(journalPath, {force: true})
+          await removeJournalOwnedState({
+            ...(generationCreated ? {candidatePath: generationPath} : {}),
+            ...(journalCreated ? {journalPath} : {}),
+            projectId: this.#projectId,
+            publicationRoot: this.#publicationRoot,
+            publisher: this,
+            ...(tempPointerCreated ? {temporaryPointerPath: tempPointerPath} : {})
+          })
         } catch (cleanupError) {
+          if (cleanupError instanceof SemantifoldDiagnostic) throw cleanupError
           publicationFailure("PUBLICATION_RECOVERY_FAILED", this.#projectId,
             "Failed publication left state that requires recovery.", cleanupError)
         }
@@ -257,14 +303,21 @@ export class GeneratedArtifactPublisher {
    * @returns {Promise<void>} Completion.
    */
   async #prepareRoot() {
+    await ensureDirectoryWithoutSymlinks(this.#projectRoot, false, this.#projectId)
     await ensureDirectoryWithoutSymlinks(this.#publicationRoot, true, this.#projectId)
+    let exactProject
     let exactPublication
 
     try {
+      exactProject = await realpath(this.#projectRoot)
       exactPublication = await realpath(this.#publicationRoot)
     } catch (error) {
       publicationFailure("INVALID_PUBLICATION_ROOT", this.#projectId,
         "Publication root could not be resolved safely.", error)
+    }
+    if (!isStrictPathDescendant(exactProject, exactPublication)) {
+      publicationFailure("INVALID_PUBLICATION_ROOT", this.#projectId,
+        "Publication root must resolve strictly beneath the project root.")
     }
     for (const sourceRoot of this.#sourceRoots) {
       await ensureDirectoryWithoutSymlinks(sourceRoot, false, this.#projectId)
@@ -277,6 +330,10 @@ export class GeneratedArtifactPublisher {
           "Source root could not be resolved safely.", error)
       }
 
+      if (!isPathWithin(exactProject, exactSource)) {
+        publicationFailure("INVALID_PUBLICATION_ROOT", this.#projectId,
+          "Source roots must resolve within the project root.")
+      }
       if (pathsOverlap(exactPublication, exactSource)) {
         publicationFailure("PUBLICATION_SOURCE_OVERLAP", this.#projectId,
           "Publication root and source roots resolve to overlapping paths.")
@@ -303,13 +360,71 @@ function reachPublicationBoundary(publisher, boundary) {
 }
 
 /**
+ * Reports one completed filesystem operation to the internal deterministic seam.
+ * @param {GeneratedArtifactPublisher} publisher - Active publisher.
+ * @param {string} operation - Completed operation.
+ * @returns {void}
+ */
+function observePublicationFilesystemOperation(publisher, operation) {
+  publicationFilesystemObservers.get(publisher)?.(operation)
+}
+
+/**
  * Reconciles only candidates and temporary pointers whose ownership is proven by a strict journal.
  * The active pointer remains the sole commit authority.
  * @param {string} publicationRoot - Publication root.
  * @param {string} projectId - Project identity.
+ * @param {GeneratedArtifactPublisher} publisher - Active publisher.
  * @returns {Promise<void>} Completion.
  */
-async function reconcilePublication(publicationRoot, projectId) {
+async function reconcilePublication(publicationRoot, projectId, publisher) {
+  const journals = await readPublicationJournals(publicationRoot, projectId)
+
+  if (journals.length == 0) return
+  const pointer = await readActivePointer(path.join(publicationRoot, activePointerName), projectId, true)
+
+  if (pointer) await verifyPublishedGeneration(publicationRoot, projectId, pointer, true)
+  for (const {journal, journalPath} of journals) {
+    const candidatePath = ownedPath(path.join(publicationRoot, generationsName), journal.generationId, projectId)
+    const temporaryPointerPath = path.join(publicationRoot, journal.tempPointer)
+    const committed = pointer?.generationId == journal.generationId
+
+    if (!committed) {
+      const candidateStatus = await optionalStatus(candidatePath, projectId, "candidate generation")
+
+      if (candidateStatus) {
+        if (!candidateStatus.isDirectory() || candidateStatus.isSymbolicLink()) {
+          publicationFailure("PUBLICATION_RECOVERY_FAILED", projectId,
+            "Journal-owned candidate is not a real directory.")
+        }
+      }
+    }
+    const temporaryStatus = await optionalStatus(temporaryPointerPath, projectId, "temporary pointer")
+
+    if (temporaryStatus) {
+      if (!temporaryStatus.isFile() || temporaryStatus.isSymbolicLink()) {
+        publicationFailure("PUBLICATION_RECOVERY_FAILED", projectId,
+          "Journal-owned temporary pointer is not a regular file.")
+      }
+    }
+    await removeJournalOwnedState({
+      ...(!committed ? {candidatePath} : {}),
+      journalPath,
+      projectId,
+      publicationRoot,
+      publisher,
+      temporaryPointerPath
+    })
+  }
+}
+
+/**
+ * Reads and validates every recovery journal without changing publication state.
+ * @param {string} publicationRoot - Publication root.
+ * @param {string} projectId - Project identity.
+ * @returns {Promise<readonly {journal: PublicationJournal, journalPath: string}[]>} Ordered journals.
+ */
+async function readPublicationJournals(publicationRoot, projectId) {
   const journalDirectory = path.join(publicationRoot, journalName)
   let entries
 
@@ -319,14 +434,9 @@ async function reconcilePublication(publicationRoot, projectId) {
     publicationFailure("PUBLICATION_RECOVERY_FAILED", projectId,
       "Publication journal directory could not be inspected.", error)
   }
-
   entries.sort(compareStrings)
-  if (entries.length == 0) return
-  const pointer = await readActivePointer(path.join(publicationRoot, activePointerName), projectId, true)
-
-  if (pointer) await verifyPublishedGeneration(publicationRoot, projectId, pointer, true)
-  let changedGenerations = false
-  let changedRoot = false
+  /** @type {{journal: PublicationJournal, journalPath: string}[]} */
+  const journals = []
 
   for (const entry of entries) {
     if (!entry.endsWith(".json") || !generationPattern.test(entry.slice(0, -5))) {
@@ -353,52 +463,62 @@ async function reconcilePublication(publicationRoot, projectId) {
       publicationFailure("PUBLICATION_RECOVERY_FAILED", projectId,
         "Publication journal entry does not match the versioned project contract.")
     }
-    const candidatePath = ownedPath(path.join(publicationRoot, generationsName), journal.generationId, projectId)
-    const temporaryPointerPath = path.join(publicationRoot, journal.tempPointer)
-    const committed = pointer?.generationId == journal.generationId
-
-    if (!committed) {
-      const candidateStatus = await optionalStatus(candidatePath, projectId, "candidate generation")
-
-      if (candidateStatus) {
-        if (!candidateStatus.isDirectory() || candidateStatus.isSymbolicLink()) {
-          publicationFailure("PUBLICATION_RECOVERY_FAILED", projectId,
-            "Journal-owned candidate is not a real directory.")
-        }
-        try {
-          await rm(candidatePath, {recursive: true})
-          changedGenerations = true
-        } catch (error) {
-          publicationFailure("PUBLICATION_RECOVERY_FAILED", projectId,
-            "Journal-owned abandoned candidate could not be removed.", error)
-        }
-      }
-    }
-    const temporaryStatus = await optionalStatus(temporaryPointerPath, projectId, "temporary pointer")
-
-    if (temporaryStatus) {
-      if (!temporaryStatus.isFile() || temporaryStatus.isSymbolicLink()) {
-        publicationFailure("PUBLICATION_RECOVERY_FAILED", projectId,
-          "Journal-owned temporary pointer is not a regular file.")
-      }
-      try {
-        await rm(temporaryPointerPath)
-        changedRoot = true
-      } catch (error) {
-        publicationFailure("PUBLICATION_RECOVERY_FAILED", projectId,
-          "Journal-owned temporary pointer could not be removed.", error)
-      }
-    }
-    try {
-      await rm(journalPath)
-    } catch (error) {
-      publicationFailure("PUBLICATION_RECOVERY_FAILED", projectId,
-        "Reconciled publication journal could not be removed.", error)
-    }
+    journals.push({journal, journalPath})
   }
-  if (changedGenerations) await syncDirectory(path.join(publicationRoot, generationsName))
-  if (changedRoot) await syncDirectory(publicationRoot)
-  await syncDirectory(journalDirectory)
+
+  return Object.freeze(journals)
+}
+
+/**
+ * Reports committed cleanup state while failing closed on every journal entry.
+ * @param {string} publicationRoot - Publication root.
+ * @param {string} projectId - Project identity.
+ * @param {string} generationId - Pointer-selected generation identity.
+ * @returns {Promise<boolean>} Whether committed cleanup remains.
+ */
+async function hasCommittedCleanupJournal(publicationRoot, projectId, generationId) {
+  const journals = await readPublicationJournals(publicationRoot, projectId)
+
+  return journals.some(({journal}) => journal.generationId == generationId)
+}
+
+/**
+ * Removes proven journal-owned state and durably synchronizes each parent before discarding its ownership proof.
+ * @param {object} options - Exact cleanup state.
+ * @param {string} [options.candidatePath] - Proven candidate generation path.
+ * @param {string} [options.temporaryPointerPath] - Proven temporary pointer path.
+ * @param {string} [options.journalPath] - Ownership journal path.
+ * @param {string} options.projectId - Project identity.
+ * @param {string} options.publicationRoot - Publication root.
+ * @param {GeneratedArtifactPublisher} options.publisher - Active publisher.
+ * @returns {Promise<void>} Completion.
+ */
+async function removeJournalOwnedState({candidatePath, journalPath, projectId, publicationRoot, publisher, temporaryPointerPath}) {
+  try {
+    if (candidatePath) {
+      await rm(candidatePath, {force: true, recursive: true})
+      observePublicationFilesystemOperation(publisher, "remove-candidate")
+      await syncDirectory(path.join(publicationRoot, generationsName))
+      observePublicationFilesystemOperation(publisher, "sync-candidate-parent")
+    }
+    if (temporaryPointerPath) {
+      await rm(temporaryPointerPath, {force: true})
+      observePublicationFilesystemOperation(publisher, "remove-temporary-pointer")
+      await syncDirectory(publicationRoot)
+      observePublicationFilesystemOperation(publisher, "sync-temporary-pointer-parent")
+    }
+    if (journalPath) {
+      reachPublicationBoundary(publisher, "before-journal-remove")
+      await rm(journalPath)
+      observePublicationFilesystemOperation(publisher, "remove-journal")
+      await syncDirectory(path.dirname(journalPath))
+      observePublicationFilesystemOperation(publisher, "sync-journal-parent")
+    }
+  } catch (error) {
+    if (error instanceof SemantifoldDiagnostic) throw error
+    publicationFailure("PUBLICATION_RECOVERY_FAILED", projectId,
+      "Journal-owned publication state could not be durably reconciled.", error)
+  }
 }
 
 /**
@@ -453,6 +573,7 @@ function validatePublicationRequest(request, projectId) {
         `Target ${index} requires a stable lowercase identity.`)
     }
     const targetId = target.id
+    const role = target.role
     const sourceProjection = target.sourceProjection
     const buildProjection = target.buildProjection
     const artifactSetCandidate = target.artifactSet
@@ -461,6 +582,10 @@ function validatePublicationRequest(request, projectId) {
     if (typeof targetId != "string" || !identityPattern.test(targetId)) {
       publicationFailure("INVALID_PUBLICATION_REQUEST", projectId,
         `Target ${index} requires a stable lowercase identity.`)
+    }
+    if (typeof role != "string" || !targetRoles.has(role)) {
+      publicationFailure("INVALID_PUBLICATION_REQUEST", projectId,
+        `Target '${targetId}' requires an explicit language-neutral role.`)
     }
 
     if (targetIds.has(targetId)) {
@@ -511,6 +636,7 @@ function validatePublicationRequest(request, projectId) {
       artifactSet,
       buildProjection,
       id: targetId,
+      role: /** @type {import("./semantic/types.js").PublicationTargetRole} */ (role),
       sourceProjection,
       validators: Object.freeze(validatedValidators)
     }))
@@ -634,6 +760,7 @@ async function stageTarget(generationPath, target, projectId) {
     id: target.id,
     ...(target.artifactSet.metadata === undefined ? {} : {metadata: target.artifactSet.metadata}),
     projections: Object.freeze({build: target.buildProjection, source: target.sourceProjection}),
+    role: target.role,
     target: target.artifactSet.target
   })
 }
@@ -732,6 +859,7 @@ async function verifyManifestFiles(generationPath, manifest, projectId) {
         `Target '${target.id}' artifact provenance does not match its staged bytes.`, error)
     }
   }
+  await verifyGenerationInventory(generationPath, manifest, projectId)
 }
 
 /**
@@ -899,11 +1027,12 @@ function validateGenerationManifest(value, projectId, generationId) {
 
   for (const target of value.targets) {
     const targetKeys = target && typeof target == "object" && "metadata" in target
-      ? ["artifacts", "buildArtifacts", "id", "metadata", "projections", "target"]
-      : ["artifacts", "buildArtifacts", "id", "projections", "target"]
+      ? ["artifacts", "buildArtifacts", "id", "metadata", "projections", "role", "target"]
+      : ["artifacts", "buildArtifacts", "id", "projections", "role", "target"]
 
     if (!isPlainObject(target) || !hasExactKeys(target, targetKeys) ||
       !identityPattern.test(typeof target.id == "string" ? target.id : "") || ids.has(target.id) ||
+      typeof target.role != "string" || !targetRoles.has(target.role) ||
       typeof target.target != "string" || !identityPattern.test(target.target) ||
       !isPlainObject(target.projections) || !hasExactKeys(target.projections, ["build", "source"]) ||
       !isSafeArtifactPath(target.projections.source) || !isSafeArtifactPath(target.projections.build) ||
@@ -929,6 +1058,7 @@ function validateGenerationManifest(value, projectId, generationId) {
       id: targetId,
       ...(target.metadata === undefined ? {} : {metadata: deepFreeze(/** @type {Record<string, unknown>} */ (target.metadata))}),
       projections: Object.freeze({build: target.projections.build, source: target.projections.source}),
+      role: /** @type {import("./semantic/types.js").PublicationTargetRole} */ (target.role),
       target: target.target
     }))
   }
@@ -995,6 +1125,7 @@ function publishedGeneration(publicationRoot, manifest, cleanupPending) {
   const targets = manifest.targets.map(target => Object.freeze({
     buildPath: path.join(generationPath, target.projections.build),
     id: target.id,
+    role: target.role,
     sourcePath: path.join(generationPath, target.projections.source)
   }))
 
@@ -1061,10 +1192,13 @@ async function verifyAtomicReplacement(publicationRoot, projectId) {
  * @param {string} filename - Exact filename.
  * @param {Uint8Array} bytes - Exact bytes.
  * @param {"wx"} flag - Exclusive creation mode.
+ * @param {() => void} [onCreated] - Called immediately after exclusive creation succeeds.
  * @returns {Promise<void>} Completion.
  */
-async function writeSyncedFile(filename, bytes, flag) {
+async function writeSyncedFile(filename, bytes, flag, onCreated) {
   const handle = await open(filename, flag, 0o600)
+
+  onCreated?.()
   /** @type {unknown} */
   let failure
 
@@ -1099,6 +1233,7 @@ async function readAndSyncRegularFile(filename, projectId, code, message) {
     const status = await lstat(filename)
 
     if (!status.isFile() || status.isSymbolicLink()) publicationFailure(code, projectId, message)
+    assertRegularFileImmutability(status, new Set(), projectId)
     const handle = await open(filename, constants.O_RDONLY)
 
     try {
@@ -1125,8 +1260,15 @@ async function readAndSyncRegularFile(filename, projectId, code, message) {
 async function listRegularFiles(directory, projectId) {
   /** @type {string[]} */
   const files = []
+  const identities = new Set()
 
-  await visit(directory, "")
+  try {
+    await visit(directory, "")
+  } catch (error) {
+    if (error instanceof SemantifoldDiagnostic) throw error
+    publicationFailure("PUBLICATION_GENERATION_VERIFICATION_FAILED", projectId,
+      "Immutable generation filesystem inventory could not be verified.", error)
+  }
 
   return files.sort(compareStrings)
 
@@ -1155,11 +1297,160 @@ async function listRegularFiles(directory, projectId) {
           "Candidate generation contains a symbolic link.")
       }
       if (status.isDirectory()) await visit(child, childRelative)
-      else if (status.isFile()) files.push(childRelative)
-      else publicationFailure("PUBLICATION_VALIDATION_FAILED", projectId,
-        "Candidate generation contains a non-regular filesystem node.")
+      else if (status.isFile()) {
+        assertRegularFileImmutability(status, identities, projectId)
+        files.push(childRelative)
+      } else publicationFailure("PUBLICATION_GENERATION_INVENTORY_MISMATCH", projectId,
+        "Immutable generation contains an undeclared filesystem entry.")
     }
   }
+}
+
+/**
+ * Verifies that the manifest describes every directory and regular file in the immutable generation.
+ * @param {string} generationPath - Exact generation root.
+ * @param {import("./semantic/types.js").GenerationManifest} manifest - Verified manifest.
+ * @param {string} projectId - Project identity.
+ * @returns {Promise<void>} Completion.
+ */
+async function verifyGenerationInventory(generationPath, manifest, projectId) {
+  const expectedFiles = new Set(["manifest.json"])
+  const expectedDirectories = new Set()
+
+  for (const target of manifest.targets) {
+    addExpectedDirectory(target.projections.source)
+    addExpectedDirectory(target.projections.build)
+    for (const artifact of target.artifacts) {
+      addExpectedFile(`${target.projections.source}/${artifact.path}`)
+    }
+    for (const artifact of target.buildArtifacts) {
+      addExpectedFile(`${target.projections.build}/${artifact.path}`)
+    }
+  }
+  /** @type {Set<string>} */
+  const observedFiles = new Set()
+  /** @type {Set<string>} */
+  const observedDirectories = new Set()
+  const identities = new Set()
+
+  try {
+    await visit(generationPath, "")
+  } catch (error) {
+    if (error instanceof SemantifoldDiagnostic) throw error
+    publicationFailure("PUBLICATION_GENERATION_VERIFICATION_FAILED", projectId,
+      "Immutable generation filesystem inventory could not be verified.", error)
+  }
+  if (!sameStringSet(expectedFiles, observedFiles) || !sameStringSet(expectedDirectories, observedDirectories)) {
+    publicationFailure("PUBLICATION_GENERATION_INVENTORY_MISMATCH", projectId,
+      "Immutable generation contains an undeclared filesystem entry.")
+  }
+
+  /**
+   * Adds one expected directory and each generation-relative parent.
+   * @param {string} relative - POSIX-style generation-relative directory.
+   * @returns {void}
+   */
+  function addExpectedDirectory(relative) {
+    const parts = relative.split("/")
+
+    for (let index = 1; index <= parts.length; index += 1) {
+      expectedDirectories.add(parts.slice(0, index).join("/"))
+    }
+  }
+
+  /**
+   * Adds one expected regular file and its parent directories.
+   * @param {string} relative - POSIX-style generation-relative filename.
+   * @returns {void}
+   */
+  function addExpectedFile(relative) {
+    expectedFiles.add(relative)
+    const separator = relative.lastIndexOf("/")
+
+    if (separator >= 0) addExpectedDirectory(relative.slice(0, separator))
+  }
+
+  /**
+   * Visits every entry in one generation directory without following links.
+   * @param {string} current - Exact directory.
+   * @param {string} relative - Generation-relative directory.
+   * @returns {Promise<void>} Completion.
+   */
+  async function visit(current, relative) {
+    const entries = await readdir(current)
+
+    entries.sort(compareStrings)
+    for (const entry of entries) {
+      const childRelative = relative.length == 0 ? entry : `${relative}/${entry}`
+
+      if (!isSafeArtifactPath(childRelative)) {
+        publicationFailure("PUBLICATION_GENERATION_INVENTORY_MISMATCH", projectId,
+          "Immutable generation contains an undeclared filesystem entry.")
+      }
+      const child = path.join(current, entry)
+      const status = await lstat(child)
+
+      if (status.isSymbolicLink()) {
+        publicationFailure("PUBLICATION_SYMLINK_TRAVERSAL", projectId,
+          "Candidate generation contains a symbolic link.")
+      }
+      if (status.isDirectory()) {
+        observedDirectories.add(childRelative)
+        await visit(child, childRelative)
+      } else if (status.isFile()) {
+        assertRegularFileImmutability(status, identities, projectId)
+        observedFiles.add(childRelative)
+      } else {
+        publicationFailure("PUBLICATION_GENERATION_INVENTORY_MISMATCH", projectId,
+          "Immutable generation contains an undeclared filesystem entry.")
+      }
+    }
+  }
+}
+
+/**
+ * Rejects external hard links and duplicate stable file identities.
+ * @param {import("node:fs").Stats} status - Regular-file status.
+ * @param {Set<string>} identities - Previously observed device/inode identities.
+ * @param {string} projectId - Project identity.
+ * @returns {void}
+ */
+function assertRegularFileImmutability(status, identities, projectId) {
+  if (status.nlink > 1) {
+    publicationFailure("PUBLICATION_HARD_LINK", projectId,
+      "Immutable generation files must not have external hard links.")
+  }
+  const identity = stableFileIdentity(status)
+
+  if (identity !== null) {
+    if (identities.has(identity)) {
+      publicationFailure("PUBLICATION_HARD_LINK", projectId,
+        "Immutable generation files must have unique filesystem identities.")
+    }
+    identities.add(identity)
+  }
+}
+
+/**
+ * Returns a stable device/inode identity only where the host reports one.
+ * @param {import("node:fs").Stats} status - File status.
+ * @returns {string | null} Identity or unavailable.
+ */
+function stableFileIdentity(status) {
+  if ((typeof status.dev != "number" && typeof status.dev != "bigint") ||
+    (typeof status.ino != "number" && typeof status.ino != "bigint") || status.ino == 0) return null
+
+  return `${String(status.dev)}:${String(status.ino)}`
+}
+
+/**
+ * Compares two string sets exactly.
+ * @param {Set<string>} left - First set.
+ * @param {Set<string>} right - Second set.
+ * @returns {boolean} Equality.
+ */
+function sameStringSet(left, right) {
+  return left.size == right.size && [...left].every(value => right.has(value))
 }
 
 /**
@@ -1311,8 +1602,22 @@ function ownedPath(root, relative, projectId) {
  * @returns {value is string} Whether the path is canonical.
  */
 function isCanonicalAbsolutePath(value) {
-  return typeof value == "string" && value.length > 0 && !value.includes("\0") && !value.includes("\\") &&
-    path.isAbsolute(value) && value != path.parse(value).root && path.normalize(value) == value && path.resolve(value) == value
+  return isCanonicalAbsolutePathForPath(value, path)
+}
+
+/**
+ * Checks one absolute path using the supplied host path semantics.
+ * This helper is intentionally not part of the package root API.
+ * @param {unknown} value - Path candidate.
+ * @param {typeof path.posix | typeof path.win32} hostPath - Host-native path implementation.
+ * @returns {value is string} Whether the path is canonical for that host.
+ */
+export function isCanonicalAbsolutePathForPath(value, hostPath) {
+  const separatorAlias = hostPath.sep == "/" ? "\\" : "/"
+
+  return typeof value == "string" && value.length > 0 && !value.includes("\0") && !value.includes(separatorAlias) &&
+    hostPath.isAbsolute(value) && value != hostPath.parse(value).root && hostPath.normalize(value) == value &&
+    hostPath.resolve(value) == value
 }
 
 /**
@@ -1326,6 +1631,28 @@ function pathsOverlap(left, right) {
   const rightKey = right.toLowerCase()
 
   return leftKey == rightKey || leftKey.startsWith(`${rightKey}${path.sep}`) || rightKey.startsWith(`${leftKey}${path.sep}`)
+}
+
+/**
+ * Checks whether a path is equal to or nested beneath one canonical root.
+ * @param {string} root - Canonical root.
+ * @param {string} candidate - Canonical candidate.
+ * @returns {boolean} Whether the candidate is within the root.
+ */
+function isPathWithin(root, candidate) {
+  const relative = path.relative(root, candidate)
+
+  return relative.length == 0 || (relative != ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative))
+}
+
+/**
+ * Checks whether a path is strictly nested beneath one canonical root.
+ * @param {string} root - Canonical root.
+ * @param {string} candidate - Canonical candidate.
+ * @returns {boolean} Whether the candidate is a strict descendant.
+ */
+function isStrictPathDescendant(root, candidate) {
+  return isPathWithin(root, candidate) && path.relative(root, candidate).length > 0
 }
 
 /**
@@ -1483,6 +1810,7 @@ function publicationFailure(code, projectId, message, error) {
  * @property {import("./semantic/types.js").GeneratedArtifactSet} artifactSet - Detached artifact set.
  * @property {string} sourceProjection - Source projection.
  * @property {string} buildProjection - Build projection.
+ * @property {import("./semantic/types.js").PublicationTargetRole} role - Language-neutral target role.
  * @property {readonly import("./semantic/types.js").PublicationValidator[]} validators - Ordered validators.
  */
 

@@ -2,7 +2,7 @@
 
 import assert from "node:assert/strict"
 import {createHash} from "node:crypto"
-import {lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile} from "node:fs/promises"
+import {chmod, link, lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile} from "node:fs/promises"
 import {tmpdir} from "node:os"
 import path from "node:path"
 import {describe, expect, it} from "@velocious/testing"
@@ -13,7 +13,11 @@ import {
   parse,
   SemantifoldDiagnostic
 } from "../index.js"
-import {injectPublicationFailure} from "../src/publication.js"
+import {
+  injectPublicationFailure,
+  isCanonicalAbsolutePathForPath,
+  observePublicationFilesystem
+} from "../src/publication.js"
 
 const synthetic = (reason = "publication fixture") => ({kind: "synthetic", reason, relatedOrigins: []})
 
@@ -59,6 +63,7 @@ describe("transactional generated-artifact publication", () => {
     const unownedOutside = path.join(root, "caller-owned.txt")
     const publisher = new GeneratedArtifactPublisher({
       projectId: "demo-project",
+      projectRoot: root,
       publicationRoot,
       sourceRoots: [sourceRoot]
     })
@@ -76,6 +81,7 @@ describe("transactional generated-artifact publication", () => {
             ], {release: 25}),
             buildProjection: "targets/java/build",
             id: "java-main",
+            role: "text",
             sourceProjection: "targets/java/source",
             validators: [async ({buildPath, sourcePath, targetId}) => {
               expect(targetId).toEqual("java-main")
@@ -92,6 +98,7 @@ describe("transactional generated-artifact publication", () => {
             ]),
             buildProjection: "targets/javascript/build",
             id: "browser",
+            role: "text",
             sourceProjection: "targets/javascript/source"
           }
         ]
@@ -100,7 +107,14 @@ describe("transactional generated-artifact publication", () => {
 
       expect(firstResolved.generationId).toEqual("cycle-001")
       expect(firstResolved.generationPath).toEqual(first.generationPath)
-      expect(firstResolved.manifest.targets.map(({id}) => id)).toEqual(["java-main", "browser"])
+      expect(firstResolved.manifest.targets.map(({id, role}) => ({id, role}))).toEqual([
+        {id: "java-main", role: "text"},
+        {id: "browser", role: "text"}
+      ])
+      expect(firstResolved.targets.map(({id, role}) => ({id, role}))).toEqual([
+        {id: "java-main", role: "text"},
+        {id: "browser", role: "text"}
+      ])
       expect(firstResolved.manifest.targets[0].artifacts.map(({path: artifactPath}) => artifactPath))
         .toEqual(["Main.java", "stale.txt"])
       expect(firstResolved.manifest.targets[0].artifacts[0].provenance).toEqual(synthetic())
@@ -124,6 +138,7 @@ describe("transactional generated-artifact publication", () => {
           artifactSet: artifactSet("java", [{content: "class Main { int value = 2; }\n", mediaType: "text/x-java-source", path: "Main.java"}]),
           buildProjection: "targets/java/build",
           id: "java-main",
+          role: "text",
           sourceProjection: "targets/java/source"
         }]
       })
@@ -144,7 +159,7 @@ describe("transactional generated-artifact publication", () => {
 
   it("keeps every pointer-once reader wholly within one old or new immutable generation", async () => {
     const {publicationRoot, root, sourceRoot} = await temporaryLayout()
-    const publisher = new GeneratedArtifactPublisher({projectId: "reader-project", publicationRoot, sourceRoots: [sourceRoot]})
+    const publisher = new GeneratedArtifactPublisher({projectId: "reader-project", projectRoot: root, publicationRoot, sourceRoots: [sourceRoot]})
 
     try {
       await publisher.publish(publicationRequest("old", "old source\n", "old build\n"))
@@ -182,7 +197,7 @@ describe("transactional generated-artifact publication", () => {
 
   it("writes deterministic manifests apart from the explicit generation identity", async () => {
     const {publicationRoot, root, sourceRoot} = await temporaryLayout()
-    const publisher = new GeneratedArtifactPublisher({projectId: "stable-project", publicationRoot, sourceRoots: [sourceRoot]})
+    const publisher = new GeneratedArtifactPublisher({projectId: "stable-project", projectRoot: root, publicationRoot, sourceRoots: [sourceRoot]})
 
     try {
       const first = await publisher.publish(publicationRequest("repeat-a", "same source\n", "same build\n"))
@@ -200,7 +215,7 @@ describe("transactional generated-artifact publication", () => {
 
   it("persists rich mappings and revalidates their staged-byte references on pointer resolution", async () => {
     const {publicationRoot, root, sourceRoot} = await temporaryLayout()
-    const publisher = new GeneratedArtifactPublisher({projectId: "mapping-project", publicationRoot, sourceRoots: [sourceRoot]})
+    const publisher = new GeneratedArtifactPublisher({projectId: "mapping-project", projectRoot: root, publicationRoot, sourceRoots: [sourceRoot]})
     const module = parse({
       filename: "source.ts",
       language: "typescript",
@@ -215,6 +230,7 @@ describe("transactional generated-artifact publication", () => {
           artifactSet: mapped,
           buildProjection: "javascript/build",
           id: "javascript-main",
+          role: "text",
           sourceProjection: "javascript/source"
         }]
       })
@@ -246,34 +262,63 @@ describe("transactional generated-artifact publication", () => {
 
     try {
       assert.throws(() => new GeneratedArtifactPublisher(/** @type {never} */ (null)), diagnostic("INVALID_PUBLICATION_REQUEST"))
+      assert.throws(() => new GeneratedArtifactPublisher(/** @type {never} */ ({
+        projectId: "demo",
+        publicationRoot,
+        sourceRoots: [sourceRoot]
+      })), diagnostic("INVALID_PUBLICATION_ROOT"))
       assert.throws(() => new GeneratedArtifactPublisher({
         projectId: "Demo",
+        projectRoot: root,
         publicationRoot,
         sourceRoots: [sourceRoot]
       }), diagnostic("INVALID_PUBLICATION_REQUEST"))
       assert.throws(() => new GeneratedArtifactPublisher({
         projectId: "demo",
+        projectRoot: root,
         publicationRoot: path.join(sourceRoot, "published"),
         sourceRoots: [sourceRoot]
       }), diagnostic("PUBLICATION_SOURCE_OVERLAP"))
+      assert.throws(() => new GeneratedArtifactPublisher({
+        projectId: "demo",
+        projectRoot: root,
+        publicationRoot: path.join(path.dirname(root), "outside-publication"),
+        sourceRoots: [sourceRoot]
+      }), diagnostic("INVALID_PUBLICATION_ROOT"))
+      assert.throws(() => new GeneratedArtifactPublisher({
+        projectId: "demo",
+        projectRoot: root,
+        publicationRoot,
+        sourceRoots: [path.join(path.dirname(root), "outside-source")]
+      }), diagnostic("INVALID_PUBLICATION_ROOT"))
       for (const invalidRoot of ["relative/output", `${publicationRoot}${path.sep}`, `${root}${path.sep}part${path.sep}..${path.sep}published`]) {
         assert.throws(() => new GeneratedArtifactPublisher({
           projectId: "demo",
+          projectRoot: root,
           publicationRoot: invalidRoot,
           sourceRoots: [sourceRoot]
         }), diagnostic("INVALID_PUBLICATION_ROOT"))
       }
 
-      const publisher = new GeneratedArtifactPublisher({projectId: "demo", publicationRoot, sourceRoots: [sourceRoot]})
+      const publisher = new GeneratedArtifactPublisher({projectId: "demo", projectRoot: root, publicationRoot, sourceRoots: [sourceRoot]})
       const validTarget = {
         artifactSet: artifactSet("demo", [{content: "ok\n", path: "main.txt"}]),
         buildProjection: "target/build",
         id: "demo-target",
+        role: "text",
         sourceProjection: "target/source"
       }
       const invalidRequests = [
         {code: "INVALID_PUBLICATION_REQUEST", request: {generationId: "../escape", targets: [validTarget]}},
         {code: "INVALID_PUBLICATION_REQUEST", request: {generationId: "empty", targets: []}},
+        {
+          code: "INVALID_PUBLICATION_REQUEST",
+          request: {generationId: "missing-role", targets: [{...validTarget, role: undefined}]}
+        },
+        {
+          code: "INVALID_PUBLICATION_REQUEST",
+          request: {generationId: "invalid-role", targets: [{...validTarget, role: "compiler"}]}
+        },
         {
           code: "PUBLICATION_PATH_COLLISION",
           request: {generationId: "duplicate", targets: [validTarget, validTarget]}
@@ -323,15 +368,24 @@ describe("transactional generated-artifact publication", () => {
     }
   })
 
+  it("uses canonical native absolute-path rules without rejecting the host separator", () => {
+    expect(isCanonicalAbsolutePathForPath("/workspace/project/output", path.posix)).toBeTrue()
+    expect(isCanonicalAbsolutePathForPath("/workspace/project\\output", path.posix)).toBeFalse()
+    expect(isCanonicalAbsolutePathForPath("C:\\workspace\\project\\output", path.win32)).toBeTrue()
+    expect(isCanonicalAbsolutePathForPath("C:/workspace/project/output", path.win32)).toBeFalse()
+    expect(isCanonicalAbsolutePathForPath("C:\\workspace\\project\\..\\output", path.win32)).toBeFalse()
+  })
+
   it("snapshots request identities and projections exactly once before filesystem use", async () => {
     const {publicationRoot, root, sourceRoot} = await temporaryLayout()
-    const publisher = new GeneratedArtifactPublisher({projectId: "snapshot-project", publicationRoot, sourceRoots: [sourceRoot]})
+    const publisher = new GeneratedArtifactPublisher({projectId: "snapshot-project", projectRoot: root, publicationRoot, sourceRoots: [sourceRoot]})
     let generationReads = 0
     let projectionReads = 0
     const target = {
       artifactSet: artifactSet("demo", [{content: "stable\n", path: "program.txt"}]),
       buildProjection: "target/build",
-      id: "demo-target"
+      id: "demo-target",
+      role: "text"
     }
 
     Object.defineProperty(target, "sourceProjection", {
@@ -375,6 +429,7 @@ describe("transactional generated-artifact publication", () => {
       const linkedPublication = path.join(root, "linked-publication")
       const linkedPublisher = new GeneratedArtifactPublisher({
         projectId: "linked-project",
+        projectRoot: root,
         publicationRoot: linkedPublication,
         sourceRoots: [sourceRoot]
       })
@@ -384,7 +439,7 @@ describe("transactional generated-artifact publication", () => {
         diagnostic("PUBLICATION_SYMLINK_TRAVERSAL"))
       expect(await readFile(outsideMarker, "utf8")).toEqual("unowned\n")
 
-      const publisher = new GeneratedArtifactPublisher({projectId: "safe-project", publicationRoot, sourceRoots: [sourceRoot]})
+      const publisher = new GeneratedArtifactPublisher({projectId: "safe-project", projectRoot: root, publicationRoot, sourceRoots: [sourceRoot]})
 
       await publisher.publish(publicationRequest("good", "good source\n", "good build\n"))
       const previous = await publisher.resolveActive()
@@ -413,9 +468,66 @@ describe("transactional generated-artifact publication", () => {
     }
   })
 
+  it("rejects undeclared files and directories anywhere in the immutable generation", async () => {
+    const {publicationRoot, root, sourceRoot} = await temporaryLayout()
+    const publisher = new GeneratedArtifactPublisher({
+      projectId: "inventory-project",
+      projectRoot: root,
+      publicationRoot,
+      sourceRoots: [sourceRoot]
+    })
+    const request = publicationRequest("undeclared-state", "source\n", "unused\n")
+
+    request.targets[0].validators = [async ({buildPath}) => {
+      await writeFile(path.join(buildPath, "..", "compiler.log"), "undeclared\n")
+      await mkdir(path.join(buildPath, "..", "scratch"))
+
+      return []
+    }]
+
+    try {
+      await assert.rejects(publisher.publish(request), diagnostic("PUBLICATION_GENERATION_INVENTORY_MISMATCH"))
+      await assert.rejects(publisher.resolveActive(), diagnostic("ACTIVE_GENERATION_MISSING"))
+      await assert.rejects(lstat(path.join(publicationRoot, "generations", "undeclared-state")), {code: "ENOENT"})
+    } finally {
+      await rm(root, {force: true, recursive: true})
+    }
+  })
+
+  it("rejects hard-linked staged files before publication can make them active", async () => {
+    const {publicationRoot, root, sourceRoot} = await temporaryLayout()
+    const publisher = new GeneratedArtifactPublisher({
+      projectId: "hard-link-project",
+      projectRoot: root,
+      publicationRoot,
+      sourceRoots: [sourceRoot]
+    })
+    const external = path.join(root, "external-hard-link.bin")
+    const request = publicationRequest("hard-linked", "source\n", "unused\n")
+
+    request.targets[0].validators = [async ({buildPath}) => {
+      const staged = path.join(buildPath, "program.bin")
+
+      await writeFile(staged, "original\n")
+      await link(staged, external)
+
+      return [{mediaType: "application/octet-stream", path: "program.bin", role: "compiler-output"}]
+    }]
+
+    try {
+      await assert.rejects(publisher.publish(request), diagnostic("PUBLICATION_HARD_LINK"))
+      await writeFile(external, "externally mutated\n")
+      expect(await readFile(external, "utf8")).toEqual("externally mutated\n")
+      await assert.rejects(publisher.resolveActive(), diagnostic("ACTIVE_GENERATION_MISSING"))
+      await assert.rejects(lstat(path.join(publicationRoot, "generations", "hard-linked")), {code: "ENOENT"})
+    } finally {
+      await rm(root, {force: true, recursive: true})
+    }
+  })
+
   it("reconciles only journal-proven abandoned state and retains ambiguous or committed generations", async () => {
     const {publicationRoot, root, sourceRoot} = await temporaryLayout()
-    const publisher = new GeneratedArtifactPublisher({projectId: "recovery-project", publicationRoot, sourceRoots: [sourceRoot]})
+    const publisher = new GeneratedArtifactPublisher({projectId: "recovery-project", projectRoot: root, publicationRoot, sourceRoots: [sourceRoot]})
     const generations = path.join(publicationRoot, "generations")
     const journals = path.join(publicationRoot, ".semantifold-publication-journal")
     const abandoned = path.join(generations, "abandoned")
@@ -450,10 +562,87 @@ describe("transactional generated-artifact publication", () => {
     }
   })
 
+  it("synchronizes journal-owned cleanup parents before discarding ownership proof", async () => {
+    const {publicationRoot, root, sourceRoot} = await temporaryLayout()
+    const publisher = new GeneratedArtifactPublisher({
+      projectId: "durable-cleanup-project",
+      projectRoot: root,
+      publicationRoot,
+      sourceRoots: [sourceRoot]
+    })
+    /** @type {string[]} */
+    const operations = []
+
+    observePublicationFilesystem(publisher, operation => operations.push(operation))
+
+    try {
+      const failedValidation = publicationRequest("interrupted-cleanup", "source\n", "build\n")
+
+      failedValidation.targets[0].validators = [() => {
+        throw new Error("candidate failure")
+      }]
+      injectPublicationFailure(publisher, "before-journal-remove", new Error("cleanup interruption"))
+      await assert.rejects(publisher.publish(failedValidation), diagnostic("PUBLICATION_RECOVERY_FAILED"))
+      expect(operations).toEqual(["remove-candidate", "sync-candidate-parent"])
+      expect(await readdir(path.join(publicationRoot, ".semantifold-publication-journal")))
+        .toEqual(["interrupted-cleanup.json"])
+
+      operations.length = 0
+      await publisher.publish(publicationRequest("after-interrupted-cleanup", "source\n", "build\n"))
+      expect(operations.slice(0, 6)).toEqual([
+        "remove-candidate",
+        "sync-candidate-parent",
+        "remove-temporary-pointer",
+        "sync-temporary-pointer-parent",
+        "remove-journal",
+        "sync-journal-parent"
+      ])
+
+      operations.length = 0
+      injectPublicationFailure(publisher, "before-pointer-replace", new Error("pointer interruption"))
+      await assert.rejects(publisher.publish(publicationRequest("temporary-cleanup", "source\n", "build\n")),
+        diagnostic("PUBLICATION_POINTER_FAILED"))
+      expect(operations).toEqual([
+        "remove-candidate",
+        "sync-candidate-parent",
+        "remove-temporary-pointer",
+        "sync-temporary-pointer-parent",
+        "remove-journal",
+        "sync-journal-parent"
+      ])
+
+      const generations = path.join(publicationRoot, "generations")
+      const journals = path.join(publicationRoot, ".semantifold-publication-journal")
+
+      await mkdir(path.join(generations, "recovery-candidate"))
+      await writeFile(path.join(publicationRoot, ".active-generation.recovery-candidate.tmp"), "temporary\n")
+      await writeFile(path.join(journals, "recovery-candidate.json"), `${JSON.stringify({
+        generationId: "recovery-candidate",
+        projectId: "durable-cleanup-project",
+        schema: "SemantifoldPublicationJournal",
+        tempPointer: ".active-generation.recovery-candidate.tmp",
+        version: 1
+      })}\n`)
+      operations.length = 0
+      await publisher.publish(publicationRequest("after-reconciliation", "source\n", "build\n"))
+      expect(operations.slice(0, 6)).toEqual([
+        "remove-candidate",
+        "sync-candidate-parent",
+        "remove-temporary-pointer",
+        "sync-temporary-pointer-parent",
+        "remove-journal",
+        "sync-journal-parent"
+      ])
+    } finally {
+      await rm(root, {force: true, recursive: true})
+    }
+  })
+
   it("fails closed on malformed journals, active pointers, and committed manifests", async () => {
     const malformedJournalLayout = await temporaryLayout()
     const journalPublisher = new GeneratedArtifactPublisher({
       projectId: "journal-project",
+      projectRoot: malformedJournalLayout.root,
       publicationRoot: malformedJournalLayout.publicationRoot,
       sourceRoots: [malformedJournalLayout.sourceRoot]
     })
@@ -471,6 +660,7 @@ describe("transactional generated-artifact publication", () => {
     const malformedPointerLayout = await temporaryLayout()
     const pointerPublisher = new GeneratedArtifactPublisher({
       projectId: "pointer-project",
+      projectRoot: malformedPointerLayout.root,
       publicationRoot: malformedPointerLayout.publicationRoot,
       sourceRoots: [malformedPointerLayout.sourceRoot]
     })
@@ -488,6 +678,7 @@ describe("transactional generated-artifact publication", () => {
     const malformedManifestLayout = await temporaryLayout()
     const manifestPublisher = new GeneratedArtifactPublisher({
       projectId: "manifest-project",
+      projectRoot: malformedManifestLayout.root,
       publicationRoot: malformedManifestLayout.publicationRoot,
       sourceRoots: [malformedManifestLayout.sourceRoot]
     })
@@ -502,9 +693,60 @@ describe("transactional generated-artifact publication", () => {
     }
   })
 
+  it("normalizes missing and unreadable committed projections without exposing host paths", async () => {
+    const {publicationRoot, root, sourceRoot} = await temporaryLayout()
+    const publisher = new GeneratedArtifactPublisher({
+      projectId: "verification-project",
+      projectRoot: root,
+      publicationRoot,
+      sourceRoots: [sourceRoot]
+    })
+
+    try {
+      const published = await publisher.publish(publicationRequest("missing-projection", "source\n", "build\n"))
+
+      await rm(published.targets[0].sourcePath, {recursive: true})
+      await assert.rejects(publisher.resolveActive(), error =>
+        error instanceof SemantifoldDiagnostic &&
+        error.code == "PUBLICATION_GENERATION_VERIFICATION_FAILED" &&
+        error.detail == "Immutable generation filesystem inventory could not be verified." &&
+        error.cause instanceof Error && "code" in error.cause && error.cause.code == "ENOENT" &&
+        !error.message.includes(root))
+    } finally {
+      await rm(root, {force: true, recursive: true})
+    }
+
+    if (process.platform != "win32") {
+      const unreadableLayout = await temporaryLayout()
+      const unreadablePublisher = new GeneratedArtifactPublisher({
+        projectId: "unreadable-project",
+        projectRoot: unreadableLayout.root,
+        publicationRoot: unreadableLayout.publicationRoot,
+        sourceRoots: [unreadableLayout.sourceRoot]
+      })
+      let unreadablePath
+
+      try {
+        const published = await unreadablePublisher.publish(publicationRequest("unreadable-projection", "source\n", "build\n"))
+
+        unreadablePath = published.targets[0].sourcePath
+        await chmod(unreadablePath, 0)
+        await assert.rejects(unreadablePublisher.resolveActive(), error =>
+          error instanceof SemantifoldDiagnostic &&
+          error.code == "PUBLICATION_GENERATION_VERIFICATION_FAILED" &&
+          error.detail == "Immutable generation filesystem inventory could not be verified." &&
+          error.cause instanceof Error && "code" in error.cause && error.cause.code == "EACCES" &&
+          !error.message.includes(unreadableLayout.root))
+      } finally {
+        if (unreadablePath) await chmod(unreadablePath, 0o700)
+        await rm(unreadableLayout.root, {force: true, recursive: true})
+      }
+    }
+  })
+
   it("keeps the truthful old-or-new authority across stage, validation, pointer, and cleanup failures", async () => {
     const {publicationRoot, root, sourceRoot} = await temporaryLayout()
-    const publisher = new GeneratedArtifactPublisher({projectId: "failure-project", publicationRoot, sourceRoots: [sourceRoot]})
+    const publisher = new GeneratedArtifactPublisher({projectId: "failure-project", projectRoot: root, publicationRoot, sourceRoots: [sourceRoot]})
 
     try {
       const initial = await publisher.publish(publicationRequest("initial", "old source\n", "old build\n"))
@@ -515,6 +757,7 @@ describe("transactional generated-artifact publication", () => {
           artifactSet: artifactSet("demo", [{content: "unwritable\n", path: tooLong}]),
           buildProjection: "target/build",
           id: "demo-target",
+          role: "text",
           sourceProjection: "target/source"
         }]
       }
@@ -560,11 +803,23 @@ describe("transactional generated-artifact publication", () => {
       const cleanupPending = await publisher.publish(publicationRequest("cleanup-pending", "latest source\n", "latest build\n"))
 
       expect(cleanupPending.cleanupPending).toBeTrue()
-      expect((await publisher.resolveActive()).generationId).toEqual("cleanup-pending")
+      const pendingResolved = await publisher.resolveActive()
+
+      expect(pendingResolved.generationId).toEqual("cleanup-pending")
+      expect(pendingResolved.cleanupPending).toBeTrue()
+      const cleanupJournalPath = path.join(publicationRoot, ".semantifold-publication-journal", "cleanup-pending.json")
+      const cleanupJournal = await readFile(cleanupJournalPath)
+
+      await writeFile(cleanupJournalPath, "{}\n")
+      await assert.rejects(publisher.resolveActive(), diagnostic("PUBLICATION_RECOVERY_FAILED"))
+      await writeFile(cleanupJournalPath, cleanupJournal)
       const recovered = await publisher.publish(publicationRequest("after-recovery", "final source\n", "final build\n"))
 
       expect(recovered.cleanupPending).toBeFalse()
-      expect((await publisher.resolveActive()).generationId).toEqual("after-recovery")
+      const recoveredResolved = await publisher.resolveActive()
+
+      expect(recoveredResolved.generationId).toEqual("after-recovery")
+      expect(recoveredResolved.cleanupPending).toBeFalse()
       expect(await readFile(path.join(cleanupPending.targets[0].sourcePath, "program.txt"), "utf8"))
         .toEqual("latest source\n")
       expect(await readFile(path.join(initial.targets[0].sourcePath, "program.txt"), "utf8")).toEqual("old source\n")
@@ -598,6 +853,7 @@ function publicationRequest(generationId, source, build, pause) {
       artifactSet: artifactSet("demo", [{content: source, path: "program.txt"}]),
       buildProjection: "target/build",
       id: "demo-target",
+      role: "text",
       sourceProjection: "target/source",
       validators: [async ({buildPath}) => {
         if (pause) await pause()
