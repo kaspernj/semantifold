@@ -1,6 +1,6 @@
 # 038 — Transactional generated-artifact publication
 
-- Status: `implemented on feature/task038-transactional-publication; coordinator review/CI/merge pending`
+- Status: `implemented in PR #55; coordinator review/CI/merge pending`
 - Phase/priority: Phase W / P0 foundation
 - Dependencies: [015-language-expansion-foundation.md](015-language-expansion-foundation.md)
 - Design: [Watch, build, and target-check pipeline](../docs/watch-build-pipeline.md)
@@ -61,4 +61,4 @@ Project configuration, source discovery, CLI commands, filesystem watching, comp
 - Implementation branch: `feature/task038-transactional-publication`, based on released `v0.8.0` commit `2e21976656a1ffd534f5146d9ee9cb14c676be39`.
 - Public surface: `GeneratedArtifactPublisher` with `publish(request)` and pointer-once `resolveActive()`.
 - Focused real-filesystem coverage: initial/update publication, stale omission, unowned-file preservation, deterministic manifests, rich mapping persistence, concurrent old/new readers, identity/projection/collision/symlink/overlap failures, byte tampering, stage/validator/pointer/cleanup failures, malformed state, and interrupted-state reconciliation.
-- Pull request: pending creation after final local validation and origin/master merge check. Coordinator-owned review, TensorBuzz CI, merge, and release remain pending.
+- Pull request: [#55](https://github.com/kaspernj/semantifold/pull/55). Coordinator-owned review, TensorBuzz CI, merge, and release remain pending.

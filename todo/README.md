@@ -4,7 +4,7 @@
 
 This folder is Semantifold's durable, dependency-ordered implementation backlog and delivered design record. Task 038 started from released `semantifold@0.8.0` / annotated `v0.8.0` at commit `2e21976656a1ffd534f5146d9ee9cb14c676be39`. The watch/build roadmap was originally researched from the documented clean `v0.7.0` baseline; earlier delivery history and external evidence remain recorded in [SOURCES.md](SOURCES.md).
 
-Tasks 001–025 and 028–037 are delivered; their exact PR, commit, CI, and acceptance history remains in the task records and [SOURCES.md](SOURCES.md). Task 037 merged through PRs #47/#48, Task 028 merged in PR #51, Task 031 merged in PR #52, and Task 030 merged in PR #53 before the `semantifold@0.7.0` release. Task 038 is implemented on `feature/task038-transactional-publication` with coordinator review, TensorBuzz CI, merge, and release still pending. Task 026 has deterministic generation/provenance while Apple materialization and acceptance remain deferred. Task 027 remains deferred roadmap work. Tasks 039–046 remain planned watch/build/check work and grant no implementation authority by themselves.
+Tasks 001–025 and 028–037 are delivered; their exact PR, commit, CI, and acceptance history remains in the task records and [SOURCES.md](SOURCES.md). Task 037 merged through PRs #47/#48, Task 028 merged in PR #51, Task 031 merged in PR #52, and Task 030 merged in PR #53 before the `semantifold@0.7.0` release. Task 038 is implemented in PR #55 with coordinator review, TensorBuzz CI, merge, and release still pending. Task 026 has deterministic generation/provenance while Apple materialization and acceptance remain deferred. Task 027 remains deferred roadmap work. Tasks 039–046 remain planned watch/build/check work and grant no implementation authority by themselves.
 
 The delivered language-baseline expansion keeps its small Tasks 001–004 IR contract. Tasks 005–008 are bounded original-five semantic layers; none makes every platform, legacy bridge, or later language block semantic progress.
 
@@ -132,7 +132,7 @@ These tasks do not gate Task 005. Browser Wasm depends only on Task 015 and rema
 
 ### Phase W — project build, watch, and target checks
 
-- [038 — Transactional generated-artifact publication](038-transactional-generated-artifact-publication.md) — implemented; coordinator review/CI/merge pending
+- [038 — Transactional generated-artifact publication](038-transactional-generated-artifact-publication.md) — implemented in PR #55; coordinator review/CI/merge pending
 - [039 — Project manifest and one-shot build CLI](039-project-manifest-and-build-cli.md)
 - [040 — Target check-plan contract and Java `javac` slice](040-target-check-plan-and-java-javac.md)
 - [041 — Interpreted and managed text-target check plans](041-interpreted-managed-target-check-plans.md)
@@ -281,7 +281,7 @@ Dependencies in task files are authoritative. Existing IDs remain stable; numeri
 | [035](035-versioned-standard-library-contracts-and-provider-linking.md) | delivered (S) | P1 | Canonical stdlib contracts/provider linking; PR #45 merge `a2aad9d4932bfc6087adc4ff8bca43678c92413c` | 010, 034 |
 | [036](036-language-compatibility-stdlib-facades.md) | delivered (S) | P1 | Versioned executable source-language qualification facades; PR #46 merge `9aba48f9d48bcef4fd4c9275aec14bfcc4f0904c` | 035 |
 | [037](037-blocking-tcp-client-stdlib-vertical-slice.md) | delivered (S; PRs #47/#48) | P1 proof | Ruby-to-PHP blocking TCP slice | 032, 036 |
-| [038](038-transactional-generated-artifact-publication.md) | implemented (W; review/CI/merge pending) | P0 | Transactional owned artifact publication/recovery | 015 |
+| [038](038-transactional-generated-artifact-publication.md) | implemented (W; PR #55; review/CI/merge pending) | P0 | Transactional owned artifact publication/recovery | 015 |
 | [039](039-project-manifest-and-build-cli.md) | roadmap (W) | P0 | Strict project manifest and one-shot build CLI | 010, 038 |
 | [040](040-target-check-plan-and-java-javac.md) | roadmap (W) | P0 | Generic check-plan contract plus Java/`javac` | 039 |
 | [041](041-interpreted-managed-target-check-plans.md) | roadmap (W) | P1 | PHP/Ruby/JS/TS/Kotlin/Python/C# checks | 040 |
