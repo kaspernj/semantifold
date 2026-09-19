@@ -5,7 +5,13 @@ import os from "node:os"
 import path from "node:path"
 import {describe, expect, it} from "@velocious/testing"
 import assert from "node:assert/strict"
-import {ProjectBuilder} from "../index.js"
+import {
+  createGeneratedArtifactSet,
+  GeneratedArtifactPublisher,
+  ProjectBuilder,
+  ProjectManifestLoader,
+  ProjectSnapshotBuilder
+} from "../index.js"
 import {observeProjectBuild} from "../src/project-build.js"
 
 /**
@@ -184,6 +190,58 @@ describe("Semantifold one-shot project build", () => {
       assert.deepEqual(await readFile(firstJavaPath), firstJava)
       expect((await readdir(path.join(root, ".semantifold/generations"))).sort())
         .toEqual([first.generationId, second.generationId].sort())
+    } finally {
+      await rm(root, {force: true, recursive: true})
+    }
+  })
+
+  it("rejects an active deterministic generation whose artifacts differ from the generated candidate", async () => {
+    const {manifestPath, root} = await buildFixture([
+      {id: "java-main", language: "java", role: "text", sourceProjection: "targets/java/source"}
+    ])
+
+    try {
+      const project = await new ProjectManifestLoader().load(manifestPath)
+      const snapshot = await new ProjectSnapshotBuilder().build(project)
+      const generationId = `g-${snapshot.hash}`
+      const target = project.targets[0]
+      const publisher = new GeneratedArtifactPublisher({
+        projectId: project.id,
+        projectRoot: project.projectRoot,
+        publicationRoot: project.publicationRoot,
+        sourceFiles: project.sources.map(({absolutePath}) => absolutePath)
+      })
+      const unrelated = await publisher.publish({
+        generationId,
+        targets: [{
+          artifactSet: createGeneratedArtifactSet({
+            artifacts: [{
+              content: "public final class Main { private Main() {} }\n",
+              contentKind: "text",
+              mediaType: "text/x-java-source",
+              ownership: "generated",
+              path: "semantifold/generated/main/Main.java",
+              provenance: {kind: "synthetic", reason: "unrelated public publisher candidate", relatedOrigins: []},
+              role: "entry"
+            }],
+            target: "java"
+          }),
+          buildProjection: target.buildProjection,
+          id: target.id,
+          role: target.role,
+          sourceProjection: target.sourceProjection
+        }]
+      })
+      const pointerPath = path.join(root, ".semantifold/active-generation.json")
+      const previousPointer = await readFile(pointerPath)
+      const unrelatedJavaPath = path.join(unrelated.targets[0].sourcePath, "semantifold/generated/main/Main.java")
+      const unrelatedJava = await readFile(unrelatedJavaPath)
+
+      await assert.rejects(new ProjectBuilder().build(manifestPath), error =>
+        error instanceof Error && "code" in error && error.code == "PUBLICATION_UNOWNED_CONFLICT")
+      assert.deepEqual(await readFile(pointerPath), previousPointer)
+      assert.deepEqual(await readFile(unrelatedJavaPath), unrelatedJava)
+      expect(await readdir(path.join(root, ".semantifold/generations"))).toEqual([generationId])
     } finally {
       await rm(root, {force: true, recursive: true})
     }

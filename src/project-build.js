@@ -109,18 +109,8 @@ export class ProjectBuilder {
       sourceFiles: project.sources.map(({absolutePath}) => absolutePath)
     })
     const generationId = `g-${snapshot.hash}`
-    let generation
+    const generation = await publisher.publish({generationId, targets: publicationTargets})
 
-    try {
-      const active = await publisher.resolveActive()
-
-      generation = active.generationId == generationId
-        ? active
-        : await publisher.publish({generationId, targets: publicationTargets})
-    } catch (error) {
-      if (!(error instanceof SemantifoldDiagnostic) || error.code != "ACTIVE_GENERATION_MISSING") throw error
-      generation = await publisher.publish({generationId, targets: publicationTargets})
-    }
     projectBuildObservers.get(this)?.("publish")
 
     return Object.freeze({

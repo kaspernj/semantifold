@@ -20,6 +20,7 @@ const sourceRoles = new Map([
   ["binary", "binaryBackend"],
   ["application", "applicationBackend"]
 ])
+const manifestDefaultApplicationTargets = new Set(["android", "flutter"])
 const projectFields = ["id", "publicationRoot", "schema", "sources", "targets", "version"]
 const sourceFields = ["entry", "id", "language", "path"]
 const targetRequiredFields = ["id", "language", "role", "sourceProjection"]
@@ -207,6 +208,10 @@ async function normalizeProject(candidate, context) {
     if (!supportsProgramArtifactRole(target.language, target.role)) {
       projectFailure("UNSUPPORTED_PROJECT_TARGET", target.language,
         `Registered target does not support '${target.role}' generation for complete semantic programs.`, manifestLocation())
+    }
+    if (target.role == "application" && !manifestDefaultApplicationTargets.has(target.language)) {
+      projectFailure("UNSUPPORTED_PROJECT_TARGET", target.language,
+        "Project manifest version 1 cannot express the target's required application configuration.", manifestLocation())
     }
     const buildProjection = target.buildProjection === undefined ? `targets/${target.id}/build` : target.buildProjection
 

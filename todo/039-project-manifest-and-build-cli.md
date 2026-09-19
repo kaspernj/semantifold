@@ -1,6 +1,6 @@
 # 039 — Project manifest and one-shot build CLI
 
-- Status: `implemented locally; focused and package acceptance pass; coordinator review / exact-head TensorBuzz CI / merge pending`
+- Status: `implemented locally; independent review corrections pass; exact-head TensorBuzz CI / merge pending`
 - Phase/priority: Phase W / P0 foundation
 - Dependencies: [010-multifile-modules-and-names.md](010-multifile-modules-and-names.md), [038-transactional-generated-artifact-publication.md](038-transactional-generated-artifact-publication.md)
 - Design: [Watch, build, and target-check pipeline](../docs/watch-build-pipeline.md)
@@ -11,7 +11,7 @@ Add a strict versioned Semantifold project manifest and a real package CLI that 
 
 ## Starting evidence and delivered result
 
-The released `semantifold@0.9.0` starting point provided `parseProgram({entryModule, sources})`, `generateProgramArtifactSet({language, program})`, and Task 038 transactional publication but exposed no package bin or project manifest. Task 039 now adds the strict loader and immutable project value, bounded stable snapshot builder, one-shot builder, reporter, strict CLI, and packaged executable. The builder composes the existing semantic/backend dispatch and publishes all ordered targets through one deterministic immutable generation. Exact retained deterministic generations are fully revalidated and atomically reactivated after an ordinary source revert without overwriting conflicting state.
+The released `semantifold@0.9.0` starting point provided `parseProgram({entryModule, sources})`, `generateProgramArtifactSet({language, program})`, and Task 038 transactional publication but exposed no package bin or project manifest. Task 039 now adds the strict loader and immutable project value, bounded stable snapshot builder, one-shot builder, reporter, strict CLI, and packaged executable. The builder composes the existing semantic/backend dispatch and submits every complete ordered candidate to one deterministic immutable generation, including when that generation ID is already active. Exact active or retained deterministic generations are fully compared and revalidated without overwriting conflicting state.
 
 ## Implemented manifest
 
@@ -23,7 +23,7 @@ Define and validate `semantifold.json` version 1 with no unknown fields. It decl
 - project-relative paths only, normalized against the manifest directory;
 - no glob syntax, package-manager resolution, arbitrary environment expansion, JavaScript callbacks, shell hooks, or inferred language from extension in version 1.
 
-Reject duplicate module/target identities, unsupported roles, feature-incompatible targets, publication/source overlap, colliding or nested target projections, and any path that escapes or aliases the declared publication root. Independently promoted output/build roots are invalid.
+Reject duplicate module/target identities, unsupported roles, feature-incompatible targets, publication/source overlap, colliding or nested target projections, and any path that escapes or aliases the declared publication root. Independently promoted output/build roots are invalid. Application targets are accepted only when version 1 can express their complete default request: Android and Flutter qualify, while configuration-required iOS fails at this manifest boundary without changing its direct public generation API.
 
 ## Implemented CLI contract
 
@@ -39,7 +39,7 @@ Reject duplicate module/target identities, unsupported roles, feature-incompatib
 
 - Strict manifest acceptance/rejection, including unknown keys, duplicate IDs, role mismatch, path aliases/escapes, legal Unicode and space-containing source paths, source/publication overlap, independent-root configuration, and target-projection nesting.
 - One-file and Task 010 multi-file builds through real public frontends/backends, including JavaScript/JSDoc to Java and at least one multi-artifact target.
-- Multiple target entries stage from one source hash under one generation and become visible through one pointer switch; one late target failure leaves the prior active generation unchanged; an A→B→A source sequence verifies and reactivates the retained A generation without changing its bytes.
+- Multiple target entries stage from one source hash under one generation and become visible through one pointer switch; one late target failure leaves the prior active generation unchanged; an A→B→A source sequence verifies and reactivates the retained A generation without changing its bytes; an active same-ID generation with different artifacts fails instead of being returned as current output.
 - Snapshot mutation during load cannot mix source revisions.
 - Human and JSON output contain one truthful terminal result; exit status preserves the first failure.
 - Packed-consumer execution proves shebang/mode/bin mapping and no repository-relative imports.
@@ -58,4 +58,4 @@ Filesystem watching, compiler execution, arbitrary includes/excludes/globs, pack
 - The CLI composes existing public semantic APIs instead of duplicating parser/backend dispatch.
 - Multi-target failure is atomic, protocol/exit behavior is deterministic, and the packed CLI passes focused tests, lint/typecheck, docs, and package gates.
 
-The implementation and focused real-filesystem/packed-consumer coverage satisfy these criteria locally. Independent review, exact-head TensorBuzz CI, merge, and release remain coordinator-owned.
+The implementation and focused real-filesystem/packed-consumer coverage satisfy these criteria locally. Independent review is complete; exact-head TensorBuzz CI, merge, and release remain coordinator-owned.

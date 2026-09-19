@@ -6,6 +6,7 @@ import os from "node:os"
 import path from "node:path"
 import {describe, expect, it} from "@velocious/testing"
 import {ProjectManifestLoader, SemantifoldProject} from "../index.js"
+import {supportsProgramArtifactRole} from "../src/backends/program.js"
 
 /**
  * Creates one real version-1 project manifest.
@@ -150,6 +151,24 @@ describe("Semantifold project manifest", () => {
       } finally {
         await rm(root, {force: true, recursive: true})
       }
+    }
+  })
+
+  it("rejects iOS application generation that version 1 cannot configure without removing backend capability", async () => {
+    const {manifestPath, root} = await projectFixture({targets: [{
+      id: "ios-main",
+      language: "ios",
+      role: "application",
+      sourceProjection: "targets/ios/source"
+    }]})
+
+    try {
+      expect(supportsProgramArtifactRole("ios", "application")).toBeTrue()
+      await assert.rejects(new ProjectManifestLoader().load(manifestPath), error =>
+        error instanceof Error && "code" in error && error.code == "UNSUPPORTED_PROJECT_TARGET" &&
+          "language" in error && error.language == "ios")
+    } finally {
+      await rm(root, {force: true, recursive: true})
     }
   })
 

@@ -33,7 +33,7 @@ The architecture is target-neutral. Every current text backend eventually suppli
 
 A versioned, strict manifest declares ordered source modules and target entries. Source language, module identity, entry identity, target language/role, one project publication root, and each target's generated/check subpaths inside an immutable project generation are explicit. These target paths are logical projections, not independently promoted filesystem roots. Version 1 uses explicit file paths rather than introducing a glob language or package-manager resolution.
 
-The loader owns path normalization and rejects unknown fields, duplicate module/target identities, ambiguous target roles, source/publication overlap, publication roots outside the project root, colliding or nested target projections, and symlink/path traversal across the owned publication root. It returns an immutable project request and never parses language syntax.
+The loader owns path normalization and rejects unknown fields, duplicate module/target identities, ambiguous target roles, source/publication overlap, publication roots outside the project root, colliding or nested target projections, symlink/path traversal across the owned publication root, and registered backend capabilities whose required configuration version 1 cannot express. It returns an immutable project request and never parses language syntax.
 
 ### Snapshot builder (Task 039 implemented for one-shot builds)
 
@@ -115,7 +115,7 @@ Exactly one terminal cycle record is emitted per cycle. Process exit is non-zero
 - the same watcher/materializer/runner code handles every source/target pairing;
 - acceptance uses a bounded matrix: all frontends and all text targets are covered, with the JavaScript/JSDoc-to-Java path plus representative cross-family paths, not a quadratic promise that every semantic feature works for every pair.
 
-Binary and application targets use the same generation watcher only after explicit target policy is defined. Browser Wasm can validate/instantiate in its own lane. Android and Flutter checks are heavier platform builds and must be opt-in rather than an automatic keystroke default. iOS remains generation-only until the separately deferred Apple/Xcode acceptance work is authorized; this roadmap does not reopen Tasks 026 or 027.
+Binary and application targets use the same generation watcher only after explicit target policy is defined. Browser Wasm can validate/instantiate in its own lane. Android and Flutter checks are heavier platform builds and must be opt-in rather than an automatic keystroke default. Direct public iOS generation remains available with explicit configuration, but Task 039 manifest version 1 cannot express that configuration and rejects iOS targets; Apple/Xcode acceptance remains separately deferred. This roadmap does not reopen Tasks 026 or 027.
 
 ## Test strategy
 
