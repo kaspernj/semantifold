@@ -456,7 +456,7 @@ describe("repository delivery contracts", () => {
 
     expect(readme).toContain("[iOS application target](docs/ios.md)")
     expect(readme).toContain("target-only `ios` application backend")
-    expect(readme).toContain("Transactional create-only directory materialization remains deferred")
+    expect(readme).toContain("Task 038 can instead persist the already-validated set inside its generic immutable-generation/pointer contract")
     expect(architecture).toContain("[iOS application target](ios.md)")
     expect(architecture).toContain("no public project materializer")
     expect(languageSupport).toContain("implemented deterministic generation/provenance; materialization and Apple acceptance deferred")
