@@ -468,6 +468,52 @@ describe("transactional generated-artifact publication", () => {
     }
   })
 
+  it("rejects validator replacement of source and build projection roots with external symlinks", async () => {
+    /** @type {unknown[]} */
+    const failures = []
+
+    for (const projection of ["build", "source"]) {
+      const {publicationRoot, root, sourceRoot} = await temporaryLayout()
+      const external = path.join(root, `external-${projection}`)
+      const externalProgram = path.join(external, "program.txt")
+      const publisher = new GeneratedArtifactPublisher({
+        projectId: `${projection}-root-project`,
+        projectRoot: root,
+        publicationRoot,
+        sourceRoots: [sourceRoot]
+      })
+      const request = publicationRequest(`${projection}-root-symlink`, "generated source\n", "unused\n")
+
+      await mkdir(external)
+      await writeFile(externalProgram, "external bytes\n")
+      request.targets[0].validators = [async ({buildPath, sourcePath}) => {
+        const projectionPath = projection == "build" ? buildPath : sourcePath
+
+        await rm(projectionPath, {recursive: true})
+        await symlink(external, projectionPath)
+        if (projection == "build") return []
+        await writeFile(path.join(buildPath, "program.bin"), "build bytes\n")
+
+        return [{mediaType: "application/octet-stream", path: "program.bin", role: "compiler-output"}]
+      }]
+
+      try {
+        await assert.rejects(publisher.publish(request), error => {
+          failures.push(error)
+          return true
+        })
+        expect(await readFile(externalProgram, "utf8")).toEqual("external bytes\n")
+        await assert.rejects(publisher.resolveActive(), diagnostic("ACTIVE_GENERATION_MISSING"))
+        await assert.rejects(lstat(path.join(publicationRoot, "generations", `${projection}-root-symlink`)), {code: "ENOENT"})
+      } finally {
+        await rm(root, {force: true, recursive: true})
+      }
+    }
+
+    expect(failures.map(error => error instanceof SemantifoldDiagnostic ? error.code : "unexpected"))
+      .toEqual(["PUBLICATION_SYMLINK_TRAVERSAL", "PUBLICATION_SYMLINK_TRAVERSAL"])
+  })
+
   it("rejects undeclared files and directories anywhere in the immutable generation", async () => {
     const {publicationRoot, root, sourceRoot} = await temporaryLayout()
     const publisher = new GeneratedArtifactPublisher({

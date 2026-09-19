@@ -1279,6 +1279,7 @@ async function listRegularFiles(directory, projectId) {
    * @returns {Promise<void>} Completion.
    */
   async function visit(current, relative) {
+    await assertRealInventoryDirectory(current, projectId)
     const entries = await readdir(current)
 
     entries.sort(compareStrings)
@@ -1377,6 +1378,7 @@ async function verifyGenerationInventory(generationPath, manifest, projectId) {
    * @returns {Promise<void>} Completion.
    */
   async function visit(current, relative) {
+    await assertRealInventoryDirectory(current, projectId)
     const entries = await readdir(current)
 
     entries.sort(compareStrings)
@@ -1405,6 +1407,25 @@ async function verifyGenerationInventory(generationPath, manifest, projectId) {
           "Immutable generation contains an undeclared filesystem entry.")
       }
     }
+  }
+}
+
+/**
+ * Verifies one inventory traversal root without following symbolic links.
+ * @param {string} directory - Exact directory about to be read.
+ * @param {string} projectId - Project identity.
+ * @returns {Promise<void>} Completion.
+ */
+async function assertRealInventoryDirectory(directory, projectId) {
+  const status = await lstat(directory)
+
+  if (status.isSymbolicLink()) {
+    publicationFailure("PUBLICATION_SYMLINK_TRAVERSAL", projectId,
+      "Candidate generation contains a symbolic link.")
+  }
+  if (!status.isDirectory()) {
+    publicationFailure("PUBLICATION_GENERATION_INVENTORY_MISMATCH", projectId,
+      "Immutable generation contains an undeclared filesystem entry.")
   }
 }
 
