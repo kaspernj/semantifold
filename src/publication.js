@@ -71,6 +71,8 @@ export class GeneratedArtifactPublisher {
   #publicationRoot
   /** @type {readonly string[]} */
   #sourceRoots
+  /** @type {readonly string[]} */
+  #sourceFiles
   /** @type {Promise<void>} */
   #publicationTail = Promise.resolve()
 
@@ -80,13 +82,14 @@ export class GeneratedArtifactPublisher {
    * @param {string} options.projectId - Stable lowercase project identity.
    * @param {string} options.projectRoot - Canonical absolute project root.
    * @param {string} options.publicationRoot - Canonical absolute publisher-owned directory beneath the project root.
-   * @param {readonly string[]} options.sourceRoots - Canonical absolute project source roots kept disjoint from publication.
+   * @param {readonly string[]} [options.sourceRoots] - Canonical absolute project source directories kept disjoint from publication.
+   * @param {readonly string[]} [options.sourceFiles] - Canonical absolute project source files kept disjoint from publication.
    */
   constructor(options) {
     if (!isPlainObject(options)) {
       publicationFailure("INVALID_PUBLICATION_REQUEST", "publication", "Publisher options must be a plain object.")
     }
-    const {projectId, projectRoot, publicationRoot, sourceRoots} = options
+    const {projectId, projectRoot, publicationRoot, sourceFiles = [], sourceRoots = []} = options
 
     if (!identityPattern.test(projectId ?? "")) {
       publicationFailure("INVALID_PUBLICATION_REQUEST", "publication", "Project identity must be a stable lowercase ID.")
@@ -96,8 +99,9 @@ export class GeneratedArtifactPublisher {
       publicationFailure("INVALID_PUBLICATION_ROOT", projectId,
         "Project and publication roots must be canonical absolute paths with publication strictly beneath the project root.")
     }
-    if (!isDenseArray(sourceRoots) || sourceRoots.length == 0) {
-      publicationFailure("INVALID_PUBLICATION_ROOT", projectId, "Source roots must be a non-empty array of canonical absolute paths.")
+    if (!isDenseArray(sourceRoots) || !isDenseArray(sourceFiles) || sourceRoots.length + sourceFiles.length == 0) {
+      publicationFailure("INVALID_PUBLICATION_ROOT", projectId,
+        "Publisher requires canonical absolute source directories or source files.")
     }
     /** @type {string[]} */
     const validatedSourceRoots = []
@@ -119,11 +123,28 @@ export class GeneratedArtifactPublisher {
       }
       validatedSourceRoots.push(sourceRoot)
     }
+    /** @type {string[]} */
+    const validatedSourceFiles = []
+
+    for (let index = 0; index < sourceFiles.length; index += 1) {
+      const sourceFile = sourceFiles[index]
+
+      if (!isCanonicalAbsolutePath(sourceFile) || !isPathWithin(projectRoot, sourceFile)) {
+        publicationFailure("INVALID_PUBLICATION_ROOT", projectId,
+          "Source files must be canonical absolute paths within the project root.")
+      }
+      if (pathsOverlap(publicationRoot, sourceFile)) {
+        publicationFailure("PUBLICATION_SOURCE_OVERLAP", projectId,
+          "Publication root and source files must be disjoint.")
+      }
+      validatedSourceFiles.push(sourceFile)
+    }
 
     this.#projectId = projectId
     this.#projectRoot = projectRoot
     this.#publicationRoot = publicationRoot
     this.#sourceRoots = Object.freeze(validatedSourceRoots)
+    this.#sourceFiles = Object.freeze(validatedSourceFiles)
   }
 
   /**
@@ -337,6 +358,31 @@ export class GeneratedArtifactPublisher {
       if (pathsOverlap(exactPublication, exactSource)) {
         publicationFailure("PUBLICATION_SOURCE_OVERLAP", this.#projectId,
           "Publication root and source roots resolve to overlapping paths.")
+      }
+    }
+    for (const sourceFile of this.#sourceFiles) {
+      await ensureDirectoryWithoutSymlinks(path.dirname(sourceFile), false, this.#projectId)
+      let status
+      let exactSource
+
+      try {
+        status = await lstat(sourceFile)
+        exactSource = await realpath(sourceFile)
+      } catch (error) {
+        publicationFailure("INVALID_PUBLICATION_ROOT", this.#projectId,
+          "Source file could not be resolved safely.", error)
+      }
+      if (status.isSymbolicLink()) {
+        publicationFailure("PUBLICATION_SYMLINK_TRAVERSAL", this.#projectId,
+          "Source file traversal encountered a symbolic link.")
+      }
+      if (!status.isFile() || exactSource != sourceFile || !isPathWithin(exactProject, exactSource)) {
+        publicationFailure("INVALID_PUBLICATION_ROOT", this.#projectId,
+          "Source files must resolve to real regular files within the project root.")
+      }
+      if (pathsOverlap(exactPublication, exactSource)) {
+        publicationFailure("PUBLICATION_SOURCE_OVERLAP", this.#projectId,
+          "Publication root and source files resolve to overlapping paths.")
       }
     }
     await ensureOwnedDirectory(path.join(this.#publicationRoot, generationsName), this.#projectId)

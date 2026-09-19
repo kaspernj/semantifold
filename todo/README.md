@@ -4,7 +4,7 @@
 
 This folder is Semantifold's durable, dependency-ordered implementation backlog and delivered design record. Task 038 started from released `semantifold@0.8.0` / annotated `v0.8.0` at commit `2e21976656a1ffd534f5146d9ee9cb14c676be39`. The watch/build roadmap was originally researched from the documented clean `v0.7.0` baseline; earlier delivery history and external evidence remain recorded in [SOURCES.md](SOURCES.md).
 
-Tasks 001–025 and 028–037 are delivered; their exact PR, commit, CI, and acceptance history remains in the task records and [SOURCES.md](SOURCES.md). Task 037 merged through PRs #47/#48, Task 028 merged in PR #51, Task 031 merged in PR #52, and Task 030 merged in PR #53 before the `semantifold@0.7.0` release. Task 038 is implemented in PR #55 with coordinator review, TensorBuzz CI, merge, and release still pending. Task 026 has deterministic generation/provenance while Apple materialization and acceptance remain deferred. Task 027 remains deferred roadmap work. Tasks 039–046 remain planned watch/build/check work and grant no implementation authority by themselves.
+Tasks 001–025 and 028–038 are delivered in released `semantifold@0.9.0`; their exact PR, commit, CI, and acceptance history remains in the task records and [SOURCES.md](SOURCES.md). Task 039's strict manifest and one-shot build CLI are implemented locally with focused/package acceptance; coordinator review, exact-head TensorBuzz CI, merge, and release remain pending. Task 026 has deterministic generation/provenance while Apple materialization and acceptance remain deferred. Task 027 remains deferred roadmap work. Tasks 040–046 remain planned check/watch work and grant no implementation authority by themselves.
 
 The delivered language-baseline expansion keeps its small Tasks 001–004 IR contract. Tasks 005–008 are bounded original-five semantic layers; none makes every platform, legacy bridge, or later language block semantic progress.
 
@@ -132,8 +132,8 @@ These tasks do not gate Task 005. Browser Wasm depends only on Task 015 and rema
 
 ### Phase W — project build, watch, and target checks
 
-- [038 — Transactional generated-artifact publication](038-transactional-generated-artifact-publication.md) — implemented in PR #55; coordinator review/CI/merge pending
-- [039 — Project manifest and one-shot build CLI](039-project-manifest-and-build-cli.md)
+- [038 — Transactional generated-artifact publication](038-transactional-generated-artifact-publication.md) — delivered in `semantifold@0.9.0`
+- [039 — Project manifest and one-shot build CLI](039-project-manifest-and-build-cli.md) — implemented locally; coordinator review/CI/merge pending
 - [040 — Target check-plan contract and Java `javac` slice](040-target-check-plan-and-java-javac.md)
 - [041 — Interpreted and managed text-target check plans](041-interpreted-managed-target-check-plans.md)
 - [042 — Native and project text-target check plans](042-native-project-target-check-plans.md)
@@ -142,7 +142,7 @@ These tasks do not gate Task 005. Browser Wasm depends only on Task 015 and rema
 - [045 — All-text-language watch/check terminal acceptance](045-all-text-language-watch-check-acceptance.md)
 - [046 — Binary and application-target watch policies](046-binary-application-watch-policies.md) — later, non-blocking
 
-Phase W follows the [watch/build/check design](../docs/watch-build-pipeline.md). The one-shot public composition parses JavaScript/JSDoc, generates `Main.java`, and can run caller-supplied `javac`; Task 038 now supplies its transactional persistent publisher. It still has no project CLI, target-owned check plan, or watcher. Tasks 039–045 remain the text-language delivery chain in dependency order, with Task 045 as its single terminal acceptance task. Task 046 later defines truthful policies for Wasm and application targets without reopening deferred Apple/Xcode work.
+Phase W follows the [watch/build/check design](../docs/watch-build-pipeline.md). Tasks 038–039 now supply transactional persistent publication plus the strict one-shot project CLI. The CLI generates and publishes but does not invoke `javac`, run generated output, or watch files. Tasks 040–045 remain the check/watch delivery chain in dependency order, with Task 045 as its single terminal acceptance task. Task 046 later defines truthful watch/check policies for Wasm and application targets without reopening deferred Apple/Xcode work.
 
 ## Language and artifact role matrix
 
@@ -281,8 +281,8 @@ Dependencies in task files are authoritative. Existing IDs remain stable; numeri
 | [035](035-versioned-standard-library-contracts-and-provider-linking.md) | delivered (S) | P1 | Canonical stdlib contracts/provider linking; PR #45 merge `a2aad9d4932bfc6087adc4ff8bca43678c92413c` | 010, 034 |
 | [036](036-language-compatibility-stdlib-facades.md) | delivered (S) | P1 | Versioned executable source-language qualification facades; PR #46 merge `9aba48f9d48bcef4fd4c9275aec14bfcc4f0904c` | 035 |
 | [037](037-blocking-tcp-client-stdlib-vertical-slice.md) | delivered (S; PRs #47/#48) | P1 proof | Ruby-to-PHP blocking TCP slice | 032, 036 |
-| [038](038-transactional-generated-artifact-publication.md) | implemented (W; PR #55; review/CI/merge pending) | P0 | Transactional owned artifact publication/recovery | 015 |
-| [039](039-project-manifest-and-build-cli.md) | roadmap (W) | P0 | Strict project manifest and one-shot build CLI | 010, 038 |
+| [038](038-transactional-generated-artifact-publication.md) | delivered (W; `v0.9.0`) | P0 | Transactional owned artifact publication/recovery | 015 |
+| [039](039-project-manifest-and-build-cli.md) | implemented locally (W; review/CI/merge pending) | P0 | Strict project manifest and one-shot build CLI | 010, 038 |
 | [040](040-target-check-plan-and-java-javac.md) | roadmap (W) | P0 | Generic check-plan contract plus Java/`javac` | 039 |
 | [041](041-interpreted-managed-target-check-plans.md) | roadmap (W) | P1 | PHP/Ruby/JS/TS/Kotlin/Python/C# checks | 040 |
 | [042](042-native-project-target-check-plans.md) | roadmap (W) | P1 | Go/C/C++/Rust/Swift/Dart/Zig checks | 040 |
@@ -324,7 +324,7 @@ A task is complete only when its own criteria and these repository-wide rules ho
 
 ## Explicit exclusions
 
-The roadmap document itself grants no implementation authority. Task 038's implemented record describes its bounded publication API; Tasks 039–046 describe planned commands/capabilities that do not yet exist. Delivered and implemented task records above describe their bounded behavior; the roadmap continues to exclude source-text fallbacks, parser AST exposure, bundled parser/tool archives, runtime downloads during tests, user package-manager resolution, lossless formatting, macro/preprocessor systems, reflection, FFI/unsafe code, native extensions, automatic credentials/signing/provisioning, device registration, TestFlight/App Store/Play Store submission, and a compiler-framework rewrite.
+The roadmap document itself grants no implementation authority. Tasks 038–039 describe their bounded implemented publication and one-shot project-build APIs; Tasks 040–046 describe planned check/watch capabilities that do not yet exist. Delivered and implemented task records above describe their bounded behavior; the roadmap continues to exclude source-text fallbacks, parser AST exposure, bundled parser/tool archives, runtime downloads during tests, user package-manager resolution, lossless formatting, macro/preprocessor systems, reflection, FFI/unsafe code, native extensions, automatic credentials/signing/provisioning, device registration, TestFlight/App Store/Play Store submission, and a compiler-framework rewrite.
 
 Ruby-to-iOS is semantic translation into generated Swift application code, never an embedded Ruby VM. Objective-C++ and Metal remain outside the Objective-C bridge. Android and Flutter lanes do not make platform APIs semantic nodes. Browser Wasm remains distinct from WASI and Wasm source input.
 

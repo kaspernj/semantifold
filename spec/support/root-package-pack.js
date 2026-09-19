@@ -6,7 +6,7 @@ import os from "node:os"
 import path from "node:path"
 
 const fixtureEntries = [
-  ".npmrc", "LICENSE", "README.md", "docs", "index.js", "package-lock.json", "package.json", "packages", "scripts",
+  ".npmrc", "LICENSE", "README.md", "bin", "docs", "index.js", "package-lock.json", "package.json", "packages", "scripts",
   "src", "tsconfig.json", "node_modules"
 ]
 

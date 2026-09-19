@@ -1,6 +1,6 @@
 # 038 — Transactional generated-artifact publication
 
-- Status: `implemented in PR #55; coordinator review/CI/merge pending`
+- Status: `delivered in semantifold@0.9.0`
 - Phase/priority: Phase W / P0 foundation
 - Dependencies: [015-language-expansion-foundation.md](015-language-expansion-foundation.md)
 - Design: [Watch, build, and target-check pipeline](../docs/watch-build-pipeline.md)

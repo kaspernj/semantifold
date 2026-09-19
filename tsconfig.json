@@ -13,5 +13,5 @@
     "types": ["node"],
     "strict": true
   },
-  "include": ["index.js", "src/**/*"]
+  "include": ["bin/**/*", "index.js", "src/**/*"]
 }

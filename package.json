@@ -5,6 +5,9 @@
   "type": "module",
   "main": "build/index.js",
   "types": "build/index.d.ts",
+  "bin": {
+    "semantifold": "bin/semantifold.js"
+  },
   "exports": {
     ".": {
       "types": "./build/index.d.ts",
@@ -13,6 +16,7 @@
   },
   "files": [
     "build/**",
+    "bin/**",
     "docs/**",
     "index.js",
     "LICENSE",

@@ -1,6 +1,6 @@
 # 039 — Project manifest and one-shot build CLI
 
-- Status: `roadmap`
+- Status: `implemented locally; focused and package acceptance pass; coordinator review / exact-head TensorBuzz CI / merge pending`
 - Phase/priority: Phase W / P0 foundation
 - Dependencies: [010-multifile-modules-and-names.md](010-multifile-modules-and-names.md), [038-transactional-generated-artifact-publication.md](038-transactional-generated-artifact-publication.md)
 - Design: [Watch, build, and target-check pipeline](../docs/watch-build-pipeline.md)
@@ -9,11 +9,11 @@
 
 Add a strict versioned Semantifold project manifest and a real package CLI that turns an explicit source snapshot into one atomically selected immutable project generation containing one or more generated targets in a one-shot `build` operation.
 
-## Current evidence and gap
+## Starting evidence and delivered result
 
-`parseProgram({entryModule, sources})` and `generateProgramArtifactSet({language, program})` already accept explicit multi-file projects. Target-only binary/application roles are also available through the generation APIs. `package.json` exposes no `bin`, the package has no project manifest, callers must assemble every API request themselves, and no product path publishes returned artifacts.
+The released `semantifold@0.9.0` starting point provided `parseProgram({entryModule, sources})`, `generateProgramArtifactSet({language, program})`, and Task 038 transactional publication but exposed no package bin or project manifest. Task 039 now adds the strict loader and immutable project value, bounded stable snapshot builder, one-shot builder, reporter, strict CLI, and packaged executable. The builder composes the existing semantic/backend dispatch and publishes all ordered targets through one deterministic immutable generation.
 
-## Planned manifest
+## Implemented manifest
 
 Define and validate `semantifold.json` version 1 with no unknown fields. It declares:
 
@@ -25,13 +25,13 @@ Define and validate `semantifold.json` version 1 with no unknown fields. It decl
 
 Reject duplicate module/target identities, unsupported roles, feature-incompatible targets, publication/source overlap, colliding or nested target projections, and any path that escapes or aliases the declared publication root. Independently promoted output/build roots are invalid.
 
-## CLI contract
+## Implemented CLI contract
 
-- Add an executable ESM `semantifold` package bin with a planned `build --project <path>` command. The default project path may be `./semantifold.json`; every other argument and unknown option fails loudly.
+- The executable ESM `semantifold` package bin implements `build`, defaults to `./semantifold.json`, accepts one `--project <path>` and one `--ndjson`, and rejects every other argument or duplicate.
 - Implement CLI behavior in importable classes/modules. Spawn no shell and hide no durable logic in `node -e` or template strings.
 - Load and freeze one complete source snapshot before parsing. Every source read is explicit and ordered; a mid-read mutation causes a bounded retry or a located unstable-snapshot failure, never a mixed parse.
 - Parse/link once, generate every declared target from that semantic snapshot, stage all target source/build projections beneath one immutable project generation, and commit it all-or-nothing through Task 038's single active-pointer replacement.
-- Emit concise human diagnostics and an optional newline-delimited JSON protocol with project identity, source snapshot hash, cycle `1`, target results, timings, and exactly one terminal record.
+- Emit concise human diagnostics and an optional deterministic newline-delimited JSON state protocol with project identity, source snapshot hash, cycle `1`, ordered target results, and exactly one terminal record.
 - Return exit `0` only after the active-generation pointer names the committed candidate. Configuration, source-read, parse, semantic, generation, check, or pre-pointer publication failure returns non-zero and leaves the prior pointer authoritative.
 - Package the bin in the public tarball and prove a fresh credential-free packed consumer can run it.
 
@@ -46,7 +46,7 @@ Reject duplicate module/target identities, unsupported roles, feature-incompatib
 
 ## Documentation
 
-Document the manifest schema, command, path/ownership rules, diagnostics, exit statuses, examples, and the clear distinction between implemented `build` and future `watch`/`--check`. Add a behavior changelog fragment when implemented.
+[Project manifest and one-shot build CLI](../docs/project-build-cli.md) documents the schema, command, path/ownership rules, snapshot and transaction semantics, human/NDJSON output, diagnostics, exit statuses, importable API, and copy-ready JavaScript/JSDoc-to-Java example. It distinguishes implemented generation/publication from later compiler/check and watch tasks.
 
 ## Non-goals
 
@@ -57,3 +57,5 @@ Filesystem watching, compiler execution, arbitrary includes/excludes/globs, pack
 - A fresh consumer can declare explicit sources/targets and run one deterministic build that publishes one immutable project generation through one atomic active-pointer replacement.
 - The CLI composes existing public semantic APIs instead of duplicating parser/backend dispatch.
 - Multi-target failure is atomic, protocol/exit behavior is deterministic, and the packed CLI passes focused tests, lint/typecheck, docs, and package gates.
+
+The implementation and focused real-filesystem/packed-consumer coverage satisfy these criteria locally. Independent review, exact-head TensorBuzz CI, merge, and release remain coordinator-owned.
