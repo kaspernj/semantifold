@@ -134,11 +134,11 @@ npx semantifold build --check
 
 Resolve `.semantifold/active-generation.json` once; the checked generation from this manifest contains Java at `targets/java/source/semantifold/generated/main/Main.java` and compiler output at `targets/java/build/semantifold/generated/main/Main.class`. The two paths belong to the same immutable generation and are never promoted separately. Omitting `buildProjection` instead selects `targets/<target-id>/build`.
 
-`build --check` compiles but does not run Java. Acceptance code may explicitly invoke the committed class afterward. Other target check plans remain Tasks 041–042; watch coordination and acceptance remain Tasks 043–045. No build mode garbage-collects committed generations or implements hot reload.
+`build --check` compiles but does not run Java. Acceptance code may explicitly invoke the committed class afterward. Task 043 now composes the same builder through `semantifold watch`; see [deterministic project watch](project-watch.md). Other target check plans remain Tasks 041–042, the packed Java watch vertical slice remains Task 044, and terminal acceptance remains Task 045. No build or watch mode garbage-collects committed generations or implements hot reload.
 
 ## Importable API and diagnostics
 
-`ProjectManifestLoader`, `SemantifoldProject`, `ProjectSnapshotBuilder`, `ProjectSnapshot`, `ProjectBuilder`, `ProjectBuildReporter`, `SemantifoldCli`, `parseSemantifoldCliArguments`, `createTargetCheckPlan`, and `TargetCheckRunner` are public ESM exports. `languageCapabilities[].check` truthfully exposes immutable `supported`, `stages`, and `toolchains` fields without claiming execution. The executable is only a thin wrapper around `SemantifoldCli`.
+`ProjectManifestLoader`, `SemantifoldProject`, `ProjectSnapshotBuilder`, `ProjectSnapshot`, `ProjectBuilder`, `ProjectBuildReporter`, `ProjectWatchCoordinator`, `ProjectWatchReporter`, `SemantifoldCli`, `parseSemantifoldCliArguments`, `createTargetCheckPlan`, and `TargetCheckRunner` are public ESM exports. `languageCapabilities[].check` truthfully exposes immutable `supported`, `stages`, and `toolchains` fields without claiming execution. The executable is only a thin wrapper around `SemantifoldCli`.
 
 Plan and lifecycle failures use `UNSUPPORTED_TARGET_CHECK`, `INVALID_TARGET_CHECK_PLAN`, `TARGET_CHECK_LAUNCH_FAILURE`, `TARGET_CHECK_OUTPUT_LIMIT`, `TARGET_CHECK_TIMEOUT`, `TARGET_CHECK_CANCELLED`, `TARGET_CHECK_SIGNAL`, `TARGET_CHECK_NONZERO_EXIT`, and `TARGET_CHECK_OUTPUT_INVALID`. Discovery retains `TOOL_NOT_FOUND`, `TOOL_AMBIGUOUS`, and version diagnostics. Publisher validation remains the transaction boundary and preserves the check diagnostic as its structured cause.
 

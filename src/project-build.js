@@ -6,13 +6,15 @@ import {SemantifoldDiagnostic} from "./diagnostic.js"
 import {parseProgramSource} from "./frontends/program.js"
 import {ProjectManifestLoader} from "./project-manifest.js"
 import {ProjectSnapshotBuilder} from "./project-snapshot.js"
-import {GeneratedArtifactPublisher} from "./publication.js"
+import {GeneratedArtifactPublisher, guardNextPublicationCommit} from "./publication.js"
 import {languageRegistry} from "./language-registry.js"
 import {createTargetCheckPlan, TargetCheckRunner} from "./target-check.js"
 import {canonicalToolchains, discoverCanonicalToolchain} from "./toolchains.js"
 
 /** @type {WeakMap<ProjectBuilder, (operation: string) => void>} */
 const projectBuildObservers = new WeakMap()
+/** @type {WeakMap<ProjectBuilder, ProjectWatchBuildControls[]>} */
+const projectWatchBuildControls = new WeakMap()
 
 /**
  * Installs an internal synchronous orchestration observer for focused specs.
@@ -26,6 +28,36 @@ export function observeProjectBuild(builder, observer) {
     throw new TypeError("Invalid project build observer.")
   }
   projectBuildObservers.set(builder, observer)
+}
+
+/**
+ * Runs one builder invocation with the narrow snapshot-currentness controls owned by the watch coordinator.
+ * This helper is intentionally not part of the package root API.
+ * @param {ProjectBuilder} builder - Project builder instance.
+ * @param {string} projectPath - Exact project manifest path.
+ * @param {ProjectBuildReporterLike} reporter - Watch-cycle reporter.
+ * @param {ProjectWatchBuildOptions} options - Checked-cycle and currentness controls.
+ * @returns {Promise<Readonly<ProjectBuildSuccess>>} Committed build result.
+ */
+export function buildWatchedProject(builder, projectPath, reporter, options) {
+  if (!(builder instanceof ProjectBuilder) || typeof projectPath != "string" || projectPath.length == 0 ||
+    !isPlainObject(options) || Object.keys(options).some(key =>
+      !["check", "expectedSnapshotHash", "publicationSignal", "signal", "validateCurrentSnapshot"].includes(key)) ||
+    typeof options.check != "boolean" || typeof options.expectedSnapshotHash != "string" ||
+    !/^[a-f0-9]{64}$/u.test(options.expectedSnapshotHash) || !(options.publicationSignal instanceof AbortSignal) ||
+    !(options.signal instanceof AbortSignal) || typeof options.validateCurrentSnapshot != "function") {
+    throw new TypeError("Invalid watched project build controls.")
+  }
+  const queued = projectWatchBuildControls.get(builder) ?? []
+
+  queued.push({
+    expectedSnapshotHash: options.expectedSnapshotHash,
+    publicationSignal: options.publicationSignal,
+    validateCurrentSnapshot: options.validateCurrentSnapshot
+  })
+  projectWatchBuildControls.set(builder, queued)
+
+  return builder.build(projectPath, reporter, {check: options.check, signal: options.signal})
 }
 
 /**
@@ -58,18 +90,24 @@ export class ProjectBuilder {
   /**
    * Builds and atomically publishes one project generation.
    * @param {string} [projectPath] - Project manifest path.
-   * @param {import("./project-reporter.js").ProjectBuildReporter} [reporter] - Optional state reporter.
-   * @param {{check?: boolean, signal?: AbortSignal, timeoutMs?: number}} [options] - Optional developer-check lifecycle.
+   * @param {ProjectBuildReporterLike} [reporter] - Optional state reporter.
+   * @param {ProjectBuildOptions} [options] - Optional developer-check and publication lifecycle.
    * @returns {Promise<Readonly<ProjectBuildSuccess>>} Committed build result.
    */
   async build(projectPath = "./semantifold.json", reporter, options = {}) {
+    const queuedWatchControls = projectWatchBuildControls.get(this)
+    const watchControls = queuedWatchControls?.shift()
+
+    if (queuedWatchControls?.length == 0) projectWatchBuildControls.delete(this)
     if (typeof options != "object" || options == null || Array.isArray(options) || Object.getPrototypeOf(options) != Object.prototype ||
+      Object.keys(options).some(key => !["check", "signal", "timeoutMs"].includes(key)) ||
       options.check !== undefined && typeof options.check != "boolean" ||
-      options.signal !== undefined && !(options.signal instanceof AbortSignal)) {
+      options.signal !== undefined && !(options.signal instanceof AbortSignal) ||
+      options.timeoutMs !== undefined && (typeof options.timeoutMs != "number" || !Number.isInteger(options.timeoutMs))) {
       throw new SemantifoldDiagnostic({
         code: "INVALID_PROJECT_BUILD",
         language: "project",
-        message: "Project build options require an optional Boolean check and AbortSignal."
+        message: "Project build options require valid check, snapshot-currentness, cancellation, and timeout controls."
       })
     }
     const check = options.check === true
@@ -78,6 +116,14 @@ export class ProjectBuilder {
 
     reporter?.projectLoaded(project.id)
     const snapshot = await this.#snapshotBuilder.build(project)
+
+    if (watchControls !== undefined && snapshot.hash != watchControls.expectedSnapshotHash) {
+      throw new SemantifoldDiagnostic({
+        code: "WATCH_SNAPSHOT_CHANGED",
+        language: project.id,
+        message: "The complete project snapshot changed before its watch cycle began."
+      })
+    }
 
     reporter?.snapshotLoaded(snapshot.hash)
     projectBuildObservers.get(this)?.("snapshot")
@@ -182,8 +228,16 @@ export class ProjectBuilder {
     const generationId = check
       ? `g-${snapshot.hash}-checked-${randomUUID()}`
       : `g-${snapshot.hash}`
+    if (watchControls !== undefined) {
+      guardNextPublicationCommit(publisher, watchControls.validateCurrentSnapshot)
+    }
+    const publicationSignal = signal === undefined
+      ? watchControls?.publicationSignal
+      : watchControls === undefined
+        ? signal
+        : AbortSignal.any([signal, watchControls.publicationSignal])
     const generation = await publisher.publish({generationId, targets: publicationTargets}, {
-      ...(signal === undefined ? {} : {signal})
+      ...(publicationSignal === undefined ? {} : {signal: publicationSignal})
     })
 
     projectBuildObservers.get(this)?.("publish")
@@ -206,6 +260,37 @@ export class ProjectBuilder {
     })
   }
 }
+
+/**
+ * @typedef ProjectBuildOptions
+ * @property {boolean} [check] - Whether every target must run its developer check.
+ * @property {AbortSignal} [signal] - Active check and publication cancellation authority.
+ * @property {number} [timeoutMs] - Per-check-stage deadline.
+ */
+
+/**
+ * @typedef ProjectWatchBuildOptions
+ * @property {boolean} check - Whether every target must run its developer check.
+ * @property {string} expectedSnapshotHash - Coordinator-reconciled complete graph hash.
+ * @property {AbortSignal} publicationSignal - Publication-only cancellation authority.
+ * @property {AbortSignal} signal - Active check and publication cancellation authority.
+ * @property {() => Promise<void> | void} validateCurrentSnapshot - Complete graph guard at the pointer boundary.
+ */
+
+/**
+ * @typedef ProjectWatchBuildControls
+ * @property {string} expectedSnapshotHash - Coordinator-reconciled complete graph hash.
+ * @property {AbortSignal} publicationSignal - Publication-only cancellation authority.
+ * @property {() => Promise<void> | void} validateCurrentSnapshot - Complete graph guard at the pointer boundary.
+ */
+
+/**
+ * @typedef ProjectBuildReporterLike
+ * @property {(projectId: string) => void} projectLoaded - Reports validated configuration.
+ * @property {(snapshotHash: string) => void} snapshotLoaded - Reports a complete snapshot.
+ * @property {(target: ProjectBuildTargetResult) => void} targetGenerated - Reports generated target output.
+ * @property {(checked: {id: string, language: string, stage: import("./semantic/types.js").TargetCheckStageResult}) => void} targetChecked - Reports a successful check stage.
+ */
 
 /**
  * @typedef ProjectBuildTargetResult
@@ -256,4 +341,13 @@ function snapshotEnvironment(candidate) {
   }
 
   return Object.freeze(snapshot)
+}
+
+/**
+ * Checks for an ordinary object-prototype record.
+ * @param {unknown} value - Candidate value.
+ * @returns {value is Record<string, unknown>} Whether the value is a plain object.
+ */
+function isPlainObject(value) {
+  return typeof value == "object" && value != null && !Array.isArray(value) && Object.getPrototypeOf(value) == Object.prototype
 }
