@@ -1,5 +1,23 @@
 # Testing
 
+## Task 039 project manifest and one-shot build CLI
+
+Task 039 uses four focused real-filesystem specs plus the public API and nearby publication regression. Manifest coverage owns the closed schema, registered complete-program roles, identities, entry selection, portable paths, source/publication separation, projection collisions, hard-link aliases, and symlink roots. Snapshot coverage owns deterministic ordered hashing and bounded real-file mutation. Build coverage owns one-file JavaScript/JSDoc-to-Java, Task-010 multi-file/multi-target publication, one parse and pointer commit, project-root source ownership, and late-target atomic failure. CLI coverage owns strict arguments, human/NDJSON terminal truth, and exit status. The packed-consumer spec performs credential-scrubbed ordinary install and clean `npm ci`, full dependency listing, public typechecking, and real package-bin execution.
+
+Run the focused files individually and sequentially:
+
+```sh
+npx velocious-test spec/project-manifest.spec.js
+npx velocious-test spec/project-snapshot.spec.js
+npx velocious-test spec/project-build.spec.js
+npx velocious-test spec/project-cli.spec.js
+npx velocious-test spec/project-cli-packed-consumer.spec.js
+npx velocious-test spec/generated-artifact-publication.spec.js
+npx velocious-test spec/public-api.spec.js
+```
+
+These tests generate and publish source artifacts only. They do not run `javac`, execute generated output, discover packages, or watch files.
+
 ## Task 005 general function signatures and calls
 
 Task 005 stays bounded to PHP, Ruby, JavaScript with JSDoc, TypeScript, and Java. `general-function-signatures-and-calls.spec.js` proves equivalent zero-, one-, and three-parameter signatures, complete signature collection, nested calls, terminating recursion, scalar/void returns, and the stable semantic failures. `general-function-frontend-validation.spec.js` owns the excluded parameter, call, method, receiver, dispatch, annotation, overload, generic, and higher-order source forms. `general-function-backend-validation.spec.js` proves generation/reparse, exact external-IR signature revalidation, target conflicts, the public feature flag, and transactional rejection from every deferred Task 025/Wasm target. `general-function-provenance-and-mapping.spec.js` proves deterministic declaration/resolution identities and exact signature/call mappings. `general-function-runtime-execution.spec.js` invokes real PHP, Ruby, Node, local `tsc` followed by Node, `javac`, and `java`, requiring exact `ready\n6\n` output; a missing command fails.

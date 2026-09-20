@@ -425,7 +425,7 @@
 
 /**
  * @typedef PublicationRequest
- * @property {string} generationId - Unique explicit generation/cycle identity.
+ * @property {string} generationId - Explicit generation/cycle identity, fresh or an exact retained validator-free candidate.
  * @property {readonly PublicationTargetInput[]} targets - Complete ordered project targets.
  */
 

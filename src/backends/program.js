@@ -26,6 +26,23 @@ const programTargets = new Set(["php", "ruby", "javascript", "typescript", "java
 const programApplicationTargets = new Set(["android", "ios", "flutter"])
 
 /**
+ * Reports whether program generation implements one registered target/role combination.
+ * @param {string} language - Registered target identity.
+ * @param {string} role - Explicit project target role.
+ * @returns {boolean} Whether complete semantic programs support the combination.
+ */
+export function supportsProgramArtifactRole(language, role) {
+  if (role == "text") {
+    return programTargets.has(/** @type {import("../semantic/types.js").SemanticLanguage} */ (language))
+  }
+  if (role == "application") {
+    return programApplicationTargets.has(/** @type {import("../semantic/types.js").BackendLanguage} */ (language))
+  }
+
+  return false
+}
+
+/**
  * Validates and prepares a complete semantic program for a non-text backend without allocating a writer.
  * @param {object} input - Backend preflight request.
  * @param {import("../semantic/types.js").SemanticLanguage} input.backendLanguage - Existing semantic backend profile to enforce.

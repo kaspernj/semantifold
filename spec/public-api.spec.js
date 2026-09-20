@@ -26,14 +26,22 @@ import {
   originalPositionFor,
   parse,
   parseProgram,
+  parseSemantifoldCliArguments,
   parseByteMapping,
   parseMapping,
+  ProjectBuilder,
+  ProjectBuildReporter,
+  ProjectManifestLoader,
+  ProjectSnapshot,
+  ProjectSnapshotBuilder,
   primaryLocation,
   remapDiagnostic,
   remapLocation,
   resolveStdlibFacade,
   runAcceptanceStages,
+  SemantifoldCli,
   SemantifoldDiagnostic,
+  SemantifoldProject,
   spansForNode,
   spansForSymbol,
   stringifyByteMapping,
@@ -68,6 +76,14 @@ describe("public API", () => {
     expect(typeof canonicalToolchains).toEqual("object")
     expect(typeof SemantifoldDiagnostic).toEqual("function")
     expect(typeof GeneratedArtifactPublisher).toEqual("function")
+    expect(typeof ProjectBuilder).toEqual("function")
+    expect(typeof ProjectBuildReporter).toEqual("function")
+    expect(typeof ProjectManifestLoader).toEqual("function")
+    expect(typeof ProjectSnapshot).toEqual("function")
+    expect(typeof ProjectSnapshotBuilder).toEqual("function")
+    expect(typeof SemantifoldCli).toEqual("function")
+    expect(typeof SemantifoldProject).toEqual("function")
+    expect(typeof parseSemantifoldCliArguments).toEqual("function")
     for (const api of [
       composeMappings,
       composeSourceMaps,

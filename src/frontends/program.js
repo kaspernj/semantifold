@@ -19,6 +19,15 @@ import {inspectRubyModule} from "./ruby.js"
 const programLanguages = new Set(["php", "ruby", "javascript", "typescript", "java"])
 const moduleIdPattern = /^[a-z][a-z0-9_]*(?:[.-][a-z][a-z0-9_]*)*$/u
 
+/**
+ * Reports whether a registered frontend participates in the explicit Task-010 program profile.
+ * @param {string} language - Registered source identity.
+ * @returns {boolean} Whether the profile accepts the language.
+ */
+export function supportsProgramSourceLanguage(language) {
+  return programLanguages.has(/** @type {import("../semantic/types.js").SemanticLanguage} */ (language))
+}
+
 /** @typedef {{facade?: import("../stdlib-facades.js").StdlibFacadeRecord, filename: string, id: string, language: import("../semantic/types.js").SemanticLanguage, ownership: "application" | "facade", source: string}} ProgramSource */
 /** @typedef {{declarationLocation?: import("../semantic/types.js").SourceLocation, facade?: import("../stdlib-facades.js").StdlibFacadeRecord, importedName: string, importedNameLocation?: import("../semantic/types.js").SourceLocation, localName: string, localNameLocation?: import("../semantic/types.js").SourceLocation, location: import("../semantic/types.js").SourceLocation, namespace?: boolean, pathLocation: import("../semantic/types.js").SourceLocation, specifier: string, stdlibCandidate?: true, typeOnly: boolean}} ProgramImportRequest */
 /** @typedef {{importedName: string, localName: string, location: import("../semantic/types.js").SourceLocation, nativeName: string, symbolKind: import("../semantic/types.js").SemanticDeclarationKind, typeOnly: boolean}} ProgramNativeBinding */

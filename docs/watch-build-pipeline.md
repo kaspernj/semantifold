@@ -2,7 +2,7 @@
 
 ## Status and verified baseline
 
-This document is a roadmap contract, not an implemented CLI contract.
+Task 039 now implements the strict project manifest, stable one-shot snapshot, deterministic generation orchestration, human/NDJSON reporting, and packaged `semantifold build` command. Target check plans and watching remain roadmap contracts.
 
 The inspected baseline is `semantifold@0.7.0`, annotated tag `v0.7.0`, commit `8cd70c5a6c7de98df2d4a183d6555ad4f3d5ba5a`. At that revision:
 
@@ -11,16 +11,16 @@ The inspected baseline is `semantifold@0.7.0`, annotated tag `v0.7.0`, commit `8
 - `discoverCanonicalToolchain` finds the configured `javac` and `java` executables.
 - `runAcceptanceStages` materializes an artifact set in a temporary directory and runs caller-supplied exact argument arrays with bounded process execution.
 - A bounded direct proof parsed the 2,648-byte JSDoc fixture `spec/fixtures/compatibility/program.js`, generated `Main.java`, compiled it with `javac 25.0.4`, executed it with Java 25.0.4, and observed the canonical output `compat\nbranch-ok!\npresent\nabsent\n7\n2\n3\n5\n4\n`.
-- `package.json` has no `bin` entry. The public API does not persist generated artifacts, load a project manifest, derive compiler arguments from a target, or watch source files.
+- `package.json` had no `bin` entry. The public API did not persist generated artifacts, load a project manifest, derive compiler arguments from a target, or watch source files.
 - The only repository file-change watcher is a test helper; there is no product watch coordinator, incremental dependency graph, event coalescing policy, or long-lived compiler owner.
 
-The released baseline therefore already proves **JavaScript/JSDoc → semantic IR → Java → `javac`** as a one-shot composition. Task 038 now adds the public language-neutral `GeneratedArtifactPublisher`, immutable generation manifests, one atomic active pointer, pointer-once resolution, and journal-bounded recovery described below. Project configuration, target-owned check plans, CLI behavior, and watching remain Tasks 039 and later.
+That historical baseline proved **JavaScript/JSDoc → semantic IR → Java → `javac`** as a one-shot composition. Released `semantifold@0.9.0` supplies Task 038's public language-neutral `GeneratedArtifactPublisher`, immutable generation manifests, one atomic active pointer, pointer-once resolution, and journal-bounded recovery. Task 039 now adds the package bin, project configuration, and one-shot CLI behavior; target-owned check plans and watching remain Tasks 040 and later.
 
 ## Product outcome
 
 A project can declare explicit source modules, one or more generated targets, one publisher-owned project publication root, target-relative generated/build projections, and whether each target is checked with its real toolchain. It can then run:
 
-- a planned one-shot `semantifold build`; or
+- the implemented one-shot `semantifold build`; or
 - a planned long-lived `semantifold watch`.
 
 For the first end-to-end slice, changing a JSDoc-typed JavaScript source regenerates Java and compiles the staged candidate with `javac`. A successful cycle publishes one coherent generated-source/compiler-output generation through one active-generation pointer switch. A parse, semantic, generation, tool-discovery, compiler, or publication failure reports a located diagnostic, keeps the process alive in watch mode, and leaves the previous successful generation usable. A later valid edit recovers without restarting the watcher.
@@ -29,13 +29,13 @@ The architecture is target-neutral. Every current text backend eventually suppli
 
 ## Architecture boundaries
 
-### Project manifest and loader
+### Project manifest and loader (Task 039 implemented)
 
 A versioned, strict manifest declares ordered source modules and target entries. Source language, module identity, entry identity, target language/role, one project publication root, and each target's generated/check subpaths inside an immutable project generation are explicit. These target paths are logical projections, not independently promoted filesystem roots. Version 1 uses explicit file paths rather than introducing a glob language or package-manager resolution.
 
-The loader owns path normalization and rejects unknown fields, duplicate module/target identities, ambiguous target roles, source/publication overlap, publication roots outside the project root, colliding or nested target projections, and symlink/path traversal across the owned publication root. It returns an immutable project request and never parses language syntax.
+The loader owns path normalization and rejects unknown fields, duplicate module/target identities, ambiguous target roles, source/publication overlap, publication roots outside the project root, colliding or nested target projections, symlink/path traversal across the owned publication root, and registered backend capabilities whose required configuration version 1 cannot express. It returns an immutable project request and never parses language syntax.
 
-### Snapshot builder
+### Snapshot builder (Task 039 implemented for one-shot builds)
 
 Each cycle reads a complete content snapshot of every declared source and the project manifest. File events are hints only. Before parsing, the coordinator re-reads and hashes the declared graph in stable order; it never assumes an event filename is complete or authoritative.
 
@@ -89,7 +89,7 @@ Native filesystem events require a bounded reconciliation strategy because Node 
 
 ### Reporting contract
 
-Human output is concise and stable. A machine-readable mode emits one JSON record per state transition with at least project identity, monotonically increasing cycle number, source snapshot hash, target ID/role, state, timing, changed paths, tool identity, exit status, and a structured diagnostic when present.
+Task 039 human output is concise and stable. Its machine-readable mode emits deterministic state records with project identity, cycle `1`, source snapshot hash, ordered target ID/role/results, exit status, and a structured diagnostic when present. It deliberately reports state rather than nondeterministic elapsed time. Later check/watch tasks add changed paths, tool identity, and their lifecycle timing where applicable.
 
 Exactly one terminal cycle record is emitted per cycle. Process exit is non-zero for failed one-shot builds, but ordinary watch-cycle failures keep the watcher process alive. Startup/configuration failure exits. Signal-driven shutdown forwards cancellation to an active owned child, waits for `close`, removes subscriptions and staging state, and exits once.
 
@@ -115,7 +115,7 @@ Exactly one terminal cycle record is emitted per cycle. Process exit is non-zero
 - the same watcher/materializer/runner code handles every source/target pairing;
 - acceptance uses a bounded matrix: all frontends and all text targets are covered, with the JavaScript/JSDoc-to-Java path plus representative cross-family paths, not a quadratic promise that every semantic feature works for every pair.
 
-Binary and application targets use the same generation watcher only after explicit target policy is defined. Browser Wasm can validate/instantiate in its own lane. Android and Flutter checks are heavier platform builds and must be opt-in rather than an automatic keystroke default. iOS remains generation-only until the separately deferred Apple/Xcode acceptance work is authorized; this roadmap does not reopen Tasks 026 or 027.
+Binary and application targets use the same generation watcher only after explicit target policy is defined. Browser Wasm can validate/instantiate in its own lane. Android and Flutter checks are heavier platform builds and must be opt-in rather than an automatic keystroke default. Direct public iOS generation remains available with explicit configuration, but Task 039 manifest version 1 cannot express that configuration and rejects iOS targets; Apple/Xcode acceptance remains separately deferred. This roadmap does not reopen Tasks 026 or 027.
 
 ## Test strategy
 
@@ -147,7 +147,7 @@ Binary and application targets use the same generation watcher only after explic
                   046 later binary/application policies
 ```
 
-Task 038 is the implemented publication foundation. Tasks 039–045 are the remaining selected text-language delivery chain, with Task 045 as its single terminal acceptance task. Task 046 is a non-blocking later extension.
+Tasks 038 and 039 are the implemented publication and one-shot project-build foundation. Tasks 040–045 are the remaining selected text-language check/watch delivery chain, with Task 045 as its single terminal acceptance task. Task 046 is a non-blocking later extension.
 
 ## Non-goals
 

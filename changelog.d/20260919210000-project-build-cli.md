@@ -1,0 +1,5 @@
+- Add the strict version-1 `semantifold.json` project manifest, immutable stable source snapshots, deterministic multi-target one-shot generation, and all-or-nothing publication through one active-generation pointer.
+- Add the packaged `semantifold build` executable with strict `--project` and `--ndjson` modes, truthful terminal status, public project lifecycle classes, and credential-free packed-consumer coverage.
+- Document path ownership, snapshot and output protocols, diagnostics, exit behavior, and the explicit boundary excluding compiler execution and file watching.
+- Reactivate exact retained deterministic generations safely after source reverts, and keep Unicode/space source alias checks separate from generated-artifact path validation.
+- Compare an already-active deterministic generation with the freshly generated candidate, and reject iOS application targets whose required configuration is outside manifest version 1.
