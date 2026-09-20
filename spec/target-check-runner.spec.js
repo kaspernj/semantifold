@@ -267,4 +267,26 @@ while :; do :; done
       await rm(root, {force: true, recursive: true})
     }
   })
+
+  it("retains an undefined stage-callback failure instead of reporting partial success", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "semantifold-task041-runner-undefined-failure-"))
+
+    try {
+      const plan = await planFor(root, process.execPath)
+      const runner = createTargetCheckRunner({execute: async () => ({stderr: "", stdout: ""}), now: () => 0})
+      let resolved = true
+
+      try {
+        await runner.run(plan, {onStage() {
+          throw undefined
+        }})
+      } catch (error) {
+        resolved = false
+        expect(error).toEqual(undefined)
+      }
+      expect(resolved).toBeFalse()
+    } finally {
+      await rm(root, {force: true, recursive: true})
+    }
+  })
 })

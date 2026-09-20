@@ -12,6 +12,7 @@ import {
   environmentPath,
   pathArgument
 } from "./check-plan.js"
+import {csharpProjectManifest} from "./csharp.js"
 
 /**
  * Constructs C#'s offline restore and non-executing build plan.
@@ -20,19 +21,29 @@ import {
  */
 export function createCSharpCheckPlan(context) {
   const tool = checkTool(context, "dotnet", "csharp")
-  const artifacts = checkArtifacts(context, artifact => artifact.path.endsWith(".cs") || artifact.path.endsWith(".csproj") ||
-    path.basename(artifact.path) == "packages.lock.json", "csharp", "only staged C# project, source, and lock artifacts")
-  const projects = context.artifacts.artifacts.filter(artifact => artifact.path.endsWith(".csproj"))
+  const artifacts = checkArtifacts(context, artifact => artifact.path.endsWith(".cs") ||
+    artifact.path == "Semantifold.csproj" || artifact.path == "packages.lock.json",
+  "csharp", "only staged C# source and canonical project/lock artifacts")
+  const projects = context.artifacts.artifacts.filter(artifact => artifact.path == "Semantifold.csproj")
+  const sources = artifacts.filter(artifact => artifact.endsWith(".cs"))
 
-  if (projects.length != 1) {
+  if (projects.length != 1 || projects[0].contentKind != "text" || projects[0].role != "manifest" ||
+    projects[0].content != csharpProjectManifest) {
     throw new SemantifoldDiagnostic({
       code: "INVALID_TARGET_CHECK_PLAN",
       language: "csharp",
-      message: "C# developer checks require exactly one staged '.csproj' artifact."
+      message: "C# developer checks require the exact producer-owned 'Semantifold.csproj' artifact."
+    })
+  }
+  if (sources.length == 0) {
+    throw new SemantifoldDiagnostic({
+      code: "INVALID_TARGET_CHECK_PLAN",
+      language: "csharp",
+      message: "C# developer checks require at least one staged '.cs' artifact."
     })
   }
   const restoreArtifacts = context.artifacts.artifacts
-    .filter(artifact => artifact.path.endsWith(".csproj") || path.basename(artifact.path) == "packages.lock.json")
+    .filter(artifact => artifact.path == "Semantifold.csproj" || artifact.path == "packages.lock.json")
     .sort((left, right) => left.path.localeCompare(right.path, "en"))
   const restoreInputs = Object.freeze(restoreArtifacts.map(artifact => path.join(context.sourcePath, artifact.path)))
   const restoreHash = createHash("sha256")
@@ -49,16 +60,22 @@ export function createCSharpCheckPlan(context) {
   const intermediatePath = path.join(context.buildPath, "obj")
   const intermediate = `${intermediatePath}/`
   const output = path.join(context.buildPath, "bin")
+  const compileItems = sources.map(source => path.relative(context.sourcePath, source).split(path.sep).join("/")).join("%3B")
+  const isolatedProjectProperties = [
+    "--property:ImportDirectoryBuildProps=false",
+    "--property:ImportDirectoryBuildTargets=false"
+  ]
   const restoreArgv = [
     "restore", projectPath, "--source", context.sourcePath, "--packages", packages, "--no-cache", "--force",
     "--disable-parallel",
-    ...(restoreArtifacts.some(artifact => path.basename(artifact.path) == "packages.lock.json") ? ["--locked-mode"] : []),
-    "--nologo", `--property:BaseIntermediateOutputPath=${intermediate}`,
+    ...(restoreArtifacts.some(artifact => artifact.path == "packages.lock.json") ? ["--locked-mode"] : []),
+    "--nologo", ...isolatedProjectProperties, `--property:BaseIntermediateOutputPath=${intermediate}`,
     `--property:MSBuildProjectExtensionsPath=${intermediate}`
   ]
   const compileArgv = [
     "build", projectPath, "--configuration", "Release", "--no-restore", "--nologo", "--warnaserror",
-    "--disable-build-servers", "--output", output, "--property:UseSharedCompilation=false",
+    "--disable-build-servers", "--output", output, ...isolatedProjectProperties,
+    `--property:SemantifoldCompileItems=${compileItems}`, "--property:UseSharedCompilation=false",
     `--property:BaseIntermediateOutputPath=${intermediate}`,
     `--property:MSBuildProjectExtensionsPath=${intermediate}`
   ]
@@ -110,8 +127,8 @@ export function createCSharpCheckPlan(context) {
     output: ownedOutput,
     pathArguments: [
       pathArgument(1, "source"), pathArgument(9, "build"),
-      pathArgument(11, "build", "--property:BaseIntermediateOutputPath="),
-      pathArgument(12, "build", "--property:MSBuildProjectExtensionsPath=")
+      pathArgument(compileArgv.length - 2, "build", "--property:BaseIntermediateOutputPath="),
+      pathArgument(compileArgv.length - 1, "build", "--property:MSBuildProjectExtensionsPath=")
     ],
     stage: "compile",
     tool,

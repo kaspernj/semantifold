@@ -134,6 +134,7 @@ export class TargetCheckRunner {
     const results = []
     /** @type {unknown} */
     let stageFailure
+    let stageFailed = false
 
     try {
       for (const stage of validated.stages) {
@@ -181,6 +182,7 @@ export class TargetCheckRunner {
         options.onStage?.(stageResult)
       }
     } catch (error) {
+      stageFailed = true
       stageFailure = error
     }
     try {
@@ -188,12 +190,12 @@ export class TargetCheckRunner {
     } catch (error) {
       const cleanup = cleanupDiagnostic(error, validated)
 
-      if (stageFailure instanceof Error) throw preservePrimaryFailure(stageFailure, cleanup)
-      if (stageFailure !== undefined) throw new AggregateError([stageFailure, cleanup],
+      if (stageFailed && stageFailure instanceof Error) throw preservePrimaryFailure(stageFailure, cleanup)
+      if (stageFailed) throw new AggregateError([stageFailure, cleanup],
         "Target check failed and its owned transient environment could not be cleaned.", {cause: error})
       throw cleanup
     }
-    if (stageFailure !== undefined) throw stageFailure
+    if (stageFailed) throw stageFailure
     const output = validated.stages.at(-1)?.output
     const outputs = output == null ? [] : await collectBuildOutputs(validated.buildPath, output)
 

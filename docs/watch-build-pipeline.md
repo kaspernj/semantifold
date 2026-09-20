@@ -67,7 +67,7 @@ Java/`javac` compiles every staged `.java` artifact together with `-d` directed 
 - TypeScript type-checks the complete set with no emit and isolated type roots;
 - Kotlin/JVM compiles all sources together to candidate-owned classes;
 - Python produces deterministic checked-hash bytecode at an explicit candidate build path and never creates source-adjacent `__pycache__`;
-- C# hashes project/lock restore inputs, restores from a local-only staged source into candidate-owned state, builds with `--no-restore`, and removes cache/home/intermediate state before publishing only `bin/` outputs.
+- C# requires its exact producer-owned project, disables ancestor MSBuild props/targets, passes every staged `.cs` file in deterministic order, hashes project/lock restore inputs, restores from a local-only staged source into candidate-owned state, builds with `--no-restore`, and removes cache/home/intermediate state before publishing only `bin/` outputs.
 
 Task 042 retains Go, C, C++, Rust, Swift, Dart, and Zig.
 

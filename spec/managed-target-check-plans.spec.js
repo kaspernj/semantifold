@@ -1,11 +1,13 @@
 // @ts-check
 
+import assert from "node:assert/strict"
 import {createHash} from "node:crypto"
 import {mkdir, mkdtemp, rm, writeFile} from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import {describe, expect, it} from "@velocious/testing"
 import {createGeneratedArtifactSet, createTargetCheckPlan, languageCapabilities} from "../index.js"
+import {csharpProjectManifest} from "../src/backends/csharp.js"
 
 const expectedChecks = new Map([
   ["php", {stages: ["validate"], supported: true, toolchains: ["php82"]}],
@@ -27,7 +29,7 @@ const fixtures = new Map([
   ["python", [["program.py", "print(1)\n", "text/x-python", "entry"]]],
   ["csharp", [
     ["Program.cs", "namespace Semantifold.Generated; internal static class Program { private static void Main() {} }\n", "text/x-csharp", "entry"],
-    ["Semantifold.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>\n", "application/xml", "manifest"]
+    ["Semantifold.csproj", csharpProjectManifest, "application/xml", "manifest"]
   ]]
 ])
 
@@ -156,7 +158,8 @@ describe("interpreted and managed target check plans", () => {
         argv: [
           "restore", path.join(csharp.sourcePath, "Semantifold.csproj"), "--source", csharp.sourcePath,
           "--packages", path.join(csharp.buildPath, "nuget-packages"), "--no-cache", "--force", "--disable-parallel",
-          "--nologo", `--property:BaseIntermediateOutputPath=${path.join(csharp.buildPath, "obj")}/`,
+          "--nologo", "--property:ImportDirectoryBuildProps=false", "--property:ImportDirectoryBuildTargets=false",
+          `--property:BaseIntermediateOutputPath=${path.join(csharp.buildPath, "obj")}/`,
           `--property:MSBuildProjectExtensionsPath=${path.join(csharp.buildPath, "obj")}/`
         ],
         inputHash: (() => {
@@ -173,6 +176,8 @@ describe("interpreted and managed target check plans", () => {
       expect(csharp.plan.stages[1].argv).toEqual([
         "build", path.join(csharp.sourcePath, "Semantifold.csproj"), "--configuration", "Release", "--no-restore",
         "--nologo", "--warnaserror", "--disable-build-servers", "--output", path.join(csharp.buildPath, "bin"),
+        "--property:ImportDirectoryBuildProps=false", "--property:ImportDirectoryBuildTargets=false",
+        "--property:SemantifoldCompileItems=Program.cs",
         "--property:UseSharedCompilation=false",
         `--property:BaseIntermediateOutputPath=${path.join(csharp.buildPath, "obj")}/`,
         `--property:MSBuildProjectExtensionsPath=${path.join(csharp.buildPath, "obj")}/`
@@ -222,6 +227,12 @@ describe("interpreted and managed target check plans", () => {
       }],
       target: "csharp"
     })
+    const changedLockedProject = createGeneratedArtifactSet({
+      artifacts: lockedProject.artifacts.map(artifact => artifact.path == "packages.lock.json"
+        ? {...artifact, content: "{\"version\":1,\"dependencies\":{},\"changed\":true}\n"}
+        : artifact),
+      target: "csharp"
+    })
     const replan = (artifacts) => createTargetCheckPlan({
       artifacts,
       buildPath: first.buildPath,
@@ -234,9 +245,14 @@ describe("interpreted and managed target check plans", () => {
     try {
       expect(first.plan.stages[0].inputHash).toEqual(second.plan.stages[0].inputHash)
       expect(replan(changedProgram).stages[0].inputHash).toEqual(first.plan.stages[0].inputHash)
-      expect(replan(changedProject).stages[0].inputHash == first.plan.stages[0].inputHash).toBeFalse()
-      expect(replan(lockedProject).stages[0].argv).toContain("--locked-mode")
-      expect(replan(lockedProject).stages[0].inputs).toEqual([
+      assert.throws(() => replan(changedProject), error =>
+        error instanceof Error && "code" in error && error.code == "INVALID_TARGET_CHECK_PLAN")
+      const lockedPlan = replan(lockedProject)
+
+      expect(lockedPlan.stages[0].inputHash == first.plan.stages[0].inputHash).toBeFalse()
+      expect(replan(changedLockedProject).stages[0].inputHash == lockedPlan.stages[0].inputHash).toBeFalse()
+      expect(lockedPlan.stages[0].argv).toContain("--locked-mode")
+      expect(lockedPlan.stages[0].inputs).toEqual([
         path.join(first.sourcePath, "packages.lock.json"), path.join(first.sourcePath, "Semantifold.csproj")
       ])
       expect(first.plan.stages[1].inputs).toEqual(first.plan.artifactPaths)

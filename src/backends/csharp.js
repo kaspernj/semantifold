@@ -6,7 +6,7 @@ import {validateBackendModule, emitExpression} from "./shared.js"
 import {emitScalarType} from "./scalars.js"
 import {SourceWriter} from "./writer.js"
 
-const project = `<Project Sdk="Microsoft.NET.Sdk">
+export const csharpProjectManifest = `<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
@@ -25,13 +25,14 @@ const project = `<Project Sdk="Microsoft.NET.Sdk">
     <DebugType>none</DebugType>
     <UseAppHost>false</UseAppHost>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <SemantifoldCompileItems Condition="'$(SemantifoldCompileItems)' == ''">Program.cs</SemantifoldCompileItems>
     <AssemblyName>Semantifold</AssemblyName>
     <RootNamespace>Semantifold.Generated</RootNamespace>
     <StartupObject>Semantifold.Generated.Program</StartupObject>
     <PathMap>$(MSBuildProjectDirectory)=/_/</PathMap>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="Program.cs" />
+    <Compile Include="$(SemantifoldCompileItems)" />
   </ItemGroup>
 </Project>
 `
@@ -66,7 +67,7 @@ export function generateCSharpProject({filename, mapDirective, module, sourceMap
       provenance: {kind: "text", mapping, sourceMap: toSourceMapV3(mapping)},
       role: "entry"
     }, {
-      content: project,
+      content: csharpProjectManifest,
       contentKind: "text",
       mediaType: "application/xml",
       ownership: "generated",

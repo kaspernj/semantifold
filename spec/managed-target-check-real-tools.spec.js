@@ -53,9 +53,15 @@ function invalidSet(good) {
 /** @param {import("../src/semantic/types.js").GeneratedArtifactSet} good */
 function invalidRestoreSet(good) {
   return createGeneratedArtifactSet({
-    artifacts: good.artifacts.map(artifact => artifact.path == "Semantifold.csproj"
-      ? {...artifact, content: "<Project><broken></Project>\n", provenance: invalidProvenance}
-      : artifact),
+    artifacts: [...good.artifacts, {
+      content: "{broken lock input\n",
+      contentKind: /** @type {const} */ ("text"),
+      mediaType: "application/json",
+      ownership: /** @type {const} */ ("generated"),
+      path: "packages.lock.json",
+      provenance: invalidProvenance,
+      role: /** @type {const} */ ("manifest")
+    }],
     target: good.target
   })
 }

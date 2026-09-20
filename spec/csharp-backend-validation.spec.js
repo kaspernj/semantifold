@@ -41,13 +41,14 @@ const expectedProject = `<Project Sdk="Microsoft.NET.Sdk">
     <DebugType>none</DebugType>
     <UseAppHost>false</UseAppHost>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <SemantifoldCompileItems Condition="'$(SemantifoldCompileItems)' == ''">Program.cs</SemantifoldCompileItems>
     <AssemblyName>Semantifold</AssemblyName>
     <RootNamespace>Semantifold.Generated</RootNamespace>
     <StartupObject>Semantifold.Generated.Program</StartupObject>
     <PathMap>$(MSBuildProjectDirectory)=/_/</PathMap>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="Program.cs" />
+    <Compile Include="$(SemantifoldCompileItems)" />
   </ItemGroup>
 </Project>
 `
