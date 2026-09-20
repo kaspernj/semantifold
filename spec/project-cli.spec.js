@@ -5,8 +5,16 @@ import {mkdir, mkdtemp, readFile, readdir, rm, writeFile} from "node:fs/promises
 import os from "node:os"
 import path from "node:path"
 import {describe, expect, it} from "@velocious/testing"
-import {parseSemantifoldCliArguments, ProjectBuilder, ProjectBuildReporter, SemantifoldCli, SemantifoldDiagnostic} from "../index.js"
+import {
+  parseSemantifoldCliArguments,
+  ProjectBuilder,
+  ProjectBuildReporter,
+  ProjectWatchCoordinator,
+  SemantifoldCli,
+  SemantifoldDiagnostic
+} from "../index.js"
 import {observeProjectBuild} from "../src/project-build.js"
+import {observeProjectWatch} from "../src/project-watch.js"
 
 /** @returns {(error: unknown) => boolean} */
 function invalidArguments() {
@@ -53,7 +61,7 @@ function outputBuffer() {
 }
 
 describe("Semantifold project CLI", () => {
-  it("parses only the strict one-shot build command and its three explicit options", () => {
+  it("parses only strict build/watch commands and their three explicit options", () => {
     expect(parseSemantifoldCliArguments(["build"])).toEqual({check: false, format: "human", projectPath: "./semantifold.json"})
     expect(parseSemantifoldCliArguments(["build", "--project", "config/project.json"])).toEqual({
       check: false,
@@ -70,10 +78,16 @@ describe("Semantifold project CLI", () => {
       format: "human",
       projectPath: "./semantifold.json"
     })
+    expect(parseSemantifoldCliArguments(["watch", "--check", "--ndjson"])).toEqual({
+      command: "watch",
+      check: true,
+      format: "ndjson",
+      projectPath: "./semantifold.json"
+    })
 
     for (const arguments_ of [
       [],
-      ["watch"],
+      ["unknown"],
       ["build", "extra"],
       ["build", "--unknown"],
       ["build", "--project"],
@@ -82,6 +96,37 @@ describe("Semantifold project CLI", () => {
       ["build", "--ndjson", "--ndjson"],
       ["build", "--check", "--check"]
     ]) assert.throws(() => parseSemantifoldCliArguments(arguments_), invalidArguments())
+  })
+
+  it("keeps watch alive after its initial cycle and returns zero only after clean signal shutdown", {timeoutMs: 30_000}, async () => {
+    const {manifestPath, root} = await cliFixture("console.log(\"watch ready\")\n")
+    const stdout = outputBuffer()
+    const stderr = outputBuffer()
+    const coordinator = new ProjectWatchCoordinator({pollIntervalMs: 40, quietPeriodMs: 20})
+    let ready = () => {}
+    const readyPromise = new Promise(resolve => {
+      ready = resolve
+    })
+
+    observeProjectWatch(coordinator, event => {
+      if (event.type == "ready" && event.cycle == 1) ready()
+    })
+    try {
+      const running = new SemantifoldCli({coordinator, stderr: stderr.writer, stdout: stdout.writer})
+        .run(["watch", "--ndjson", "--project", manifestPath])
+
+      await readyPromise
+      expect(process.emit("SIGTERM")).toBeTrue()
+      expect(await running).toEqual(0)
+      expect(stderr.read()).toEqual("")
+      const records = stdout.read().trim().split("\n").map(line => JSON.parse(line))
+
+      expect(records.some(({state}) => state == "cycle-succeeded")).toBeTrue()
+      expect(records.at(-1)).toMatchObject({state: "watch-stopped", terminal: true, terminalScope: "watch"})
+    } finally {
+      await coordinator.stop("fixture cleanup")
+      await rm(root, {force: true, recursive: true})
+    }
   })
 
   it("reports one truthful human terminal result and returns zero only after publication", async () => {

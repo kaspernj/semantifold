@@ -1,6 +1,6 @@
 # 040 — Target check-plan contract and Java javac slice
 
-- Status: `post-independent-review corrections complete on feature branch; focused/package acceptance pass; exact-head CI/merge pending`
+- Status: `delivered through PR #57 at merge commit 6af0c371a2d904ba502df915cbd42e9aacd82904`
 - Phase/priority: Phase W / P0 compiler foundation
 - Dependencies: [039-project-manifest-and-build-cli.md](039-project-manifest-and-build-cli.md)
 - Design: [Watch, build, and target-check pipeline](../docs/watch-build-pipeline.md)
@@ -55,4 +55,4 @@ Filesystem watch mode, Java incremental compilation servers, Gradle/Maven, annot
 - `build --check` uses real `javac` and makes source/classes visible together only through the successful project-generation pointer switch.
 - Compiler failure/recovery, process lifecycle, diagnostics, focused tests, lint/typecheck, docs, changelog, and packed-consumer behavior satisfy repository gates.
 
-The implementation satisfies these criteria locally. Focused RED/GREEN coverage proves plan validation, owned process lifecycle, real multi-unit `javac`, repeated/reverted checked transactions, explicit post-publication `java` execution, last-good preservation/recovery, nested human/NDJSON diagnostics, CLI reporting, and the credential-free packed consumer. Exact-head TensorBuzz CI, merge, and release remain coordinator-owned.
+The implementation satisfied these criteria and was delivered through PR #57 at merge commit `6af0c371a2d904ba502df915cbd42e9aacd82904`. Focused coverage proves plan validation, owned process lifecycle, real multi-unit `javac`, repeated/reverted checked transactions, explicit post-publication `java` execution, last-good preservation/recovery, nested human/NDJSON diagnostics, CLI reporting, and the credential-free packed consumer.

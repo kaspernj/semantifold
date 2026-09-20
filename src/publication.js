@@ -29,6 +29,26 @@ const publicationBoundaries = new Set([
 const injectedPublicationFailures = new WeakMap()
 /** @type {WeakMap<GeneratedArtifactPublisher, (operation: string) => void>} */
 const publicationFilesystemObservers = new WeakMap()
+/** @type {WeakMap<GeneratedArtifactPublisher, (() => Promise<void> | void)[]>} */
+const publicationCommitGuards = new WeakMap()
+
+/**
+ * Queues one internal caller-owned currentness guard for the publisher's next transaction.
+ * The guard runs after every validator closes and immediately before the active-pointer commit.
+ * This helper is intentionally not part of the package root API.
+ * @param {GeneratedArtifactPublisher} publisher - Publisher instance.
+ * @param {() => Promise<void> | void} guard - Exact pre-commit guard.
+ * @returns {void}
+ */
+export function guardNextPublicationCommit(publisher, guard) {
+  if (!(publisher instanceof GeneratedArtifactPublisher) || typeof guard != "function") {
+    throw new TypeError("Invalid publication commit guard.")
+  }
+  const queued = publicationCommitGuards.get(publisher) ?? []
+
+  queued.push(guard)
+  publicationCommitGuards.set(publisher, queued)
+}
 
 /**
  * Installs one internal, one-shot deterministic failure used by real-filesystem interruption specs.
@@ -156,6 +176,10 @@ export class GeneratedArtifactPublisher {
    */
   publish(request, options = {}) {
     const signal = validatePublicationOptions(options, this.#projectId)
+    const queuedGuards = publicationCommitGuards.get(this)
+    const commitGuard = queuedGuards?.shift()
+
+    if (queuedGuards?.length == 0) publicationCommitGuards.delete(this)
     /** @type {(value: import("./semantic/types.js").PublishedGeneration) => void} */
     let resolveResult
     /** @type {(reason?: unknown) => void} */
@@ -166,7 +190,7 @@ export class GeneratedArtifactPublisher {
     })
     const operation = this.#publicationTail.then(async () => {
       try {
-        resolveResult(await this.#publish(request, signal))
+        resolveResult(await this.#publish(request, signal, commitGuard))
       } catch (error) {
         rejectResult(error)
       }
@@ -197,9 +221,10 @@ export class GeneratedArtifactPublisher {
    * Performs one serialized publication.
    * @param {import("./semantic/types.js").PublicationRequest} request - Complete request.
    * @param {AbortSignal | undefined} signal - Optional transaction cancellation authority.
+   * @param {(() => Promise<void> | void) | undefined} commitGuard - Optional currentness guard.
    * @returns {Promise<import("./semantic/types.js").PublishedGeneration>} Publication result.
    */
-  async #publish(request, signal) {
+  async #publish(request, signal, commitGuard) {
     const validated = validatePublicationRequest(request, this.#projectId)
 
     assertPublicationActive(signal, this.#projectId)
@@ -301,6 +326,7 @@ export class GeneratedArtifactPublisher {
         tempPointerCreated = true
       })
       reachPublicationBoundary(this, "before-pointer-replace")
+      await commitGuard?.()
       assertPublicationActive(signal, this.#projectId)
       await rename(tempPointerPath, path.join(this.#publicationRoot, activePointerName))
       tempPointerCreated = false

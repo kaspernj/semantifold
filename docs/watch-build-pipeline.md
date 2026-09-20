@@ -2,7 +2,7 @@
 
 ## Status and verified baseline
 
-Task 039 implements the strict project manifest, stable one-shot snapshot, deterministic generation orchestration, human/NDJSON reporting, and packaged `semantifold build` command. Task 040 now implements the generic non-executing check-plan contract plus Java/`javac` and `semantifold build --check`. Other target plans and watching remain roadmap contracts.
+Tasks 039–040 implement the strict project manifest, stable one-shot snapshot, deterministic generation orchestration, generic non-executing check-plan contract, Java/`javac`, human/NDJSON reporting, and packaged `semantifold build [--check]`. Task 043 now implements the language-neutral deterministic watch coordinator and `semantifold watch [--check]`. Other target plans and the packed Java watch vertical slice remain roadmap contracts.
 
 The inspected baseline is `semantifold@0.7.0`, annotated tag `v0.7.0`, commit `8cd70c5a6c7de98df2d4a183d6555ad4f3d5ba5a`. At that revision:
 
@@ -14,14 +14,14 @@ The inspected baseline is `semantifold@0.7.0`, annotated tag `v0.7.0`, commit `8
 - `package.json` had no `bin` entry. The public API did not persist generated artifacts, load a project manifest, derive compiler arguments from a target, or watch source files.
 - The only repository file-change watcher is a test helper; there is no product watch coordinator, incremental dependency graph, event coalescing policy, or long-lived compiler owner.
 
-That historical baseline proved **JavaScript/JSDoc → semantic IR → Java → `javac`** as a one-shot composition. Released `semantifold@0.9.0` supplies Task 038's public language-neutral `GeneratedArtifactPublisher`, immutable generation manifests, one atomic active pointer, pointer-once resolution, and journal-bounded recovery. Task 039 adds the package bin, project configuration, and one-shot CLI behavior; Task 040 productizes the generic plan/runner and Java compiler boundary. Other target-owned check plans and watching remain Tasks 041 and later.
+That historical baseline proved **JavaScript/JSDoc → semantic IR → Java → `javac`** as a one-shot composition. Released `semantifold@0.9.0` supplies Task 038's public language-neutral `GeneratedArtifactPublisher`, immutable generation manifests, one atomic active pointer, pointer-once resolution, and journal-bounded recovery. Task 039 adds the package bin, project configuration, and one-shot CLI behavior; Task 040 productizes the generic plan/runner and Java compiler boundary; Task 043 supplies generic watch coordination. Other target-owned check plans and the packed Java watch vertical slice remain Tasks 041–044.
 
 ## Product outcome
 
 A project can declare explicit source modules, one or more generated targets, one publisher-owned project publication root, and target-relative generated/build projections. The one-shot CLI selects generation-only or all-target developer checking with `--check`. It can then run:
 
 - the implemented one-shot `semantifold build`; or
-- a planned long-lived `semantifold watch`.
+- the implemented long-lived `semantifold watch`.
 
 For the first end-to-end slice, changing a JSDoc-typed JavaScript source regenerates Java and compiles the staged candidate with `javac`. A successful cycle publishes one coherent generated-source/compiler-output generation through one active-generation pointer switch. A parse, semantic, generation, tool-discovery, compiler, or publication failure reports a located diagnostic, keeps the process alive in watch mode, and leaves the previous successful generation usable. A later valid edit recovers without restarting the watcher.
 
@@ -68,7 +68,7 @@ The implemented initial check plan is Java/`javac`. It compiles every staged `.j
 
 A watch check validates or compiles but does not execute generated application code by default. Restore/download behavior is never an implicit per-edit action; targets with project metadata use pinned, offline, isolated state and rerun prerequisite stages only when their declared inputs change.
 
-### Watch coordinator
+### Watch coordinator (Task 043 implemented)
 
 One lifecycle-aware class owns filesystem subscriptions, content snapshots, cycle state, the active checker child, reporting, and shutdown. Its state machine is:
 
@@ -85,11 +85,13 @@ any live state -- SIGINT/SIGTERM --> stopping --> stopped
 
 `failed` means the last candidate failed; it does not discard the last successful output or terminate watch mode. A watcher event during `building`/`rebuilding` sets one dirty generation marker. The coordinator starts exactly one follow-up after the owned child closes. It never starts a retry while prior compiler work is still live.
 
-Native filesystem events require a bounded reconciliation strategy because Node and TypeScript both document platform-dependent watcher behavior. Version 1 watches the explicit manifest/source files and relevant parent directories, re-scans the declared graph after each hint, supports a documented polling fallback, and suppresses no-op cycles by content hash. The publication root and every generated/build projection are rejected as source roots and are never watched.
+Native filesystem events require a bounded reconciliation strategy because Node and TypeScript both document platform-dependent watcher behavior. Version 1 watches the explicit manifest/source files and their distinct parent directories without recursive watching, filters publisher-owned parent events, re-scans the complete graph after each coalesced hint, supplements native events with a bounded reconciliation interval, switches wholly to polling when native subscription creation or a live watcher fails, and suppresses no-op cycles by content hash. Polling metadata is only a reconciliation hint, and unchanged invalid graphs do not emit repeated failed cycles. The publication root and every generated/build projection are rejected as sources and are never direct subscriptions, preventing publication feedback cycles.
+
+The implemented pre-pointer currentness guard runs only after every target validator/checker has closed. It re-loads and hashes the complete graph; changed content rejects and cleans the stale staged candidate, while one dirty marker admits a single immediate latest-state follow-up. A later event in the narrow guard-to-pointer window cancels publication without cancelling a healthy checker earlier in the cycle.
 
 ### Reporting contract
 
-Task 039 human output is concise and stable. Its machine-readable mode emits deterministic state records with project identity, cycle `1`, source snapshot hash, ordered target ID/role/results, exit status, and a structured diagnostic when present. Generation-only records deliberately report state rather than nondeterministic elapsed time. Task 040 checked-stage records add exact tool/process identity and lifecycle timing; later watch tasks add changed paths and cycle timing where applicable.
+Task 039 human output is concise and stable. Its machine-readable mode emits deterministic state records with project identity, cycle `1`, source snapshot hash, ordered target ID/role/results, exit status, and a structured diagnostic when present. Generation-only records deliberately report state rather than nondeterministic elapsed time. Task 040 checked-stage records add exact tool/process identity and lifecycle timing. Task 043 watch records add stable changed paths, cycle duration, succeeded/failed/recovered/superseded/cancelled classification, one terminal record per admitted cycle, and one separate watcher terminal.
 
 Exactly one terminal cycle record is emitted per cycle. Process exit is non-zero for failed one-shot builds, but ordinary watch-cycle failures keep the watcher process alive. Startup/configuration failure exits. Signal-driven shutdown forwards cancellation to an active owned child, waits for `close`, removes subscriptions and staging state, and exits once.
 
@@ -147,7 +149,7 @@ Binary and application targets use the same generation watcher only after explic
                   046 later binary/application policies
 ```
 
-Tasks 038–040 are the implemented publication, one-shot project-build, and initial Java check foundation. Tasks 041–045 are the remaining selected text-language check/watch delivery chain, with Task 045 as its single terminal acceptance task. Task 046 is a non-blocking later extension.
+Tasks 038–040 and 043 are the implemented publication, one-shot project-build, initial Java check, and watch-orchestration foundation. Tasks 041–042 and 044–045 remain the selected text-language check/watch delivery chain, with Task 045 as its single terminal acceptance task. Task 046 is a non-blocking later extension.
 
 ## Non-goals
 

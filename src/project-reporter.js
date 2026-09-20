@@ -135,11 +135,7 @@ export class ProjectBuildReporter {
     const diagnostic = normalizeDiagnostic(failure)
 
     if (this.#format == "human") {
-      const processFailure = deepestDiagnostic(diagnostic)
-      const causes = humanDiagnosticCauses(diagnostic, processFailure)
-      const evidence = humanProcessEvidence(processFailure)
-
-      this.#stderr.write(`Build failed: ${diagnostic.message}\n${causes}${evidence}`)
+      this.#stderr.write(formatHumanProjectFailure(diagnostic, "Build failed"))
       return
     }
     this.#writeNdjson({
@@ -189,7 +185,7 @@ export class ProjectBuildReporter {
  * @param {unknown} failure - Opaque failure.
  * @returns {SemantifoldDiagnostic} Stable diagnostic.
  */
-function normalizeDiagnostic(failure) {
+export function normalizeDiagnostic(failure) {
   if (failure instanceof SemantifoldDiagnostic) return failure
   const cause = failure instanceof Error ? failure : new Error(String(failure))
 
@@ -206,7 +202,7 @@ function normalizeDiagnostic(failure) {
  * @param {SemantifoldDiagnostic} diagnostic - Normalized diagnostic.
  * @returns {Record<string, unknown>} Protocol diagnostic.
  */
-function diagnosticRecord(diagnostic) {
+export function diagnosticRecord(diagnostic) {
   return {
     code: diagnostic.code,
     detail: diagnostic.detail,
@@ -291,6 +287,22 @@ function humanProcessEvidence(diagnostic) {
     `signal=${value("signal")} durationMs=${value("durationMs")}\n`
 
   return `${heading}${humanStream("stdout", diagnostic.stdout)}${humanStream("stderr", diagnostic.stderr)}`
+}
+
+/**
+ * Formats one normalized failure with preserved nested process evidence.
+ * This helper is shared by the one-shot and watch reporters but is not a package-root API.
+ * @param {unknown} failure - Opaque or normalized failure.
+ * @param {string} heading - Human output heading without punctuation.
+ * @returns {string} Complete newline-terminated failure text.
+ */
+export function formatHumanProjectFailure(failure, heading) {
+  const diagnostic = normalizeDiagnostic(failure)
+  const processFailure = deepestDiagnostic(diagnostic)
+  const causes = humanDiagnosticCauses(diagnostic, processFailure)
+  const evidence = humanProcessEvidence(processFailure)
+
+  return `${heading}: ${diagnostic.message}\n${causes}${evidence}`
 }
 
 /**

@@ -1,7 +1,7 @@
 // @ts-check
 
 import assert from "node:assert/strict"
-import {execFile} from "node:child_process"
+import {execFile, spawn} from "node:child_process"
 import {lstat, mkdir, mkdtemp, readFile, rm, writeFile} from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
@@ -62,8 +62,10 @@ describe("packed Semantifold project CLI consumer", () => {
         targets: [{id: "java-main", language: "java", role: "text", sourceProjection: "targets/java/source"}],
         version: 1
       }, null, 2)}\n`)
-      await writeFile(path.join(consumerDirectory, "type-consumer.mts"), `import {createTargetCheckPlan, ProjectBuilder, SemantifoldCli, TargetCheckRunner} from "semantifold"
+      await writeFile(path.join(consumerDirectory, "type-consumer.mts"), `import {createTargetCheckPlan, ProjectBuilder, ProjectWatchCoordinator, ProjectWatchReporter, SemantifoldCli, TargetCheckRunner} from "semantifold"
 void new ProjectBuilder()
+void new ProjectWatchCoordinator()
+void new ProjectWatchReporter()
 void new SemantifoldCli()
 void new TargetCheckRunner()
 void createTargetCheckPlan
@@ -123,12 +125,63 @@ void createTargetCheckPlan
 
         expect(ran.stdout).toEqual("packed\n")
         expect(ran.stderr).toEqual("")
+        const watched = await runPackedWatch(path.join(consumerDirectory, "node_modules/.bin/semantifold"), consumerDirectory, environment)
+
+        expect(watched.code).toEqual(0)
+        expect(watched.signal).toEqual(null)
+        expect(watched.stderr.replace(/^\(node:\d+\) ExperimentalWarning: WASI is an experimental feature and might change at any time\n\(Use `node --trace-warnings \.\.\.` to show where the warning was created\)\n?$/u, "")).toEqual("")
+        expect(watched.records.some(({state}) => state == "cycle-succeeded")).toBeTrue()
+        expect(watched.records.at(-1)).toMatchObject({state: "watch-stopped", terminal: true, terminalScope: "watch"})
       }
     } finally {
       await rm(root, {force: true, recursive: true})
     }
   })
 })
+
+/**
+ * Runs the packed long-lived command through its initial generation-only cycle and clean signal shutdown.
+ * @param {string} executable - Installed package bin.
+ * @param {string} cwd - Consumer directory.
+ * @param {NodeJS.ProcessEnv} env - Credential-free environment.
+ * @returns {Promise<{code: number | null, records: Record<string, any>[], signal: NodeJS.Signals | null, stderr: string}>} Watch evidence.
+ */
+function runPackedWatch(executable, cwd, env) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(executable, ["watch", "--ndjson"], {cwd, env, stdio: ["ignore", "pipe", "pipe"]})
+    /** @type {Record<string, any>[]} */
+    const records = []
+    let stdout = ""
+    let stderr = ""
+    let stopped = false
+
+    child.stdout.setEncoding("utf8")
+    child.stderr.setEncoding("utf8")
+    child.stderr.on("data", chunk => {
+      stderr += chunk
+    })
+    child.stdout.on("data", chunk => {
+      stdout += chunk
+      let newline
+
+      while ((newline = stdout.indexOf("\n")) != -1) {
+        const line = stdout.slice(0, newline)
+
+        stdout = stdout.slice(newline + 1)
+        if (line.length == 0) continue
+        const record = JSON.parse(line)
+
+        records.push(record)
+        if (!stopped && record.state == "cycle-succeeded") {
+          stopped = true
+          child.kill("SIGTERM")
+        }
+      }
+    })
+    child.once("error", reject)
+    child.once("close", (code, signal) => resolve({code, records, signal, stderr}))
+  })
+}
 
 /** @param {string} output @returns {Record<string, any>} */
 function parsePackResult(output) {
