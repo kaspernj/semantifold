@@ -6,6 +6,7 @@ import {StringDecoder} from "node:string_decoder"
 const forcedTerminationGraceMs = 250
 const retainedPipeGraceMs = 250
 const deadlineFailures = new WeakSet()
+const cancellationFailures = new WeakSet()
 
 /**
  * Executes one exact file while owning its complete bounded lifecycle.
@@ -15,6 +16,7 @@ const deadlineFailures = new WeakSet()
  * @param {Readonly<Record<string, string>>} input.environment - Exact environment.
  * @param {string} input.executable - Exact executable path.
  * @param {number} input.maxBuffer - Maximum bytes captured per output stream.
+ * @param {AbortSignal} [input.signal] - Optional owned cancellation signal.
  * @param {number} input.timeoutMs - Deadline before termination begins.
  * @returns {Promise<{stderr: string, stdout: string}>} Output after the owned process group closes.
  */
@@ -38,13 +40,19 @@ export function createExecuteFileWithDeadline({registerSpawnListener}) {
  * @param {(child: import("node:child_process").ChildProcess, listener: () => void) => void} registerSpawnListener - Registers deadline initialization.
  * @returns {Promise<{stderr: string, stdout: string}>} Output after the owned process group closes.
  */
-function executeFileWithDeadlineUsing({arguments: processArguments, cwd, environment, executable, maxBuffer, timeoutMs}, registerSpawnListener) {
+function executeFileWithDeadlineUsing({arguments: processArguments, cwd, environment, executable, maxBuffer, signal, timeoutMs}, registerSpawnListener) {
   if (process.platform == "win32") {
     return Promise.reject(Object.assign(new Error("Owned process-tree termination is unavailable on this platform."), {
       code: "ENOTSUP",
       stderr: "",
       stdout: ""
     }))
+  }
+  if (signal?.aborted) {
+    const cancellationError = Object.assign(new Error("Subprocess was cancelled before launch."), {stderr: "", stdout: ""})
+
+    cancellationFailures.add(cancellationError)
+    return Promise.reject(cancellationError)
   }
 
   return new Promise((resolve, reject) => {
@@ -56,8 +64,10 @@ function executeFileWithDeadlineUsing({arguments: processArguments, cwd, environ
     let pipeTimer
     /** @type {Error | undefined} */
     let launchError
+    let cancellationRequested = false
     let deadlineExceeded = false
     let outputExceeded = false
+    let processGroupOwned = false
     let settled = false
     const stderr = outputCapture(maxBuffer, () => terminateForOutputLimit())
     const stdout = outputCapture(maxBuffer, () => terminateForOutputLimit())
@@ -68,9 +78,15 @@ function executeFileWithDeadlineUsing({arguments: processArguments, cwd, environ
       stdio: ["ignore", "pipe", "pipe"]
     })
     const processGroupId = child.pid
+    const cancel = () => {
+      if (settled || cancellationRequested || deadlineExceeded || outputExceeded) return
+      cancellationRequested = true
+      if (processGroupOwned && processGroupId != undefined) beginTermination(processGroupId)
+    }
 
     child.stderr.on("data", stderr.receive)
     child.stdout.on("data", stdout.receive)
+    signal?.addEventListener("abort", cancel, {once: true})
     child.once("error", (error) => {
       launchError = error
     })
@@ -80,18 +96,24 @@ function executeFileWithDeadlineUsing({arguments: processArguments, cwd, environ
         child.kill("SIGKILL")
         return
       }
+      processGroupOwned = true
+      if (cancellationRequested) {
+        beginTermination(processGroupId)
+        return
+      }
 
       deadlineTimer = setTimeout(() => {
-        if (settled) return
+        if (settled || cancellationRequested || deadlineExceeded || outputExceeded) return
         deadlineExceeded = true
         beginTermination(processGroupId)
       }, timeoutMs)
     })
-    child.once("close", (code, signal) => {
+    child.once("close", (code, closeSignal) => {
       settled = true
       if (deadlineTimer != undefined) clearTimeout(deadlineTimer)
       if (forceTimer != undefined) clearTimeout(forceTimer)
       if (pipeTimer != undefined) clearTimeout(pipeTimer)
+      signal?.removeEventListener("abort", cancel)
       const capturedStderr = stderr.finish()
       const capturedStdout = stdout.finish()
 
@@ -100,24 +122,34 @@ function executeFileWithDeadlineUsing({arguments: processArguments, cwd, environ
       } else if (outputExceeded) {
         reject(Object.assign(new Error(`Subprocess exceeded its ${maxBuffer}-byte output capture limit.`), {
           code: "ERR_CHILD_PROCESS_STDIO_MAXBUFFER",
-          signal,
+          signal: closeSignal,
           stderr: capturedStderr,
           stdout: capturedStdout
         }))
+      } else if (cancellationRequested) {
+        const cancellationError = Object.assign(new Error("Subprocess was cancelled."), {
+          code,
+          signal: closeSignal,
+          stderr: capturedStderr,
+          stdout: capturedStdout
+        })
+
+        cancellationFailures.add(cancellationError)
+        reject(cancellationError)
       } else if (deadlineExceeded) {
         const timeoutError = Object.assign(new Error("Subprocess exceeded its owned deadline."), {
           code,
-          signal,
+          signal: closeSignal,
           stderr: capturedStderr,
           stdout: capturedStdout
         })
 
         deadlineFailures.add(timeoutError)
         reject(timeoutError)
-      } else if (code != 0 || signal != null) {
+      } else if (code != 0 || closeSignal != null) {
         reject(Object.assign(new Error("Subprocess failed after launch."), {
           code,
-          signal,
+          signal: closeSignal,
           stderr: capturedStderr,
           stdout: capturedStdout
         }))
@@ -126,7 +158,7 @@ function executeFileWithDeadlineUsing({arguments: processArguments, cwd, environ
 
     /** Begins bounded termination after output capture crosses its limit. */
     function terminateForOutputLimit() {
-      if (outputExceeded || settled) return
+      if (settled || cancellationRequested || deadlineExceeded || outputExceeded) return
       outputExceeded = true
       if (processGroupId != undefined) beginTermination(processGroupId)
     }
@@ -229,4 +261,13 @@ function signalOwnedProcessGroup(processGroupId, signal) {
  */
 export function exceededOwnedDeadline(error) {
   return typeof error == "object" && error != null && deadlineFailures.has(error)
+}
+
+/**
+ * Reports whether this module's cancellation signal initiated termination.
+ * @param {unknown} error - Subprocess failure.
+ * @returns {boolean} Whether the failure belongs to owned cancellation.
+ */
+export function cancelledOwnedProcess(error) {
+  return typeof error == "object" && error != null && cancellationFailures.has(error)
 }

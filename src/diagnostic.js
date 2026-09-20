@@ -19,8 +19,12 @@ export class SemantifoldDiagnostic extends Error {
    * @param {string | undefined} [options.stderr] - Captured standard error when available.
    * @param {string | undefined} [options.stdout] - Captured standard output when available.
    * @param {string | undefined} [options.version] - Captured executable version when known.
+   * @param {number | undefined} [options.durationMs] - Observed process duration when known.
+   * @param {string | undefined} [options.projectId] - Exact project identity when known.
+   * @param {string | undefined} [options.targetId] - Exact project target identity when known.
+   * @param {string | undefined} [options.toolId] - Exact toolchain identity when known.
    */
-  constructor({cause, code, command, executable, exitCode, generatedLocation, language, location, message, signal, stage, stderr, stdout, version}) {
+  constructor({cause, code, command, durationMs, executable, exitCode, generatedLocation, language, location, message, projectId, signal, stage, stderr, stdout, targetId, toolId, version}) {
     const locationText = location ? ` at ${location.filename}:${location.start.line}:${location.start.column}` : ""
 
     super(`[${code}] ${language}${locationText}: ${message}`, cause ? {cause} : undefined)
@@ -31,12 +35,16 @@ export class SemantifoldDiagnostic extends Error {
     this.language = language
     this.location = location
     if (command != undefined) this.command = command
+    if (durationMs != undefined) this.durationMs = durationMs
     if (executable != undefined) this.executable = executable
     if (exitCode != undefined) this.exitCode = exitCode
     if (signal != undefined) this.signal = signal
     if (stage != undefined) this.stage = stage
     if (stderr != undefined) this.stderr = stderr
     if (stdout != undefined) this.stdout = stdout
+    if (projectId != undefined) this.projectId = projectId
+    if (targetId != undefined) this.targetId = targetId
+    if (toolId != undefined) this.toolId = toolId
     if (version != undefined) this.version = version
   }
 }

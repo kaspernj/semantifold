@@ -22,6 +22,7 @@ export {ProjectSnapshot, ProjectSnapshotBuilder} from "./src/project-snapshot.js
 export {ProjectBuilder} from "./src/project-build.js"
 export {parseSemantifoldCliArguments, SemantifoldCli} from "./src/project-cli.js"
 export {ProjectBuildReporter} from "./src/project-reporter.js"
+export {createTargetCheckPlan, TargetCheckRunner} from "./src/target-check.js"
 export {createStdlibContractRegistry, listStdlibModules, resolveStdlibModule} from "./src/semantic/stdlib.js"
 export {createStdlibProviderRegistry, listStdlibProviders} from "./src/stdlib-providers.js"
 export {negotiateStdlibProviders} from "./src/stdlib-negotiation.js"

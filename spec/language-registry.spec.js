@@ -20,6 +20,7 @@ describe("language role registry", () => {
     expect(supportedLanguages).toEqual(allLanguages)
     expect(languageCapabilities.map(({id}) => id)).toEqual(allTargets)
     expect(Object.isFrozen(languageCapabilities)).toBeTrue()
+    expect(languageCapabilities.filter(({check}) => check.supported).map(({id}) => id)).toEqual(["java"])
 
     for (const descriptor of languageCapabilities) {
       expect(Object.isFrozen(descriptor)).toBeTrue()
@@ -27,6 +28,9 @@ describe("language role registry", () => {
       expect(Object.isFrozen(descriptor.features)).toBeTrue()
       expect(Object.isFrozen(descriptor.mapping)).toBeTrue()
       expect(Object.isFrozen(descriptor.acceptance)).toBeTrue()
+      expect(Object.isFrozen(descriptor.check)).toBeTrue()
+      expect(Object.isFrozen(descriptor.check.stages)).toBeTrue()
+      expect(Object.isFrozen(descriptor.check.toolchains)).toBeTrue()
       if (["wasm", "android", "ios", "flutter"].includes(descriptor.id)) {
         expect(descriptor.features).toEqual({
           closedRecords: false,
