@@ -521,6 +521,13 @@
  * @typedef TargetCheckPathArgument
  * @property {number} index - Exact argv index containing the path.
  * @property {"source" | "build"} ownership - Candidate subtree that owns the path.
+ * @property {string} [prefix] - Exact non-path argv prefix preceding an owned absolute path.
+ */
+
+/**
+ * @typedef TargetCheckEnvironmentPath
+ * @property {string} name - Exact environment variable containing an owned absolute directory.
+ * @property {"source" | "build"} ownership - Candidate subtree that owns the directory.
  */
 
 /**
@@ -540,7 +547,11 @@
  * @property {readonly TargetCheckPathArgument[]} pathArguments - Complete ownership declaration for argv paths.
  * @property {string} cwd - Exact candidate-scoped working directory.
  * @property {Readonly<Record<string, string>>} environment - Exact deterministic environment.
- * @property {Readonly<TargetCheckOutputOwnership>} output - Compiler output ownership.
+ * @property {readonly TargetCheckEnvironmentPath[]} environmentPaths - Owned absolute environment directories.
+ * @property {string | null} inputHash - SHA-256 of declared restore inputs, or null for unconditional stages.
+ * @property {readonly string[]} inputs - Complete staged artifact inputs read by the stage.
+ * @property {Readonly<TargetCheckOutputOwnership> | null} output - Build output ownership, or null for non-producing checks.
+ * @property {readonly string[]} transientPaths - Generation-owned cache/intermediate directories removed after checking.
  */
 
 /**

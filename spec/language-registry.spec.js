@@ -20,7 +20,9 @@ describe("language role registry", () => {
     expect(supportedLanguages).toEqual(allLanguages)
     expect(languageCapabilities.map(({id}) => id)).toEqual(allTargets)
     expect(Object.isFrozen(languageCapabilities)).toBeTrue()
-    expect(languageCapabilities.filter(({check}) => check.supported).map(({id}) => id)).toEqual(["java"])
+    expect(languageCapabilities.filter(({check}) => check.supported).map(({id}) => id)).toEqual([
+      "php", "ruby", "javascript", "typescript", "java", "kotlin", "python", "csharp"
+    ])
 
     for (const descriptor of languageCapabilities) {
       expect(Object.isFrozen(descriptor)).toBeTrue()

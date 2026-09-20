@@ -11,7 +11,7 @@ semantifold watch --check
 semantifold watch --check --ndjson
 ```
 
-`watch` accepts the same single `--project`, `--check`, and `--ndjson` options as `build`. Generation-only watch works for every target accepted by the version-1 project manifest. `--check` additionally requires every configured target to advertise a target-owned non-executing developer-check plan; Java is the currently implemented checked target. Neither command runs generated application code.
+`watch` accepts the same single `--project`, `--check`, and `--ndjson` options as `build`. Generation-only watch works for every target accepted by the version-1 project manifest. `--check` additionally requires every configured target to advertise a target-owned non-executing developer-check plan. PHP, Ruby, JavaScript, TypeScript, and Java are check-capable among the manifest's existing complete-program text targets; the registry also exposes Kotlin/JVM, Python, and C# plans for their existing generated single-module artifact sets. Neither command runs generated application code.
 
 The coordinator installs `SIGINT` and `SIGTERM` handlers before loading the initial graph and immediately performs cycle 1. Invalid startup configuration or a failed initial build terminates watch with status 1. Once the initial cycle succeeds, an ordinary source, semantic, generation, discovery, check, or pre-commit publication failure emits a failed cycle and keeps watch alive. The next successful candidate is reported as recovered. Clean signal shutdown returns status 0.
 
@@ -39,7 +39,7 @@ On `SIGINT`, `SIGTERM`, or `ProjectWatchCoordinator.stop(reason)`, the coordinat
 
 `ProjectWatchCoordinator` and `ProjectWatchReporter` are public ESM exports. The coordinator composes `ProjectManifestLoader`, `ProjectSnapshotBuilder`, `ProjectBuilder`, target-owned check plans, and `GeneratedArtifactPublisher`; it contains no language IDs, parser logic, compiler argument construction, or artifact writes.
 
-The coordinator and generic check runner contain no Java language switch. Java generation remains in the Java backend, the target-owned plan constructs exact `javac` arguments, and the generic runner owns the process. Other text-target plans remain Tasks 041–042, their terminal matrix remains Task 045, and binary/application watch policy remains Task 046. Watch adds no globs, ignore language, daemon mode, editor protocol, runtime execution, hot reload, arbitrary hooks, network access, or package installation.
+The coordinator and generic check runner contain no target-language switch. Target-owned modules construct exact PHP, Ruby, Node, TypeScript, Java, Kotlin/JVM, Python, and C# requests; the runner owns their processes and transient candidate state. Native/project text-target plans remain Task 042, their terminal matrix remains Task 045, and binary/application watch policy remains Task 046. Watch adds no globs, ignore language, daemon mode, editor protocol, runtime execution, hot reload, arbitrary hooks, network access, or package installation.
 
 ## Copy-ready JavaScript/JSDoc-to-Java watch
 

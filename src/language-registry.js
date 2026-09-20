@@ -5,6 +5,7 @@ import {SemantifoldDiagnostic, unsupportedRole} from "./diagnostic.js"
 import {generateJava} from "./backends/java.js"
 import {generateKotlin} from "./backends/kotlin.js"
 import {generateCSharpProject} from "./backends/csharp.js"
+import {createCSharpCheckPlan} from "./backends/csharp-check.js"
 import {generateGoModule} from "./backends/go.js"
 import {generateRustProject} from "./backends/rust.js"
 import {generateSwift} from "./backends/swift.js"
@@ -36,6 +37,12 @@ import {parsePhp} from "./frontends/php.js"
 import {parsePython} from "./frontends/python.js"
 import {parseRuby} from "./frontends/ruby.js"
 import {createJavaCheckPlan} from "./backends/java-check.js"
+import {createJavaScriptCheckPlan} from "./backends/javascript-check.js"
+import {createKotlinCheckPlan} from "./backends/kotlin-check.js"
+import {createPhpCheckPlan} from "./backends/php-check.js"
+import {createPythonCheckPlan} from "./backends/python-check.js"
+import {createRubyCheckPlan} from "./backends/ruby-check.js"
+import {createTypeScriptCheckPlan} from "./backends/typescript-check.js"
 
 const registryRoles = Object.freeze(["frontend", "textBackend", "binaryBackend", "applicationBackend", "interoperability"])
 const acceptanceStageOrder = ["parse", "generate", "restore", "compile", "link", "validate", "instantiate", "execute"]
@@ -83,15 +90,19 @@ const registryKeys = new Set([
  */
 
 /**
- * @callback TargetCheckPlanFactory
- * @param {Readonly<{
+ * @typedef {Readonly<{
  *   artifacts: import("./semantic/types.js").GeneratedArtifactSet,
  *   buildPath: string,
  *   projectId: string,
  *   sourcePath: string,
  *   targetId: string,
  *   tools: readonly import("./semantic/types.js").DiscoveredToolchain[]
- * }>} context - Exact staged target context.
+ * }>} TargetCheckPlanContext
+ */
+
+/**
+ * @callback TargetCheckPlanFactory
+ * @param {TargetCheckPlanContext} context - Exact staged target context.
  * @returns {import("./semantic/types.js").TargetCheckPlan} Immutable plan.
  */
 
@@ -460,7 +471,8 @@ const zigFrontend = ({filename, source}) => parseZig({filename, source})
 
 const records = [
   language({
-    acceptance: {stages: ["parse", "generate", "execute"], toolchains: ["php82"]},
+    acceptance: {stages: ["parse", "generate", "validate", "execute"], toolchains: ["php82"]},
+    check: {factory: createPhpCheckPlan, stages: ["validate"], toolchains: ["php82"]},
     defaultFilename: "program.php",
     frontend: phpFrontend,
     id: "php",
@@ -468,7 +480,8 @@ const records = [
     textBackend: generatePhp
   }),
   language({
-    acceptance: {stages: ["parse", "generate", "execute"], toolchains: ["ruby"]},
+    acceptance: {stages: ["parse", "generate", "validate", "execute"], toolchains: ["ruby"]},
+    check: {factory: createRubyCheckPlan, stages: ["validate"], toolchains: ["ruby"]},
     defaultFilename: "program.rb",
     frontend: rubyFrontend,
     id: "ruby",
@@ -476,7 +489,8 @@ const records = [
     textBackend: generateRuby
   }),
   language({
-    acceptance: {stages: ["parse", "generate", "execute"], toolchains: ["node"]},
+    acceptance: {stages: ["parse", "generate", "validate", "execute"], toolchains: ["node"]},
+    check: {factory: createJavaScriptCheckPlan, stages: ["validate"], toolchains: ["node"]},
     defaultFilename: "program.js",
     frontend: javaScriptFrontend,
     id: "javascript",
@@ -485,6 +499,7 @@ const records = [
   }),
   language({
     acceptance: {stages: ["parse", "generate", "compile", "execute"], toolchains: ["tsc", "node"]},
+    check: {factory: createTypeScriptCheckPlan, stages: ["compile"], toolchains: ["tsc"]},
     defaultFilename: "program.ts",
     frontend: typeScriptFrontend,
     id: "typescript",
@@ -502,6 +517,7 @@ const records = [
   }),
   language({
     acceptance: {stages: ["parse", "generate", "compile", "execute"], toolchains: ["kotlinc", "java25"]},
+    check: {factory: createKotlinCheckPlan, stages: ["compile"], toolchains: ["kotlinc"]},
     defaultFilename: "Program.kt",
     frontend: kotlinFrontend,
     id: "kotlin",
@@ -510,6 +526,7 @@ const records = [
   }),
   language({
     acceptance: {stages: ["parse", "generate", "compile", "execute"], toolchains: ["python"]},
+    check: {factory: createPythonCheckPlan, stages: ["compile"], toolchains: ["python"]},
     defaultFilename: "program.py",
     frontend: pythonFrontend,
     id: "python",
@@ -519,6 +536,7 @@ const records = [
   language({
     acceptance: {stages: ["parse", "generate", "restore", "compile", "execute"], toolchains: ["dotnet"]},
     artifactMultiplicity: "multiple",
+    check: {factory: createCSharpCheckPlan, stages: ["restore", "compile"], toolchains: ["dotnet"]},
     defaultFilename: "Program.cs",
     frontend: csharpFrontend,
     id: "csharp",

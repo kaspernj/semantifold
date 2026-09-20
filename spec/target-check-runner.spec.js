@@ -196,7 +196,8 @@ while :; do :; done
         artifactPaths: Object.freeze([sourceFixture]),
         stages: Object.freeze([Object.freeze({
           ...fixturePlan.stages[0],
-          argv: Object.freeze([sourceFixture])
+          argv: Object.freeze([sourceFixture]),
+          inputs: Object.freeze([sourceFixture])
         })])
       })
       const result = await new TargetCheckRunner().run(/** @type {import("../src/semantic/types.js").TargetCheckPlan} */ (validFixturePlan))
@@ -205,6 +206,63 @@ while :; do :; done
       expect(result.stages[0].signal).toEqual(null)
       expect(result.stages[0].stdout).toEqual("parent stdout\nlate stdout\n")
       expect(result.stages[0].stderr).toEqual("parent stderr\nlate stderr\n")
+    } finally {
+      await rm(root, {force: true, recursive: true})
+    }
+  })
+
+  it("distinguishes owned-environment preparation and cleanup failures while retaining the first process failure", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "semantifold-task041-runner-environment-"))
+
+    try {
+      const preparationPlan = await planFor(path.join(root, "preparation"), process.execPath)
+      const blocker = path.join(preparationPlan.buildPath, "blocker")
+      const preparationHome = path.join(blocker, "home")
+      const preparationStage = preparationPlan.stages[0]
+      const invalidPreparationPlan = Object.freeze({...preparationPlan, stages: Object.freeze([Object.freeze({
+        ...preparationStage,
+        environment: Object.freeze({...preparationStage.environment, HOME: preparationHome}),
+        environmentPaths: Object.freeze([Object.freeze({name: "HOME", ownership: /** @type {const} */ ("build")})])
+      })])})
+      let launches = 0
+
+      await writeFile(blocker, "not a directory\n")
+      await assert.rejects(createTargetCheckRunner({
+        execute: async () => {
+          launches += 1
+
+          return {stderr: "", stdout: ""}
+        },
+        now: () => 0
+      }).run(/** @type {import("../src/semantic/types.js").TargetCheckPlan} */ (invalidPreparationPlan)), error =>
+        error instanceof SemantifoldDiagnostic && error.code == "TARGET_CHECK_PREPARATION_FAILURE" &&
+        error.stage == "compile" && error.cause instanceof Error)
+      expect(launches).toEqual(0)
+
+      const cleanupPlan = await planFor(path.join(root, "cleanup"), process.execPath)
+      const cleanupHome = path.join(cleanupPlan.buildPath, "home")
+      const cleanupStage = cleanupPlan.stages[0]
+      const ownedCleanupPlan = Object.freeze({...cleanupPlan, stages: Object.freeze([Object.freeze({
+        ...cleanupStage,
+        environment: Object.freeze({...cleanupStage.environment, HOME: cleanupHome}),
+        environmentPaths: Object.freeze([Object.freeze({name: "HOME", ownership: /** @type {const} */ ("build")})])
+      })])})
+      const processFailure = Object.assign(new Error("compiler failed"), {code: 7, stderr: "native failure\n", stdout: ""})
+
+      try {
+        await assert.rejects(createTargetCheckRunner({
+          execute: async () => {
+            await chmod(cleanupPlan.buildPath, 0o500)
+            throw processFailure
+          },
+          now: () => 0
+        }).run(/** @type {import("../src/semantic/types.js").TargetCheckPlan} */ (ownedCleanupPlan)), error =>
+          checkFailure(error, "TARGET_CHECK_NONZERO_EXIT") && error.stderr == "native failure\n" &&
+          error.cause instanceof AggregateError && error.cause.errors.some(cause =>
+            cause instanceof SemantifoldDiagnostic && cause.code == "TARGET_CHECK_CLEANUP_FAILURE"))
+      } finally {
+        await chmod(cleanupPlan.buildPath, 0o700)
+      }
     } finally {
       await rm(root, {force: true, recursive: true})
     }

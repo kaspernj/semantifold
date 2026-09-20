@@ -46,7 +46,10 @@ export function createJavaCheckPlan(context) {
     argv,
     cwd: context.sourcePath,
     environment: deterministicEnvironment({}),
+    environmentPaths: Object.freeze([]),
     executable: javac.executable,
+    inputHash: null,
+    inputs: Object.freeze(artifactPaths),
     output: Object.freeze({
       mediaType: "application/java-vm",
       ownership: /** @type {const} */ ("build"),
@@ -55,7 +58,8 @@ export function createJavaCheckPlan(context) {
     }),
     pathArguments,
     stage: /** @type {const} */ ("compile"),
-    tool: javac
+    tool: javac,
+    transientPaths: Object.freeze([])
   })
 
   return Object.freeze({
