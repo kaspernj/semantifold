@@ -1,16 +1,18 @@
 // @ts-check
 
 import assert from "node:assert/strict"
-import {watch as watchFileSystem} from "node:fs"
+import {watch as watchFileSystem, writeFileSync} from "node:fs"
 import {chmod, mkdir, mkdtemp, readFile, readdir, rename, rm, utimes, writeFile} from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import {describe, expect, it} from "@velocious/testing"
 import {
   ProjectBuilder,
+  ProjectSnapshotBuilder,
   ProjectWatchCoordinator,
   ProjectWatchReporter
 } from "../index.js"
+import {observeProjectBuild} from "../src/project-build.js"
 import {createProjectWatchCoordinator, observeProjectWatch} from "../src/project-watch.js"
 import {createTargetCheckRunner} from "../src/target-check.js"
 import {executeFileWithDeadline} from "../src/subprocess.js"
@@ -18,6 +20,7 @@ import {executeFileWithDeadline} from "../src/subprocess.js"
 const sourceA = "console.log(\"A\")\n"
 const sourceB = "console.log(\"B\")\n"
 const sourceC = "console.log(\"C\")\n"
+const sourceAfterPublication = "console.log(\"changed after publication\")\n"
 
 /**
  * Creates one watchable JavaScript/JSDoc-to-Java project.
@@ -67,15 +70,18 @@ function outputBuffer() {
 /**
  * Creates a marker queue without timer-based test synchronization.
  * @param {ProjectWatchCoordinator} coordinator - Coordinator under observation.
- * @returns {{next: (predicate: (event: import("../src/project-watch.js").ProjectWatchObservation) => boolean) => Promise<import("../src/project-watch.js").ProjectWatchObservation>}} Marker reader.
+ * @returns {{history: () => readonly import("../src/project-watch.js").ProjectWatchObservation[], next: (predicate: (event: import("../src/project-watch.js").ProjectWatchObservation) => boolean) => Promise<import("../src/project-watch.js").ProjectWatchObservation>}} Marker reader.
  */
 function watchEvents(coordinator) {
   /** @type {import("../src/project-watch.js").ProjectWatchObservation[]} */
   const queued = []
+  /** @type {import("../src/project-watch.js").ProjectWatchObservation[]} */
+  const history = []
   /** @type {{predicate: (event: import("../src/project-watch.js").ProjectWatchObservation) => boolean, resolve: (event: import("../src/project-watch.js").ProjectWatchObservation) => void}[]} */
   const pending = []
 
   observeProjectWatch(coordinator, event => {
+    history.push(event)
     const index = pending.findIndex(({predicate}) => predicate(event))
 
     if (index == -1) queued.push(event)
@@ -83,12 +89,155 @@ function watchEvents(coordinator) {
   })
 
   return {
+    history: () => [...history],
     next(predicate) {
       const index = queued.findIndex(predicate)
 
       if (index != -1) return Promise.resolve(/** @type {import("../src/project-watch.js").ProjectWatchObservation} */ (queued.splice(index, 1)[0]))
 
       return new Promise(resolve => pending.push({predicate, resolve}))
+    }
+  }
+}
+
+/**
+ * Creates an exact controllable native-watch backend without emitting host filesystem events.
+ * @param {() => void} [onOpen] - Called before each subscription attempt.
+ * @returns {{activeCount: () => number, emit: (filename: string) => void, fail: () => void, nativeWatch: typeof watchFileSystem, openCount: () => number}} Backend controls.
+ */
+function controlledNativeBackend(onOpen = () => {}) {
+  /** @type {{closed: boolean, filename: string, listener: (eventType: string, filename: string | Buffer | null) => void}[]} */
+  const subscriptions = []
+  let failing = false
+  let opens = 0
+  const nativeWatch = /** @type {typeof watchFileSystem} */ (/** @type {unknown} */ ((filename, listener) => {
+    opens += 1
+    onOpen()
+    if (failing) throw Object.assign(new Error("fixture native resubscription failure"), {code: "ENOSPC"})
+    const record = {
+      closed: false,
+      filename: String(filename),
+      listener
+    }
+    const subscription = {
+      close() {
+        record.closed = true
+      },
+      once() {
+        return subscription
+      }
+    }
+
+    subscriptions.push(record)
+
+    return subscription
+  }))
+
+  return {
+    activeCount: () => subscriptions.filter(({closed}) => !closed).length,
+    emit(filename) {
+      const subscription = subscriptions.find(record => !record.closed && record.filename == filename)
+
+      assert.notEqual(subscription, undefined, `Missing active fixture subscription for '${filename}'.`)
+      subscription.listener("change", path.basename(filename))
+    },
+    fail() {
+      failing = true
+    },
+    nativeWatch,
+    openCount: () => opens
+  }
+}
+
+/**
+ * Creates an explicit marker queue for an injected asynchronous collaborator.
+ * @returns {{mark: () => void, next: () => Promise<void>}} Marker controls.
+ */
+function markers() {
+  let available = 0
+  /** @type {(() => void)[]} */
+  const waiting = []
+
+  return {
+    mark() {
+      const resolve = waiting.shift()
+
+      if (resolve === undefined) available += 1
+      else resolve()
+    },
+    next() {
+      if (available > 0) {
+        available -= 1
+        return Promise.resolve()
+      }
+
+      return new Promise(resolve => waiting.push(resolve))
+    }
+  }
+}
+
+/**
+ * Replaces only the coordinator's global timer primitives with manually fired callbacks.
+ * @returns {{fireIntervals: () => void, fireTimeout: (id: number) => boolean, hasTimeout: (id: number) => boolean, install: () => void, restore: () => void, takeScheduledTimeout: () => number}} Timer controls.
+ */
+function controlledTimers() {
+  const originals = {
+    clearInterval: globalThis.clearInterval,
+    clearTimeout: globalThis.clearTimeout,
+    setInterval: globalThis.setInterval,
+    setTimeout: globalThis.setTimeout
+  }
+  /** @type {Map<number, () => void>} */
+  const intervals = new Map()
+  /** @type {Map<number, () => void>} */
+  const timeouts = new Map()
+  /** @type {number[]} */
+  const scheduledTimeouts = []
+  let identity = 0
+
+  return {
+    fireIntervals() {
+      for (const callback of intervals.values()) callback()
+    },
+    fireTimeout(id) {
+      const callback = timeouts.get(id)
+
+      if (callback === undefined) return false
+      timeouts.delete(id)
+      callback()
+
+      return true
+    },
+    hasTimeout: id => timeouts.has(id),
+    install() {
+      globalThis.clearInterval = /** @type {typeof clearInterval} */ (/** @type {unknown} */ (id => intervals.delete(Number(id))))
+      globalThis.clearTimeout = /** @type {typeof clearTimeout} */ (/** @type {unknown} */ (id => timeouts.delete(Number(id))))
+      globalThis.setInterval = /** @type {typeof setInterval} */ (/** @type {unknown} */ (callback => {
+        identity += 1
+        intervals.set(identity, callback)
+
+        return identity
+      }))
+      globalThis.setTimeout = /** @type {typeof setTimeout} */ (/** @type {unknown} */ (callback => {
+        identity += 1
+        timeouts.set(identity, callback)
+        scheduledTimeouts.push(identity)
+
+        return identity
+      }))
+    },
+    restore() {
+      globalThis.clearInterval = originals.clearInterval
+      globalThis.clearTimeout = originals.clearTimeout
+      globalThis.setInterval = originals.setInterval
+      globalThis.setTimeout = originals.setTimeout
+    },
+    takeScheduledTimeout() {
+      const id = scheduledTimeouts.shift()
+
+      assert.notEqual(id, undefined, "Expected one scheduled fixture timeout.")
+
+      return id
     }
   }
 }
@@ -155,6 +304,182 @@ function controlledBuilder(blockedInvocation) {
 }
 
 describe("Semantifold deterministic project watch coordinator", () => {
+  it("keeps the pre-cycle polling baseline when source metadata changes after pointer publication", {timeoutMs: 30_000}, async () => {
+    const {manifestPath, root, sourcePath} = await watchFixture()
+    const backend = controlledNativeBackend()
+    const builder = new ProjectBuilder()
+    const coordinator = createProjectWatchCoordinator({
+      builder,
+      nativeWatch: backend.nativeWatch,
+      pollIntervalMs: 60_000,
+      quietPeriodMs: 10
+    })
+    const events = watchEvents(coordinator)
+    let changed = false
+
+    observeProjectBuild(builder, operation => {
+      if (operation != "publish" || changed) return
+      changed = true
+      writeFileSync(sourcePath, sourceAfterPublication)
+    })
+    const running = coordinator.run(manifestPath,
+      new ProjectWatchReporter({format: "ndjson", stdout: outputBuffer().writer}))
+
+    try {
+      await events.next(event => event.type == "cycle-terminal" && event.cycle == 1 && event.status == "succeeded")
+      expect((await activeJava(root)).source).toContain("\"A\"")
+      expect(events.history().some(event => event.type == "dirty" && event.cycle == 1)).toBeTrue()
+      await events.next(event => event.type == "cycle-terminal" && event.cycle == 2 && event.status == "succeeded")
+      expect((await activeJava(root)).source).toContain("\"changed after publication\"")
+    } finally {
+      await coordinator.stop("fixture cleanup")
+      await running
+      await rm(root, {force: true, recursive: true})
+    }
+  })
+
+  it("awaits a blocked startup state read and never subscribes after terminal shutdown", {timeoutMs: 30_000}, async () => {
+    const {manifestPath, root} = await watchFixture()
+    let releaseStateRead = () => {}
+    const stateReadGate = new Promise(resolve => {
+      releaseStateRead = resolve
+    })
+    let markFirstActivity = (_activity) => {}
+    const firstActivity = new Promise(resolve => {
+      markFirstActivity = resolve
+    })
+    const backend = controlledNativeBackend(() => markFirstActivity("native-subscription"))
+    const coordinator = createProjectWatchCoordinator({
+      nativeWatch: backend.nativeWatch,
+      pollIntervalMs: 60_000,
+      quietPeriodMs: 10,
+      async watchStateReader(filenames) {
+        markFirstActivity("state-read")
+        await stateReadGate
+
+        return new Map([...filenames].map(filename => [filename, "fixture-state"]))
+      }
+    })
+    const output = outputBuffer()
+    const running = coordinator.run(manifestPath, new ProjectWatchReporter({format: "ndjson", stdout: output.writer}))
+
+    try {
+      expect(await firstActivity).toEqual("state-read")
+      let settled = false
+      const stopping = coordinator.stop("startup fixture stop").then(result => {
+        settled = true
+
+        return result
+      })
+
+      await Promise.resolve()
+      expect(settled).toBeFalse()
+      releaseStateRead()
+      expect(await stopping).toMatchObject({cycles: 0, status: "stopped"})
+      expect(await running).toMatchObject({cycles: 0, status: "stopped"})
+      expect(backend.openCount()).toEqual(0)
+      expect(output.read().trim().split("\n").map(line => JSON.parse(line).state)).toEqual(["watch-stopped"])
+    } finally {
+      releaseStateRead()
+      await coordinator.stop("fixture cleanup")
+      await running
+      await rm(root, {force: true, recursive: true})
+    }
+  })
+
+  it("keeps one invalid-graph recovery quiet timer when polling is more frequent", {timeoutMs: 30_000}, async () => {
+    const {manifestPath, root, sourcePath} = await watchFixture()
+    const timers = controlledTimers()
+    const backend = controlledNativeBackend()
+    const snapshotBuilds = markers()
+    let observeSnapshotBuilds = false
+    class ObservedSnapshotBuilder extends ProjectSnapshotBuilder {
+      async build(project) {
+        const snapshot = await super.build(project)
+
+        if (observeSnapshotBuilds) snapshotBuilds.mark()
+
+        return snapshot
+      }
+    }
+    const coordinator = createProjectWatchCoordinator({
+      nativeWatch: backend.nativeWatch,
+      pollIntervalMs: 1,
+      quietPeriodMs: 10,
+      snapshotBuilder: new ObservedSnapshotBuilder()
+    })
+    const events = watchEvents(coordinator)
+
+    timers.install()
+    const running = coordinator.run(manifestPath,
+      new ProjectWatchReporter({format: "ndjson", stdout: outputBuffer().writer}))
+    try {
+      await events.next(event => event.type == "cycle-terminal" && event.cycle == 1 && event.status == "succeeded")
+      await rm(sourcePath)
+      backend.emit(sourcePath)
+      expect(timers.fireTimeout(timers.takeScheduledTimeout())).toBeTrue()
+      await events.next(event => event.type == "cycle-terminal" && event.cycle == 2 && event.status == "failed")
+
+      await writeFile(sourcePath, sourceB)
+      observeSnapshotBuilds = true
+      timers.fireIntervals()
+      await snapshotBuilds.next()
+      await Promise.resolve()
+      const recoveryTimer = timers.takeScheduledTimeout()
+
+      timers.fireIntervals()
+      await snapshotBuilds.next()
+      await Promise.resolve()
+      expect(timers.hasTimeout(recoveryTimer)).toBeTrue()
+      expect(timers.fireTimeout(recoveryTimer)).toBeTrue()
+      await events.next(event => event.type == "cycle-terminal" && event.cycle == 3 && event.status == "recovered")
+      expect((await activeJava(root)).source).toContain("\"B\"")
+    } finally {
+      try {
+        await coordinator.stop("fixture cleanup")
+        await running
+      } finally {
+        timers.restore()
+        await rm(root, {force: true, recursive: true})
+      }
+    }
+  })
+
+  it("switches truthfully to polling when a manifest topology resubscription fails", {timeoutMs: 30_000}, async () => {
+    const {manifestPath, root} = await watchFixture()
+    const replacementPath = path.join(root, "src/replacement-main.js")
+    const backend = controlledNativeBackend()
+    const coordinator = createProjectWatchCoordinator({
+      nativeWatch: backend.nativeWatch,
+      pollIntervalMs: 60_000,
+      quietPeriodMs: 10
+    })
+    const events = watchEvents(coordinator)
+    const running = coordinator.run(manifestPath,
+      new ProjectWatchReporter({format: "ndjson", stdout: outputBuffer().writer}))
+
+    try {
+      await events.next(event => event.type == "cycle-terminal" && event.cycle == 1 && event.status == "succeeded")
+      const manifest = JSON.parse(await readFile(manifestPath, "utf8"))
+
+      await writeFile(replacementPath, sourceB)
+      manifest.sources[0].path = "src/replacement-main.js"
+      await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
+      backend.fail()
+      backend.emit(manifestPath)
+      await events.next(event => event.type == "cycle-terminal" && event.cycle == 2 && event.status == "succeeded")
+      expect(events.history().filter(event => event.type == "watch-backend").map(({status}) => status)).toEqual([
+        "native", "polling"
+      ])
+      expect(backend.activeCount()).toEqual(0)
+      expect((await activeJava(root)).source).toContain("\"B\"")
+    } finally {
+      await coordinator.stop("fixture cleanup")
+      await running
+      await rm(root, {force: true, recursive: true})
+    }
+  })
+
   it("coalesces real file hints, suppresses no-op touches, and recovers through replace/delete/recreate", {timeoutMs: 30_000}, async () => {
     const {manifestPath, root, sourcePath} = await watchFixture()
     const stdout = outputBuffer()

@@ -1,6 +1,6 @@
 # 043 — Deterministic watch coordinator
 
-- Status: `implementation complete on feature branch; focused and aggregate acceptance pass; independent review/CI/merge pending`
+- Status: `post-review correction complete on feature branch; focused and aggregate acceptance pass; exact-head CI/merge pending`
 - Phase/priority: Phase W / P0 lifecycle foundation
 - Dependencies: [039-project-manifest-and-build-cli.md](039-project-manifest-and-build-cli.md), [040-target-check-plan-and-java-javac.md](040-target-check-plan-and-java-javac.md)
 - Design: [Watch, build, and target-check pipeline](../docs/watch-build-pipeline.md)
@@ -62,3 +62,5 @@ Task 043 now provides public `ProjectWatchCoordinator` and `ProjectWatchReporter
 The builder's narrow current-snapshot interface installs an internal publisher guard after every checker closes and immediately before pointer replacement. Edits do not terminate healthy checks, stale completed candidates cannot publish, and the existing publication signal closes the remaining guard-to-pointer race. Parse/generation/check/publication failures preserve the last-good pointer; later valid content reports recovery. Signal shutdown closes subscriptions/timers, cancels only the exact active operation, waits for child `close` and publication cleanup, and emits one watcher terminal. No generated application is executed.
 
 Focused RED first failed because `src/project-watch.js` did not exist. Focused GREEN covers real create/change/delete/recreate and atomic replacement, burst/no-op reconciliation, dirty-during-check single follow-up, stale-candidate refusal, checked failure/recovery, startup overlap rejection, native-backend fallback, idle CLI shutdown, and an active real child that ignores TERM and requires bounded forced cleanup. Task 044 retains the packed real-`javac` JavaScript/JSDoc-to-Java watch vertical slice.
+
+The bounded post-review correction adds deterministic regressions for four concurrency boundaries: a lost native event after pointer publication cannot replace the pre-cycle polling baseline; shutdown awaits an in-progress startup state read before its sole terminal; recovery polling cannot indefinitely reset a longer quiet window; and failed native resubscription after a manifest topology change reports and uses polling. These corrections do not broaden the public API or Task 044 scope.

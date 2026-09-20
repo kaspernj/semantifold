@@ -4,7 +4,7 @@
 
 This folder is Semantifold's durable, dependency-ordered implementation backlog and delivered design record. Task 038 started from released `semantifold@0.8.0` / annotated `v0.8.0` at commit `2e21976656a1ffd534f5146d9ee9cb14c676be39`. The watch/build roadmap was originally researched from the documented clean `v0.7.0` baseline; earlier delivery history and external evidence remain recorded in [SOURCES.md](SOURCES.md).
 
-Tasks 001–025 and 028–038 are delivered in released `semantifold@0.9.0`; their exact PR, commit, CI, and acceptance history remains in the task records and [SOURCES.md](SOURCES.md). Task 039's strict manifest and one-shot build CLI shipped through PR #56 at merge commit `41770a2734152640badbb28da50f10dede01aa40`; Task 040's generic check-plan contract and Java/`javac` slice shipped through PR #57 at merge commit `6af0c371a2d904ba502df915cbd42e9aacd82904`. Task 043's deterministic watch coordinator is complete on its feature branch with focused and aggregate acceptance; independent review, exact-head TensorBuzz CI, and merge remain pending. Task 026 has deterministic generation/provenance while Apple materialization and acceptance remain deferred. Task 027 remains deferred roadmap work. Tasks 041–042 and 044–046 remain planned check/watch work and grant no implementation authority by themselves.
+Tasks 001–025 and 028–038 are delivered in released `semantifold@0.9.0`; their exact PR, commit, CI, and acceptance history remains in the task records and [SOURCES.md](SOURCES.md). Task 039's strict manifest and one-shot build CLI shipped through PR #56 at merge commit `41770a2734152640badbb28da50f10dede01aa40`; Task 040's generic check-plan contract and Java/`javac` slice shipped through PR #57 at merge commit `6af0c371a2d904ba502df915cbd42e9aacd82904`. Task 043's deterministic watch coordinator and bounded post-review correction are complete on its feature branch with focused and aggregate acceptance; exact-head TensorBuzz CI and merge remain pending. Task 026 has deterministic generation/provenance while Apple materialization and acceptance remain deferred. Task 027 remains deferred roadmap work. Tasks 041–042 and 044–046 remain planned check/watch work and grant no implementation authority by themselves.
 
 The delivered language-baseline expansion keeps its small Tasks 001–004 IR contract. Tasks 005–008 are bounded original-five semantic layers; none makes every platform, legacy bridge, or later language block semantic progress.
 
@@ -137,7 +137,7 @@ These tasks do not gate Task 005. Browser Wasm depends only on Task 015 and rema
 - [040 — Target check-plan contract and Java `javac` slice](040-target-check-plan-and-java-javac.md) — delivered through PR #57
 - [041 — Interpreted and managed text-target check plans](041-interpreted-managed-target-check-plans.md)
 - [042 — Native and project text-target check plans](042-native-project-target-check-plans.md)
-- [043 — Deterministic watch coordinator](043-deterministic-watch-coordinator.md) — implementation complete on feature branch; focused and aggregate acceptance pass; independent review/CI/merge pending
+- [043 — Deterministic watch coordinator](043-deterministic-watch-coordinator.md) — post-review correction complete on feature branch; focused and aggregate acceptance pass; exact-head CI/merge pending
 - [044 — JavaScript/JSDoc-to-Java watch vertical slice](044-jsdoc-java-watch-vertical-slice.md)
 - [045 — All-text-language watch/check terminal acceptance](045-all-text-language-watch-check-acceptance.md)
 - [046 — Binary and application-target watch policies](046-binary-application-watch-policies.md) — later, non-blocking
@@ -286,7 +286,7 @@ Dependencies in task files are authoritative. Existing IDs remain stable; numeri
 | [040](040-target-check-plan-and-java-javac.md) | delivered (W; PR #57) | P0 | Generic check-plan contract plus Java/`javac` | 039 |
 | [041](041-interpreted-managed-target-check-plans.md) | roadmap (W) | P1 | PHP/Ruby/JS/TS/Kotlin/Python/C# checks | 040 |
 | [042](042-native-project-target-check-plans.md) | roadmap (W) | P1 | Go/C/C++/Rust/Swift/Dart/Zig checks | 040 |
-| [043](043-deterministic-watch-coordinator.md) | complete on feature branch (W; independent review/CI/merge pending) | P0 | Serialized hash-reconciled project watcher | 039, 040 |
+| [043](043-deterministic-watch-coordinator.md) | post-review correction complete (W; exact-head CI/merge pending) | P0 | Serialized hash-reconciled project watcher | 039, 040 |
 | [044](044-jsdoc-java-watch-vertical-slice.md) | roadmap (W) | P0 | JS/JSDoc edit → Java → `javac` recovery slice | 043 |
 | [045](045-all-text-language-watch-check-acceptance.md) | roadmap (W) | P1 terminal | All current frontends/text targets bounded matrix | 041, 042, 044 |
 | [046](046-binary-application-watch-policies.md) | roadmap (W; later) | P2 | Wasm/Android/Flutter policies; iOS generation-only | 021, 028, 030, 043, 045 |

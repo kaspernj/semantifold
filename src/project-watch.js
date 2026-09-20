@@ -17,6 +17,8 @@ const maximumPollIntervalMs = 60_000
 const projectWatchObservers = new WeakMap()
 /** @type {WeakMap<ProjectWatchCoordinator, typeof watchFileSystem>} */
 const projectWatchNativeBackends = new WeakMap()
+/** @type {WeakMap<ProjectWatchCoordinator, ProjectWatchStateReader>} */
+const projectWatchStateReaders = new WeakMap()
 
 /**
  * Installs a synchronous lifecycle observer for focused coordination specs.
@@ -35,11 +37,12 @@ export function observeProjectWatch(coordinator, observer) {
 /**
  * Creates a coordinator with one instance-owned native event backend for focused fallback specs.
  * This helper is intentionally not part of the package root API.
- * @param {{builder?: ProjectBuilder, manifestLoader?: ProjectManifestLoader, nativeWatch: typeof watchFileSystem, pollIntervalMs?: number, quietPeriodMs?: number, snapshotBuilder?: ProjectSnapshotBuilder}} options - Coordinator options and backend.
+ * @param {{builder?: ProjectBuilder, manifestLoader?: ProjectManifestLoader, nativeWatch: typeof watchFileSystem, pollIntervalMs?: number, quietPeriodMs?: number, snapshotBuilder?: ProjectSnapshotBuilder, watchStateReader?: ProjectWatchStateReader}} options - Coordinator options and backends.
  * @returns {ProjectWatchCoordinator} Configured coordinator.
  */
 export function createProjectWatchCoordinator(options) {
-  if (!isPlainObject(options) || typeof options.nativeWatch != "function") {
+  if (!isPlainObject(options) || typeof options.nativeWatch != "function" ||
+    options.watchStateReader !== undefined && typeof options.watchStateReader != "function") {
     throw new TypeError("Invalid project watch coordinator dependencies.")
   }
   const coordinator = new ProjectWatchCoordinator({
@@ -51,6 +54,7 @@ export function createProjectWatchCoordinator(options) {
   })
 
   projectWatchNativeBackends.set(coordinator, options.nativeWatch)
+  if (options.watchStateReader !== undefined) projectWatchStateReaders.set(coordinator, options.watchStateReader)
 
   return coordinator
 }
@@ -114,6 +118,8 @@ export class ProjectWatchCoordinator {
   #publicationController
   /** @type {Promise<void> | undefined} */
   #activeCycle
+  /** @type {Promise<void> | undefined} */
+  #startup
   /** @type {Promise<Readonly<ProjectWatchResult>> | undefined} */
   #completion
   /**
@@ -174,7 +180,15 @@ export class ProjectWatchCoordinator {
     })
     process.once("SIGINT", this.#signalHandler)
     process.once("SIGTERM", this.#signalHandler)
-    void this.#start(this.#check)
+    const startup = this.#start(this.#check)
+
+    this.#startup = startup
+    const startupSettled = () => {
+      if (this.#startup === startup) this.#startup = undefined
+      this.#finishStoppedIfIdle()
+    }
+
+    void startup.then(startupSettled, startupSettled)
 
     return this.#completion
   }
@@ -193,7 +207,7 @@ export class ProjectWatchCoordinator {
       this.#closeEventBackends()
       this.#activeController?.abort(reason)
       this.#publicationController?.abort(reason)
-      if (this.#activeCycle === undefined) this.#finishStopped()
+      this.#finishStoppedIfIdle()
     }
 
     return this.#completion
@@ -207,22 +221,23 @@ export class ProjectWatchCoordinator {
   async #start(check) {
     try {
       const project = await this.#manifestLoader.load(this.#manifestPath)
+
+      if (this.#stopping) return
       const snapshot = await this.#snapshotBuilder.build(project)
 
-      if (this.#stopping) {
-        this.#finishStopped()
-        return
-      }
+      if (this.#stopping) return
       this.#project = project
       this.#lastSnapshot = snapshot
       this.#setWatchTopology(project)
-      this.#watchStates = await readWatchStates(this.#watchedPaths)
+      this.#watchStates = await this.#readWatchStates()
+      if (this.#stopping) return
       this.#reporter?.watchStarted(project.id)
+      if (this.#stopping) return
       this.#startEventBackend()
+      if (this.#stopping) return
       await this.#admitCycle({changedPaths: [], check, project, snapshot})
     } catch (error) {
-      if (this.#stopping) this.#finishStopped()
-      else this.#finishFailed(error)
+      if (!this.#stopping) this.#finishFailed(error)
     }
   }
 
@@ -312,6 +327,7 @@ export class ProjectWatchCoordinator {
           }
         })
 
+        this.#commitWindow = false
         terminalStatus = this.#hadFailure ? "recovered" : "succeeded"
         this.#hadFailure = false
         this.#suppressedHash = result.snapshotHash
@@ -319,7 +335,11 @@ export class ProjectWatchCoordinator {
           this.#project = currentProject
           this.#lastSnapshot = currentSnapshot
           this.#setWatchTopology(currentProject)
-          this.#watchStates = await readWatchStates(this.#watchedPaths)
+          const watchStates = await this.#readWatchStates()
+          const changedWatchPaths = changedWatchStatePaths(this.#watchStates, watchStates, this.#displayPaths)
+
+          if (changedWatchPaths.length == 0) this.#watchStates = watchStates
+          else for (const changedPath of changedWatchPaths) this.#hint(changedPath, check)
         }
         this.#reporter?.cycleSucceeded(result, terminalStatus == "recovered")
       } catch (error) {
@@ -342,7 +362,7 @@ export class ProjectWatchCoordinator {
     this.#publicationController = undefined
     this.#observe({cycle, status: terminalStatus, type: "cycle-terminal"})
     if (this.#stopping) {
-      this.#finishStopped()
+      this.#finishStoppedIfIdle()
       return
     }
     if (this.#initialCycle && terminalStatus == "failed") {
@@ -381,11 +401,11 @@ export class ProjectWatchCoordinator {
       snapshot = await this.#snapshotBuilder.build(project)
       this.#suppressedInvalidState = undefined
       this.#setWatchTopology(project)
-      this.#watchStates = await readWatchStates(this.#watchedPaths)
+      this.#watchStates = await this.#readWatchStates()
     } catch (error) {
       snapshotFailure = error
       try {
-        this.#watchStates = await readWatchStates(this.#watchedPaths)
+        this.#watchStates = await this.#readWatchStates()
       } catch {
         // The build cycle below owns and reports the original complete-graph failure.
       }
@@ -452,7 +472,9 @@ export class ProjectWatchCoordinator {
     this.#watchedPaths = watchedPaths
     this.#displayPaths = displayPaths
     this.#publicationRoot = project.publicationRoot
-    if (changed && this.#subscriptions.length > 0 && !this.#polling) this.#openNativeSubscriptions()
+    if (changed && this.#subscriptions.length > 0 && !this.#polling && !this.#openNativeSubscriptions()) {
+      this.#switchToPolling()
+    }
   }
 
   /**
@@ -535,13 +557,13 @@ export class ProjectWatchCoordinator {
           const project = await this.#manifestLoader.load(this.#manifestPath)
 
           await this.#snapshotBuilder.build(project)
-          this.#hint(undefined, this.#currentCheckMode())
+          if (this.#quietTimer === undefined) this.#hint(undefined, this.#currentCheckMode())
           return
         } catch {
           // An unchanged invalid graph remains one failed cycle until it becomes readable and valid.
         }
       }
-      const current = await readWatchStates(this.#watchedPaths)
+      const current = await this.#readWatchStates()
       const changed = changedWatchStatePaths(this.#watchStates, current, this.#displayPaths)
 
       this.#pollFailed = false
@@ -564,6 +586,16 @@ export class ProjectWatchCoordinator {
    */
   #currentCheckMode() {
     return this.#check
+  }
+
+  /**
+   * Reads one detached mutation-sensitive state observation through the selected backend.
+   * @returns {Promise<Map<string, string>>} Stable ordered path states.
+   */
+  #readWatchStates() {
+    const reader = projectWatchStateReaders.get(this) ?? readWatchStates
+
+    return reader(new Set(this.#watchedPaths))
   }
 
   #check = false
@@ -595,6 +627,14 @@ export class ProjectWatchCoordinator {
     this.#quietTimer = undefined
     this.#pollTimer = undefined
     this.#closeSubscriptions()
+  }
+
+  /**
+   * Resolves shutdown only after startup and the active cycle have both relinquished ownership.
+   * @returns {void}
+   */
+  #finishStoppedIfIdle() {
+    if (this.#stopping && this.#startup === undefined && this.#activeCycle === undefined) this.#finishStopped()
   }
 
   /**
@@ -654,7 +694,7 @@ export class ProjectWatchCoordinator {
 /**
  * Reads mutation-sensitive states only as polling/event deduplication hints.
  * Content hashes remain authoritative for cycle admission.
- * @param {Set<string>} filenames - Exact watched graph paths.
+ * @param {Readonly<Set<string>>} filenames - Exact watched graph paths.
  * @returns {Promise<Map<string, string>>} Stable ordered path states.
  */
 async function readWatchStates(filenames) {
@@ -673,6 +713,10 @@ async function readWatchStates(filenames) {
 
   return result
 }
+
+/**
+ * @typedef {(filenames: Readonly<Set<string>>) => Promise<Map<string, string>>} ProjectWatchStateReader
+ */
 
 /**
  * Locates polling changes without treating metadata as build identity.
