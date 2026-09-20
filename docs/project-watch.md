@@ -1,6 +1,6 @@
 # Deterministic project watch
 
-Task 043 adds one language-neutral, long-lived coordinator above the existing project snapshot, build/check, and transactional publication contracts. It accepts filesystem events only as hints, re-reads the complete explicit manifest/source graph, serializes complete cycles, and never executes generated programs.
+Task 043 adds one language-neutral, long-lived coordinator above the existing project snapshot, build/check, and transactional publication contracts. Task 044 proves its first packed checked vertical slice from JavaScript/JSDoc through generated Java and real `javac`. The coordinator accepts filesystem events only as hints, re-reads the complete explicit manifest/source graph, serializes complete cycles, and never executes generated programs.
 
 ## Commands
 
@@ -25,6 +25,8 @@ After the quiet window, `ProjectManifestLoader` and `ProjectSnapshotBuilder` re-
 
 Only one cycle and one checker child can be owned at a time. A hint during a cycle sets one dirty marker; it does not terminate a healthy compiler. After every target checker has closed, the builder invokes a complete-snapshot currentness guard at the publisher's pre-pointer boundary. Changed content supersedes and cleans the staged candidate without replacing `active-generation.json`; one immediate follow-up then owns the latest complete state. A hint in the narrow interval after that guard cancels publication before pointer replacement. After a pointer commit, mutation-sensitive state is compared with the pre-cycle polling baseline: a newer state marks the active cycle dirty and is never absorbed as a clean baseline merely because its native event was lost. A committed pointer still selects exactly one immutable generation, and readers continue to resolve it once.
 
+In NDJSON mode, the first hint admitted while a cycle remains active emits nonterminal `state: "cycle-dirty"`. This acknowledges that the coordinator owns one latest-state follow-up; it does not claim that an event filename is a complete input or that its bytes have already been snapshotted. Further hints in the same active cycle collapse into that one dirty generation.
+
 ## Failure, reporting, and shutdown
 
 Human output identifies succeeded, failed, recovered, superseded, and cancelled cycles. NDJSON uses `SemantifoldWatchEvent` version 1. State records carry the project, cycle, complete snapshot hash when available, stable changed paths, ordered target/check evidence, and durations. Every admitted cycle emits exactly one record with `terminal: true` and `terminalScope: "cycle"`; shutdown emits exactly one separate watcher terminal with `terminalScope: "watch"`.
@@ -37,4 +39,22 @@ On `SIGINT`, `SIGTERM`, or `ProjectWatchCoordinator.stop(reason)`, the coordinat
 
 `ProjectWatchCoordinator` and `ProjectWatchReporter` are public ESM exports. The coordinator composes `ProjectManifestLoader`, `ProjectSnapshotBuilder`, `ProjectBuilder`, target-owned check plans, and `GeneratedArtifactPublisher`; it contains no language IDs, parser logic, compiler argument construction, or artifact writes.
 
-Task 043 supplies orchestration only. The packed real-`javac` JavaScript/JSDoc-to-Java watch acceptance remains Task 044. Other text-target plans remain Tasks 041–042, their terminal matrix remains Task 045, and binary/application watch policy remains Task 046. Watch adds no globs, ignore language, daemon mode, editor protocol, runtime execution, hot reload, arbitrary hooks, network access, or package installation.
+The coordinator and generic check runner contain no Java language switch. Java generation remains in the Java backend, the target-owned plan constructs exact `javac` arguments, and the generic runner owns the process. Other text-target plans remain Tasks 041–042, their terminal matrix remains Task 045, and binary/application watch policy remains Task 046. Watch adds no globs, ignore language, daemon mode, editor protocol, runtime execution, hot reload, arbitrary hooks, network access, or package installation.
+
+## Copy-ready JavaScript/JSDoc-to-Java watch
+
+The npm package includes [`examples/jsdoc-java-watch`](../examples/jsdoc-java-watch/). Copy that directory outside `node_modules`, enter it, and run:
+
+```sh
+npx semantifold watch --check
+```
+
+The example manifest explicitly selects `src/main.js`, JavaScript, one Java text target, `targets/java/source`, and `targets/java/classes`. Its JSDoc-typed functions cover numeric and Boolean/string control behavior, and `expected-output.txt` records the output used by acceptance. Cycle 1 prints a line of this form only after real `javac` has closed successfully and the pointer has switched:
+
+```text
+Watch cycle 1 succeeded: project 'jsdoc-java-watch' published generation 'g-<snapshot-sha256>-checked-<uuid>'.
+```
+
+An unambiguous supported `javac` must be available on `PATH`, or `SEMANTIFOLD_JAVAC` must name its absolute configured executable. Missing `javac` fails the declared check; watch never silently changes to generation-only operation. Real `java` is not required by watch because watch does not execute generated code. The Task 044 acceptance harness separately discovers real `java`, resolves `active-generation.json` once, verifies the selected manifest/source/class hashes, and executes only that committed class snapshot.
+
+Saving a valid edit produces a later successful generation. Touching the source without changing content reports no cycle. A located JavaScript/JSDoc parse or semantic error never invokes `javac`; a real compiler error at the generic staged check boundary never switches the pointer. Both failures keep a previously successful watcher alive, and the next valid edit reports recovery. Edits admitted during an active check emit `cycle-dirty` in NDJSON, allow the owned child to close, refuse its stale candidate, and run one latest-state follow-up without overlapping compiler processes. `SIGINT` or `SIGTERM` during idle or checking closes subscriptions and the exact checker process before the sole watcher terminal.

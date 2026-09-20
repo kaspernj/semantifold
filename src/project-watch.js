@@ -447,7 +447,10 @@ export class ProjectWatchCoordinator {
 
       this.#dirty = true
       if (this.#commitWindow) this.#publicationController?.abort("A filesystem hint reached the active-pointer commit window.")
-      if (!wasDirty) this.#observe({cycle: this.#cycle, status: "dirty", type: "dirty"})
+      if (!wasDirty) {
+        this.#reporter?.cycleDirty()
+        this.#observe({cycle: this.#cycle, status: "dirty", type: "dirty"})
+      }
       return
     }
     if (this.#quietTimer !== undefined) clearTimeout(this.#quietTimer)

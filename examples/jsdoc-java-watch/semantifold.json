@@ -1,0 +1,23 @@
+{
+  "schema": "SemantifoldProject",
+  "version": 1,
+  "id": "jsdoc-java-watch",
+  "publicationRoot": ".semantifold",
+  "sources": [
+    {
+      "id": "main",
+      "path": "src/main.js",
+      "language": "javascript",
+      "entry": true
+    }
+  ],
+  "targets": [
+    {
+      "id": "java-main",
+      "language": "java",
+      "role": "text",
+      "sourceProjection": "targets/java/source",
+      "buildProjection": "targets/java/classes"
+    }
+  ]
+}
