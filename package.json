@@ -18,6 +18,7 @@
     "build/**",
     "bin/**",
     "docs/**",
+    "examples/**",
     "index.js",
     "LICENSE",
     "README.md",

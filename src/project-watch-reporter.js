@@ -203,6 +203,15 @@ export class ProjectWatchReporter {
   }
 
   /**
+   * Reports the first filesystem hint admitted while the current cycle remains active.
+   * @returns {void}
+   */
+  cycleDirty() {
+    this.#requireCycle()
+    this.#emit({state: "cycle-dirty"})
+  }
+
+  /**
    * Emits the sole clean watcher terminal.
    * @param {string} reason - Shutdown reason.
    * @returns {void}

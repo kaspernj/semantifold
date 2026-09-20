@@ -134,7 +134,7 @@ npx semantifold build --check
 
 Resolve `.semantifold/active-generation.json` once; the checked generation from this manifest contains Java at `targets/java/source/semantifold/generated/main/Main.java` and compiler output at `targets/java/build/semantifold/generated/main/Main.class`. The two paths belong to the same immutable generation and are never promoted separately. Omitting `buildProjection` instead selects `targets/<target-id>/build`.
 
-`build --check` compiles but does not run Java. Acceptance code may explicitly invoke the committed class afterward. Task 043 now composes the same builder through `semantifold watch`; see [deterministic project watch](project-watch.md). Other target check plans remain Tasks 041–042, the packed Java watch vertical slice remains Task 044, and terminal acceptance remains Task 045. No build or watch mode garbage-collects committed generations or implements hot reload.
+`build --check` compiles but does not run Java. Acceptance code may explicitly invoke the committed class afterward. Tasks 043–044 compose the same builder through the packed `semantifold watch --check` JavaScript/JSDoc-to-Java workflow; see [deterministic project watch](project-watch.md) and the shipped [`examples/jsdoc-java-watch`](../examples/jsdoc-java-watch/) project. Other target check plans remain Tasks 041–042 and terminal acceptance remains Task 045. No build or watch mode garbage-collects committed generations or implements hot reload.
 
 ## Importable API and diagnostics
 

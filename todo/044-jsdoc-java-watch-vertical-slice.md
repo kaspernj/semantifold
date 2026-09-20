@@ -1,6 +1,6 @@
 # 044 — JavaScript/JSDoc-to-Java watch vertical slice
 
-- Status: `roadmap`
+- Status: `implementation complete in PR #59; local focused/static/package validation passed; review/CI/merge pending`
 - Phase/priority: Phase W / P0 product slice
 - Dependencies: [043-deterministic-watch-coordinator.md](043-deterministic-watch-coordinator.md)
 - Design: [Watch, build, and target-check pipeline](../docs/watch-build-pipeline.md)
@@ -52,3 +52,11 @@ All-language matrix completion (Task 045), Java incremental compiler daemons, Ja
 - A packed consumer can run one long-lived watcher and observe valid edit → generated Java → real `javac` → coherent committed classes.
 - Parse/check failures retain the last good generation and recover on a valid edit without process restart.
 - The slice uses only generic project/publisher/check/watcher contracts and passes focused lifecycle, packaging, lint/typecheck, documentation, and changelog gates.
+
+## Implementation record — 2026-09-20
+
+Task 044 now ships `examples/jsdoc-java-watch` as a copy-ready public-consumer project and proves it from a real packed tarball after both ordinary credential-free install and clean `npm ci`. One long-lived `semantifold watch --check --ndjson` process performs the initial build, suppresses a content-identical touch, commits semantic edits through real canonical `javac`, retains exact pointer/source/class bytes across a located frontend failure and a controlled real compiler failure, recovers without restart, and serializes a latest-state burst without overlapping checker processes. Acceptance resolves each active pointer once, verifies generation-manifest and artifact hashes/provenance against that immutable snapshot, and invokes real canonical `java` only from the harness for exact expected output.
+
+The controlled compiler fixture is outside production: a configured test-owned executable preserves canonical version discovery, accepts the target plan's exact argv, and delegates to the real discovered `javac`. It may corrupt one already-staged candidate at the generic check boundary or wait on an explicit marker so failure, burst, and active-shutdown ownership are observable. Production gains only a target-neutral nonterminal `cycle-dirty` NDJSON acknowledgement for the first hint admitted during an active cycle; no Java-specific watcher, output mutation hook, runtime execution, package-manager integration, or new semantics were added.
+
+Focused RED failed at the intended missing package surface because the tarball did not contain the public Task 044 example. Focused GREEN then exercised ordinary install and clean `npm ci`, complete dependency listing and public typing, idle and active signal shutdown, missing-`javac` failure, last-good cleanup, and exact process terminals. Implementation is proposed in PR #59; independent review, exact-head TensorBuzz CI, merge, release, and publication remain coordinator-owned.

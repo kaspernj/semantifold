@@ -103,6 +103,7 @@ export class ProjectWatchCoordinator {
   #cycle = 0
   #hintVersion = 0
   #dirty = false
+  #cycleDirtyReported = false
   #commitWindow = false
   #hadFailure = false
   #running = false
@@ -256,6 +257,7 @@ export class ProjectWatchCoordinator {
     this.#activeController = activeController
     this.#publicationController = publicationController
     this.#dirty = false
+    this.#cycleDirtyReported = false
     this.#commitWindow = false
     this.#hintPaths.clear()
     this.#reporter?.cycleStarted({
@@ -443,11 +445,13 @@ export class ProjectWatchCoordinator {
     this.#hintVersion += 1
     if (changedPath !== undefined) this.#hintPaths.add(changedPath)
     if (this.#activeCycle !== undefined) {
-      const wasDirty = this.#dirty
-
       this.#dirty = true
       if (this.#commitWindow) this.#publicationController?.abort("A filesystem hint reached the active-pointer commit window.")
-      if (!wasDirty) this.#observe({cycle: this.#cycle, status: "dirty", type: "dirty"})
+      if (!this.#cycleDirtyReported) {
+        this.#cycleDirtyReported = true
+        this.#reporter?.cycleDirty()
+        this.#observe({cycle: this.#cycle, status: "dirty", type: "dirty"})
+      }
       return
     }
     if (this.#quietTimer !== undefined) clearTimeout(this.#quietTimer)

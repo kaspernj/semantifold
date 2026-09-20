@@ -2,7 +2,7 @@
 
 ## Status and verified baseline
 
-Tasks 039–040 implement the strict project manifest, stable one-shot snapshot, deterministic generation orchestration, generic non-executing check-plan contract, Java/`javac`, human/NDJSON reporting, and packaged `semantifold build [--check]`. Task 043 now implements the language-neutral deterministic watch coordinator and `semantifold watch [--check]`. Other target plans and the packed Java watch vertical slice remain roadmap contracts.
+Tasks 039–040 implement the strict project manifest, stable one-shot snapshot, deterministic generation orchestration, generic non-executing check-plan contract, Java/`javac`, human/NDJSON reporting, and packaged `semantifold build [--check]`. Task 043 implements the language-neutral deterministic watch coordinator and `semantifold watch [--check]`; Task 044 proves its packed JavaScript/JSDoc-to-Java checked vertical slice. Other target plans remain roadmap contracts.
 
 The inspected baseline is `semantifold@0.7.0`, annotated tag `v0.7.0`, commit `8cd70c5a6c7de98df2d4a183d6555ad4f3d5ba5a`. At that revision:
 
@@ -14,7 +14,7 @@ The inspected baseline is `semantifold@0.7.0`, annotated tag `v0.7.0`, commit `8
 - `package.json` had no `bin` entry. The public API did not persist generated artifacts, load a project manifest, derive compiler arguments from a target, or watch source files.
 - The only repository file-change watcher is a test helper; there is no product watch coordinator, incremental dependency graph, event coalescing policy, or long-lived compiler owner.
 
-That historical baseline proved **JavaScript/JSDoc → semantic IR → Java → `javac`** as a one-shot composition. Released `semantifold@0.9.0` supplies Task 038's public language-neutral `GeneratedArtifactPublisher`, immutable generation manifests, one atomic active pointer, pointer-once resolution, and journal-bounded recovery. Task 039 adds the package bin, project configuration, and one-shot CLI behavior; Task 040 productizes the generic plan/runner and Java compiler boundary; Task 043 supplies generic watch coordination. Other target-owned check plans and the packed Java watch vertical slice remain Tasks 041–044.
+That historical baseline proved **JavaScript/JSDoc → semantic IR → Java → `javac`** as a one-shot composition. Released `semantifold@0.9.0` supplies Task 038's public language-neutral `GeneratedArtifactPublisher`, immutable generation manifests, one atomic active pointer, pointer-once resolution, and journal-bounded recovery. Task 039 adds the package bin, project configuration, and one-shot CLI behavior; Task 040 productizes the generic plan/runner and Java compiler boundary; Task 043 supplies generic watch coordination; Task 044 supplies the packed credential-free watch proof and public example. Other target-owned check plans remain Tasks 041–042.
 
 ## Product outcome
 
@@ -91,7 +91,7 @@ The implemented pre-pointer currentness guard runs only after every target valid
 
 ### Reporting contract
 
-Task 039 human output is concise and stable. Its machine-readable mode emits deterministic state records with project identity, cycle `1`, source snapshot hash, ordered target ID/role/results, exit status, and a structured diagnostic when present. Generation-only records deliberately report state rather than nondeterministic elapsed time. Task 040 checked-stage records add exact tool/process identity and lifecycle timing. Task 043 watch records add stable changed paths, cycle duration, succeeded/failed/recovered/superseded/cancelled classification, one terminal record per admitted cycle, and one separate watcher terminal.
+Task 039 human output is concise and stable. Its machine-readable mode emits deterministic state records with project identity, cycle `1`, source snapshot hash, ordered target ID/role/results, exit status, and a structured diagnostic when present. Generation-only records deliberately report state rather than nondeterministic elapsed time. Task 040 checked-stage records add exact tool/process identity and lifecycle timing. Task 043 watch records add stable changed paths, cycle duration, succeeded/failed/recovered/superseded/cancelled classification, one terminal record per admitted cycle, and one separate watcher terminal. Task 044 adds the nonterminal `cycle-dirty` acknowledgement used to synchronize a controlled active-check burst with the coordinator's admitted follow-up ownership.
 
 Exactly one terminal cycle record is emitted per cycle. Process exit is non-zero for failed one-shot builds, but ordinary watch-cycle failures keep the watcher process alive. Startup/configuration failure exits. Signal-driven shutdown forwards cancellation to an active owned child, waits for `close`, removes subscriptions and staging state, and exits once.
 
@@ -149,7 +149,7 @@ Binary and application targets use the same generation watcher only after explic
                   046 later binary/application policies
 ```
 
-Tasks 038–040 and 043 are the implemented publication, one-shot project-build, initial Java check, and watch-orchestration foundation. Tasks 041–042 and 044–045 remain the selected text-language check/watch delivery chain, with Task 045 as its single terminal acceptance task. Task 046 is a non-blocking later extension.
+Tasks 038–040 and 043–044 are the implemented publication, one-shot project-build, initial Java check, watch-orchestration foundation, and first packed checked slice. Tasks 041–042 and 045 remain the selected text-language check/watch delivery chain, with Task 045 as its single terminal acceptance task. Task 046 is a non-blocking later extension.
 
 ## Non-goals
 

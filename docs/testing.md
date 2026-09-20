@@ -1,5 +1,15 @@
 # Testing
 
+## Task 044 packed JavaScript/JSDoc-to-Java watch slice
+
+`jsdoc-java-watch-packed-consumer.spec.js` performs the complete Task 044 proof from a real root tarball after ordinary credential-free install and clean `npm ci`, each with default `install-links=false`, an empty user/global npm configuration, a fresh cache, the public registry, full dependency listing, and strict public API typing. One long-lived packed `watch --check --ndjson` process uses an exact-argv test-owned configured compiler boundary that delegates to canonical real `javac`. Event and process markers—not timing sleeps—drive valid edits, no-op touch suppression, a located frontend failure, one controlled invalid staged-Java compiler failure, recovery, dirty-during-check burst supersession, and idle/active signal shutdown. Every successful cycle resolves the active pointer once, verifies manifest and artifact hashes/provenance, and invokes canonical real `java` only from the acceptance harness. Missing `javac`, overlap, leakage, a changed last-good byte, or a missing tool is a failure, never a skip.
+
+Run it as one focused file:
+
+```sh
+npx velocious-test spec/jsdoc-java-watch-packed-consumer.spec.js
+```
+
 ## Task 040 target check plans and Java compiler publication
 
 Task 040 uses focused plan, process-lifecycle, real project transaction, CLI, registry/public-API, and packed-consumer specs. `target-check-plan.spec.js` owns immutable capability/plan schema, exact Java argv, target-declared stage/tool validation, generation-only rejection, path ownership, dense immutable arguments/environment, and the developer execution prohibition. `target-check-runner.spec.js` owns launch, non-zero, output-limit, timeout, cancellation, child-signal, late-output, and close-only settlement behavior without timing sleeps. `project-java-check.spec.js` compiles a real two-unit JavaScript/JSDoc → semantic IR → Java project into the generation-scoped build subtree, executes committed classes only in acceptance code, and proves repeated and A→B→A checked builds rerun real `javac`, exact reverted source/class bytes, missing/ambiguous `javac`, invalid Java, pre-pointer failure, exact last-good bytes, cleanup, and recovery. CLI coverage owns strict `--check`, stage/tool/process reporting, nested compiler and tool-discovery diagnostics, the no-execution boundary, and deterministic cancellation after checker close but before pointer replacement with exact last-good source/class preservation. The packed-consumer proof repeats ordinary install and clean `npm ci` with scrubbed credentials/configuration, public declaration use, real package bin/`javac`, committed class resolution, and explicit post-build `java` execution.
