@@ -1,6 +1,6 @@
 # 044 — JavaScript/JSDoc-to-Java watch vertical slice
 
-- Status: `implementation complete on feature branch; local focused/static/package validation passed; PR/review/CI/merge pending`
+- Status: `implementation complete in PR #59; local focused/static/package validation passed; review/CI/merge pending`
 - Phase/priority: Phase W / P0 product slice
 - Dependencies: [043-deterministic-watch-coordinator.md](043-deterministic-watch-coordinator.md)
 - Design: [Watch, build, and target-check pipeline](../docs/watch-build-pipeline.md)
@@ -59,4 +59,4 @@ Task 044 now ships `examples/jsdoc-java-watch` as a copy-ready public-consumer p
 
 The controlled compiler fixture is outside production: a configured test-owned executable preserves canonical version discovery, accepts the target plan's exact argv, and delegates to the real discovered `javac`. It may corrupt one already-staged candidate at the generic check boundary or wait on an explicit marker so failure, burst, and active-shutdown ownership are observable. Production gains only a target-neutral nonterminal `cycle-dirty` NDJSON acknowledgement for the first hint admitted during an active cycle; no Java-specific watcher, output mutation hook, runtime execution, package-manager integration, or new semantics were added.
 
-Focused RED failed at the intended missing package surface because the tarball did not contain the public Task 044 example. Focused GREEN then exercised ordinary install and clean `npm ci`, complete dependency listing and public typing, idle and active signal shutdown, missing-`javac` failure, last-good cleanup, and exact process terminals. Independent review, exact-head TensorBuzz CI, merge, release, and publication remain coordinator-owned.
+Focused RED failed at the intended missing package surface because the tarball did not contain the public Task 044 example. Focused GREEN then exercised ordinary install and clean `npm ci`, complete dependency listing and public typing, idle and active signal shutdown, missing-`javac` failure, last-good cleanup, and exact process terminals. Implementation is proposed in PR #59; independent review, exact-head TensorBuzz CI, merge, release, and publication remain coordinator-owned.
