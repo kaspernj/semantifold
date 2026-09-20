@@ -338,6 +338,47 @@ describe("Semantifold deterministic project watch coordinator", () => {
     }
   })
 
+  it("reports one dirty event when post-publication metadata re-admits a cleared active-cycle hint", {timeoutMs: 30_000}, async () => {
+    const {manifestPath, root, sourcePath} = await watchFixture()
+    const backend = controlledNativeBackend()
+    const controlled = controlledBuilder(1)
+    const output = outputBuffer()
+    let stateReads = 0
+    const coordinator = createProjectWatchCoordinator({
+      builder: controlled.builder,
+      nativeWatch: backend.nativeWatch,
+      pollIntervalMs: 60_000,
+      quietPeriodMs: 10,
+      async watchStateReader(filenames) {
+        stateReads += 1
+
+        return new Map([...filenames].map(filename => [filename,
+          filename == sourcePath && stateReads > 1 ? "source-after-touch" : "stable"]))
+      }
+    })
+    const events = watchEvents(coordinator)
+    const running = coordinator.run(manifestPath,
+      new ProjectWatchReporter({format: "ndjson", stdout: output.writer}), {check: true})
+
+    try {
+      await controlled.started
+      backend.emit(sourcePath)
+      await events.next(event => event.type == "dirty" && event.cycle == 1)
+      controlled.release()
+      await events.next(event => event.type == "cycle-terminal" && event.cycle == 1 && event.status == "succeeded")
+      await events.next(event => event.type == "reconciled" && event.status == "unchanged")
+      const records = output.read().trim().split("\n").map(line => JSON.parse(line))
+
+      expect(records.filter(record => record.state == "cycle-dirty" && record.cycle == 1)).toHaveLength(1)
+      expect(events.history().filter(event => event.type == "dirty" && event.cycle == 1)).toHaveLength(1)
+    } finally {
+      controlled.release()
+      await coordinator.stop("fixture cleanup")
+      await running
+      await rm(root, {force: true, recursive: true})
+    }
+  })
+
   it("awaits a blocked startup state read and never subscribes after terminal shutdown", {timeoutMs: 30_000}, async () => {
     const {manifestPath, root} = await watchFixture()
     let releaseStateRead = () => {}
