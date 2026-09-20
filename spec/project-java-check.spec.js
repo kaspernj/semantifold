@@ -16,6 +16,7 @@ import {
   SemantifoldDiagnostic,
   TargetCheckRunner
 } from "../index.js"
+import {observeProjectBuild} from "../src/project-build.js"
 import {injectPublicationFailure} from "../src/publication.js"
 
 const executeFile = promisify(execFile)
@@ -109,7 +110,9 @@ describe("Java project checks and atomic publication", () => {
         .filter(filename => filename.endsWith(".java"))
       const buildFiles = (await readdir(target.buildPath, {recursive: true})).filter(filename => filename.endsWith(".class"))
 
-      expect(result.generationId).toEqual(`g-${result.snapshotHash}-checked`)
+      expect(result.generationId).toMatch(
+        new RegExp(`^g-${result.snapshotHash}-checked-[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$`, "u")
+      )
       expect(result.targets[0].check?.stages.map(({stage}) => stage)).toEqual(["compile"])
       expect(result.targets[0].check?.stages[0]).toMatchObject({exitCode: 0, signal: null, tool: {id: "javac"}})
       expect(sourceFiles.sort()).toEqual([
@@ -136,6 +139,48 @@ describe("Java project checks and atomic publication", () => {
 
       expect(executed.stdout).toEqual("Hello Ada\n")
       expect(executed.stderr).toEqual("")
+    } finally {
+      await rm(root, {force: true, recursive: true})
+    }
+  })
+
+  it("reruns javac for repeated and reverted checked snapshots while retaining exact immutable outputs", {timeoutMs: 30_000}, async () => {
+    const {manifestPath, root} = await checkedProject()
+    const sourcePath = path.join(root, "src/main.js")
+    const builder = new ProjectBuilder()
+    /** @type {string[]} */
+    const operations = []
+
+    observeProjectBuild(builder, operation => operations.push(operation))
+    try {
+      const originalSource = await readFile(sourcePath)
+      const first = await builder.build(manifestPath, undefined, {check: true})
+      const firstJavaPath = path.join(first.generation.targets[0].sourcePath, "semantifold/generated/main/Main.java")
+      const firstClassPath = path.join(first.generation.targets[0].buildPath, "semantifold/generated/main/Main.class")
+      const firstJava = await readFile(firstJavaPath)
+      const firstClass = await readFile(firstClassPath)
+      const repeated = await builder.build(manifestPath, undefined, {check: true})
+
+      await writeFile(sourcePath, originalSource.toString("utf8").replace("message(\"Ada\")", "message(\"Grace\")"))
+      const changed = await builder.build(manifestPath, undefined, {check: true})
+
+      await writeFile(sourcePath, originalSource)
+      const reverted = await builder.build(manifestPath, undefined, {check: true})
+      const pointer = JSON.parse(await readFile(path.join(root, ".semantifold/active-generation.json"), "utf8"))
+      const revertedJavaPath = path.join(reverted.generation.targets[0].sourcePath, "semantifold/generated/main/Main.java")
+      const revertedClassPath = path.join(reverted.generation.targets[0].buildPath, "semantifold/generated/main/Main.class")
+
+      expect(new Set([first.generationId, repeated.generationId, changed.generationId, reverted.generationId]).size).toEqual(4)
+      expect(first.snapshotHash).toEqual(repeated.snapshotHash)
+      expect(first.snapshotHash).toEqual(reverted.snapshotHash)
+      expect(changed.snapshotHash == first.snapshotHash).toBeFalse()
+      expect(operations.filter(operation => operation == "check:java-main:compile")).toHaveLength(4)
+      expect(pointer.generationId).toEqual(reverted.generationId)
+      assert.deepEqual(await readFile(revertedJavaPath), firstJava)
+      assert.deepEqual(await readFile(revertedClassPath), firstClass)
+      assert.deepEqual(await readFile(firstJavaPath), firstJava)
+      assert.deepEqual(await readFile(firstClassPath), firstClass)
+      expect(await readdir(path.join(root, ".semantifold/generations"))).toHaveLength(4)
     } finally {
       await rm(root, {force: true, recursive: true})
     }

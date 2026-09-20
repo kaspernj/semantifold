@@ -264,6 +264,54 @@ describe("Semantifold project CLI", () => {
     )
     expect(human.read()).toContain("stdout:\ncompiler context\n")
     expect(human.read()).toContain("stderr:\nMain.java:1: error: fixture\n")
+    expect(human.read()).not.toContain("Caused by:")
+  })
+
+  it("renders actionable nested tool-discovery diagnostics in human failures", () => {
+    const diagnostics = [
+      new SemantifoldDiagnostic({
+        code: "TOOL_NOT_FOUND",
+        command: "javac",
+        language: "javac",
+        message: "Canonical command 'javac' was not found as an executable on PATH."
+      }),
+      new SemantifoldDiagnostic({
+        code: "TOOL_AMBIGUOUS",
+        command: "javac",
+        language: "javac",
+        message: "Canonical command 'javac' resolves to multiple executables: /tools/one/javac, /tools/two/javac."
+      }),
+      new SemantifoldDiagnostic({
+        code: "TOOL_UNSUPPORTED_VERSION",
+        command: "javac",
+        executable: "/tools/old/javac",
+        language: "javac",
+        message: "Executable '/tools/old/javac' reported unsupported version 'javac 16.0.2'.",
+        version: "javac 16.0.2"
+      })
+    ]
+
+    for (const diagnostic of diagnostics) {
+      const publication = new SemantifoldDiagnostic({
+        cause: diagnostic,
+        code: "PUBLICATION_VALIDATION_FAILED",
+        language: "report-project",
+        message: "Validator 0 failed for target 'java-main'."
+      })
+      const human = outputBuffer()
+
+      new ProjectBuildReporter({format: "human", stderr: human.writer}).failed(publication)
+      const output = human.read()
+
+      expect(output.match(/Build failed:/gu)).toHaveLength(1)
+      expect(output).toContain(
+        "Build failed: [PUBLICATION_VALIDATION_FAILED] report-project: Validator 0 failed for target 'java-main'.\n"
+      )
+      expect(output).toContain(`Caused by: ${diagnostic.message}\n`)
+      expect(output).not.toContain("Check failure:")
+      expect(output).not.toContain("stdout:\n")
+      expect(output).not.toContain("stderr:\n")
+    }
   })
 
   it("returns non-zero with exactly one terminal record preserving the first diagnostic", async () => {

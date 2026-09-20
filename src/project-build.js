@@ -1,5 +1,6 @@
 // @ts-check
 
+import {randomUUID} from "node:crypto"
 import {generateProgramArtifacts} from "./backends/program.js"
 import {SemantifoldDiagnostic} from "./diagnostic.js"
 import {parseProgramSource} from "./frontends/program.js"
@@ -178,7 +179,9 @@ export class ProjectBuilder {
       publicationRoot: project.publicationRoot,
       sourceFiles: project.sources.map(({absolutePath}) => absolutePath)
     })
-    const generationId = `g-${snapshot.hash}${check ? "-checked" : ""}`
+    const generationId = check
+      ? `g-${snapshot.hash}-checked-${randomUUID()}`
+      : `g-${snapshot.hash}`
     const generation = await publisher.publish({generationId, targets: publicationTargets}, {
       ...(signal === undefined ? {} : {signal})
     })

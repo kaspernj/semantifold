@@ -1,6 +1,6 @@
 # 040 — Target check-plan contract and Java javac slice
 
-- Status: `implementation complete on feature branch; focused/package acceptance pass; review/CI/merge pending`
+- Status: `post-independent-review corrections complete on feature branch; focused/package acceptance pass; exact-head CI/merge pending`
 - Phase/priority: Phase W / P0 compiler foundation
 - Dependencies: [039-project-manifest-and-build-cli.md](039-project-manifest-and-build-cli.md)
 - Design: [Watch, build, and target-check pipeline](../docs/watch-build-pipeline.md)
@@ -29,6 +29,7 @@ A direct baseline proof on `v0.7.0` parsed the 2,648-byte JavaScript/JSDoc compa
 - Compile every staged `.java` artifact together into the candidate generation's isolated Java build subtree; never emit `.class` files beside generated source.
 - Match the existing accepted Java compiler profile and diagnostics. Do not silently add a different language release or warning policy.
 - Add `build --check` and manifest generated/build projection configuration. A successful cycle publishes one coherent source/class project generation through one active-pointer replacement; missing/ambiguous `javac`, spawn failure, timeout, cancellation through the pointer-commit boundary, non-zero close, or pre-pointer publication failure leaves the prior generation active.
+- Give every checked invocation a fresh immutable candidate identity so unchanged and reverted snapshots rerun their declared checks; retain deterministic same-ID verification/reactivation for generation-only builds.
 - Report tool identity, exact stage, exit status/signal, bounded stdout/stderr, timing, and structured Semantifold context without flattening compiler diagnostics.
 
 ## Tests
@@ -36,8 +37,9 @@ A direct baseline proof on `v0.7.0` parsed the 2,648-byte JavaScript/JSDoc compa
 - Check-plan schema/immutability and rejection of undeclared toolchains, invalid stage order, path escape, mutable argv/environment, and execution stages in developer-check mode.
 - Real JavaScript/JSDoc-to-Java `build --check` with `javac`, followed by execution of committed classes only in acceptance code to prove the compiled output is usable.
 - Deliberately invalid staged Java at the check boundary produces a compiler failure and leaves the previous active generation's Java/class outputs byte-for-byte unchanged; a later valid candidate succeeds.
+- Repeated unchanged and A→B→A checked builds each run real `javac`; the reverted committed source/class bytes exactly match A without mutating or trusting its retained generation.
 - Spawn failure, non-zero close, timeout/cancellation, late stdout/stderr, and signal handling settle only after the child closes and leak no process or staging root. Deterministic CLI coverage cancels after checker close but before pointer replacement and proves the prior exact source/class bytes remain authoritative.
-- JSON/human reporting and exit status remain truthful and deterministic.
+- JSON/human reporting and exit status remain truthful and deterministic; human failures retain outer publication context plus actionable nested tool-discovery diagnostics without duplicating compiler-process evidence.
 
 ## Documentation
 
@@ -53,4 +55,4 @@ Filesystem watch mode, Java incremental compilation servers, Gradle/Maven, annot
 - `build --check` uses real `javac` and makes source/classes visible together only through the successful project-generation pointer switch.
 - Compiler failure/recovery, process lifecycle, diagnostics, focused tests, lint/typecheck, docs, changelog, and packed-consumer behavior satisfy repository gates.
 
-The implementation satisfies these criteria locally. Focused RED/GREEN coverage proves plan validation, owned process lifecycle, real multi-unit `javac`, explicit post-publication `java` execution, last-good preservation/recovery, CLI reporting, and the credential-free packed consumer. Independent review, exact-head TensorBuzz CI, merge, and release remain coordinator-owned.
+The implementation satisfies these criteria locally. Focused RED/GREEN coverage proves plan validation, owned process lifecycle, real multi-unit `javac`, repeated/reverted checked transactions, explicit post-publication `java` execution, last-good preservation/recovery, nested human/NDJSON diagnostics, CLI reporting, and the credential-free packed consumer. Exact-head TensorBuzz CI, merge, and release remain coordinator-owned.

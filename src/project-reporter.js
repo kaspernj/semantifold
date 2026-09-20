@@ -136,9 +136,10 @@ export class ProjectBuildReporter {
 
     if (this.#format == "human") {
       const processFailure = deepestDiagnostic(diagnostic)
+      const causes = humanDiagnosticCauses(diagnostic, processFailure)
       const evidence = humanProcessEvidence(processFailure)
 
-      this.#stderr.write(`Build failed: ${diagnostic.message}\n${evidence}`)
+      this.#stderr.write(`Build failed: ${diagnostic.message}\n${causes}${evidence}`)
       return
     }
     this.#writeNdjson({
@@ -249,6 +250,26 @@ function deepestDiagnostic(diagnostic) {
   while (current.cause instanceof SemantifoldDiagnostic) current = current.cause
 
   return current
+}
+
+/**
+ * Formats nested structured diagnostics without duplicating detailed checker-process evidence.
+ * @param {SemantifoldDiagnostic} diagnostic - Root diagnostic.
+ * @param {SemantifoldDiagnostic} deepest - Deepest structured diagnostic.
+ * @returns {string} Ordered human-readable cause lines.
+ */
+function humanDiagnosticCauses(diagnostic, deepest) {
+  let current = diagnostic.cause
+  let result = ""
+
+  while (current instanceof SemantifoldDiagnostic) {
+    if (current !== deepest || !current.code.startsWith("TARGET_CHECK_")) {
+      result += `Caused by: ${current.message}\n`
+    }
+    current = current.cause
+  }
+
+  return result
 }
 
 /**
