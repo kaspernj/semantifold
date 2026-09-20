@@ -5,7 +5,7 @@ import {mkdir, mkdtemp, rm, writeFile} from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import {describe, expect, it} from "@velocious/testing"
-import {parseSemantifoldCliArguments, SemantifoldCli} from "../index.js"
+import {parseSemantifoldCliArguments, ProjectBuildReporter, SemantifoldCli, SemantifoldDiagnostic} from "../index.js"
 
 /** @returns {(error: unknown) => boolean} */
 function invalidArguments() {
@@ -52,15 +52,22 @@ function outputBuffer() {
 }
 
 describe("Semantifold project CLI", () => {
-  it("parses only the strict one-shot build command and its two explicit options", () => {
-    expect(parseSemantifoldCliArguments(["build"])).toEqual({format: "human", projectPath: "./semantifold.json"})
+  it("parses only the strict one-shot build command and its three explicit options", () => {
+    expect(parseSemantifoldCliArguments(["build"])).toEqual({check: false, format: "human", projectPath: "./semantifold.json"})
     expect(parseSemantifoldCliArguments(["build", "--project", "config/project.json"])).toEqual({
+      check: false,
       format: "human",
       projectPath: "config/project.json"
     })
     expect(parseSemantifoldCliArguments(["build", "--ndjson", "--project", "semantifold.json"])).toEqual({
+      check: false,
       format: "ndjson",
       projectPath: "semantifold.json"
+    })
+    expect(parseSemantifoldCliArguments(["build", "--check"])).toEqual({
+      check: true,
+      format: "human",
+      projectPath: "./semantifold.json"
     })
 
     for (const arguments_ of [
@@ -71,7 +78,8 @@ describe("Semantifold project CLI", () => {
       ["build", "--project"],
       ["build", "--project", "--ndjson"],
       ["build", "--project", "one.json", "--project", "two.json"],
-      ["build", "--ndjson", "--ndjson"]
+      ["build", "--ndjson", "--ndjson"],
+      ["build", "--check", "--check"]
     ]) assert.throws(() => parseSemantifoldCliArguments(arguments_), invalidArguments())
   })
 
@@ -117,6 +125,93 @@ describe("Semantifold project CLI", () => {
     } finally {
       await rm(root, {force: true, recursive: true})
     }
+  })
+
+  it("reports exact javac stage evidence for --check without executing generated Java", {timeoutMs: 30_000}, async () => {
+    const {manifestPath, root} = await cliFixture("console.log(\"checked only\")\n")
+    const stdout = outputBuffer()
+    const stderr = outputBuffer()
+
+    try {
+      const status = await new SemantifoldCli({stderr: stderr.writer, stdout: stdout.writer})
+        .run(["build", "--check", "--ndjson", "--project", manifestPath])
+      const records = stdout.read().trim().split("\n").map(line => JSON.parse(line))
+      const checked = records.find(({state}) => state == "target-checked")
+
+      expect(status).toEqual(0)
+      expect(stderr.read()).toEqual("")
+      expect(records.map(({state}) => state)).toEqual([
+        "project-loaded", "snapshot-loaded", "target-generated", "target-checked", "succeeded"
+      ])
+      expect(checked).toMatchObject({
+        argv: ["-d"],
+        exitCode: 0,
+        language: "java",
+        signal: null,
+        stage: "compile",
+        stderr: "",
+        target: "java-main",
+        tool: {id: "javac"}
+      })
+      expect(checked.argv.length).toEqual(3)
+      expect(typeof checked.durationMs).toEqual("number")
+      expect(records.at(-1)).toMatchObject({checked: true, exitCode: 0, terminal: true})
+    } finally {
+      await rm(root, {force: true, recursive: true})
+    }
+  })
+
+  it("retains nested compiler output and process context in human and NDJSON failures", () => {
+    const compiler = new SemantifoldDiagnostic({
+      code: "TARGET_CHECK_NONZERO_EXIT",
+      durationMs: 12,
+      executable: "/canonical/javac",
+      exitCode: 1,
+      language: "java",
+      message: "Target check stage 'compile' exited nonzero.",
+      projectId: "report-project",
+      stage: "compile",
+      stderr: "Main.java:1: error: fixture\n",
+      stdout: "compiler context\n",
+      targetId: "java-main",
+      toolId: "javac",
+      version: "javac 25.0.4"
+    })
+    const publication = new SemantifoldDiagnostic({
+      cause: compiler,
+      code: "PUBLICATION_VALIDATION_FAILED",
+      language: "report-project",
+      message: "Validator 0 failed for target 'java-main'."
+    })
+    const ndjson = outputBuffer()
+    const human = outputBuffer()
+
+    new ProjectBuildReporter({format: "ndjson", stdout: ndjson.writer}).failed(publication)
+    new ProjectBuildReporter({format: "human", stderr: human.writer}).failed(publication)
+    const record = JSON.parse(ndjson.read())
+
+    expect(record.diagnostic).toMatchObject({
+      cause: {
+        code: "TARGET_CHECK_NONZERO_EXIT",
+        durationMs: 12,
+        executable: "/canonical/javac",
+        exitCode: 1,
+        projectId: "report-project",
+        stage: "compile",
+        stderr: "Main.java:1: error: fixture\n",
+        stdout: "compiler context\n",
+        targetId: "java-main",
+        toolId: "javac",
+        version: "javac 25.0.4"
+      },
+      code: "PUBLICATION_VALIDATION_FAILED"
+    })
+    expect(human.read()).toContain(
+      "Check failure: project='report-project' target='java-main' language='java' tool='javac' " +
+      "executable='/canonical/javac' version='javac 25.0.4' stage='compile' exitCode=1 signal=none durationMs=12\n"
+    )
+    expect(human.read()).toContain("stdout:\ncompiler context\n")
+    expect(human.read()).toContain("stderr:\nMain.java:1: error: fixture\n")
   })
 
   it("returns non-zero with exactly one terminal record preserving the first diagnostic", async () => {

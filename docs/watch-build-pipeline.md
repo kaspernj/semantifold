@@ -2,7 +2,7 @@
 
 ## Status and verified baseline
 
-Task 039 now implements the strict project manifest, stable one-shot snapshot, deterministic generation orchestration, human/NDJSON reporting, and packaged `semantifold build` command. Target check plans and watching remain roadmap contracts.
+Task 039 implements the strict project manifest, stable one-shot snapshot, deterministic generation orchestration, human/NDJSON reporting, and packaged `semantifold build` command. Task 040 now implements the generic non-executing check-plan contract plus Java/`javac` and `semantifold build --check`. Other target plans and watching remain roadmap contracts.
 
 The inspected baseline is `semantifold@0.7.0`, annotated tag `v0.7.0`, commit `8cd70c5a6c7de98df2d4a183d6555ad4f3d5ba5a`. At that revision:
 
@@ -14,11 +14,11 @@ The inspected baseline is `semantifold@0.7.0`, annotated tag `v0.7.0`, commit `8
 - `package.json` had no `bin` entry. The public API did not persist generated artifacts, load a project manifest, derive compiler arguments from a target, or watch source files.
 - The only repository file-change watcher is a test helper; there is no product watch coordinator, incremental dependency graph, event coalescing policy, or long-lived compiler owner.
 
-That historical baseline proved **JavaScript/JSDoc → semantic IR → Java → `javac`** as a one-shot composition. Released `semantifold@0.9.0` supplies Task 038's public language-neutral `GeneratedArtifactPublisher`, immutable generation manifests, one atomic active pointer, pointer-once resolution, and journal-bounded recovery. Task 039 now adds the package bin, project configuration, and one-shot CLI behavior; target-owned check plans and watching remain Tasks 040 and later.
+That historical baseline proved **JavaScript/JSDoc → semantic IR → Java → `javac`** as a one-shot composition. Released `semantifold@0.9.0` supplies Task 038's public language-neutral `GeneratedArtifactPublisher`, immutable generation manifests, one atomic active pointer, pointer-once resolution, and journal-bounded recovery. Task 039 adds the package bin, project configuration, and one-shot CLI behavior; Task 040 productizes the generic plan/runner and Java compiler boundary. Other target-owned check plans and watching remain Tasks 041 and later.
 
 ## Product outcome
 
-A project can declare explicit source modules, one or more generated targets, one publisher-owned project publication root, target-relative generated/build projections, and whether each target is checked with its real toolchain. It can then run:
+A project can declare explicit source modules, one or more generated targets, one publisher-owned project publication root, and target-relative generated/build projections. The one-shot CLI selects generation-only or all-target developer checking with `--check`. It can then run:
 
 - the implemented one-shot `semantifold build`; or
 - a planned long-lived `semantifold watch`.
@@ -55,13 +55,13 @@ Publication commits exactly one small active-generation pointer by writing and s
 
 An interruption before the pointer replacement leaves the previous generation active; an interruption after it leaves either the old or new complete pointer durably recoverable, never a composite state. A recovery journal may finish cleanup of unpublished candidates and temporary pointer files, but it is not used to claim atomicity across multiple filesystem operations. Candidate and temporary-pointer parent directories are synchronized before the proving journal is removed and its directory synchronized. Publication never removes a committed generation, because a reader may already hold its resolved snapshot; committed-generation retention/garbage collection is a separate explicit policy. A failed candidate is removed without changing the active pointer.
 
-### Target check-plan registry
+### Target check-plan registry (Task 040 implemented for Java)
 
-The existing language registry remains authoritative for target identity, roles, declared acceptance stages, and required toolchain IDs. A planned target-check capability derives exact stage requests from a validated staged artifact set and its generation-scoped target build subtree.
+The existing language registry remains authoritative for target identity, roles, declared acceptance stages, and required toolchain IDs. Its explicit immutable `check` capability now distinguishes generation-only targets from Java's supported developer check without claiming execution. The target-owned factory derives exact stage requests from a validated staged artifact set and its generation-scoped target source/build subtrees.
 
-The generic runner owns process lifecycle, locale/timezone normalization, output capture, timeout/cancellation, and close observation. A target check plan owns filenames, exact argv, toolchain IDs, offline/cache policy, and which stages constitute a non-executing developer check. The watcher does not switch on language IDs.
+The generic runner validates immutable dense argv/environment/path ownership before spawn and owns process lifecycle, locale/timezone normalization, bounded output capture, timeout/cancellation, signal forwarding, first failure, and close observation. A target check plan owns filenames, exact argv, toolchain IDs, offline/cache policy, and which stages constitute a non-executing developer check. The builder and future watcher do not switch on language IDs.
 
-The initial check plan is Java/`javac`. Later tasks add current text targets in two cohorts:
+The implemented initial check plan is Java/`javac`. It compiles every staged `.java` artifact together with `-d` directed at the candidate build subtree and never invokes `java`. Later tasks add current text targets in two cohorts:
 
 - interpreted/managed: PHP, Ruby, JavaScript, TypeScript, Kotlin/JVM, Python, and C# (Java is supplied by the initial slice);
 - native/project: Go, C, C++, Rust, Swift, Dart, and Zig.
@@ -89,7 +89,7 @@ Native filesystem events require a bounded reconciliation strategy because Node 
 
 ### Reporting contract
 
-Task 039 human output is concise and stable. Its machine-readable mode emits deterministic state records with project identity, cycle `1`, source snapshot hash, ordered target ID/role/results, exit status, and a structured diagnostic when present. It deliberately reports state rather than nondeterministic elapsed time. Later check/watch tasks add changed paths, tool identity, and their lifecycle timing where applicable.
+Task 039 human output is concise and stable. Its machine-readable mode emits deterministic state records with project identity, cycle `1`, source snapshot hash, ordered target ID/role/results, exit status, and a structured diagnostic when present. Generation-only records deliberately report state rather than nondeterministic elapsed time. Task 040 checked-stage records add exact tool/process identity and lifecycle timing; later watch tasks add changed paths and cycle timing where applicable.
 
 Exactly one terminal cycle record is emitted per cycle. Process exit is non-zero for failed one-shot builds, but ordinary watch-cycle failures keep the watcher process alive. Startup/configuration failure exits. Signal-driven shutdown forwards cancellation to an active owned child, waits for `close`, removes subscriptions and staging state, and exits once.
 
@@ -147,7 +147,7 @@ Binary and application targets use the same generation watcher only after explic
                   046 later binary/application policies
 ```
 
-Tasks 038 and 039 are the implemented publication and one-shot project-build foundation. Tasks 040–045 are the remaining selected text-language check/watch delivery chain, with Task 045 as its single terminal acceptance task. Task 046 is a non-blocking later extension.
+Tasks 038–040 are the implemented publication, one-shot project-build, and initial Java check foundation. Tasks 041–045 are the remaining selected text-language check/watch delivery chain, with Task 045 as its single terminal acceptance task. Task 046 is a non-blocking later extension.
 
 ## Non-goals
 

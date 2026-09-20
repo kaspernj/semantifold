@@ -23,6 +23,7 @@ describe("Dart registry and toolchain", () => {
     expect(languageCapabilities.find(({id}) => id == "dart")).toEqual({
       acceptance: {stages: ["parse", "generate", "restore", "compile", "validate", "execute"], toolchains: ["dart"]},
       artifactMultiplicity: "multiple",
+      check: {stages: [], supported: false, toolchains: []},
       features: {
         closedRecords: false,
         conditionControlledLoops: false,

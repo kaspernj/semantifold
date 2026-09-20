@@ -9,6 +9,7 @@ import {
   createCapabilityAuthority,
   createByteMapping,
   createGeneratedArtifactSet,
+  createTargetCheckPlan,
   createStdlibFacadeRegistry,
   discoverCanonicalToolchain,
   discoverToolchain,
@@ -47,6 +48,7 @@ import {
   stringifyByteMapping,
   stringifyMapping,
   supportedLanguages,
+  TargetCheckRunner,
   toSourceMapV3
 } from "../index.js"
 
@@ -83,12 +85,14 @@ describe("public API", () => {
     expect(typeof ProjectSnapshotBuilder).toEqual("function")
     expect(typeof SemantifoldCli).toEqual("function")
     expect(typeof SemantifoldProject).toEqual("function")
+    expect(typeof TargetCheckRunner).toEqual("function")
     expect(typeof parseSemantifoldCliArguments).toEqual("function")
     for (const api of [
       composeMappings,
       composeSourceMaps,
       createByteMapping,
       createGeneratedArtifactSet,
+      createTargetCheckPlan,
       discoverCanonicalToolchain,
       discoverToolchain,
       generatedPositionFor,

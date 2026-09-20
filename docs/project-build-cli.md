@@ -1,6 +1,6 @@
 # Project manifest and one-shot build CLI
 
-Task 039 adds a strict filesystem boundary above the existing `parseProgram`, `generateProgramArtifactSet`, and `GeneratedArtifactPublisher` APIs. A build reads one explicit source graph, parses and links it once, generates every ordered target from that semantic program, and makes the complete immutable generation active with one pointer replacement. It does not discover sources, infer languages, invoke a compiler, or execute generated code.
+Task 039 adds a strict filesystem boundary above the existing `parseProgram`, `generateProgramArtifactSet`, and `GeneratedArtifactPublisher` APIs. Task 040 composes its registered developer-check boundary without moving compiler behavior into the CLI. A build reads one explicit source graph, parses and links it once, generates every ordered target from that semantic program, and makes the complete immutable generation active with one pointer replacement. Ordinary `build` remains generation-only; `build --check` invokes only target-owned non-executing plans. Neither mode executes generated code.
 
 ## `semantifold.json` version 1
 
@@ -45,7 +45,7 @@ Each source has exactly `id`, `path`, `language`, and Boolean `entry`. Module ID
 
 Each target has exactly `id`, `language`, `role`, `sourceProjection`, and optional `buildProjection`. The role is `text`, `binary`, or `application` and must match both the language registry and an implemented complete-program backend. The existing original-five text program backends are supported. A registered single-module target is not automatically a project target; complete-program binary generation is not implemented. Android and Flutter application backends may participate through their default, asset-free requests. iOS requires caller-supplied application identity and deployment configuration that version 1 cannot express, so an iOS application target fails at manifest loading with `UNSUPPORTED_PROJECT_TARGET`; direct public iOS generation with explicit configuration remains supported. This does not define Task 046 watch/check policy.
 
-`sourceProjection` is required. `buildProjection` reserves the Task-040 compiler-output location but Task 039 does not write to it; when omitted it is `targets/<target-id>/build`. Both are logical paths inside one immutable generation, never separately promoted output roots.
+`sourceProjection` is required. `buildProjection` owns checker/compiler output and defaults to `targets/<target-id>/build`. Both are logical paths inside one immutable generation, never separately promoted output roots. A generation-only build leaves the build projection empty. A successful Java check records every `.class` file there as a hashed `compiler-output` with media type `application/java-vm`.
 
 Version 1 has no globs, extension inference, package resolution, environment expansion, configuration callbacks, plugins, shell hooks, commands, target-specific compiler settings, or independent output roots.
 
@@ -72,11 +72,13 @@ Readers resolve `active-generation.json` once and retain the returned immutable 
 
 `ProjectSnapshotBuilder` reads the exact manifest and all declared source files in manifest order. Descriptor identity, size, modification state, real paths, and exact bytes are checked, and the complete graph is read twice. One inconsistent graph receives one bounded retry. Continued mutation fails with a project-relative `UNSTABLE_PROJECT_SNAPSHOT`; a changed manifest is never combined with the already-validated project value.
 
-The SHA-256 snapshot hash is length-framed over the exact manifest bytes and ordered source IDs, paths, languages, and UTF-8 content. Absolute host paths and wall-clock values are absent. The generation ID is `g-<snapshot-hash>`.
+The SHA-256 snapshot hash is length-framed over the exact manifest bytes and ordered source IDs, paths, languages, and UTF-8 content. Absolute host paths and wall-clock values are absent. The generation-only ID is `g-<snapshot-hash>`; the separately owned checked candidate is `g-<snapshot-hash>-checked`, so generation-only and compiler-bearing manifests never alias one retained identity.
 
-`ProjectBuilder` parses and links the frozen sources once. It generates targets in manifest order through the existing program backend dispatch. Only after every target succeeds does it give the complete ordered set to `GeneratedArtifactPublisher`, even when the deterministic generation ID is already active. The publisher stages a fresh generation or verifies the existing generation as the exact generated candidate before replacing `active-generation.json` once. A configuration, read, parse, link, semantic, generation, or pre-pointer publication failure leaves the prior active generation authoritative.
+`ProjectBuilder` parses and links the frozen sources once. It generates targets in manifest order through the existing program backend dispatch. With `check: true`, each target must advertise an immutable developer-check capability. The builder discovers exactly that capability's toolchains and attaches a publisher validator; the validator constructs the target-owned plan only after generated artifacts exist in the candidate source subtree. The generic `TargetCheckRunner` validates the complete plan before spawning, owns timeout/cancellation and bounded output, and settles on child `close`. Only after every target succeeds does the publisher replace `active-generation.json` once. A configuration, read, parse, link, semantic, generation, discovery, plan, check, or pre-pointer publication failure leaves the prior active generation authoritative.
 
-Rebuilding identical already-active inputs uses the same exact candidate comparison as retained-generation reactivation. If the same deterministic generation is retained but another generation is active, the publisher requires its canonical manifest bytes to equal the validator-free candidate exactly and revalidates the complete inventory, hashes, provenance, symlink boundaries, and hard-link identities before one atomic pointer replacement reactivates it. A mismatched or malformed existing directory is neither overwritten nor removed and fails with `PUBLICATION_UNOWNED_CONFLICT` while the previous pointer remains authoritative.
+Java is the first check-capable target. Its registry capability declares only stage `compile` and toolchain `javac`, even though full acceptance metadata also declares later `java` execution. Its target-owned plan passes `-d <candidate-build-root>` followed by every staged `.java` artifact in artifact order. It adds no release or warning flags beyond the existing accepted compiler profile. No generic builder, runner, reporter, or CLI branch switches on `java`.
+
+Rebuilding identical generation-only inputs uses the same exact candidate comparison as retained-generation reactivation. If the same deterministic generation is retained but another generation is active, the publisher requires its canonical manifest bytes to equal the validator-free candidate exactly and revalidates the complete inventory, hashes, provenance, symlink boundaries, and hard-link identities before one atomic pointer replacement reactivates it. Task 038 intentionally forbids reactivation requests that carry validators, so a retained same-ID checked generation fails with `PUBLICATION_UNOWNED_CONFLICT` instead of trusting previously produced compiler output. A mismatched or malformed existing directory is likewise neither overwritten nor removed, and the previous pointer remains authoritative.
 
 ## Command and output
 
@@ -84,13 +86,14 @@ The public package installs one executable:
 
 ```sh
 semantifold build
+semantifold build --check
 semantifold build --project path/to/semantifold.json
-semantifold build --project path/to/semantifold.json --ndjson
+semantifold build --project path/to/semantifold.json --check --ndjson
 ```
 
-The default is `./semantifold.json`. `build`, `--project <path>`, and `--ndjson` are the complete grammar. Options may appear once. Unknown commands/options, missing option values, duplicate options, and positional extras fail with `INVALID_CLI_ARGUMENTS`. The executable passes argument arrays directly to the importable CLI; it does not spawn a shell.
+The default is `./semantifold.json`. `build`, `--project <path>`, `--check`, and `--ndjson` are the complete grammar. Options may appear once. Unknown commands/options, missing option values, duplicate options, and positional extras fail with `INVALID_CLI_ARGUMENTS`. The executable passes argument arrays directly to the importable CLI; it does not spawn a shell.
 
-Human mode prints one concise success line only after the active pointer names the committed generation, or one diagnostic line on failure. Exit status is `0` only for that committed or verified deterministic generation and `1` for the first failure.
+Human mode prints one concise success line only after the active pointer names the committed generation. A check failure prints one terminal diagnostic heading followed by labeled project/target, tool, stage, exit/signal, duration, and bounded stdout/stderr evidence. Exit status is `0` only for that committed or verified deterministic generation and `1` for the first failure.
 
 `--ndjson` writes one `SemantifoldBuildEvent` version-1 JSON object per line. Every record has `cycle: 1`, `project`, and `state`. Successful builds emit these deterministic states in order:
 
@@ -101,7 +104,9 @@ Human mode prints one concise success line only after the active pointer names t
 {"cycle":1,"project":"jsdoc-java-example","schema":"SemantifoldBuildEvent","version":1,"exitCode":0,"generationId":"g-<sha256>","snapshotHash":"<sha256>","state":"succeeded","targets":[{"artifactCount":1,"id":"java-main","language":"java","role":"text"}],"terminal":true}
 ```
 
-There is exactly one record with `terminal: true`. Failure records use `state: "failed"`, `exitCode: 1`, and a stable structured diagnostic. Records contain state rather than nondeterministic elapsed time.
+There is exactly one record with `terminal: true`. Failure records use `state: "failed"`, `exitCode: 1`, and a stable structured diagnostic. Generation-only records remain deterministic; checked-stage records add the observed lifecycle duration required for process reporting.
+
+Checked builds insert one `target-checked` record per successful stage after `target-generated`. It contains the exact `argv`, target and language, stage, canonical tool ID/command/executable/source/version, exit code or signal, bounded stdout/stderr, and duration. The terminal record includes `checked: true`. Check failures retain the outer publication context and a nested compiler diagnostic rather than flattening away stage/tool/process evidence.
 
 ## JavaScript/JSDoc to Java example
 
@@ -124,14 +129,17 @@ Copy the manifest above to `semantifold.json`, then run:
 
 ```sh
 npx semantifold build
+npx semantifold build --check
 ```
 
-Resolve `.semantifold/active-generation.json`; its generation contains Java at `targets/java/source/semantifold/generated/main/Main.java`. The reserved `targets/java/build` directory is empty.
+Resolve `.semantifold/active-generation.json` once; the checked generation from this manifest contains Java at `targets/java/source/semantifold/generated/main/Main.java` and compiler output at `targets/java/build/semantifold/generated/main/Main.class`. The two paths belong to the same immutable generation and are never promoted separately. Omitting `buildProjection` instead selects `targets/<target-id>/build`.
 
-Task 039 does not run `javac`, execute Java, check any target with its toolchain, watch files, garbage-collect committed generations, or implement hot reload. Target-owned check plans and Java compilation are Task 040; watch coordination and acceptance remain Tasks 043 and 044.
+`build --check` compiles but does not run Java. Acceptance code may explicitly invoke the committed class afterward. Other target check plans remain Tasks 041–042; watch coordination and acceptance remain Tasks 043–045. No build mode garbage-collects committed generations or implements hot reload.
 
 ## Importable API and diagnostics
 
-`ProjectManifestLoader`, `SemantifoldProject`, `ProjectSnapshotBuilder`, `ProjectSnapshot`, `ProjectBuilder`, `ProjectBuildReporter`, `SemantifoldCli`, and `parseSemantifoldCliArguments` are public ESM exports. The executable is only a thin wrapper around `SemantifoldCli`.
+`ProjectManifestLoader`, `SemantifoldProject`, `ProjectSnapshotBuilder`, `ProjectSnapshot`, `ProjectBuilder`, `ProjectBuildReporter`, `SemantifoldCli`, `parseSemantifoldCliArguments`, `createTargetCheckPlan`, and `TargetCheckRunner` are public ESM exports. `languageCapabilities[].check` truthfully exposes immutable `supported`, `stages`, and `toolchains` fields without claiming execution. The executable is only a thin wrapper around `SemantifoldCli`.
+
+Plan and lifecycle failures use `UNSUPPORTED_TARGET_CHECK`, `INVALID_TARGET_CHECK_PLAN`, `TARGET_CHECK_LAUNCH_FAILURE`, `TARGET_CHECK_OUTPUT_LIMIT`, `TARGET_CHECK_TIMEOUT`, `TARGET_CHECK_CANCELLED`, `TARGET_CHECK_SIGNAL`, `TARGET_CHECK_NONZERO_EXIT`, and `TARGET_CHECK_OUTPUT_INVALID`. Discovery retains `TOOL_NOT_FOUND`, `TOOL_AMBIGUOUS`, and version diagnostics. Publisher validation remains the transaction boundary and preserves the check diagnostic as its structured cause.
 
 Manifest/snapshot diagnostics include `INVALID_PROJECT_MANIFEST`, `INVALID_PROJECT_PATH`, `PROJECT_SOURCE_ALIAS`, `PROJECT_SOURCE_PUBLICATION_OVERLAP`, `PROJECT_PROJECTION_COLLISION`, `PROJECT_SYMLINK_TRAVERSAL`, `PROJECT_MANIFEST_READ_FAILED`, `PROJECT_SOURCE_READ_FAILED`, `INVALID_PROJECT_SOURCE_ENCODING`, `UNSUPPORTED_PROJECT_SOURCE`, `UNSUPPORTED_PROJECT_TARGET`, and `UNSTABLE_PROJECT_SNAPSHOT`. Registry, parser, semantic, backend, artifact, and publication diagnostics retain their existing codes and causes. User output uses project-relative locations and does not print unrelated absolute host paths.

@@ -166,6 +166,13 @@
  */
 
 /**
+ * @typedef LanguageCheckCapabilities
+ * @property {boolean} supported - Whether the target owns a developer check plan.
+ * @property {readonly AcceptanceStage[]} stages - Ordered non-executing developer-check stages.
+ * @property {readonly string[]} toolchains - Exact canonical tools required to construct the plan.
+ */
+
+/**
  * @typedef LanguageFeatureCapabilities
  * @property {boolean} generalFunctionsAndCalls - Task 005 arbitrary required signatures, resolved direct calls, and void functions.
  * @property {boolean} immutableCollections - Task 006 recursive immutable lists/maps, total access, and size.
@@ -189,6 +196,7 @@
  * @property {Readonly<LanguageFeatureCapabilities>} features - Semantic feature capabilities.
  * @property {Readonly<LanguageMappingCapabilities>} mapping - Mapping forms.
  * @property {Readonly<LanguageAcceptanceCapabilities>} acceptance - Stages and toolchains.
+ * @property {Readonly<LanguageCheckCapabilities>} check - Non-executing developer-check capability.
  */
 
 /**
@@ -502,6 +510,67 @@
  * @property {string} version - First selected-stream version line.
  * @property {string} versionOutput - Complete normalized stdout, or normalized stderr when stdout is empty.
  * @property {readonly string[]} versionArguments - Exact version argument array.
+ */
+
+/**
+ * @typedef TargetCheckPathArgument
+ * @property {number} index - Exact argv index containing the path.
+ * @property {"source" | "build"} ownership - Candidate subtree that owns the path.
+ */
+
+/**
+ * @typedef TargetCheckOutputOwnership
+ * @property {"build"} ownership - Compiler outputs belong only to the candidate build subtree.
+ * @property {string} path - Exact generation-scoped build root.
+ * @property {string} mediaType - Media type assigned to every produced regular file.
+ * @property {string} role - Language-neutral compiler-output role.
+ */
+
+/**
+ * @typedef TargetCheckStageRequest
+ * @property {AcceptanceStage} stage - Declared non-executing acceptance stage.
+ * @property {DiscoveredToolchain} tool - Exact immutable discovered tool record.
+ * @property {string} executable - Exact executable copied from the tool record.
+ * @property {readonly string[]} argv - Exact shell-free argument vector.
+ * @property {readonly TargetCheckPathArgument[]} pathArguments - Complete ownership declaration for argv paths.
+ * @property {string} cwd - Exact candidate-scoped working directory.
+ * @property {Readonly<Record<string, string>>} environment - Exact deterministic environment.
+ * @property {Readonly<TargetCheckOutputOwnership>} output - Compiler output ownership.
+ */
+
+/**
+ * @typedef TargetCheckPlan
+ * @property {"SemantifoldTargetCheckPlan"} schema - Plan schema discriminator.
+ * @property {1} version - Plan schema version.
+ * @property {"developer-check"} mode - Non-executing developer-check mode.
+ * @property {string} projectId - Exact project identity.
+ * @property {string} targetId - Exact project target identity.
+ * @property {string} target - Registered backend target identity.
+ * @property {string} sourcePath - Exact staged generated-source root.
+ * @property {string} buildPath - Exact staged compiler-output root.
+ * @property {readonly string[]} artifactPaths - Exact staged artifact paths.
+ * @property {readonly TargetCheckStageRequest[]} stages - Ordered target-owned requests.
+ */
+
+/**
+ * @typedef TargetCheckStageResult
+ * @property {AcceptanceStage} stage - Completed stage identity.
+ * @property {Readonly<{command: string, executable: string, id: string, source: "override" | "canonical", version: string}>} tool - Exact tool identity.
+ * @property {readonly string[]} argv - Exact executed argument vector.
+ * @property {number} exitCode - Successful process exit code.
+ * @property {null} signal - Successful process signal state.
+ * @property {string} stdout - Bounded captured standard output.
+ * @property {string} stderr - Bounded captured standard error.
+ * @property {number} durationMs - Non-negative stage duration.
+ */
+
+/**
+ * @typedef TargetCheckResult
+ * @property {string} projectId - Exact project identity.
+ * @property {string} targetId - Exact project target identity.
+ * @property {string} target - Registered backend target identity.
+ * @property {readonly TargetCheckStageResult[]} stages - Ordered successful stage evidence.
+ * @property {readonly PublicationBuildArtifactInput[]} outputs - Complete compiler-owned build files.
  */
 
 /**

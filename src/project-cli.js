@@ -40,7 +40,26 @@ export class SemantifoldCli {
       if (options.format != hintedFormat) {
         reporter = new ProjectBuildReporter({format: options.format, stderr: this.#stderr, stdout: this.#stdout})
       }
-      const result = await this.#builder.build(options.projectPath, reporter)
+      const controller = new AbortController()
+      const forwardSignal = () => controller.abort("Semantifold CLI received a termination signal.")
+
+      if (options.check) {
+        process.once("SIGINT", forwardSignal)
+        process.once("SIGTERM", forwardSignal)
+      }
+      let result
+
+      try {
+        result = await this.#builder.build(options.projectPath, reporter, {
+          check: options.check,
+          ...(options.check ? {signal: controller.signal} : {})
+        })
+      } finally {
+        if (options.check) {
+          process.removeListener("SIGINT", forwardSignal)
+          process.removeListener("SIGTERM", forwardSignal)
+        }
+      }
 
       reporter.succeeded(result)
 
@@ -56,7 +75,7 @@ export class SemantifoldCli {
 /**
  * Parses the intentionally narrow one-shot CLI grammar.
  * @param {readonly string[]} arguments_ - Arguments after the executable name.
- * @returns {Readonly<{format: "human" | "ndjson", projectPath: string}>} Validated command options.
+ * @returns {Readonly<{check: boolean, format: "human" | "ndjson", projectPath: string}>} Validated command options.
  */
 export function parseSemantifoldCliArguments(arguments_) {
   if (!Array.isArray(arguments_) || arguments_.length == 0 || arguments_[0] != "build") {
@@ -66,10 +85,16 @@ export function parseSemantifoldCliArguments(arguments_) {
   let projectPath = "./semantifold.json"
   let projectSeen = false
   let ndjsonSeen = false
+  let checkSeen = false
 
   for (let index = 1; index < arguments_.length; index += 1) {
     const argument = arguments_[index]
 
+    if (argument == "--check") {
+      if (checkSeen) invalidArguments("Option '--check' may be supplied only once.")
+      checkSeen = true
+      continue
+    }
     if (argument == "--ndjson") {
       if (ndjsonSeen) invalidArguments("Option '--ndjson' may be supplied only once.")
       ndjsonSeen = true
@@ -91,7 +116,7 @@ export function parseSemantifoldCliArguments(arguments_) {
     invalidArguments(`Unknown command argument '${argument}'.`)
   }
 
-  return Object.freeze({format, projectPath})
+  return Object.freeze({check: checkSeen, format, projectPath})
 }
 
 /**

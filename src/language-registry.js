@@ -35,12 +35,14 @@ import {parseJavaScriptTypeScript} from "./frontends/javascript-typescript.js"
 import {parsePhp} from "./frontends/php.js"
 import {parsePython} from "./frontends/python.js"
 import {parseRuby} from "./frontends/ruby.js"
+import {createJavaCheckPlan} from "./backends/java-check.js"
 
 const registryRoles = Object.freeze(["frontend", "textBackend", "binaryBackend", "applicationBackend", "interoperability"])
 const acceptanceStageOrder = ["parse", "generate", "restore", "compile", "link", "validate", "instantiate", "execute"]
 const acceptanceStages = new Map(acceptanceStageOrder.map((stage, index) => [stage, index]))
+const developerCheckStages = new Set(["restore", "compile", "link", "validate"])
 const registryKeys = new Set([
-  "acceptance", "applicationBackend", "artifactMultiplicity", "binaryBackend", "defaultFilename", "frontend", "id",
+  "acceptance", "applicationBackend", "artifactMultiplicity", "binaryBackend", "check", "defaultFilename", "frontend", "id",
   "features", "interoperability", "mapping", "mediaType", "provider", "roundTrip", "textBackend"
 ])
 
@@ -65,6 +67,7 @@ const registryKeys = new Set([
  * @typedef LanguageRegistryRecord
  * @property {string} id - Stable identity.
  * @property {{stages: import("./semantic/types.js").AcceptanceStage[], toolchains: string[]}} acceptance - Acceptance declaration.
+ * @property {Readonly<LanguageRegistryCheckRecord>} check - Developer-check declaration.
  * @property {"single" | "multiple"} artifactMultiplicity - Artifact multiplicity.
  * @property {import("./semantic/types.js").LanguageFeatureCapabilities} features - Semantic feature capabilities.
  * @property {import("./semantic/types.js").LanguageMappingCapabilities} mapping - Mapping capabilities.
@@ -77,6 +80,27 @@ const registryKeys = new Set([
  * @property {RegistryImplementation} [binaryBackend] - Binary backend.
  * @property {RegistryImplementation} [applicationBackend] - Application-artifact backend.
  * @property {RegistryImplementation} [interoperability] - Interoperability bridge.
+ */
+
+/**
+ * @callback TargetCheckPlanFactory
+ * @param {Readonly<{
+ *   artifacts: import("./semantic/types.js").GeneratedArtifactSet,
+ *   buildPath: string,
+ *   projectId: string,
+ *   sourcePath: string,
+ *   targetId: string,
+ *   tools: readonly import("./semantic/types.js").DiscoveredToolchain[]
+ * }>} context - Exact staged target context.
+ * @returns {import("./semantic/types.js").TargetCheckPlan} Immutable plan.
+ */
+
+/**
+ * @typedef LanguageRegistryCheckRecord
+ * @property {TargetCheckPlanFactory} [factory] - Target-owned plan factory for supported checks.
+ * @property {readonly import("./semantic/types.js").AcceptanceStage[]} stages - Exact non-executing stages.
+ * @property {boolean} supported - Whether the target supplies a check plan.
+ * @property {readonly string[]} toolchains - Exact declared canonical toolchains.
  */
 
 /**
@@ -218,12 +242,62 @@ export function createLanguageRegistry(candidateRecords) {
     if (new Set(toolchains).size != toolchains.length) {
       invalidRegistry(`Registry record '${id}' has duplicate acceptance toolchains.`, id)
     }
+    const checkCandidate = candidate.check
+    /** @type {Readonly<LanguageRegistryCheckRecord>} */
+    let check
+
+    if (checkCandidate === undefined) {
+      check = deepFreeze({stages: [], supported: false, toolchains: []})
+    } else {
+      if (!isPlainObject(checkCandidate) || Object.keys(checkCandidate).sort().join(",") != "factory,stages,toolchains" ||
+        typeof checkCandidate.factory != "function" || !isDenseArray(checkCandidate.stages) ||
+        !isDenseArray(checkCandidate.toolchains) || checkCandidate.stages.length == 0) {
+        invalidRegistry(`Registry record '${id}' has an invalid developer-check declaration.`, id)
+      }
+      /** @type {unknown[]} */
+      const checkStageSnapshot = []
+      /** @type {unknown[]} */
+      const checkToolchainSnapshot = []
+
+      for (let index = 0; index < checkCandidate.stages.length; index += 1) {
+        checkStageSnapshot.push(checkCandidate.stages[index])
+      }
+      for (let index = 0; index < checkCandidate.toolchains.length; index += 1) {
+        checkToolchainSnapshot.push(checkCandidate.toolchains[index])
+      }
+      if (!checkStageSnapshot.every(stage => typeof stage == "string" && developerCheckStages.has(stage) &&
+        declaredStages.has(stage)) || !checkToolchainSnapshot.every(toolchain => typeof toolchain == "string" &&
+        toolchains.includes(toolchain)) || new Set(checkStageSnapshot).size != checkStageSnapshot.length ||
+        new Set(checkToolchainSnapshot).size != checkToolchainSnapshot.length) {
+        invalidRegistry(`Registry record '${id}' developer checks must use ordered non-executing declared stages and toolchains.`, id)
+      }
+      let previousCheckStage = -1
+
+      for (const stage of checkStageSnapshot) {
+        const stageIndex = /** @type {number} */ (acceptanceStages.get(/** @type {string} */ (stage)))
+
+        if (stageIndex < previousCheckStage) {
+          invalidRegistry(`Registry record '${id}' has unordered developer-check stages.`, id)
+        }
+        previousCheckStage = stageIndex
+      }
+      check = deepFreeze({
+        factory: /** @type {TargetCheckPlanFactory} */ (checkCandidate.factory),
+        stages: /** @type {import("./semantic/types.js").AcceptanceStage[]} */ (checkStageSnapshot),
+        supported: true,
+        toolchains: /** @type {string[]} */ (checkToolchainSnapshot)
+      })
+    }
 
     const hasFrontend = typeof candidate.frontend == "function"
     const hasTextBackend = typeof candidate.textBackend == "function"
     const hasBinaryBackend = typeof candidate.binaryBackend == "function"
     const hasApplicationBackend = typeof candidate.applicationBackend == "function"
     const hasBackend = hasTextBackend || hasBinaryBackend || hasApplicationBackend
+
+    if (check.supported && !hasBackend) {
+      invalidRegistry(`Registry record '${id}' declares developer checks without a backend role.`, id)
+    }
 
     if ((mapping.richText || mapping.sourceMapV3 || mapping.binaryRanges) && !hasBackend ||
       mapping.sourceMapV3 && !mapping.richText ||
@@ -255,6 +329,7 @@ export function createLanguageRegistry(candidateRecords) {
     const record = deepFreeze(/** @type {LanguageRegistryRecord} */ ({
       acceptance,
       artifactMultiplicity,
+      check,
       features,
       id,
       mapping,
@@ -271,6 +346,7 @@ export function createLanguageRegistry(candidateRecords) {
     const descriptor = deepFreeze(/** @type {import("./semantic/types.js").LanguageCapabilities} */ ({
       acceptance,
       artifactMultiplicity,
+      check: deepFreeze({stages: check.stages, supported: check.supported, toolchains: check.toolchains}),
       features,
       id,
       mapping,
@@ -417,6 +493,7 @@ const records = [
   }),
   language({
     acceptance: {stages: ["parse", "generate", "compile", "execute"], toolchains: ["javac", "java"]},
+    check: {factory: createJavaCheckPlan, stages: ["compile"], toolchains: ["javac"]},
     defaultFilename: "Main.java",
     frontend: javaFrontend,
     id: "java",

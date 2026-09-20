@@ -70,6 +70,27 @@ export class ProjectBuildReporter {
   }
 
   /**
+   * Reports one successful target-check stage with exact process evidence.
+   * @param {{id: string, language: string, stage: import("./semantic/types.js").TargetCheckStageResult}} checked - Target and stage result.
+   * @returns {void}
+   */
+  targetChecked(checked) {
+    this.#emitState({
+      argv: checked.stage.argv,
+      durationMs: checked.stage.durationMs,
+      exitCode: checked.stage.exitCode,
+      language: checked.language,
+      signal: checked.stage.signal,
+      stage: checked.stage.stage,
+      state: "target-checked",
+      stderr: checked.stage.stderr,
+      stdout: checked.stage.stdout,
+      target: checked.id,
+      tool: checked.stage.tool
+    })
+  }
+
+  /**
    * Emits the sole successful terminal record.
    * @param {import("./project-build.js").ProjectBuildSuccess} result - Committed build result.
    * @returns {void}
@@ -82,11 +103,14 @@ export class ProjectBuildReporter {
     if (this.#format == "human") {
       const targetWord = result.targets.length == 1 ? "target" : "targets"
 
-      this.#stdout.write(`Built project '${result.projectId}' as generation '${result.generationId}' with ${result.targets.length} ${targetWord}.\n`)
+      const action = result.checked ? "Built and checked" : "Built"
+
+      this.#stdout.write(`${action} project '${result.projectId}' as generation '${result.generationId}' with ${result.targets.length} ${targetWord}.\n`)
       return
     }
     this.#writeNdjson({
       exitCode: 0,
+      checked: result.checked,
       generationId: result.generationId,
       snapshotHash: result.snapshotHash,
       state: "succeeded",
@@ -111,7 +135,10 @@ export class ProjectBuildReporter {
     const diagnostic = normalizeDiagnostic(failure)
 
     if (this.#format == "human") {
-      this.#stderr.write(`Build failed: ${diagnostic.message}\n`)
+      const processFailure = deepestDiagnostic(diagnostic)
+      const evidence = humanProcessEvidence(processFailure)
+
+      this.#stderr.write(`Build failed: ${diagnostic.message}\n${evidence}`)
       return
     }
     this.#writeNdjson({
@@ -183,8 +210,78 @@ function diagnosticRecord(diagnostic) {
     code: diagnostic.code,
     detail: diagnostic.detail,
     language: diagnostic.language,
-    ...(diagnostic.location === undefined ? {} : {location: diagnostic.location})
+    ...(diagnostic.location === undefined ? {} : {location: diagnostic.location}),
+    ...optionalDiagnosticFields(diagnostic),
+    ...(diagnostic.cause instanceof SemantifoldDiagnostic ? {cause: diagnosticRecord(diagnostic.cause)} : {})
   }
+}
+
+/**
+ * Retains stable structured process and target context.
+ * @param {SemantifoldDiagnostic} diagnostic - Diagnostic to serialize.
+ * @returns {Record<string, unknown>} Present optional fields.
+ */
+function optionalDiagnosticFields(diagnostic) {
+  const fields = [
+    "command", "durationMs", "executable", "exitCode", "projectId", "signal", "stage", "stderr", "stdout", "targetId",
+    "toolId", "version"
+  ]
+  /** @type {Record<string, unknown>} */
+  const result = {}
+
+  for (const field of fields) {
+    const value = Reflect.get(diagnostic, field)
+
+    if (value !== undefined) result[field] = value
+  }
+
+  return result
+}
+
+/**
+ * Finds the most specific Semantifold diagnostic in a preserved cause chain.
+ * @param {SemantifoldDiagnostic} diagnostic - Root diagnostic.
+ * @returns {SemantifoldDiagnostic} Deepest structured diagnostic.
+ */
+function deepestDiagnostic(diagnostic) {
+  let current = diagnostic
+
+  while (current.cause instanceof SemantifoldDiagnostic) current = current.cause
+
+  return current
+}
+
+/**
+ * Formats complete bounded check-process evidence without flattening its diagnostic.
+ * @param {SemantifoldDiagnostic} diagnostic - Deepest structured diagnostic.
+ * @returns {string} Human-readable check context and streams, when applicable.
+ */
+function humanProcessEvidence(diagnostic) {
+  if (!diagnostic.code.startsWith("TARGET_CHECK_")) return ""
+  /**
+   * Reads one optional diagnostic field for compact human display.
+   * @param {string} field - Field identity.
+   * @returns {unknown} Present value or an explicit absence marker.
+   */
+  const value = field => Reflect.get(diagnostic, field) ?? "none"
+  const heading = `Check failure: project='${value("projectId")}' target='${value("targetId")}' ` +
+    `language='${diagnostic.language}' tool='${value("toolId")}' executable='${value("executable")}' ` +
+    `version='${value("version")}' stage='${value("stage")}' exitCode=${value("exitCode")} ` +
+    `signal=${value("signal")} durationMs=${value("durationMs")}\n`
+
+  return `${heading}${humanStream("stdout", diagnostic.stdout)}${humanStream("stderr", diagnostic.stderr)}`
+}
+
+/**
+ * Labels one bounded process stream and preserves its exact content.
+ * @param {string} name - Stream identity.
+ * @param {unknown} content - Captured stream value.
+ * @returns {string} Labeled newline-terminated stream evidence.
+ */
+function humanStream(name, content) {
+  if (typeof content != "string" || content.length == 0) return `${name}:\n<empty>\n`
+
+  return `${name}:\n${content}${content.endsWith("\n") ? "" : "\n"}`
 }
 
 /** @typedef {{write: (chunk: string) => unknown}} WritableOutput */

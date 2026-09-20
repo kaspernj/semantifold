@@ -1,6 +1,6 @@
 # 039 — Project manifest and one-shot build CLI
 
-- Status: `implemented locally; independent review corrections pass; exact-head TensorBuzz CI / merge pending`
+- Status: `delivered through PR #56 at merge commit 41770a2734152640badbb28da50f10dede01aa40`
 - Phase/priority: Phase W / P0 foundation
 - Dependencies: [010-multifile-modules-and-names.md](010-multifile-modules-and-names.md), [038-transactional-generated-artifact-publication.md](038-transactional-generated-artifact-publication.md)
 - Design: [Watch, build, and target-check pipeline](../docs/watch-build-pipeline.md)
@@ -58,4 +58,4 @@ Filesystem watching, compiler execution, arbitrary includes/excludes/globs, pack
 - The CLI composes existing public semantic APIs instead of duplicating parser/backend dispatch.
 - Multi-target failure is atomic, protocol/exit behavior is deterministic, and the packed CLI passes focused tests, lint/typecheck, docs, and package gates.
 
-The implementation and focused real-filesystem/packed-consumer coverage satisfy these criteria locally. Independent review is complete; exact-head TensorBuzz CI, merge, and release remain coordinator-owned.
+The implementation and focused real-filesystem/packed-consumer coverage satisfied these criteria and shipped through PR #56. Task 040 now composes the reserved build projection and CLI boundary without changing Task 039's generation-only behavior.

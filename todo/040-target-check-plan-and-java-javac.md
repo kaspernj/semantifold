@@ -1,6 +1,6 @@
 # 040 — Target check-plan contract and Java javac slice
 
-- Status: `roadmap`
+- Status: `implementation complete on feature branch; focused/package acceptance pass; review/CI/merge pending`
 - Phase/priority: Phase W / P0 compiler foundation
 - Dependencies: [039-project-manifest-and-build-cli.md](039-project-manifest-and-build-cli.md)
 - Design: [Watch, build, and target-check pipeline](../docs/watch-build-pipeline.md)
@@ -9,13 +9,13 @@
 
 Define a registry-driven target check-plan contract and integrate the first concrete Java plan so `semantifold build --check` stages Java, compiles it with real `javac`, and publishes generated source plus compiler outputs only after the check succeeds.
 
-## Current evidence and gap
+## Starting evidence and implemented result
 
-The language registry declares Java acceptance stages `parse`, `generate`, `compile`, and `execute` with toolchains `javac` and `java`. `discoverCanonicalToolchain` and `runAcceptanceStages` are public and already prove caller-supplied `javac` argument arrays. Compiler argument construction is duplicated in specs, no registry capability creates a developer check plan, and the current runner's private temporary materialization cannot publish a checked generation.
+The starting language registry declared Java acceptance stages `parse`, `generate`, `compile`, and `execute` with toolchains `javac` and `java`, while compiler argument construction remained duplicated in specs. Task 040 now adds the immutable public `check` capability, `createTargetCheckPlan`, lifecycle-owning `TargetCheckRunner`, Java's target-owned compiler plan, transactional `ProjectBuilder` composition, strict CLI `--check`, and structured human/NDJSON evidence. Generation-only targets advertise unsupported checks rather than execution.
 
 A direct baseline proof on `v0.7.0` parsed the 2,648-byte JavaScript/JSDoc compatibility fixture, generated `Main.java`, compiled it with `javac 25.0.4`, executed it with Java 25.0.4, and produced `compat\nbranch-ok!\npresent\nabsent\n7\n2\n3\n5\n4\n`. This task productizes the compile boundary; it does not redesign Java generation.
 
-## Planned check-plan contract
+## Implemented check-plan contract
 
 - Extend the authoritative target capability model with an explicit immutable check-plan factory/capability. Public descriptors must distinguish generation-only from check-capable targets without claiming execution.
 - A plan receives only a validated staged artifact set, its isolated generation-scoped target build subtree, exact project/target identity, and discovered immutable tool records. It returns ordered stage requests with exact executable/argv/cwd/environment/output ownership and no shell strings.
@@ -52,3 +52,5 @@ Filesystem watch mode, Java incremental compilation servers, Gradle/Maven, annot
 - The Java compiler command comes from a target-owned plan rather than a Java branch in the CLI.
 - `build --check` uses real `javac` and makes source/classes visible together only through the successful project-generation pointer switch.
 - Compiler failure/recovery, process lifecycle, diagnostics, focused tests, lint/typecheck, docs, changelog, and packed-consumer behavior satisfy repository gates.
+
+The implementation satisfies these criteria locally. Focused RED/GREEN coverage proves plan validation, owned process lifecycle, real multi-unit `javac`, explicit post-publication `java` execution, last-good preservation/recovery, CLI reporting, and the credential-free packed consumer. Independent review, exact-head TensorBuzz CI, merge, and release remain coordinator-owned.
