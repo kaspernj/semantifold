@@ -1,11 +1,12 @@
 // @ts-check
 
 import assert from "node:assert/strict"
-import {mkdir, mkdtemp, rm, writeFile} from "node:fs/promises"
+import {mkdir, mkdtemp, readFile, readdir, rm, writeFile} from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import {describe, expect, it} from "@velocious/testing"
-import {parseSemantifoldCliArguments, ProjectBuildReporter, SemantifoldCli, SemantifoldDiagnostic} from "../index.js"
+import {parseSemantifoldCliArguments, ProjectBuilder, ProjectBuildReporter, SemantifoldCli, SemantifoldDiagnostic} from "../index.js"
+import {observeProjectBuild} from "../src/project-build.js"
 
 /** @returns {(error: unknown) => boolean} */
 function invalidArguments() {
@@ -156,6 +157,57 @@ describe("Semantifold project CLI", () => {
       expect(checked.argv.length).toEqual(3)
       expect(typeof checked.durationMs).toEqual("number")
       expect(records.at(-1)).toMatchObject({checked: true, exitCode: 0, terminal: true})
+    } finally {
+      await rm(root, {force: true, recursive: true})
+    }
+  })
+
+  it("cancels after javac closes without publishing or reporting success", {timeoutMs: 30_000}, async () => {
+    const {manifestPath, root} = await cliFixture("console.log(\"last good\")\n")
+    const stdout = outputBuffer()
+    const stderr = outputBuffer()
+
+    try {
+      const first = await new ProjectBuilder().build(manifestPath, undefined, {check: true})
+      const pointerPath = path.join(root, ".semantifold/active-generation.json")
+      const javaPath = path.join(first.generation.targets[0].sourcePath, "semantifold/generated/main/Main.java")
+      const classPath = path.join(first.generation.targets[0].buildPath, "semantifold/generated/main/Main.class")
+      const oldPointer = await readFile(pointerPath)
+      const oldJava = await readFile(javaPath)
+      const oldClass = await readFile(classPath)
+      const builder = new ProjectBuilder()
+      let checkClosed = 0
+      let signalHandled = false
+
+      observeProjectBuild(builder, operation => {
+        if (operation != "check:java-main:compile") return
+        checkClosed += 1
+        signalHandled = process.emit("SIGTERM")
+      })
+      await writeFile(path.join(root, "src/main.js"), "console.log(\"must-not-execute\")\n")
+      const status = await new SemantifoldCli({builder, stderr: stderr.writer, stdout: stdout.writer})
+        .run(["build", "--check", "--ndjson", "--project", manifestPath])
+      const records = stdout.read().trim().split("\n").map(line => JSON.parse(line))
+
+      expect(checkClosed).toEqual(1)
+      expect(signalHandled).toBeTrue()
+      expect(status).toEqual(1)
+      expect(stderr.read()).toEqual("")
+      expect(records.map(({state}) => state)).toEqual([
+        "project-loaded", "snapshot-loaded", "target-generated", "target-checked", "failed"
+      ])
+      expect(records.filter(({terminal}) => terminal === true)).toHaveLength(1)
+      expect(records.at(-1)).toMatchObject({
+        diagnostic: {code: "PUBLICATION_CANCELLED"},
+        exitCode: 1,
+        state: "failed",
+        terminal: true
+      })
+      expect(stdout.read()).not.toContain("must-not-execute")
+      assert.deepEqual(await readFile(pointerPath), oldPointer)
+      assert.deepEqual(await readFile(javaPath), oldJava)
+      assert.deepEqual(await readFile(classPath), oldClass)
+      expect(await readdir(path.join(root, ".semantifold/generations"))).toEqual([first.generationId])
     } finally {
       await rm(root, {force: true, recursive: true})
     }

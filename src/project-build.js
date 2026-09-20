@@ -72,6 +72,7 @@ export class ProjectBuilder {
       })
     }
     const check = options.check === true
+    const signal = options.signal
     const project = await this.#manifestLoader.load(projectPath)
 
     reporter?.projectLoaded(project.id)
@@ -145,7 +146,7 @@ export class ProjectBuilder {
             reporter?.targetChecked({id: target.id, language: target.language, stage})
             projectBuildObservers.get(this)?.(`check:${target.id}:${stage.stage}`)
           },
-          ...(options.signal === undefined ? {} : {signal: options.signal}),
+          ...(signal === undefined ? {} : {signal}),
           ...(options.timeoutMs === undefined ? {} : {timeoutMs: options.timeoutMs})
         })
 
@@ -178,7 +179,9 @@ export class ProjectBuilder {
       sourceFiles: project.sources.map(({absolutePath}) => absolutePath)
     })
     const generationId = `g-${snapshot.hash}${check ? "-checked" : ""}`
-    const generation = await publisher.publish({generationId, targets: publicationTargets})
+    const generation = await publisher.publish({generationId, targets: publicationTargets}, {
+      ...(signal === undefined ? {} : {signal})
+    })
 
     projectBuildObservers.get(this)?.("publish")
 

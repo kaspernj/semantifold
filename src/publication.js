@@ -151,9 +151,11 @@ export class GeneratedArtifactPublisher {
    * Stages, validates, and publishes one complete immutable project generation.
    * Calls on one publisher instance are serialized in invocation order.
    * @param {import("./semantic/types.js").PublicationRequest} request - Complete publication request.
+   * @param {import("./semantic/types.js").PublicationOptions} [options] - Transaction lifecycle controls.
    * @returns {Promise<import("./semantic/types.js").PublishedGeneration>} Committed immutable snapshot.
    */
-  publish(request) {
+  publish(request, options = {}) {
+    const signal = validatePublicationOptions(options, this.#projectId)
     /** @type {(value: import("./semantic/types.js").PublishedGeneration) => void} */
     let resolveResult
     /** @type {(reason?: unknown) => void} */
@@ -164,7 +166,7 @@ export class GeneratedArtifactPublisher {
     })
     const operation = this.#publicationTail.then(async () => {
       try {
-        resolveResult(await this.#publish(request))
+        resolveResult(await this.#publish(request, signal))
       } catch (error) {
         rejectResult(error)
       }
@@ -194,11 +196,13 @@ export class GeneratedArtifactPublisher {
   /**
    * Performs one serialized publication.
    * @param {import("./semantic/types.js").PublicationRequest} request - Complete request.
+   * @param {AbortSignal | undefined} signal - Optional transaction cancellation authority.
    * @returns {Promise<import("./semantic/types.js").PublishedGeneration>} Publication result.
    */
-  async #publish(request) {
+  async #publish(request, signal) {
     const validated = validatePublicationRequest(request, this.#projectId)
 
+    assertPublicationActive(signal, this.#projectId)
     await this.#prepareRoot()
     await reconcilePublication(this.#publicationRoot, this.#projectId, this)
     await verifyAtomicReplacement(this.#publicationRoot, this.#projectId)
@@ -297,6 +301,7 @@ export class GeneratedArtifactPublisher {
         tempPointerCreated = true
       })
       reachPublicationBoundary(this, "before-pointer-replace")
+      assertPublicationActive(signal, this.#projectId)
       await rename(tempPointerPath, path.join(this.#publicationRoot, activePointerName))
       tempPointerCreated = false
       committed = true
@@ -412,6 +417,35 @@ export class GeneratedArtifactPublisher {
     }
     await ensureOwnedDirectory(path.join(this.#publicationRoot, generationsName), this.#projectId)
     await ensureOwnedDirectory(path.join(this.#publicationRoot, journalName), this.#projectId)
+  }
+}
+
+/**
+ * Validates and snapshots transaction lifecycle controls before publication is queued.
+ * @param {unknown} options - Candidate options.
+ * @param {string} projectId - Project diagnostic identity.
+ * @returns {AbortSignal | undefined} Optional cancellation signal.
+ */
+function validatePublicationOptions(options, projectId) {
+  if (!isPlainObject(options) || Object.keys(options).some(key => key != "signal") ||
+    options.signal !== undefined && !(options.signal instanceof AbortSignal)) {
+    publicationFailure("INVALID_PUBLICATION_REQUEST", projectId,
+      "Publication options require only an optional AbortSignal.")
+  }
+
+  return /** @type {AbortSignal | undefined} */ (options.signal)
+}
+
+/**
+ * Rejects cancellation before the atomic active-pointer commit begins.
+ * @param {AbortSignal | undefined} signal - Optional transaction cancellation authority.
+ * @param {string} projectId - Project diagnostic identity.
+ * @returns {void}
+ */
+function assertPublicationActive(signal, projectId) {
+  if (signal?.aborted) {
+    publicationFailure("PUBLICATION_CANCELLED", projectId,
+      "Publication was cancelled before the active generation pointer commit.")
   }
 }
 

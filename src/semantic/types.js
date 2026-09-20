@@ -438,6 +438,11 @@
  */
 
 /**
+ * @typedef PublicationOptions
+ * @property {AbortSignal} [signal] - Cancellation authority through the active-pointer commit boundary.
+ */
+
+/**
  * @typedef GenerationContentHash
  * @property {"sha256"} algorithm - Hash algorithm.
  * @property {string} value - Lowercase hexadecimal digest.

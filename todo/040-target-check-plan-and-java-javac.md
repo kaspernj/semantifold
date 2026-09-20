@@ -28,7 +28,7 @@ A direct baseline proof on `v0.7.0` parsed the 2,648-byte JavaScript/JSDoc compa
 - Add Java text-target check capability using the configured canonical `javac` identity and the repository's already qualified Java profile.
 - Compile every staged `.java` artifact together into the candidate generation's isolated Java build subtree; never emit `.class` files beside generated source.
 - Match the existing accepted Java compiler profile and diagnostics. Do not silently add a different language release or warning policy.
-- Add `build --check` and manifest generated/build projection configuration. A successful cycle publishes one coherent source/class project generation through one active-pointer replacement; missing/ambiguous `javac`, spawn failure, timeout, non-zero close, or pre-pointer publication failure leaves the prior generation active.
+- Add `build --check` and manifest generated/build projection configuration. A successful cycle publishes one coherent source/class project generation through one active-pointer replacement; missing/ambiguous `javac`, spawn failure, timeout, cancellation through the pointer-commit boundary, non-zero close, or pre-pointer publication failure leaves the prior generation active.
 - Report tool identity, exact stage, exit status/signal, bounded stdout/stderr, timing, and structured Semantifold context without flattening compiler diagnostics.
 
 ## Tests
@@ -36,7 +36,7 @@ A direct baseline proof on `v0.7.0` parsed the 2,648-byte JavaScript/JSDoc compa
 - Check-plan schema/immutability and rejection of undeclared toolchains, invalid stage order, path escape, mutable argv/environment, and execution stages in developer-check mode.
 - Real JavaScript/JSDoc-to-Java `build --check` with `javac`, followed by execution of committed classes only in acceptance code to prove the compiled output is usable.
 - Deliberately invalid staged Java at the check boundary produces a compiler failure and leaves the previous active generation's Java/class outputs byte-for-byte unchanged; a later valid candidate succeeds.
-- Spawn failure, non-zero close, timeout/cancellation, late stdout/stderr, and signal handling settle only after the child closes and leak no process or staging root.
+- Spawn failure, non-zero close, timeout/cancellation, late stdout/stderr, and signal handling settle only after the child closes and leak no process or staging root. Deterministic CLI coverage cancels after checker close but before pointer replacement and proves the prior exact source/class bytes remain authoritative.
 - JSON/human reporting and exit status remain truthful and deterministic.
 
 ## Documentation
