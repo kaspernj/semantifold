@@ -293,7 +293,8 @@ export function validateTargetCheckPlan(candidate) {
     if (!validEnvironment(request.environment)) {
       return invalidPlan(`Target check stage '${request.stage}' requires an immutable deterministic environment.`, target)
     }
-    if (!validEnvironmentPaths(request.environmentPaths, request.environment, candidate.sourcePath, candidate.buildPath)) {
+    if (!validEnvironmentPaths(request.environmentPaths, request.environment, candidate.sourcePath, candidate.buildPath,
+      capability.toolchains, usedTools)) {
       return invalidPlan(`Target check stage '${request.stage}' has invalid environment-path ownership.`, target)
     }
     if (typeof request.cwd != "string" || !ownedByEither(candidate.sourcePath, candidate.buildPath, request.cwd)) {
@@ -650,24 +651,36 @@ function validEnvironment(value) {
 }
 
 /**
- * Checks every absolute non-PATH environment value against an explicit candidate-owned directory declaration.
+ * Checks every absolute non-PATH environment value against an explicit candidate-owned directory or discovered-tool declaration.
  * @param {unknown} value - Candidate declarations.
  * @param {Readonly<Record<string, string>>} environment - Validated deterministic environment.
  * @param {string} sourcePath - Candidate source root.
  * @param {string} buildPath - Candidate build root.
+ * @param {readonly string[]} toolchains - Target-declared toolchain IDs.
+ * @param {Set<string>} usedTools - Validated tools used by this plan.
  * @returns {value is readonly import("./semantic/types.js").TargetCheckEnvironmentPath[]} Whether ownership is complete.
  */
-function validEnvironmentPaths(value, environment, sourcePath, buildPath) {
+function validEnvironmentPaths(value, environment, sourcePath, buildPath, toolchains, usedTools) {
   if (!isDenseArray(value) || !Object.isFrozen(value)) return false
   const names = new Set()
 
   for (let index = 0; index < value.length; index += 1) {
     const declaration = value[index]
 
-    if (!isPlainObject(declaration) || !Object.isFrozen(declaration) || !hasExactKeys(declaration, ["name", "ownership"]) ||
-      typeof declaration.name != "string" || names.has(declaration.name) ||
-      declaration.ownership != "source" && declaration.ownership != "build") return false
+    if (!isPlainObject(declaration) || !Object.isFrozen(declaration) ||
+      !hasExactKeys(declaration, declaration.ownership == "tool" ? ["name", "ownership", "tool"] : ["name", "ownership"]) ||
+      typeof declaration.name != "string" || names.has(declaration.name)) return false
     const environmentPath = environment[declaration.name]
+
+    if (declaration.ownership == "tool") {
+      if (!isDiscoveredTool(declaration.tool) || !Object.isFrozen(declaration.tool) ||
+        !Object.isFrozen(declaration.tool.versionArguments) || !toolchains.includes(declaration.tool.id) ||
+        environmentPath != declaration.tool.executable) return false
+      usedTools.add(declaration.tool.id)
+      names.add(declaration.name)
+      continue
+    }
+    if (declaration.ownership != "source" && declaration.ownership != "build") return false
     const root = declaration.ownership == "source" ? sourcePath : buildPath
 
     if (typeof environmentPath != "string" || !ownedBy(root, environmentPath)) return false

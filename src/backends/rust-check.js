@@ -8,6 +8,7 @@ import {
   checkStage,
   checkTool,
   environmentPath,
+  environmentTool,
   pathArgument
 } from "./check-plan.js"
 import {rustLockfile, rustManifest} from "./rust-runtime.js"
@@ -18,7 +19,8 @@ import {rustLockfile, rustManifest} from "./rust-runtime.js"
  * @returns {import("../semantic/types.js").TargetCheckPlan} Immutable Cargo plan.
  */
 export function createRustCheckPlan(context) {
-  const tool = checkTool(context, "cargo", "rust")
+  const rustc = checkTool(context, "rustc", "rust")
+  const cargo = checkTool(context, "cargo", "rust")
   const artifacts = checkArtifacts(context, artifact => artifact.path.endsWith(".rs") ||
     artifact.path == "Cargo.toml" || artifact.path == "Cargo.lock",
   "rust", "only staged Rust source and canonical Cargo manifest/lock artifacts")
@@ -46,12 +48,13 @@ export function createRustCheckPlan(context) {
     CARGO_NET_OFFLINE: "true",
     CARGO_TERM_COLOR: "never",
     HOME: home,
-    PATH: [path.dirname(tool.executable), "/usr/local/bin", "/usr/bin", "/bin"].filter((value, index, values) =>
+    PATH: [path.dirname(rustc.executable), path.dirname(cargo.executable), "/usr/local/bin", "/usr/bin", "/bin"].filter((value, index, values) =>
       values.indexOf(value) == index).join(path.delimiter),
+    RUSTC: rustc.executable,
     TMPDIR: temporary
   }
   const environmentPaths = [environmentPath("CARGO_HOME", "build"), environmentPath("HOME", "build"),
-    environmentPath("TMPDIR", "build")]
+    environmentTool("RUSTC", rustc), environmentPath("TMPDIR", "build")]
   /**
    * Constructs one Cargo stage over the complete generated project.
    * @param {import("../semantic/types.js").AcceptanceStage} name - Registry stage identity.
@@ -67,7 +70,7 @@ export function createRustCheckPlan(context) {
     output: null,
     pathArguments: [pathArgument(4, "build")],
     stage: name,
-    tool,
+    tool: cargo,
     transientPaths: [target]
   })
 

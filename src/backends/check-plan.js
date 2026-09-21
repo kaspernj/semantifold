@@ -126,6 +126,16 @@ export function environmentPath(name, ownership) {
 }
 
 /**
+ * Freezes one exact tool-executable environment binding.
+ * @param {string} name - Exact environment variable.
+ * @param {import("../semantic/types.js").DiscoveredToolchain} tool - Exact discovered tool.
+ * @returns {import("../semantic/types.js").TargetCheckEnvironmentPath} Immutable declaration.
+ */
+export function environmentTool(name, tool) {
+  return Object.freeze({name, ownership: /** @type {const} */ ("tool"), tool})
+}
+
+/**
  * Freezes build-output ownership metadata.
  * @param {string} buildPath - Exact candidate build root.
  * @param {string} mediaType - Output media type.

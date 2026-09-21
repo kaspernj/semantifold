@@ -578,7 +578,7 @@ const records = [
   language({
     acceptance: {stages: ["parse", "generate", "compile", "validate", "execute"], toolchains: ["rustc", "cargo"]},
     artifactMultiplicity: "multiple",
-    check: {factory: createRustCheckPlan, stages: ["compile", "validate"], toolchains: ["cargo"]},
+    check: {factory: createRustCheckPlan, stages: ["compile", "validate"], toolchains: ["rustc", "cargo"]},
     defaultFilename: "src/main.rs", frontend: parseRust, id: "rust", mediaType: "text/x-rust", textBackend: generateRustProject
   }),
   language({acceptance: {stages: ["parse", "generate", "compile", "execute"], toolchains: ["swiftc"]},

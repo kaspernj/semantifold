@@ -10,15 +10,17 @@ import {
   createTargetCheckPlan,
   generateArtifactSet,
   languageCapabilities,
-  parse
+  parse,
+  SemantifoldDiagnostic
 } from "../index.js"
+import {createTargetCheckRunner} from "../src/target-check.js"
 
 const targets = ["go", "c", "cpp", "rust", "swift", "dart", "zig"]
 const expectedChecks = new Map([
   ["go", {stages: ["compile", "validate"], supported: true, toolchains: ["go"]}],
   ["c", {stages: ["compile", "link"], supported: true, toolchains: ["clang"]}],
   ["cpp", {stages: ["compile", "link"], supported: true, toolchains: ["clangpp"]}],
-  ["rust", {stages: ["compile", "validate"], supported: true, toolchains: ["cargo"]}],
+  ["rust", {stages: ["compile", "validate"], supported: true, toolchains: ["rustc", "cargo"]}],
   ["swift", {stages: ["compile"], supported: true, toolchains: ["swiftc"]}],
   ["dart", {stages: ["restore", "compile", "validate"], supported: true, toolchains: ["dart"]}],
   ["zig", {stages: ["compile", "validate"], supported: true, toolchains: ["zig"]}]
@@ -40,11 +42,12 @@ console.log(add(2, 3))
 /** @param {string} id */
 function tool(id) {
   const commands = new Map([["clangpp", "clang++"], ["swiftc", "swiftc"]])
+  const directories = new Map([["cargo", "/opt/semantifold-cargo/bin"], ["rustc", "/opt/semantifold-rust/bin"]])
   const command = commands.get(id) ?? id
 
   return Object.freeze({
     command,
-    executable: `/opt/semantifold-tools/${command}`,
+    executable: path.join(directories.get(id) ?? "/opt/semantifold-tools", command),
     id,
     source: /** @type {const} */ ("override"),
     version: `${id} fixture`,
@@ -148,7 +151,13 @@ describe("native and project target check plans", () => {
         ["validate", ["check", "--offline", "--locked", "--target-dir", path.join(rust.buildPath, "cargo-target")]]
       ])
       expect(rust.plan.stages[0].environment).toMatchObject({CARGO_INCREMENTAL: "0", CARGO_NET_OFFLINE: "true",
-        CARGO_TERM_COLOR: "never"})
+        CARGO_TERM_COLOR: "never", RUSTC: "/opt/semantifold-rust/bin/rustc"})
+      expect(rust.plan.stages[0].environment.PATH.split(path.delimiter).slice(0, 2)).toEqual([
+        "/opt/semantifold-rust/bin", "/opt/semantifold-cargo/bin"
+      ])
+      expect(rust.plan.stages[0].environmentPaths).toContainEqual({
+        name: "RUSTC", ownership: "tool", tool: tool("rustc")
+      })
       expect(swift.plan.stages.map(({stage}) => stage)).toEqual(["compile", "compile", "compile"])
       expect(swift.plan.stages.map(({argv}) => argv)).toEqual([
         ["--driver-mode=swiftc", "-warnings-as-errors", "-typecheck", "-module-name", "SemantifoldGenerated",
@@ -211,6 +220,50 @@ describe("native and project target check plans", () => {
           : artifact),
         target: "dart"
       })}), error => error instanceof Error && "code" in error && error.code == "INVALID_TARGET_CHECK_PLAN")
+    } finally {
+      await rm(staged.root, {force: true, recursive: true})
+    }
+  })
+
+  it("rejects missing, mismatched, mutable, or undeclared tool environment bindings before launch", async () => {
+    const staged = await planFor("rust")
+    const stage = staged.plan.stages[0]
+    const rustcBinding = stage.environmentPaths.find(({name}) => name == "RUSTC")
+    let executions = 0
+    const runner = createTargetCheckRunner({
+      async execute() {
+        executions += 1
+        return {stderr: "", stdout: ""}
+      },
+      now: () => 0
+    })
+
+    assert.ok(rustcBinding)
+    const replacements = [
+      {...stage, environmentPaths: Object.freeze(stage.environmentPaths.filter(({name}) => name != "RUSTC"))},
+      {...stage, environment: Object.freeze({...stage.environment, RUSTC: "/opt/semantifold-cargo/bin/cargo"})},
+      {...stage, environmentPaths: Object.freeze(stage.environmentPaths.map(binding => binding.name == "RUSTC"
+        ? {...binding}
+        : binding))},
+      {
+        ...stage,
+        environment: Object.freeze({...stage.environment, GO: "/opt/semantifold-tools/go"}),
+        environmentPaths: Object.freeze([...stage.environmentPaths, Object.freeze({
+          name: "GO", ownership: /** @type {const} */ ("tool"), tool: tool("go")
+        })])
+      }
+    ]
+
+    try {
+      for (const replacement of replacements) {
+        const plan = Object.freeze({...staged.plan, stages: Object.freeze([
+          Object.freeze(replacement), ...staged.plan.stages.slice(1)
+        ])})
+
+        await assert.rejects(runner.run(plan), error =>
+          error instanceof SemantifoldDiagnostic && error.code == "INVALID_TARGET_CHECK_PLAN")
+      }
+      expect(executions).toEqual(0)
     } finally {
       await rm(staged.root, {force: true, recursive: true})
     }
