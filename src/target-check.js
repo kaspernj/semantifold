@@ -1,6 +1,6 @@
 // @ts-check
 
-import {lstat, readdir} from "node:fs/promises"
+import {lstat, mkdir, readdir, rm, rmdir} from "node:fs/promises"
 import path from "node:path"
 import {isDenseArray} from "./array.js"
 import {createGeneratedArtifactSet} from "./artifacts.js"
@@ -93,9 +93,11 @@ export function createTargetCheckPlan(input) {
     return invalidPlan("Target check plan factory failed.", target, error)
   }
   const validated = validateTargetCheckPlan(plan)
+  const expectedArtifacts = new Set(context.artifacts.artifacts.map(artifact => path.join(context.sourcePath, artifact.path)))
 
   if (validated.projectId != context.projectId || validated.targetId != context.targetId ||
-    validated.target != target || validated.sourcePath != context.sourcePath || validated.buildPath != context.buildPath) {
+    validated.target != target || validated.sourcePath != context.sourcePath || validated.buildPath != context.buildPath ||
+    validated.artifactPaths.length != expectedArtifacts.size || validated.artifactPaths.some(artifact => !expectedArtifacts.has(artifact))) {
     return invalidPlan("Target check plan changed its validated candidate context.", target)
   }
 
@@ -130,48 +132,72 @@ export class TargetCheckRunner {
     }
     /** @type {import("./semantic/types.js").TargetCheckStageResult[]} */
     const results = []
+    /** @type {unknown} */
+    let stageFailure
+    let stageFailed = false
 
-    for (const stage of validated.stages) {
-      const startedAt = dependencies.now()
-      /** @type {import("./semantic/types.js").TargetCheckStageResult} */
-      let stageResult
+    try {
+      for (const stage of validated.stages) {
+        const startedAt = dependencies.now()
+        /** @type {import("./semantic/types.js").TargetCheckStageResult} */
+        let stageResult
 
-      if (options.signal?.aborted) throw cancelledDiagnostic(stage, validated, 0)
-      try {
-        const output = await dependencies.execute({
-          arguments: stage.argv,
-          cwd: stage.cwd,
-          environment: stage.environment,
-          executable: stage.executable,
-          maxBuffer: maximumOutputBytes,
-          signal: options.signal,
-          timeoutMs
-        })
-        stageResult = Object.freeze({
-          argv: stage.argv,
-          durationMs: elapsed(dependencies.now(), startedAt),
-          exitCode: 0,
-          signal: null,
-          stage: stage.stage,
-          stderr: output.stderr,
-          stdout: output.stdout,
-          tool: Object.freeze({
-            command: stage.tool.command,
-            executable: stage.tool.executable,
-            id: stage.tool.id,
-            source: stage.tool.source,
-            version: stage.tool.version
+        if (options.signal?.aborted) throw cancelledDiagnostic(stage, validated, 0)
+        try {
+          await prepareStage(stage)
+        } catch (error) {
+          throw preparationDiagnostic(error, stage, validated, elapsed(dependencies.now(), startedAt))
+        }
+        try {
+          const output = await dependencies.execute({
+            arguments: stage.argv,
+            cwd: stage.cwd,
+            environment: stage.environment,
+            executable: stage.executable,
+            maxBuffer: maximumOutputBytes,
+            signal: options.signal,
+            timeoutMs
           })
-        })
+          stageResult = Object.freeze({
+            argv: stage.argv,
+            durationMs: elapsed(dependencies.now(), startedAt),
+            exitCode: 0,
+            signal: null,
+            stage: stage.stage,
+            stderr: output.stderr,
+            stdout: output.stdout,
+            tool: Object.freeze({
+              command: stage.tool.command,
+              executable: stage.tool.executable,
+              id: stage.tool.id,
+              source: stage.tool.source,
+              version: stage.tool.version
+            })
+          })
 
-      } catch (error) {
-        throw processDiagnostic(error, stage, validated, timeoutMs, elapsed(dependencies.now(), startedAt))
+        } catch (error) {
+          throw processDiagnostic(error, stage, validated, timeoutMs, elapsed(dependencies.now(), startedAt))
+        }
+        results.push(stageResult)
+        options.onStage?.(stageResult)
       }
-      results.push(stageResult)
-      options.onStage?.(stageResult)
+    } catch (error) {
+      stageFailed = true
+      stageFailure = error
     }
+    try {
+      await cleanupStageEnvironment(validated)
+    } catch (error) {
+      const cleanup = cleanupDiagnostic(error, validated)
+
+      if (stageFailed && stageFailure instanceof Error) throw preservePrimaryFailure(stageFailure, cleanup)
+      if (stageFailed) throw new AggregateError([stageFailure, cleanup],
+        "Target check failed and its owned transient environment could not be cleaned.", {cause: error})
+      throw cleanup
+    }
+    if (stageFailed) throw stageFailure
     const output = validated.stages.at(-1)?.output
-    const outputs = output === undefined ? [] : await collectBuildOutputs(validated.buildPath, output)
+    const outputs = output == null ? [] : await collectBuildOutputs(validated.buildPath, output)
 
     return Object.freeze({
       outputs: Object.freeze(outputs),
@@ -234,7 +260,10 @@ export function validateTargetCheckPlan(candidate) {
     }
     artifactPaths.add(artifactPath)
   }
-  if (candidate.stages.length != capability.stages.length) {
+  const plannedStageKinds = candidate.stages.map(stage => isPlainObject(stage) && typeof stage.stage == "string" ? stage.stage : "")
+    .filter((stage, index, stages) => index == 0 || stage != stages[index - 1])
+
+  if (plannedStageKinds.join("\0") != capability.stages.join("\0")) {
     return invalidPlan("Target check stages must exactly match the target-declared developer-check stages.", target)
   }
   const usedTools = new Set()
@@ -242,11 +271,10 @@ export function validateTargetCheckPlan(candidate) {
 
   for (let index = 0; index < candidate.stages.length; index += 1) {
     const stage = candidate.stages[index]
-    const declaredStage = capability.stages[index]
-
     if (!isPlainObject(stage) || !Object.isFrozen(stage) || !hasExactKeys(stage, [
-      "argv", "cwd", "environment", "executable", "output", "pathArguments", "stage", "tool"
-    ]) || typeof stage.stage != "string" || stage.stage != declaredStage || stage.stage == "execute" ||
+      "argv", "cwd", "environment", "environmentPaths", "executable", "inputHash", "inputs", "output", "pathArguments",
+      "stage", "tool", "transientPaths"
+    ]) || typeof stage.stage != "string" || stage.stage == "execute" ||
       !record.acceptance.stages.includes(/** @type {import("./semantic/types.js").AcceptanceStage} */ (stage.stage))) {
       return invalidPlan("Target check stages must be immutable, ordered, declared, and non-executing.", target)
     }
@@ -265,33 +293,63 @@ export function validateTargetCheckPlan(candidate) {
     if (!validEnvironment(request.environment)) {
       return invalidPlan(`Target check stage '${request.stage}' requires an immutable deterministic environment.`, target)
     }
+    if (!validEnvironmentPaths(request.environmentPaths, request.environment, candidate.sourcePath, candidate.buildPath)) {
+      return invalidPlan(`Target check stage '${request.stage}' has invalid environment-path ownership.`, target)
+    }
     if (typeof request.cwd != "string" || !ownedByEither(candidate.sourcePath, candidate.buildPath, request.cwd)) {
       return invalidPlan(`Target check stage '${request.stage}' working directory escapes the candidate target subtrees.`, target)
     }
-    if (!validOutput(request.output, candidate.buildPath)) {
+    if (request.output !== null && !validOutput(request.output, candidate.buildPath)) {
       return invalidPlan(`Target check stage '${request.stage}' has invalid compiler-output ownership.`, target)
+    }
+    if (!validTransientPaths(request.transientPaths, candidate.buildPath)) {
+      return invalidPlan(`Target check stage '${request.stage}' has invalid transient-path ownership.`, target)
+    }
+    if (request.stage == "restore" ? typeof request.inputHash != "string" || !/^[a-f0-9]{64}$/u.test(request.inputHash) : request.inputHash !== null) {
+      return invalidPlan(`Target check stage '${request.stage}' has invalid restore-input identity.`, target)
+    }
+    if (!isDenseArray(request.inputs) || !Object.isFrozen(request.inputs) || request.inputs.length == 0) {
+      return invalidPlan(`Target check stage '${request.stage}' requires immutable declared inputs.`, target)
+    }
+    const stageInputs = new Set()
+
+    for (let inputIndex = 0; inputIndex < request.inputs.length; inputIndex += 1) {
+      const inputPath = request.inputs[inputIndex]
+
+      if (typeof inputPath != "string" || stageInputs.has(inputPath) || !ownedByEither(candidate.sourcePath, candidate.buildPath, inputPath)) {
+        return invalidPlan(`Target check stage '${request.stage}' has invalid or duplicate declared inputs.`, target)
+      }
+      if (ownedBy(candidate.sourcePath, inputPath)) {
+        if (!artifactPaths.has(inputPath)) {
+          return invalidPlan(`Target check stage '${request.stage}' reads an undeclared staged artifact.`, target)
+        }
+        referencedArtifactPaths.add(inputPath)
+      }
+      stageInputs.add(inputPath)
     }
     const pathIndexes = new Set()
     for (let pathIndex = 0; pathIndex < request.pathArguments.length; pathIndex += 1) {
       const declaration = request.pathArguments[pathIndex]
 
-      if (!isPlainObject(declaration) || !Object.isFrozen(declaration) || !hasExactKeys(declaration, ["index", "ownership"]) ||
+      if (!isPlainObject(declaration) || !Object.isFrozen(declaration) ||
+        !hasExactKeys(declaration, declaration.prefix === undefined ? ["index", "ownership"] : ["index", "ownership", "prefix"]) ||
         typeof declaration.index != "number" || !Number.isInteger(declaration.index) || declaration.index < 0 ||
         declaration.index >= request.argv.length ||
-        pathIndexes.has(declaration.index) || declaration.ownership != "source" && declaration.ownership != "build") {
+        pathIndexes.has(declaration.index) || declaration.ownership != "source" && declaration.ownership != "build" ||
+        declaration.prefix !== undefined && (typeof declaration.prefix != "string" || declaration.prefix.length == 0 ||
+          declaration.prefix.includes("\0"))) {
         return invalidPlan(`Target check stage '${request.stage}' has invalid path-argument ownership.`, target)
       }
-      const argument = request.argv[declaration.index]
+      const rawArgument = request.argv[declaration.index]
+      const argument = declaration.prefix === undefined
+        ? rawArgument
+        : rawArgument.startsWith(declaration.prefix)
+          ? rawArgument.slice(declaration.prefix.length)
+          : ""
       const root = declaration.ownership == "source" ? candidate.sourcePath : candidate.buildPath
 
       if (argument != root && !ownedBy(root, argument)) {
         return invalidPlan(`Target check stage '${request.stage}' path argument escapes its candidate subtree.`, target)
-      }
-      if (declaration.ownership == "source") {
-        if (!artifactPaths.has(argument)) {
-          return invalidPlan(`Target check stage '${request.stage}' refers to an undeclared staged artifact.`, target)
-        }
-        referencedArtifactPaths.add(argument)
       }
       pathIndexes.add(declaration.index)
     }
@@ -401,6 +459,119 @@ function processDiagnostic(error, stage, plan, timeoutMs, durationMs) {
 }
 
 /**
+ * Creates target-owned environment directories before launch without touching source staging.
+ * @param {import("./semantic/types.js").TargetCheckStageRequest} stage - Validated stage.
+ * @returns {Promise<void>} Completion.
+ */
+async function prepareStage(stage) {
+  for (const declaration of stage.environmentPaths) {
+    if (declaration.ownership == "build") {
+      await mkdir(stage.environment[declaration.name], {mode: 0o700, recursive: true})
+    }
+  }
+  for (const transientPath of stage.transientPaths) await mkdir(transientPath, {mode: 0o700, recursive: true})
+}
+
+/**
+ * Removes only explicitly declared generation-owned transient cache/home directories after every child has closed.
+ * @param {import("./semantic/types.js").TargetCheckPlan} plan - Validated plan.
+ * @returns {Promise<void>} Completion.
+ */
+async function cleanupStageEnvironment(plan) {
+  const owned = new Set()
+
+  for (const stage of plan.stages) {
+    for (const declaration of stage.environmentPaths) {
+      if (declaration.ownership == "build") owned.add(stage.environment[declaration.name])
+    }
+    for (const transientPath of stage.transientPaths) owned.add(transientPath)
+  }
+  const paths = [...owned].sort((left, right) => right.length - left.length || right.localeCompare(left, "en"))
+
+  for (const ownedPath of paths) {
+    await rm(ownedPath, {force: true, recursive: true})
+    await removeEmptyParents(path.dirname(ownedPath), plan.buildPath)
+  }
+}
+
+/**
+ * Removes empty transient ancestors without ever removing the candidate build root.
+ * @param {string} candidate - First possible empty ancestor.
+ * @param {string} buildPath - Exact retained build root.
+ * @returns {Promise<void>} Completion.
+ */
+async function removeEmptyParents(candidate, buildPath) {
+  let current = candidate
+
+  while (ownedBy(buildPath, current)) {
+    if ((await readdir(current)).length > 0) return
+    await rmdir(current)
+    current = path.dirname(current)
+  }
+}
+
+/**
+ * Preserves cache/home preparation failures separately from tool launch or compilation.
+ * @param {unknown} error - Filesystem failure.
+ * @param {import("./semantic/types.js").TargetCheckStageRequest} stage - Failed stage.
+ * @param {import("./semantic/types.js").TargetCheckPlan} plan - Plan context.
+ * @param {number} durationMs - Observed duration.
+ * @returns {SemantifoldDiagnostic} Structured failure.
+ */
+function preparationDiagnostic(error, stage, plan, durationMs) {
+  return new SemantifoldDiagnostic({
+    cause: error instanceof Error ? error : undefined,
+    code: "TARGET_CHECK_PREPARATION_FAILURE",
+    durationMs,
+    executable: stage.executable,
+    language: plan.target,
+    message: `Target '${plan.targetId}' stage '${stage.stage}' could not prepare its owned cache/home directories.`,
+    projectId: plan.projectId,
+    stage: stage.stage,
+    stderr: "",
+    stdout: "",
+    targetId: plan.targetId,
+    toolId: stage.tool.id,
+    version: stage.tool.version
+  })
+}
+
+/**
+ * Reports transient cache/home cleanup separately from native compiler diagnostics.
+ * @param {unknown} error - Filesystem failure.
+ * @param {import("./semantic/types.js").TargetCheckPlan} plan - Plan context.
+ * @returns {SemantifoldDiagnostic} Structured cleanup failure.
+ */
+function cleanupDiagnostic(error, plan) {
+  return new SemantifoldDiagnostic({
+    cause: error instanceof Error ? error : undefined,
+    code: "TARGET_CHECK_CLEANUP_FAILURE",
+    language: plan.target,
+    message: `Target '${plan.targetId}' could not remove its owned transient cache/home directories.`,
+    projectId: plan.projectId,
+    targetId: plan.targetId
+  })
+}
+
+/**
+ * Retains the first plan/process diagnostic while attaching bounded cleanup evidence.
+ * @param {Error} primaryFailure - First check failure.
+ * @param {SemantifoldDiagnostic} cleanupFailure - Structured cleanup failure.
+ * @returns {Error} Original failure with cleanup evidence in its cause chain.
+ */
+function preservePrimaryFailure(primaryFailure, cleanupFailure) {
+  const causes = primaryFailure.cause instanceof Error ? [primaryFailure.cause, cleanupFailure] : [cleanupFailure]
+
+  Object.defineProperty(primaryFailure, "cause", {
+    configurable: true,
+    value: new AggregateError(causes, "Target check failed and its owned transient environment cleanup also failed."),
+    writable: true
+  })
+
+  return primaryFailure
+}
+
+/**
  * Creates a structured failure when cancellation precedes stage launch.
  * @param {import("./semantic/types.js").TargetCheckStageRequest} stage - Cancelled stage.
  * @param {import("./semantic/types.js").TargetCheckPlan} plan - Plan context.
@@ -473,6 +644,57 @@ function validEnvironment(value) {
   const expected = Object.entries(normalized).sort(([left], [right]) => left.localeCompare(right, "en"))
 
   return JSON.stringify(actual) == JSON.stringify(expected)
+}
+
+/**
+ * Checks every absolute non-PATH environment value against an explicit candidate-owned directory declaration.
+ * @param {unknown} value - Candidate declarations.
+ * @param {Readonly<Record<string, string>>} environment - Validated deterministic environment.
+ * @param {string} sourcePath - Candidate source root.
+ * @param {string} buildPath - Candidate build root.
+ * @returns {value is readonly import("./semantic/types.js").TargetCheckEnvironmentPath[]} Whether ownership is complete.
+ */
+function validEnvironmentPaths(value, environment, sourcePath, buildPath) {
+  if (!isDenseArray(value) || !Object.isFrozen(value)) return false
+  const names = new Set()
+
+  for (let index = 0; index < value.length; index += 1) {
+    const declaration = value[index]
+
+    if (!isPlainObject(declaration) || !Object.isFrozen(declaration) || !hasExactKeys(declaration, ["name", "ownership"]) ||
+      typeof declaration.name != "string" || names.has(declaration.name) ||
+      declaration.ownership != "source" && declaration.ownership != "build") return false
+    const environmentPath = environment[declaration.name]
+    const root = declaration.ownership == "source" ? sourcePath : buildPath
+
+    if (typeof environmentPath != "string" || environmentPath != root && !ownedBy(root, environmentPath)) return false
+    names.add(declaration.name)
+  }
+  for (const [name, environmentValue] of Object.entries(environment)) {
+    if (name != "PATH" && path.isAbsolute(environmentValue) && !names.has(name)) return false
+  }
+
+  return true
+}
+
+/**
+ * Checks generation-owned transient cache/intermediate directories.
+ * @param {unknown} value - Candidate path vector.
+ * @param {string} buildPath - Candidate build root.
+ * @returns {value is readonly string[]} Whether paths are immutable distinct build descendants.
+ */
+function validTransientPaths(value, buildPath) {
+  if (!isDenseArray(value) || !Object.isFrozen(value)) return false
+  const paths = new Set()
+
+  for (let index = 0; index < value.length; index += 1) {
+    const transientPath = value[index]
+
+    if (typeof transientPath != "string" || !ownedBy(buildPath, transientPath) || paths.has(transientPath)) return false
+    paths.add(transientPath)
+  }
+
+  return true
 }
 
 /**

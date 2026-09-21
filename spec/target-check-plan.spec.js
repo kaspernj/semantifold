@@ -91,34 +91,34 @@ function replaceStage(plan, stage) {
 }
 
 describe("registry-driven target check plans", () => {
-  it("publishes an explicit immutable Java-only developer-check capability", () => {
+  it("publishes explicit immutable developer-check capabilities without claiming unsupported targets", () => {
     const java = languageCapabilities.find(({id}) => id == "java")
-    const javascript = languageCapabilities.find(({id}) => id == "javascript")
+    const go = languageCapabilities.find(({id}) => id == "go")
 
     expect(java?.check).toEqual({stages: ["compile"], supported: true, toolchains: ["javac"]})
-    expect(javascript?.check).toEqual({stages: [], supported: false, toolchains: []})
+    expect(go?.check).toEqual({stages: [], supported: false, toolchains: []})
     expect(Object.isFrozen(java?.check)).toBeTrue()
     expect(Object.isFrozen(java?.check.stages)).toBeTrue()
     expect(Object.isFrozen(java?.check.toolchains)).toBeTrue()
-    const javascriptArtifacts = createGeneratedArtifactSet({
+    const goArtifacts = createGeneratedArtifactSet({
       artifacts: [{
-        content: "console.log(1)\n",
+        content: "package main\nfunc main() {}\n",
         contentKind: "text",
-        mediaType: "text/javascript",
+        mediaType: "text/x-go",
         ownership: "generated",
-        path: "program.js",
+        path: "main.go",
         provenance: synthetic,
         role: "entry"
       }],
-      target: "javascript"
+      target: "go"
     })
 
     assert.throws(() => createTargetCheckPlan({
-      artifacts: javascriptArtifacts,
+      artifacts: goArtifacts,
       buildPath: "/candidate/build",
       projectId: "plan-project",
       sourcePath: "/candidate/source",
-      targetId: "javascript-main",
+      targetId: "go-main",
       tools: []
     }), error => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_TARGET_CHECK")
   })
@@ -192,7 +192,7 @@ describe("registry-driven target check plans", () => {
     }
   })
 
-  it("rejects undeclared tools, invalid order, escaped paths, mutable or sparse vectors, and developer execution", async () => {
+  it("rejects undeclared tools, invalid order, escaped ownership, mutable or sparse vectors, and developer execution", async () => {
     const {plan, root} = await stagedPlan()
     let executions = 0
     const runner = createTargetCheckRunner({
@@ -217,6 +217,19 @@ describe("registry-driven target check plans", () => {
       replaceStage(plan, {...base, argv: [...base.argv]}),
       replaceStage(plan, {...base, argv: Object.freeze(sparse)}),
       replaceStage(plan, {...base, environment: {...base.environment}}),
+      replaceStage(plan, {...base, inputs: [...base.inputs]}),
+      replaceStage(plan, {...base, inputs: Object.freeze([path.join(root, "escaped.java")])}),
+      replaceStage(plan, {...base, inputHash: "0".repeat(64)}),
+      replaceStage(plan, {...base, pathArguments: Object.freeze([
+        Object.freeze({index: 1, ownership: /** @type {const} */ ("build"), prefix: "--out="}),
+        ...base.pathArguments.slice(1)
+      ])}),
+      replaceStage(plan, {
+        ...base,
+        environment: Object.freeze({...base.environment, HOME: path.join(root, "escaped-home")}),
+        environmentPaths: Object.freeze([Object.freeze({name: "HOME", ownership: /** @type {const} */ ("build")})])
+      }),
+      replaceStage(plan, {...base, transientPaths: Object.freeze([path.join(root, "escaped-cache")])}),
       replaceStage(plan, {...base, stage: /** @type {const} */ ("execute")})
     ]
 

@@ -2,7 +2,7 @@
 
 ## Status and verified baseline
 
-Tasks 039–040 implement the strict project manifest, stable one-shot snapshot, deterministic generation orchestration, generic non-executing check-plan contract, Java/`javac`, human/NDJSON reporting, and packaged `semantifold build [--check]`. Task 043 implements the language-neutral deterministic watch coordinator and `semantifold watch [--check]`; Task 044 proves its packed JavaScript/JSDoc-to-Java checked vertical slice. Other target plans remain roadmap contracts.
+Tasks 039–041 implement the strict project manifest, stable one-shot snapshot, deterministic generation orchestration, generic non-executing check-plan contract, Java/`javac`, the seven interpreted/managed target plans, human/NDJSON reporting, and packaged `semantifold build [--check]`. Task 043 implements the language-neutral deterministic watch coordinator and `semantifold watch [--check]`; Task 044 proves its packed JavaScript/JSDoc-to-Java checked vertical slice. Native/project target plans remain a roadmap contract.
 
 The inspected baseline is `semantifold@0.7.0`, annotated tag `v0.7.0`, commit `8cd70c5a6c7de98df2d4a183d6555ad4f3d5ba5a`. At that revision:
 
@@ -14,7 +14,7 @@ The inspected baseline is `semantifold@0.7.0`, annotated tag `v0.7.0`, commit `8
 - `package.json` had no `bin` entry. The public API did not persist generated artifacts, load a project manifest, derive compiler arguments from a target, or watch source files.
 - The only repository file-change watcher is a test helper; there is no product watch coordinator, incremental dependency graph, event coalescing policy, or long-lived compiler owner.
 
-That historical baseline proved **JavaScript/JSDoc → semantic IR → Java → `javac`** as a one-shot composition. Released `semantifold@0.9.0` supplies Task 038's public language-neutral `GeneratedArtifactPublisher`, immutable generation manifests, one atomic active pointer, pointer-once resolution, and journal-bounded recovery. Task 039 adds the package bin, project configuration, and one-shot CLI behavior; Task 040 productizes the generic plan/runner and Java compiler boundary; Task 043 supplies generic watch coordination; Task 044 supplies the packed credential-free watch proof and public example. Other target-owned check plans remain Tasks 041–042.
+That historical baseline proved **JavaScript/JSDoc → semantic IR → Java → `javac`** as a one-shot composition. Released `semantifold@0.9.0` supplies Task 038's public language-neutral `GeneratedArtifactPublisher`, immutable generation manifests, one atomic active pointer, pointer-once resolution, and journal-bounded recovery. Task 039 adds the package bin, project configuration, and one-shot CLI behavior; Task 040 productizes the generic plan/runner and Java compiler boundary; Task 041 adds PHP, Ruby, JavaScript, TypeScript, Kotlin/JVM, Python, and C# plans; Task 043 supplies generic watch coordination; and Task 044 supplies the packed credential-free watch proof and public example. Native/project check plans remain Task 042.
 
 ## Product outcome
 
@@ -25,7 +25,7 @@ A project can declare explicit source modules, one or more generated targets, on
 
 For the first end-to-end slice, changing a JSDoc-typed JavaScript source regenerates Java and compiles the staged candidate with `javac`. A successful cycle publishes one coherent generated-source/compiler-output generation through one active-generation pointer switch. A parse, semantic, generation, tool-discovery, compiler, or publication failure reports a located diagnostic, keeps the process alive in watch mode, and leaves the previous successful generation usable. A later valid edit recovers without restarting the watcher.
 
-The architecture is target-neutral. Every current text backend eventually supplies one target-owned check plan. Every current source frontend participates through the existing parser/project APIs; the watcher never contains language syntax logic.
+The architecture is target-neutral. Java and the seven interpreted/managed targets supply target-owned plans; the remaining native/project text backends fail loudly until Task 042. Every current source frontend participates through the existing parser/project APIs; the watcher never contains language syntax logic.
 
 ## Architecture boundaries
 
@@ -55,18 +55,23 @@ Publication commits exactly one small active-generation pointer by writing and s
 
 An interruption before the pointer replacement leaves the previous generation active; an interruption after it leaves either the old or new complete pointer durably recoverable, never a composite state. A recovery journal may finish cleanup of unpublished candidates and temporary pointer files, but it is not used to claim atomicity across multiple filesystem operations. Candidate and temporary-pointer parent directories are synchronized before the proving journal is removed and its directory synchronized. Publication never removes a committed generation, because a reader may already hold its resolved snapshot; committed-generation retention/garbage collection is a separate explicit policy. A failed candidate is removed without changing the active pointer.
 
-### Target check-plan registry (Task 040 implemented for Java)
+### Target check-plan registry (Tasks 040–041 implemented)
 
-The existing language registry remains authoritative for target identity, roles, declared acceptance stages, and required toolchain IDs. Its explicit immutable `check` capability now distinguishes generation-only targets from Java's supported developer check without claiming execution. The target-owned factory derives exact stage requests from a validated staged artifact set and its generation-scoped target source/build subtrees.
+The existing language registry remains authoritative for target identity, roles, declared acceptance stages, and required toolchain IDs. Its explicit immutable `check` capability distinguishes generation-only targets from Java plus PHP, Ruby, JavaScript, TypeScript, Kotlin/JVM, Python, and C# developer checks without claiming execution. The target-owned factory derives exact stage requests from a validated staged artifact set and its generation-scoped target source/build subtrees.
 
-The generic runner validates immutable dense argv/environment/path ownership before spawn and owns process lifecycle, locale/timezone normalization, bounded output capture, timeout/cancellation, signal forwarding, first failure, and close observation. A target check plan owns filenames, exact argv, toolchain IDs, offline/cache policy, and which stages constitute a non-executing developer check. The builder and future watcher do not switch on language IDs.
+The generic runner validates immutable dense argv, complete artifact inputs, restore hashes, environment/path ownership, nullable output ownership, and transient candidate directories before spawn. It owns process lifecycle, locale/timezone normalization, bounded output capture, timeout/cancellation, signal forwarding, first failure, close observation, and post-close transient cleanup. A target check plan owns filenames, exact argv, toolchain IDs, offline/cache policy, and which stages constitute a non-executing developer check. The builder and watcher do not switch on language IDs.
 
-The implemented initial check plan is Java/`javac`. It compiles every staged `.java` artifact together with `-d` directed at the candidate build subtree and never invokes `java`. Later tasks add current text targets in two cohorts:
+Java/`javac` compiles every staged `.java` artifact together with `-d` directed at the candidate build subtree and never invokes `java`. Task 041 implements the interpreted/managed cohort:
 
-- interpreted/managed: PHP, Ruby, JavaScript, TypeScript, Kotlin/JVM, Python, and C# (Java is supplied by the initial slice);
-- native/project: Go, C, C++, Rust, Swift, Dart, and Zig.
+- PHP, Ruby, and JavaScript run real syntax checks once per generated language artifact;
+- TypeScript type-checks the complete set with no emit and isolated type roots;
+- Kotlin/JVM compiles all sources together to candidate-owned classes;
+- Python produces deterministic checked-hash bytecode at an explicit candidate build path and never creates source-adjacent `__pycache__`;
+- C# requires its exact producer-owned project, disables ancestor MSBuild props/targets, passes every staged `.cs` file in deterministic order, hashes project/lock restore inputs, restores from a local-only staged source into candidate-owned state, builds with `--no-restore`, and removes cache/home/intermediate state before publishing only `bin/` outputs.
 
-A watch check validates or compiles but does not execute generated application code by default. Restore/download behavior is never an implicit per-edit action; targets with project metadata use pinned, offline, isolated state and rerun prerequisite stages only when their declared inputs change.
+Task 042 retains Go, C, C++, Rust, Swift, Dart, and Zig.
+
+A watch check validates or compiles but does not execute generated application code by default. A content-identical reconciliation admits no cycle and therefore performs no restore. Every fresh C# candidate uses its declared project/lock hash, generation-specific SDK assets, and local-only package source; it reruns restore without network access because checked generations do not share mutable restore state.
 
 ### Watch coordinator (Task 043 implemented)
 
@@ -149,7 +154,7 @@ Binary and application targets use the same generation watcher only after explic
                   046 later binary/application policies
 ```
 
-Tasks 038–040 and 043–044 are the implemented publication, one-shot project-build, initial Java check, watch-orchestration foundation, and first packed checked slice. Tasks 041–042 and 045 remain the selected text-language check/watch delivery chain, with Task 045 as its single terminal acceptance task. Task 046 is a non-blocking later extension.
+Tasks 038–041 and 043–044 are the implemented publication, one-shot project-build, Java plus interpreted/managed checks, watch-orchestration foundation, and first packed checked slice. Tasks 042 and 045 remain the selected text-language check/watch delivery chain, with Task 045 as its single terminal acceptance task. Task 046 is a non-blocking later extension.
 
 ## Non-goals
 

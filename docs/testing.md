@@ -382,6 +382,19 @@ Task 024 adds configured Go 1.26.x discovery restricted to Linux/amd64; the patc
 
 Task 023 adds exact Kotlin/JVM 2.4.20 discovery on the pinned OpenJDK 25.0.4+7 Ubuntu runtime. Ubuntu26.04 development and Ubuntu24.04 TensorBuzz use their exact `25.0.4+7-1~26.04` and `25.0.4+7-1~24.04` package builds. Bootstrap and discovery accept only their two qualified compiler-reported distribution suffixes, never arbitrary output. Original and generated `Program.kt` files compile with `-language-version 2.4 -api-version 2.4 -jvm-target 25 -Werror -include-runtime` into runnable `Program.jar` files, then execute through the exact `java25` discovery contract. Every process uses a fresh directory and exact status/stderr/UTF-8 stdout assertions; no test downloads a compiler or dependency.
 
+Task 041's product checks are separate from runtime acceptance. Run the two focused files sequentially:
+
+```sh
+npx velocious-test spec/managed-target-check-plans.spec.js
+npx velocious-test spec/managed-target-check-real-tools.spec.js
+```
+
+The plan spec proves exact frozen registry descriptors/argv, declared input and path ownership, no execute stage, stable C# project/lock hashing, and source-only changes that do not alter that restore identity. The real-tool spec fails rather than skips when any configured PHP, Ruby, Node, TypeScript, Kotlin, Python, or .NET tool is unavailable. It checks a generated supported fixture twice per target, injects invalid native source at every plan boundary, and requires preserved native output, nonzero structured stage diagnostics, the unchanged last-good pointer/bytes, and no failed candidate/staging residue. A separate malformed C# lockfile produces a real `restore` failure distinct from `compile` failure. The same file exercises all Task 041 targets already admitted by the version-1 complete-program boundary through the unchanged generic CLI.
+
+`spec/csharp-target-check-safety.spec.js` is the focused correction gate. With real .NET it proves that altered project bytes are rejected before a safe project-defined write target can run, ancestor `Directory.Build.targets` is not imported, staged source bytes remain unchanged, and an additional invalid `.cs` artifact reaches the compiler through the exact deterministic compile-item list instead of being merely declared as evidence.
+
+Product checks never execute the generated marker program. PHP uses configuration-free lint, Ruby disables gems for syntax checking, Node uses parse-only `--check`, and TypeScript uses no emit/incremental state plus candidate-only type roots. Kotlin publishes only `classes/`; Python uses isolated `py_compile` with checked-hash invalidation and publishes one build-root `.pyc`; C# accepts only its canonical generated manifest, disables ancestor customization, compiles every staged source, and lets restore consult only the staged local source. All NuGet/CLI/home/temp/intermediate paths are generation-owned and removed after the compiler closes, leaving only `bin/`. Repeated output inventories must match, source trees remain byte-owned by the publisher, and missing tools are failures.
+
 | Tool ID | Canonical command | Absolute-path override | Accepted canonical version |
 | --- | --- | --- | --- |
 | `php` | `php` | `SEMANTIFOLD_PHP` | PHP 8.x |

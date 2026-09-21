@@ -6,9 +6,9 @@ The immutable registry is authoritative for both dispatch and discovery:
 
 | ID | Frontend | Text backend | Binary backend | Application backend | Interoperability | General functions/calls | Immutable collections | Optional values | Ordered list iteration | Ordered map iteration | Condition-controlled loops | Reference classes | Effects/resources | Closed records | Typed errors | Type parameters/generics | Artifacts | Round trip | Mapping | Acceptance |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `php` | yes | yes | no | no | no | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | single | yes | rich + v3 | parse, generate, execute (`php`) |
-| `ruby` | yes | yes | no | no | no | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | single | yes | rich + v3 | parse, generate, execute (`ruby`) |
-| `javascript` | yes | yes | no | no | no | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | single | yes | rich + v3 | parse, generate, execute (`node`) |
+| `php` | yes | yes | no | no | no | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | single | yes | rich + v3 | parse, generate, validate, execute (`php`) |
+| `ruby` | yes | yes | no | no | no | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | single | yes | rich + v3 | parse, generate, validate, execute (`ruby`) |
+| `javascript` | yes | yes | no | no | no | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | single | yes | rich + v3 | parse, generate, validate, execute (`node`) |
 | `typescript` | yes | yes | no | no | no | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | single | yes | rich + v3 | parse, generate, compile, execute (`tsc`, `node`) |
 | `java` | yes | yes | no | no | no | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | single | yes | rich + v3 | parse, generate, compile, execute (`javac`, `java`) |
 | `kotlin` | yes | yes | no | no | no | no | no | no | no | no | no | no | no | no | no | no | single | yes | rich + v3 | parse, generate, compile, execute (`kotlinc`, `java25`) |
@@ -27,6 +27,25 @@ The immutable registry is authoritative for both dispatch and discovery:
 | `flutter` | no | no | no | yes | no | no | no | no | no | no | no | no | no | no | no | no | multiple | no | rich text + v3 + byte ranges | generate, restore, compile, validate, instantiate, execute (`flutter`, `android`; Android qualified, iOS deferred) |
 
 `languageCapabilities` exposes all nineteen records as frozen data, including `features.generalFunctionsAndCalls`, `features.immutableCollections`, `features.optionalValues`, `features.orderedListIteration`, `features.orderedMapIteration`, `features.conditionControlledLoops`, `features.referenceClasses`, `features.effectfulCapabilitiesAndResources`, `features.closedRecords`, `features.typedErrors`, and `features.typeParametersAndGenerics`. A role or semantic feature is not inferred from another role: browser Wasm has binary/application backends without a frontend or text backend, while `ios`, `android`, and `flutter` have only application backends. None has a source round trip or general interoperability role; Android retains the Kotlin/JVM Tasks 001–004 function subset, while Flutter consumes the independent Dart Tasks 001–005 capability subset and both add resolved Task 010 linkage in their application shells. `supportedLanguages` is the derived list of fifteen records with both frontend and text generation. C#, Go, C, and Zig return two text artifacts; Rust and Dart return three; Wasm returns one binary and three text artifacts; iOS, Android, and Flutter return deterministic multi-artifact application projects. Their callers use `generateArtifactSet()`; the legacy single-artifact APIs reject unavailable roles with `UNSUPPORTED_ROLE`.
+
+## Non-executing developer checks
+
+The immutable `languageCapabilities[].check` descriptor reports target-owned developer checks for PHP, Ruby, JavaScript, TypeScript, Java, Kotlin/JVM, Python, and C#. It reports only non-executing stage kinds and the exact canonical toolchain IDs; acceptance-stage execution remains separate.
+
+| Target | Check stages and tool | Candidate-owned policy |
+| --- | --- | --- |
+| PHP | `validate` with `php82` | Runs `php -n -l` once for every generated `.php` file. No PHP configuration is loaded and application statements are not executed. |
+| Ruby | `validate` with `ruby` | Runs `ruby --disable=gems -c` once for every generated `.rb` file. It loads neither user gems nor generated application behavior. |
+| JavaScript | `validate` with `node` | Runs `node --check` for every generated `.js` file. Candidate `package.json` manifests are declared inputs, and modules are parsed without evaluation. |
+| TypeScript | `compile` with `tsc` | Type-checks the complete `.ts` set as NodeNext/ES2024 with `--noEmit`, no incremental state, deterministic diagnostics, and a candidate-build-only `typeRoots`; it writes no compiler artifact. |
+| Java | `compile` with `javac` | Compiles every `.java` unit together with `-d` directed at the candidate build root. It never invokes `java`. |
+| Kotlin/JVM | `compile` with `kotlinc` | Compiles every `.kt` input together at language/API 2.4 and JVM target 25 with warnings as errors. Classes go only below candidate `classes/`; owned home/cache/temp directories are removed after the child closes. |
+| Python | `compile` with `python` | Uses isolated Python and `py_compile.compile(..., doraise=True)` with checked-hash invalidation, a stable display filename, and an explicit candidate-build `.pyc` path. No `__pycache__` is written beside source and generated code is not imported. |
+| C# | `restore`, then `compile`, with `dotnet` | Requires the exact producer-owned `Semantifold.csproj`, disables ancestor `Directory.Build.props`/`.targets`, and passes every staged `.cs` path through one deterministic compile-item property. It hashes project/lock restore inputs, restores only from the staged candidate source into isolated state, and builds Release with `--no-restore`; transient state is removed and only `bin/` is published. |
+
+All plans use immutable exact argv, absolute configured executable identities, `C.UTF-8` locale, UTC, no shell, declared artifact inputs, and explicit source/build/environment/transient path ownership. A failed discovery, preparation, restore, validation, compile, or cleanup is fatal. Native stdout/stderr remain attached to the structured stage diagnostic, the failed candidate is removed, and the previous active generation remains authoritative. A content-identical watch reconciliation admits no build cycle and therefore performs no C# restore. A fresh changed C# candidate restores because its SDK assets are generation-path-specific; restore remains local-only and its input identity excludes ordinary `.cs` edits.
+
+The version-1 project manifest still admits complete-program text generation only for PHP, Ruby, JavaScript, TypeScript, and Java. Task 041 adds Kotlin/Python/C# target plans for validated single-module artifact sets without broadening that semantic project-generation boundary. Those plans use the same public `createTargetCheckPlan` and `TargetCheckRunner`; adding those languages to complete-program manifests is separate semantic-language work.
 
 ## Task 026 iOS application generation
 
