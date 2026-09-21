@@ -1,0 +1,2 @@
+- Add immutable non-executing developer-check plans for Go, C, C++, Rust, Swift, Dart, and Zig with exact qualified tool profiles, offline dependency boundaries, candidate-owned caches/output, and transactional last-good preservation.
+- Refresh the Ubuntu 26.04 development image and canonical Kotlin/JVM discovery to the exact OpenJDK 25.0.4.1+1 package identity while retaining TensorBuzz's qualified Ubuntu 24.04 profile.

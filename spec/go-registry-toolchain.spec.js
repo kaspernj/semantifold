@@ -24,7 +24,7 @@ describe("Go registry and toolchain", () => {
     expect(languageCapabilities.find(({id}) => id == "go")).toEqual({
       acceptance: {stages: ["parse", "generate", "compile", "validate", "execute"], toolchains: ["go"]},
       artifactMultiplicity: "multiple",
-      check: {stages: [], supported: false, toolchains: []},
+      check: {stages: ["compile", "validate"], supported: true, toolchains: ["go"]},
       features: {closedRecords: false, conditionControlledLoops: false, effectfulCapabilitiesAndResources: false, generalFunctionsAndCalls: false, immutableCollections: false, optionalValues: false, orderedListIteration: false, orderedMapIteration: false, referenceClasses: false, typeParametersAndGenerics: false, typedErrors: false},
       id: "go",
       mapping: {binaryRanges: false, richText: true, sourceMapV3: true},

@@ -43,6 +43,13 @@ import {createPhpCheckPlan} from "./backends/php-check.js"
 import {createPythonCheckPlan} from "./backends/python-check.js"
 import {createRubyCheckPlan} from "./backends/ruby-check.js"
 import {createTypeScriptCheckPlan} from "./backends/typescript-check.js"
+import {createGoCheckPlan} from "./backends/go-check.js"
+import {createCCheckPlan} from "./backends/c-check.js"
+import {createCppCheckPlan} from "./backends/cpp-check.js"
+import {createRustCheckPlan} from "./backends/rust-check.js"
+import {createSwiftCheckPlan} from "./backends/swift-check.js"
+import {createDartCheckPlan} from "./backends/dart-check.js"
+import {createZigCheckPlan} from "./backends/zig-check.js"
 
 const registryRoles = Object.freeze(["frontend", "textBackend", "binaryBackend", "applicationBackend", "interoperability"])
 const acceptanceStageOrder = ["parse", "generate", "restore", "compile", "link", "validate", "instantiate", "execute"]
@@ -546,6 +553,7 @@ const records = [
   language({
     acceptance: {stages: ["parse", "generate", "compile", "validate", "execute"], toolchains: ["go"]},
     artifactMultiplicity: "multiple",
+    check: {factory: createGoCheckPlan, stages: ["compile", "validate"], toolchains: ["go"]},
     defaultFilename: "main.go",
     frontend: goFrontend,
     id: "go",
@@ -555,6 +563,7 @@ const records = [
   language({
     acceptance: {stages: ["parse", "generate", "compile", "link", "execute"], toolchains: ["clang"]},
     artifactMultiplicity: "multiple",
+    check: {factory: createCCheckPlan, stages: ["compile", "link"], toolchains: ["clang"]},
     defaultFilename: "program.c",
     frontend: parseC,
     id: "c",
@@ -563,18 +572,22 @@ const records = [
   }),
   language({
     acceptance: {stages: ["parse", "generate", "compile", "link", "execute"], toolchains: ["clangpp"]},
+    check: {factory: createCppCheckPlan, stages: ["compile", "link"], toolchains: ["clangpp"]},
     defaultFilename: "program.cpp", frontend: parseCpp, id: "cpp", mediaType: "text/x-c++src", textBackend: generateCpp
   }),
   language({
     acceptance: {stages: ["parse", "generate", "compile", "validate", "execute"], toolchains: ["rustc", "cargo"]},
     artifactMultiplicity: "multiple",
+    check: {factory: createRustCheckPlan, stages: ["compile", "validate"], toolchains: ["cargo"]},
     defaultFilename: "src/main.rs", frontend: parseRust, id: "rust", mediaType: "text/x-rust", textBackend: generateRustProject
   }),
   language({acceptance: {stages: ["parse", "generate", "compile", "execute"], toolchains: ["swiftc"]},
+    check: {factory: createSwiftCheckPlan, stages: ["compile"], toolchains: ["swiftc"]},
     defaultFilename: "program.swift", frontend: parseSwift, id: "swift", mediaType: "text/x-swift", textBackend: generateSwift}),
   language({
     acceptance: {stages: ["parse", "generate", "restore", "compile", "validate", "execute"], toolchains: ["dart"]},
     artifactMultiplicity: "multiple",
+    check: {factory: createDartCheckPlan, stages: ["restore", "compile", "validate"], toolchains: ["dart"]},
     defaultFilename: "bin/program.dart",
     features: {
       closedRecords: false,
@@ -597,6 +610,7 @@ const records = [
   language({
     acceptance: {stages: ["parse", "generate", "compile", "validate", "execute"], toolchains: ["zig"]},
     artifactMultiplicity: "multiple",
+    check: {factory: createZigCheckPlan, stages: ["compile", "validate"], toolchains: ["zig"]},
     defaultFilename: "src/main.zig",
     features: {
       closedRecords: false,

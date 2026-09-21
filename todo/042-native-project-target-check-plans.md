@@ -1,6 +1,6 @@
 # 042 — Native and project text-target check plans
 
-- Status: `roadmap`
+- Status: `implemented on feature branch; focused and static/package validation complete; review, CI, merge, and release pending`
 - Phase/priority: Phase W / P1 target adoption
 - Dependencies: [040-target-check-plan-and-java-javac.md](040-target-check-plan-and-java-javac.md)
 - Design: [Watch, build, and target-check pipeline](../docs/watch-build-pipeline.md)
@@ -50,3 +50,9 @@ Filesystem watch orchestration, runtime execution on every edit, cross-compilati
 - All seven named targets provide generic check plans without language switches in the CLI/runner.
 - Real tools run offline and write only inside declared candidate-generation subtrees; failure preserves the prior active generation and leaks no resources.
 - Focused real-tool specs, registry contracts, lint/typecheck, docs, changelog, and package gates pass.
+
+## Implemented result
+
+All seven targets now publish immutable target-owned plans through the unchanged public factory and language-neutral runner. Go performs a cgo-disabled, network/workspace/VCS-disabled trimmed build and read-only vet with isolated home/path/cache/temp state. C and C++ compile every translation unit and link through the strict Clang C17 or C++20/libstdc++ ordinary `-O0` developer profile while leaving sanitizer/optimization variants explicit acceptance/CI work. Rust accepts only the exact dependency-free Cargo manifest/lock and runs locked offline build/check with all Cargo state transient. Swift type-checks and compiles with exact driver mode and warnings as errors. Dart accepts only its exact dependency-free package/lock, hashes only those restore inputs, performs an enforced offline dry run, compiles natively, verifies formatting, and analyzes fatally while removing `.dart_tool`, pub state, and its absolute-source-URI-bearing native check output. Zig accepts only its exact standard-library-only project, builds Debug with isolated caches and an owned transient prefix, and verifies canonical formatting.
+
+The generic runner now retains the last declared compiler/linker output when later non-producing validators follow it, and declared candidate-source transient state is cleaned with the same post-close ownership rules as build transient state. No developer plan executes generated application code. `spec/native-project-target-check-plans.spec.js` covers exact capabilities, argv, immutability, offline/cache ownership, non-execution, and Dart restore identity. `spec/native-project-target-check-real-tools.spec.js` invokes all seven qualified real tools twice, injects invalid staged source for each target, preserves native diagnostics and exact target context, proves the prior active pointer/bytes remain authoritative, and checks that failed candidates and transient state do not leak. Task 045's terminal matrix and Task 046's binary/application policy remain untouched.

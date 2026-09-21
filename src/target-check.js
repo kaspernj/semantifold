@@ -144,7 +144,7 @@ export class TargetCheckRunner {
 
         if (options.signal?.aborted) throw cancelledDiagnostic(stage, validated, 0)
         try {
-          await prepareStage(stage)
+          await prepareStage(stage, validated)
         } catch (error) {
           throw preparationDiagnostic(error, stage, validated, elapsed(dependencies.now(), startedAt))
         }
@@ -196,7 +196,7 @@ export class TargetCheckRunner {
       throw cleanup
     }
     if (stageFailed) throw stageFailure
-    const output = validated.stages.at(-1)?.output
+    const output = validated.stages.findLast(stage => stage.output !== null)?.output
     const outputs = output == null ? [] : await collectBuildOutputs(validated.buildPath, output)
 
     return Object.freeze({
@@ -302,7 +302,7 @@ export function validateTargetCheckPlan(candidate) {
     if (request.output !== null && !validOutput(request.output, candidate.buildPath)) {
       return invalidPlan(`Target check stage '${request.stage}' has invalid compiler-output ownership.`, target)
     }
-    if (!validTransientPaths(request.transientPaths, candidate.buildPath)) {
+    if (!validTransientPaths(request.transientPaths, candidate.sourcePath, candidate.buildPath, artifactPaths)) {
       return invalidPlan(`Target check stage '${request.stage}' has invalid transient-path ownership.`, target)
     }
     if (request.stage == "restore" ? typeof request.inputHash != "string" || !/^[a-f0-9]{64}$/u.test(request.inputHash) : request.inputHash !== null) {
@@ -461,15 +461,18 @@ function processDiagnostic(error, stage, plan, timeoutMs, durationMs) {
 /**
  * Creates target-owned environment directories before launch without touching source staging.
  * @param {import("./semantic/types.js").TargetCheckStageRequest} stage - Validated stage.
+ * @param {import("./semantic/types.js").TargetCheckPlan} plan - Validated plan context.
  * @returns {Promise<void>} Completion.
  */
-async function prepareStage(stage) {
+async function prepareStage(stage, plan) {
   for (const declaration of stage.environmentPaths) {
     if (declaration.ownership == "build") {
       await mkdir(stage.environment[declaration.name], {mode: 0o700, recursive: true})
     }
   }
-  for (const transientPath of stage.transientPaths) await mkdir(transientPath, {mode: 0o700, recursive: true})
+  for (const transientPath of stage.transientPaths) {
+    if (ownedBy(plan.buildPath, transientPath)) await mkdir(transientPath, {mode: 0o700, recursive: true})
+  }
 }
 
 /**
@@ -490,20 +493,20 @@ async function cleanupStageEnvironment(plan) {
 
   for (const ownedPath of paths) {
     await rm(ownedPath, {force: true, recursive: true})
-    await removeEmptyParents(path.dirname(ownedPath), plan.buildPath)
+    await removeEmptyParents(path.dirname(ownedPath), ownedBy(plan.buildPath, ownedPath) ? plan.buildPath : plan.sourcePath)
   }
 }
 
 /**
  * Removes empty transient ancestors without ever removing the candidate build root.
  * @param {string} candidate - First possible empty ancestor.
- * @param {string} buildPath - Exact retained build root.
+ * @param {string} root - Exact retained candidate root.
  * @returns {Promise<void>} Completion.
  */
-async function removeEmptyParents(candidate, buildPath) {
+async function removeEmptyParents(candidate, root) {
   let current = candidate
 
-  while (ownedBy(buildPath, current)) {
+  while (ownedBy(root, current)) {
     if ((await readdir(current)).length > 0) return
     await rmdir(current)
     current = path.dirname(current)
@@ -667,7 +670,7 @@ function validEnvironmentPaths(value, environment, sourcePath, buildPath) {
     const environmentPath = environment[declaration.name]
     const root = declaration.ownership == "source" ? sourcePath : buildPath
 
-    if (typeof environmentPath != "string" || environmentPath != root && !ownedBy(root, environmentPath)) return false
+    if (typeof environmentPath != "string" || !ownedBy(root, environmentPath)) return false
     names.add(declaration.name)
   }
   for (const [name, environmentValue] of Object.entries(environment)) {
@@ -680,17 +683,21 @@ function validEnvironmentPaths(value, environment, sourcePath, buildPath) {
 /**
  * Checks generation-owned transient cache/intermediate directories.
  * @param {unknown} value - Candidate path vector.
+ * @param {string} sourcePath - Candidate source root.
  * @param {string} buildPath - Candidate build root.
- * @returns {value is readonly string[]} Whether paths are immutable distinct build descendants.
+ * @param {Set<string>} artifactPaths - Exact staged artifact paths.
+ * @returns {value is readonly string[]} Whether paths are immutable distinct candidate descendants.
  */
-function validTransientPaths(value, buildPath) {
+function validTransientPaths(value, sourcePath, buildPath, artifactPaths) {
   if (!isDenseArray(value) || !Object.isFrozen(value)) return false
   const paths = new Set()
 
   for (let index = 0; index < value.length; index += 1) {
     const transientPath = value[index]
 
-    if (typeof transientPath != "string" || !ownedBy(buildPath, transientPath) || paths.has(transientPath)) return false
+    if (typeof transientPath != "string" || !ownedBy(sourcePath, transientPath) && !ownedBy(buildPath, transientPath) ||
+      paths.has(transientPath) || ownedBy(sourcePath, transientPath) && [...artifactPaths].some(artifactPath =>
+        transientPath == artifactPath || pathsOverlap(transientPath, artifactPath))) return false
     paths.add(transientPath)
   }
 

@@ -59,3 +59,7 @@ The qualified binding accepts at most 32,767 UTF-16 code units, including all in
 Malformed IR, unsupported target options/identifiers/types and unrepresentable integer/string/source bounds use `UNSUPPORTED_CAPABILITY` before any artifact. Unsupported source forms use located frontend diagnostics; malformed generated regions normalize semantic/capability failures to `UNSUPPORTED_SYNTAX`. Parser recovery uses `PARSE_ERROR`.
 
 Original operators, call targets, types and statement consumers retain rich/v3 provenance. Runtime code, prototypes, discards, marker comments, temporary declarations/uses and short-circuit control have explicit synthetic origins related to semantic occurrences. Generation/reparse is deterministic, including shared semantic objects, Unicode/CRLF source positions, serialized maps and stale-provenance rebuilding. Tests use the complete C distinguishable-call matrix, five CPP fixture profiles, original-five crossings and real native execution; expanded language-cohort matrices remain Task025 work.
+
+## Non-executing developer check
+
+The registered Task 042 plan compiles every staged `.cpp` unit with the exact Clang C++20/libstdc++, warnings-as-errors, no-exceptions/no-RTTI, UTF-8, checked-overflow `-O0` profile and then links the complete object set into generation-owned `semantifold-cpp`. Object and TMPDIR state are transient and the executable is not run. Existing `-O2` and ASan/UBSan/leak variants remain explicit acceptance and TensorBuzz profiles, not automatic watcher work.

@@ -380,7 +380,7 @@ Task 017 adds the distinct ordered `restore` stage and configured .NET SDK 10 di
 
 Task 024 adds configured Go 1.26.x discovery restricted to Linux/amd64; the patch release is read from the discovered toolchain rather than fixed by runtime tests. Acceptance obtains `GOROOT` from that exact `go`, requires the companion `gofmt` beside the configured or discovered executable to resolve to the same `GOROOT/bin/gofmt`, and checks `gofmt -d` before native execution. Each dependency-free generated module is run with `GOTOOLCHAIN=local`, `GOPROXY=off`, `GOSUMDB=off`, `GOVCS=off`, `CGO_ENABLED=0`, `GOENV=off`, `GOWORK=off`, `GOOS=linux`, `GOARCH=amd64`, and isolated HOME/GOPATH/build/module caches. The short-lived discovery fixture also writes exact `off` mode into its isolated Go telemetry directory before invoking the tool, then asserts that the mode file is the only telemetry state: Go 1.26 otherwise starts an unawaited uploader sidecar even in default `local` mode, which can recreate `upload/` while the fixture root is being removed. Cleanup errors remain fatal. Stages run offline `go build`, mandatory `go vet`, and `go run`, while compiler-only differential cases use the matching `go tool compile`. Tests require exact status/stdout, unchanged `go.mod`/`main.go`, no `go.sum`/`go.work`/vendor tree, and byte-identical binaries and output in two fresh directories. Missing, wrong-minor, wrong-architecture, mismatched-gofmt, download, cgo, workspace, vet, formatting, nondeterminism, telemetry leakage, or cleanup evidence fails without a skip.
 
-Task 023 adds exact Kotlin/JVM 2.4.20 discovery on the pinned OpenJDK 25.0.4+7 Ubuntu runtime. Ubuntu26.04 development and Ubuntu24.04 TensorBuzz use their exact `25.0.4+7-1~26.04` and `25.0.4+7-1~24.04` package builds. Bootstrap and discovery accept only their two qualified compiler-reported distribution suffixes, never arbitrary output. Original and generated `Program.kt` files compile with `-language-version 2.4 -api-version 2.4 -jvm-target 25 -Werror -include-runtime` into runnable `Program.jar` files, then execute through the exact `java25` discovery contract. Every process uses a fresh directory and exact status/stderr/UTF-8 stdout assertions; no test downloads a compiler or dependency.
+Task 023 adds exact Kotlin/JVM 2.4.20 discovery on pinned OpenJDK 25 Ubuntu runtimes. Ubuntu26.04 development uses exact `25.0.4.1+1-1~26.04.4`; Ubuntu24.04 TensorBuzz retains exact `25.0.4+7-1~24.04`. Bootstrap and discovery accept only those two qualified compiler-reported package identities, never arbitrary output. Original and generated `Program.kt` files compile with `-language-version 2.4 -api-version 2.4 -jvm-target 25 -Werror -include-runtime` into runnable `Program.jar` files, then execute through the exact `java25` discovery contract. Every process uses a fresh directory and exact status/stderr/UTF-8 stdout assertions; no test downloads a compiler or dependency.
 
 Task 041's product checks are separate from runtime acceptance. Run the two focused files sequentially:
 
@@ -395,6 +395,26 @@ The plan spec proves exact frozen registry descriptors/argv, declared input and 
 
 Product checks never execute the generated marker program. PHP uses configuration-free lint, Ruby disables gems for syntax checking, Node uses parse-only `--check`, and TypeScript uses no emit/incremental state plus candidate-only type roots. Kotlin publishes only `classes/`; Python uses isolated `py_compile` with checked-hash invalidation and publishes one build-root `.pyc`; C# accepts only its canonical generated manifest, disables ancestor customization, compiles every staged source, and lets restore consult only the staged local source. All NuGet/CLI/home/temp/intermediate paths are generation-owned and removed after the compiler closes, leaving only `bin/`. Repeated output inventories must match, source trees remain byte-owned by the publisher, and missing tools are failures.
 
+Task 042's native/project checks are covered by two additional focused files, run sequentially:
+
+```sh
+npx velocious-test spec/native-project-target-check-plans.spec.js
+npx velocious-test spec/native-project-target-check-real-tools.spec.js
+```
+
+The plan spec asserts exact frozen registry descriptors, argv arrays, declared inputs, path ownership, non-execution, and isolation for Go, C, C++, Rust, Swift, Dart, and Zig. It proves that Dart's length-framed restore identity contains only the exact producer-owned `pubspec.yaml`/`pubspec.lock` and is stable across source-only changes. The real-tool spec fails rather than skips when any qualified tool is unavailable. For every target it publishes two fresh valid candidates, checks stable source/build inventories and successful native stages, injects invalid staged source, retains native diagnostics and exact target identity, preserves the prior pointer/bytes, and proves the failed candidate plus transient state are gone.
+
+The developer profiles are intentionally bounded and non-executing:
+
+- Go uses exact local Go 1.26, `CGO_ENABLED=0`, `GOTOOLCHAIN=local`, read-only modules, network/VCS/workspace disablement, trimmed/build-ID-free output, and mandatory vet. Its HOME, GOPATH, GOCACHE, GOMODCACHE, and GOTMPDIR are candidate-owned; the qualified version-specific telemetry child guard prevents an unowned uploader descendant.
+- C uses strict Clang C17 at `-O0`, compiling every `.c` unit while declaring every `.h`, then linking the complete object set. C++ uses Clang C++20/libstdc++, no exceptions/RTTI, and the matching strict warnings/encoding/overflow profile. Their objects and temp state are removed, leaving only the linked developer executable. Existing O0/O2 ordinary plus ASan/UBSan/leak runs remain mandatory explicit acceptance/CI profiles; they are not hidden watcher branches.
+- Rust requires the exact dependency-free edition-2021 manifest and format-4 lock, then runs `cargo build --offline --locked` and `cargo check --offline --locked` with isolated CARGO_HOME/HOME/temp/target state and no incremental compilation. All Cargo target/cache/lock/executable state is transient.
+- Swift 6.3.3 explicitly uses `--driver-mode=swiftc`, warnings as errors, `-typecheck`, then a stable named-module object compile and native link with the ELF build ID disabled. The owned relative object path avoids randomized driver-temporary paths in `.swift_modhash`; object/HOME/XDG cache/temp state is removed, and the byte-stable compiled output is published but never run.
+- Dart 3.13.3 performs `pub get --offline --dry-run --enforce-lockfile --no-precompile` against the fixed dependency-free package, compiles the selected native executable, verifies formatting with no writes, and runs fatal analysis. PUB_CACHE/HOME/temp, the candidate package's `.dart_tool`, and the path-dependent native check output are declared transient and removed after close; `PUB_HOSTED_URL` is unreachable.
+- Zig 0.15.2 accepts only `build.zig` plus generated Zig sources, runs the Debug project build with generation-owned local/global caches and prefix, then runs `zig fmt --check`. The root-dependent Debug prefix is transient, so no native executable leaks or is published. Canonical format, `zig build test`, and builds/runs in Debug, ReleaseSafe, and ReleaseFast remain mandatory explicit acceptance/CI coverage and are not repeated on every edit.
+
+No Task 042 plan runs a generated executable, fetches a package, consults a user-global dependency home, cross-compiles, or adds a terminal matrix. Native nonzero exit, discovery, invalid plan, restore, compile, link, validation, timeout/cancellation, cleanup, and publication failures retain their distinct existing diagnostics.
+
 | Tool ID | Canonical command | Absolute-path override | Accepted canonical version |
 | --- | --- | --- | --- |
 | `php` | `php` | `SEMANTIFOLD_PHP` | PHP 8.x |
@@ -404,8 +424,8 @@ Product checks never execute the generated marker program. PHP uses configuratio
 | `tsc` | `tsc` | `SEMANTIFOLD_TSC` | TypeScript 7.x |
 | `javac` | `javac` | `SEMANTIFOLD_JAVAC` | JDK 17–29 |
 | `java` | `java` | `SEMANTIFOLD_JAVA` | JRE 17–29 |
-| `java25` | `java` | `SEMANTIFOLD_JAVA` | exact OpenJDK 25.0.4+7 Ubuntu runtime for JVM25 artifacts |
-| `kotlinc` | `kotlinc` | `SEMANTIFOLD_KOTLINC` | exact Kotlin/JVM 2.4.20 on JRE 25.0.4+7 Ubuntu |
+| `java25` | `java` | `SEMANTIFOLD_JAVA` | exact OpenJDK 25.0.4.1+1 development or 25.0.4+7 TensorBuzz runtime for JVM25 artifacts |
+| `kotlinc` | `kotlinc` | `SEMANTIFOLD_KOTLINC` | exact Kotlin/JVM 2.4.20 on the matching qualified OpenJDK 25 Ubuntu package |
 | `python` | `python3` | `SEMANTIFOLD_PYTHON` | Python 3.x |
 | `dotnet` | `dotnet` | `SEMANTIFOLD_DOTNET` | .NET SDK 10.x |
 | `go` | `go` | `SEMANTIFOLD_GO` | Go 1.26.x, Linux/amd64 |

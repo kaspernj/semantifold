@@ -28,8 +28,8 @@ describe("Kotlin registration and exact compiler identity", () => {
 
     try {
       const executable = path.join(directory, "kotlinc")
-      const expected = "info: kotlinc-jvm 2.4.20 (JRE 25.0.4+7-1-26.04-Ubuntu)"
-      const noble = expected.replace("26.04", "24.04")
+      const expected = "info: kotlinc-jvm 2.4.20 (JRE 25.0.4.1+1-1-26.04.4-Ubuntu)"
+      const noble = "info: kotlinc-jvm 2.4.20 (JRE 25.0.4+7-1-24.04-Ubuntu)"
 
       await writeFile(executable, "#!/bin/sh\nprintf '%s\\n' '" + expected + "' >&2\n")
       await chmod(executable, 0o755)
@@ -50,14 +50,20 @@ describe("Kotlin registration and exact compiler identity", () => {
       await assert.rejects(discoverCanonicalToolchain("kotlinc", {override: "/missing/kotlinc"}), error =>
         error instanceof SemantifoldDiagnostic && error.code == "TOOL_NOT_FOUND")
       const java = path.join(directory, "java")
-      const javaVersion = 'openjdk version "25.0.4" 2026-07-21'
-      const javaOutput = javaVersion + "\nOpenJDK Runtime Environment (build 25.0.4+7-1-26.04-Ubuntu)\n" +
-        "OpenJDK 64-Bit Server VM (build 25.0.4+7-1-26.04-Ubuntu, mixed mode, sharing)"
+      const javaVersion = 'openjdk version "25.0.4.1" 2026-08-18'
+      const javaOutput = javaVersion + "\nOpenJDK Runtime Environment (build 25.0.4.1+1-1-26.04.4-Ubuntu)\n" +
+        "OpenJDK 64-Bit Server VM (build 25.0.4.1+1-1-26.04.4-Ubuntu, mixed mode, sharing)"
 
       await writeFile(java, "#!/bin/sh\nprintf '%s\\n' '" + javaOutput + "' >&2\n")
       await chmod(java, 0o755)
       expect((await discoverCanonicalToolchain("java25", {override: java})).version).toEqual(javaVersion)
-      await writeFile(java, "#!/bin/sh\nprintf '%s\\n' '" + javaOutput.replace("25.0.4", "24.0.2") + "' >&2\n")
+      const nobleJavaVersion = 'openjdk version "25.0.4" 2026-07-21'
+      const nobleJavaOutput = nobleJavaVersion + "\nOpenJDK Runtime Environment (build 25.0.4+7-1-24.04-Ubuntu)\n" +
+        "OpenJDK 64-Bit Server VM (build 25.0.4+7-1-24.04-Ubuntu, mixed mode, sharing)"
+
+      await writeFile(java, "#!/bin/sh\nprintf '%s\\n' '" + nobleJavaOutput + "' >&2\n")
+      expect((await discoverCanonicalToolchain("java25", {override: java})).version).toEqual(nobleJavaVersion)
+      await writeFile(java, "#!/bin/sh\nprintf '%s\\n' '" + javaOutput.replace("25.0.4.1", "24.0.2") + "' >&2\n")
       await assert.rejects(discoverCanonicalToolchain("java25", {override: java}), error =>
         error instanceof SemantifoldDiagnostic && error.code == "TOOL_UNSUPPORTED_VERSION")
     } finally {

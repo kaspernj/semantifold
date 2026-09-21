@@ -58,3 +58,7 @@ dart compile exe bin/program.dart -o semantifold-dart
 ```
 
 All three generated artifact hashes remain unchanged after every command; only disposable `.dart_tool/` state and the native executable appear. The six Tasks 001–005 Dart fixtures translate to every compatible target and execute identically on Dart VM/native. Representative PHP, Ruby, JavaScript, TypeScript, and Java fixtures translate into Dart. Additional acceptance proves Unicode, eager argument ordering, direct recursion, void calls, Boolean short-circuiting, and the safe-integer boundary with exact empty stderr and identical VM/native stdout.
+
+## Non-executing developer check
+
+The registered Task 042 plan accepts only the exact producer-owned dependency-free pubspec, lockfile, and Dart sources. Its length-framed restore hash contains only `pubspec.lock` and `pubspec.yaml`, so ordinary source changes cannot alter restore identity. Each fresh checked candidate performs an enforced-lock `dart pub get --offline --dry-run --no-precompile`, compiles `bin/program.dart` to a generation-owned native output, verifies format with no writes, and runs fatal analysis. HOME, PUB_CACHE, TMPDIR, candidate `.dart_tool`, and the native check output are declared transient and removed after all children close; `PUB_HOSTED_URL` is unreachable. Dart 3.13.3 embeds the candidate's absolute source URI in that executable, so publishing it would make otherwise identical generations path-dependent; the developer plan verifies but never runs or publishes it.

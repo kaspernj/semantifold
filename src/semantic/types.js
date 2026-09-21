@@ -551,7 +551,7 @@
  * @property {string | null} inputHash - SHA-256 of declared restore inputs, or null for unconditional stages.
  * @property {readonly string[]} inputs - Complete staged artifact inputs read by the stage.
  * @property {Readonly<TargetCheckOutputOwnership> | null} output - Build output ownership, or null for non-producing checks.
- * @property {readonly string[]} transientPaths - Generation-owned cache/intermediate directories removed after checking.
+ * @property {readonly string[]} transientPaths - Candidate source/build cache or intermediate directories removed after checking.
  */
 
 /**

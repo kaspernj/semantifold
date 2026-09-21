@@ -344,7 +344,7 @@ describe("packed Semantifold legacy Tree-sitter boundary", () => {
           goRoot: "source_file",
           kotlinGrammarVersion: "0.4.0",
           kotlinGrammarIsInstalled: true,
-          kotlinJavaVersion: 'openjdk version "25.0.4" 2026-07-21',
+          kotlinJavaVersion: 'openjdk version "25.0.4.1" 2026-08-18',
           kotlinRoundTrip: true,
           kotlinRuntimeOutput: "3\n",
           internalPackageIsNotConsumerDependency: true,

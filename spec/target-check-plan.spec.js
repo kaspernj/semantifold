@@ -94,31 +94,33 @@ describe("registry-driven target check plans", () => {
   it("publishes explicit immutable developer-check capabilities without claiming unsupported targets", () => {
     const java = languageCapabilities.find(({id}) => id == "java")
     const go = languageCapabilities.find(({id}) => id == "go")
+    const wasm = languageCapabilities.find(({id}) => id == "wasm")
 
     expect(java?.check).toEqual({stages: ["compile"], supported: true, toolchains: ["javac"]})
-    expect(go?.check).toEqual({stages: [], supported: false, toolchains: []})
+    expect(go?.check).toEqual({stages: ["compile", "validate"], supported: true, toolchains: ["go"]})
+    expect(wasm?.check).toEqual({stages: [], supported: false, toolchains: []})
     expect(Object.isFrozen(java?.check)).toBeTrue()
     expect(Object.isFrozen(java?.check.stages)).toBeTrue()
     expect(Object.isFrozen(java?.check.toolchains)).toBeTrue()
-    const goArtifacts = createGeneratedArtifactSet({
+    const wasmArtifacts = createGeneratedArtifactSet({
       artifacts: [{
-        content: "package main\nfunc main() {}\n",
+        content: "unsupported check fixture\n",
         contentKind: "text",
-        mediaType: "text/x-go",
+        mediaType: "text/plain",
         ownership: "generated",
-        path: "main.go",
+        path: "fixture.txt",
         provenance: synthetic,
         role: "entry"
       }],
-      target: "go"
+      target: "wasm"
     })
 
     assert.throws(() => createTargetCheckPlan({
-      artifacts: goArtifacts,
+      artifacts: wasmArtifacts,
       buildPath: "/candidate/build",
       projectId: "plan-project",
       sourcePath: "/candidate/source",
-      targetId: "go-main",
+      targetId: "wasm-main",
       tools: []
     }), error => error instanceof SemantifoldDiagnostic && error.code == "UNSUPPORTED_TARGET_CHECK")
   })
@@ -229,7 +231,16 @@ describe("registry-driven target check plans", () => {
         environment: Object.freeze({...base.environment, HOME: path.join(root, "escaped-home")}),
         environmentPaths: Object.freeze([Object.freeze({name: "HOME", ownership: /** @type {const} */ ("build")})])
       }),
+      replaceStage(plan, {
+        ...base,
+        environment: Object.freeze({...base.environment, HOME: plan.buildPath}),
+        environmentPaths: Object.freeze([Object.freeze({name: "HOME", ownership: /** @type {const} */ ("build")})])
+      }),
       replaceStage(plan, {...base, transientPaths: Object.freeze([path.join(root, "escaped-cache")])}),
+      replaceStage(plan, {...base, transientPaths: Object.freeze([plan.sourcePath])}),
+      replaceStage(plan, {...base, transientPaths: Object.freeze([plan.buildPath])}),
+      replaceStage(plan, {...base, transientPaths: Object.freeze([plan.artifactPaths[0]])}),
+      replaceStage(plan, {...base, transientPaths: Object.freeze([path.dirname(plan.artifactPaths[0])])}),
       replaceStage(plan, {...base, stage: /** @type {const} */ ("execute")})
     ]
 

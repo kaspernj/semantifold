@@ -309,7 +309,7 @@ describe("repository delivery contracts", () => {
     assert.match(runs, /php-cli/u)
     assert.match(runs, /python3/u)
     assert.match(runs, /ruby/u)
-    assert.match(runs, /openjdk-25-jdk-headless=25\.0\.4\+7-1~26\.04/u)
+    assert.match(runs, /openjdk-25-jdk-headless=25\.0\.4\.1\+1-1~26\.04\.4/u)
     assert.match(runs, /dotnet-sdk-10\.0/u)
     assert.match(runs, /golang-go/u)
     for (const pin of ["clang=1:21.1.6-71", "clang-21=1:21.1.8-6ubuntu1", "libclang-rt-21-dev=1:21.1.8-6ubuntu1", "libstdc++-15-dev=15.2.0-16ubuntu1"]) assert.ok(runs.includes(pin))

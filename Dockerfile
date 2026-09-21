@@ -29,7 +29,7 @@ RUN apt-get update \
     libstdc++-15-dev=15.2.0-16ubuntu1 \
     libxml2-dev \
     curl \
-    openjdk-25-jdk-headless=25.0.4+7-1~26.04 \
+    openjdk-25-jdk-headless=25.0.4.1+1-1~26.04.4 \
     dotnet-sdk-10.0 \
     git \
     gh \
@@ -91,8 +91,8 @@ RUN install -d -m 0755 /tmp/semantifold-kotlin \
   && chmod 0755 /opt/kotlinc/bin/kotlinc \
   && KOTLIN_VERSION_OUTPUT="$(/opt/kotlinc/bin/kotlinc -version 2>&1)" \
   && printf '%s\n' "$KOTLIN_VERSION_OUTPUT" \
-  && printf '%s\n' "$KOTLIN_VERSION_OUTPUT" | grep --extended-regexp --quiet '^info: kotlinc-jvm 2\.4\.20 \(JRE 25\.0\.4\+7-1-(24|26)\.04-Ubuntu\)$' \
-  && test "$(java -version 2>&1 | sed -n '1p')" = 'openjdk version "25.0.4" 2026-07-21' \
+  && printf '%s\n' "$KOTLIN_VERSION_OUTPUT" | grep --extended-regexp --quiet '^info: kotlinc-jvm 2\.4\.20 \(JRE 25\.0\.4\.1\+1-1-26\.04\.4-Ubuntu\)$' \
+  && test "$(java -version 2>&1 | sed -n '1p')" = 'openjdk version "25.0.4.1" 2026-08-18' \
   && rm -rf /tmp/semantifold-kotlin
 
 ENV SEMANTIFOLD_DART=/opt/dart-sdk-3.13.3/bin/dart

@@ -58,3 +58,7 @@ Missing, duplicated, reordered, forged or wrong-version markers; extra/dead/esca
 Rich mappings and Source Map v3 retain original operator, call, literal, binding and final-consumer origins. All generated declarations/names/markers, prototypes, unused-binding uses, short-circuit control and cleanup are synthetic with related semantic origins. Shared IR objects receive distinct occurrence paths, temporary names and map records. The header is a synthetic artifact related to the module root.
 
 See [testing](testing.md) for package pins, portable qualification commands, strict C17 flags, mandatory O0/O2 sanitizer execution, ownership instrumentation and original-five crossings. These changes neither publish a package nor extend the standard-library portability contract.
+
+## Non-executing developer check
+
+The registered Task 042 plan compiles every staged `.c` unit and declares every staged header with the strict Clang C17 flags above at ordinary `-O0`, then links the complete object set into the generation-owned `semantifold-c` output. Object and TMPDIR state are transient and removed only after the linker closes. The plan never runs the executable. Existing `-O2` and ASan/UBSan/leak variants remain explicit real acceptance and TensorBuzz profiles rather than hidden every-edit branches.
