@@ -19,19 +19,24 @@ const installRoot = "/opt/kotlinc"
 const convergenceCommand = `rm -rf ${installRoot}`
 const moveCommand = `mv kotlinc ${installRoot}`
 const compilerPermissionCommand = `chmod 0755 ${executable}`
-const developmentJdkPackage = "openjdk-25-jdk-headless=25.0.4+7-1~26.04"
+const developmentJdkPackage = "openjdk-25-jdk-headless=25.0.4.1+1-1~26.04.4"
 const tensorbuzzJdkPackage = "openjdk-25-jdk-headless=25.0.4+7-1~24.04"
 const compilerReadback = `KOTLIN_VERSION_OUTPUT="$(${executable} -version 2>&1)"`
-const compilerVersionPattern = String.raw`^info: kotlinc-jvm 2\.4\.20 \(JRE 25\.0\.4\+7-1-(24|26)\.04-Ubuntu\)$`
-const compilerVersionProbe = `printf '%s\\n' "$KOTLIN_VERSION_OUTPUT" | grep --extended-regexp --quiet '${compilerVersionPattern}'`
+const developmentCompilerVersionPattern = String.raw`^info: kotlinc-jvm 2\.4\.20 \(JRE 25\.0\.4\.1\+1-1-26\.04\.4-Ubuntu\)$`
+const tensorbuzzCompilerVersionPattern = String.raw`^info: kotlinc-jvm 2\.4\.20 \(JRE 25\.0\.4\+7-1-(24|26)\.04-Ubuntu\)$`
+
+/** @param {string} pattern */
+const compilerVersionProbe = (pattern) =>
+  `printf '%s\\n' "$KOTLIN_VERSION_OUTPUT" | grep --extended-regexp --quiet '${pattern}'`
 
 /**
  * Extracts the exact compiler-version probe from one canonical bootstrap.
  * @param {string} name - Bootstrap name for assertion diagnostics.
  * @param {string} bootstrap - Canonical bootstrap source.
+ * @param {string} expected - Exact bootstrap-specific probe.
  * @returns {string} Executable shell probe.
  */
-function extractCompilerVersionProbe(name, bootstrap) {
+function extractCompilerVersionProbe(name, bootstrap, expected) {
   const line = bootstrap.split("\n").find((candidate) => candidate.includes("grep --extended-regexp --quiet"))
 
   assert.ok(line, `${name} must contain a compiler-version probe`)
@@ -39,7 +44,7 @@ function extractCompilerVersionProbe(name, bootstrap) {
 
   if (probe.startsWith("&& ")) probe = probe.slice(3)
   if (probe.endsWith(" \\")) probe = probe.slice(0, -2)
-  assert.equal(probe, compilerVersionProbe, `${name} must use the exact shared compiler-version probe`)
+  assert.equal(probe, expected, `${name} must use its exact compiler-version probe`)
 
   return probe
 }
@@ -103,24 +108,32 @@ async function expectStaleInstallConvergence(name, bootstrap) {
 }
 
 describe("Kotlin canonical compiler and JVM image contract", () => {
-  it("admits only the qualified Ubuntu packaging suffixes through both canonical shell probes", async () => {
+  it("admits only each qualified Ubuntu package identity through its canonical shell probe", async () => {
     const dockerSource = await readFile(new URL("../Dockerfile", import.meta.url), "utf8")
     const tensorbuzzSource = await readFile(new URL("../tensorbuzz.yml", import.meta.url), "utf8")
     const tensorbuzz = parseYaml(tensorbuzzSource)
     const probes = [
-      ["Docker", extractCompilerVersionProbe("Docker", dockerSource)],
-      ["TensorBuzz", extractCompilerVersionProbe("TensorBuzz", tensorbuzz.before_install.join("\n"))]
+      ["Docker", extractCompilerVersionProbe("Docker", dockerSource,
+        compilerVersionProbe(developmentCompilerVersionPattern))],
+      ["TensorBuzz", extractCompilerVersionProbe("TensorBuzz", tensorbuzz.before_install.join("\n"),
+        compilerVersionProbe(tensorbuzzCompilerVersionPattern))]
     ]
     const identities = [
-      ["info: kotlinc-jvm 2.4.20 (JRE 25.0.4+7-1-24.04-Ubuntu)", 0],
-      ["info: kotlinc-jvm 2.4.20 (JRE 25.0.4+7-1-26.04-Ubuntu)", 0],
+      "info: kotlinc-jvm 2.4.20 (JRE 25.0.4+7-1-24.04-Ubuntu)",
+      "info: kotlinc-jvm 2.4.20 (JRE 25.0.4.1+1-1-26.04.4-Ubuntu)",
+      "info: kotlinc-jvm 2.4.20 (JRE 25.0.4+7-1-26.04-Ubuntu)",
       "info: kotlinc-jvm 2.4.10 (JRE 25.0.4+7-1-24.04-Ubuntu)",
       "info: kotlinc-jvm 2.4.20 (JRE 24.0.2+12-1-24.04-Ubuntu)",
       "info: kotlinc-jvm 2.4.20 (JRE 25.0.4+7-1-25.04-Ubuntu)",
       "info: kotlinc-js 2.4.20 (JRE 25.0.4+7-1-24.04-Ubuntu)"
-    ].map((entry) => typeof entry == "string" ? [entry, 1] : entry)
-    const outcomes = await Promise.all(probes.flatMap(([name, probe]) => identities.map(async ([identity, expected]) => ({
-      actual: await compilerVersionProbeStatus(probe, identity), expected, identity, name
+    ]
+    const accepted = new Map([
+      ["Docker", new Set([identities[1]])],
+      ["TensorBuzz", new Set([identities[0], identities[2]])]
+    ])
+    const outcomes = await Promise.all(probes.flatMap(([name, probe]) => identities.map(async (identity) => ({
+      actual: await compilerVersionProbeStatus(probe, identity), expected: accepted.get(name)?.has(identity) ? 0 : 1,
+      identity, name
     }))))
 
     for (const {actual, expected, identity, name} of outcomes) {
@@ -139,8 +152,8 @@ describe("Kotlin canonical compiler and JVM image contract", () => {
     expect(source).toContain(developmentJdkPackage)
     expect(source).toContain(`ENV SEMANTIFOLD_KOTLINC=${executable}`)
     expect(runs).toContain(compilerReadback)
-    expect(runs).toContain(compilerVersionProbe)
-    expect(runs).toContain("openjdk version \"25.0.4\"")
+    expect(runs).toContain(compilerVersionProbe(developmentCompilerVersionPattern))
+    expect(runs).toContain("openjdk version \"25.0.4.1\" 2026-08-18")
     expect(source).not.toMatch(/ENV PATH=.*kotlinc|ln --symbolic .*kotlinc/u)
   })
 
@@ -153,8 +166,8 @@ describe("Kotlin canonical compiler and JVM image contract", () => {
     expect(beforeInstall).toContain(checksum)
     expect(beforeInstall).toContain(tensorbuzzJdkPackage)
     expect(beforeInstall).toContain(compilerReadback)
-    expect(beforeInstall).toContain(compilerVersionProbe)
-    expect(beforeInstall).toContain("openjdk version \"25.0.4\"")
+    expect(beforeInstall).toContain(compilerVersionProbe(tensorbuzzCompilerVersionPattern))
+    expect(beforeInstall).toContain("openjdk version \"25.0.4\" 2026-07-21")
     expect(config.environment.SEMANTIFOLD_KOTLINC).toEqual(executable)
     expect(config.environment.PATH).toEqual(undefined)
   })

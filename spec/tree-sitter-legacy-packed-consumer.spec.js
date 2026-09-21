@@ -50,6 +50,16 @@ const rustGrammarRoot = `${internalPackageRoot}/node_modules/tree-sitter-rust`
 const cppGrammarRoot = `${internalPackageRoot}/node_modules/tree-sitter-cpp`
 const zigRuntimeRoot = `${internalZigPackageRoot}/node_modules/tree-sitter`
 const zigGrammarRoot = `${internalZigPackageRoot}/node_modules/@tree-sitter-grammars/tree-sitter-zig`
+const qualifiedKotlinJdkPairs = Object.freeze([
+  Object.freeze({
+    compiler: "info: kotlinc-jvm 2.4.20 (JRE 25.0.4.1+1-1-26.04.4-Ubuntu)",
+    java: 'openjdk version "25.0.4.1" 2026-08-18'
+  }),
+  Object.freeze({
+    compiler: "info: kotlinc-jvm 2.4.20 (JRE 25.0.4+7-1-24.04-Ubuntu)",
+    java: 'openjdk version "25.0.4" 2026-07-21'
+  })
+])
 const requiredPackedFiles = [
   `${rustGrammarRoot}/LICENSE`, `${rustGrammarRoot}/package.json`, `${rustGrammarRoot}/binding.gyp`,
   `${rustGrammarRoot}/bindings/node/index.d.ts`, `${rustGrammarRoot}/src/parser.c`, `${rustGrammarRoot}/src/scanner.c`,
@@ -106,6 +116,16 @@ const requiredPrebuilds = [
 ]
 
 describe("packed Semantifold legacy Tree-sitter boundary", () => {
+  it("accepts only the exact paired development and TensorBuzz Kotlin/JDK identities", () => {
+    for (const pair of qualifiedKotlinJdkPairs) expect(isQualifiedKotlinJdkPair(pair.compiler, pair.java)).toBeTrue()
+    for (const pair of [
+      {compiler: qualifiedKotlinJdkPairs[0].compiler, java: qualifiedKotlinJdkPairs[1].java},
+      {compiler: qualifiedKotlinJdkPairs[1].compiler, java: qualifiedKotlinJdkPairs[0].java},
+      {compiler: qualifiedKotlinJdkPairs[0].compiler.replace("25.0.4.1", "25.0.4.2"), java: qualifiedKotlinJdkPairs[0].java},
+      {compiler: qualifiedKotlinJdkPairs[1].compiler, java: qualifiedKotlinJdkPairs[1].java.replace("2026-07-21", "2026-07-22")}
+    ]) expect(isQualifiedKotlinJdkPair(pair.compiler, pair.java)).toBeFalse()
+  })
+
   it("isolates npm's effective configuration from inherited alternate registries and credentials", async () => {
     const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "semantifold-npm-config-"))
     const userConfig = path.join(temporaryRoot, "user.npmrc")
@@ -314,8 +334,9 @@ describe("packed Semantifold legacy Tree-sitter boundary", () => {
             path.join(process.env.SEMANTIFOLD_PACK_EVIDENCE, command + "-kotlin-command-results.json"))
         }
 
-        expect(proof.kotlinCompilerVersion).toMatch(/^info: kotlinc-jvm 2\.4\.20 \(JRE 25\.0\.4\+7-1-(?:24|26)\.04-Ubuntu\)$/u)
+        expect(isQualifiedKotlinJdkPair(proof.kotlinCompilerVersion, proof.kotlinJavaVersion)).toBeTrue()
         delete proof.kotlinCompilerVersion
+        delete proof.kotlinJavaVersion
         expect(proof).toEqual({
           dartGrammarVersion: "0.7.0",
           dartGrammarIsInstalled: true,
@@ -344,7 +365,6 @@ describe("packed Semantifold legacy Tree-sitter boundary", () => {
           goRoot: "source_file",
           kotlinGrammarVersion: "0.4.0",
           kotlinGrammarIsInstalled: true,
-          kotlinJavaVersion: 'openjdk version "25.0.4" 2026-07-21',
           kotlinRoundTrip: true,
           kotlinRuntimeOutput: "3\n",
           internalPackageIsNotConsumerDependency: true,
@@ -379,6 +399,14 @@ describe("packed Semantifold legacy Tree-sitter boundary", () => {
     }
   })
 })
+
+/**
+ * @param {unknown} compiler
+ * @param {unknown} java
+ */
+function isQualifiedKotlinJdkPair(compiler, java) {
+  return qualifiedKotlinJdkPairs.some(pair => pair.compiler === compiler && pair.java === java)
+}
 
 /**
  * @param {string} packageRoot

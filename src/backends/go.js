@@ -6,7 +6,7 @@ import {validateBackendModule, emitExpression} from "./shared.js"
 import {emitScalarType} from "./scalars.js"
 import {SourceWriter} from "./writer.js"
 
-const manifest = "module example.com/semantifold/generated\n\ngo 1.26.0\n"
+export const goModuleManifest = "module example.com/semantifold/generated\n\ngo 1.26.0\n"
 const binarySyntax = Object.freeze({
   BooleanAnd: "&&", BooleanEqual: "==", BooleanNotEqual: "!=", BooleanOr: "||",
   IntegerAdd: "+", IntegerEqual: "==", IntegerGreaterThan: ">", IntegerGreaterThanOrEqual: ">=",
@@ -38,7 +38,7 @@ export function generateGoModule({filename, mapDirective, module, sourceMapFilen
   if (!root) throw new Error("Validated Go module omitted its canonical root provenance.")
   return {
     artifacts: [{
-      content: manifest,
+      content: goModuleManifest,
       contentKind: "text",
       mediaType: "text/plain",
       ownership: "generated",
